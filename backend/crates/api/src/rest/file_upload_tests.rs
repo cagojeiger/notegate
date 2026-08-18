@@ -7,6 +7,7 @@
 )]
 
 use std::collections::BTreeMap;
+use std::io::{Cursor, Write};
 
 use axum::body::{Body, to_bytes};
 use axum::http::{
@@ -28,6 +29,8 @@ use secrecy::SecretString;
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 use uuid::Uuid;
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipWriter};
 
 use crate::mcp::tools::transfers;
 use crate::mcp::tools::unified::{CompletedPartInput, FileTransferInput};
@@ -60,6 +63,37 @@ fn test_s3_config() -> Option<S3Config> {
 fn unavailable_internal_storage(mut config: S3Config) -> S3Config {
     config.endpoint = "http://127.0.0.1:1".to_owned();
     config
+}
+
+fn docx_bytes() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    const MAIN_CONTENT_TYPE: &str =
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml";
+    let content_types = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/word/document.xml" ContentType="{MAIN_CONTENT_TYPE}"/>
+</Types>"#
+    );
+    let entries: [(&str, &[u8]); 3] = [
+        ("[Content_Types].xml", content_types.as_bytes()),
+        (
+            "_rels/.rels",
+            br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"#,
+        ),
+        (
+            "word/document.xml",
+            br#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>"#,
+        ),
+    ];
+    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    for (name, bytes) in entries {
+        writer.start_file(name, options)?;
+        writer.write_all(bytes)?;
+    }
+    Ok(writer.finish()?.into_inner())
 }
 
 struct BegunUpload {
@@ -121,7 +155,8 @@ async fn begin_upload_with_media_type(
             "parent_node_id": parent_node_id,
             "name": name,
             "byte_len": byte_len,
-            "media_type": media_type
+            "media_type": media_type,
+            "original_filename": name
         }),
     )
     .await?;
@@ -352,6 +387,172 @@ async fn pdf_bytes_use_the_dedicated_preview_url() -> Result<(), Box<dyn std::er
     assert_eq!(batch["results"][0]["media_type"], "application/pdf");
     assert!(batch["results"][0]["url"].is_null());
 
+    delete_attached_file(&db, &state, &caller, space_id, node_id).await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn verified_docx_bytes_use_the_dedicated_preview_url()
+-> Result<(), Box<dyn std::error::Error>> {
+    const DOCX_MEDIA_TYPE: &str =
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3.clone());
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+    let bytes = docx_bytes()?;
+    let upload = begin_upload_with_media_type(
+        &state,
+        &caller,
+        space_id,
+        root_id,
+        "document.docx",
+        bytes.len(),
+        "text/html",
+    )
+    .await?;
+    sqlx::query("UPDATE object_storage_objects SET original_filename = NULL WHERE id = $1")
+        .bind(upload.id)
+        .execute(&db.pool)
+        .await?;
+    put_upload(&upload, &bytes).await?.error_for_status()?;
+
+    let (status, completed) = complete_upload(&state, &caller, space_id, upload.id).await?;
+    assert_eq!(status, StatusCode::CREATED, "{completed}");
+    assert_eq!(completed["node"]["media_type"], "text/html");
+    assert_eq!(completed["node"]["detected_media_type"], DOCX_MEDIA_TYPE);
+    assert_eq!(completed["node"]["preview_available"], false);
+    assert_eq!(completed["node"]["file_preview_kind"], "docx");
+    assert_eq!(completed["node"]["encryption_mode"], "none");
+    let node_id: Uuid = serde_json::from_value(completed["node"]["id"].clone())?;
+
+    let cached_preview_state = state_with_s3(&db, unavailable_internal_storage(s3));
+    let docx_preview_response = rest_app(cached_preview_state, caller.clone())
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/v1/spaces/{space_id}/files/{node_id}/docx-preview-url"
+                ))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(docx_preview_response.status(), StatusCode::OK);
+    assert_eq!(
+        docx_preview_response.headers().get(CACHE_CONTROL),
+        Some(&axum::http::HeaderValue::from_static("private, no-store"))
+    );
+    let preview: Value =
+        serde_json::from_slice(&to_bytes(docx_preview_response.into_body(), usize::MAX).await?)?;
+    assert_eq!(preview["media_type"], DOCX_MEDIA_TYPE);
+    let response = reqwest::get(preview["url"].as_str().ok_or("docx preview url")?).await?;
+    assert!(response.status().is_success());
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some(DOCX_MEDIA_TYPE)
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_DISPOSITION)
+            .and_then(|value| value.to_str().ok()),
+        Some("inline")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("private, no-store, max-age=0")
+    );
+
+    sqlx::query(
+        "UPDATE file_objects SET detected_media_type = 'application/zip' WHERE node_id = $1",
+    )
+    .bind(node_id)
+    .execute(&db.pool)
+    .await?;
+    let first_validation = state
+        .docx_validation_admission
+        .enter()
+        .expect("first DOCX validation permit");
+    let second_validation = state
+        .docx_validation_admission
+        .enter()
+        .expect("second DOCX validation permit");
+    let (status, body) = empty_request(
+        rest_app(state.clone(), caller.clone()),
+        "GET",
+        format!("/v1/spaces/{space_id}/files/{node_id}/docx-preview-url"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    let detected: Option<String> =
+        sqlx::query_scalar("SELECT detected_media_type FROM file_objects WHERE node_id = $1")
+            .bind(node_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(detected.as_deref(), Some("application/zip"));
+    drop((first_validation, second_validation));
+
+    let (status, body) = empty_request(
+        rest_app(state.clone(), caller.clone()),
+        "GET",
+        format!("/v1/spaces/{space_id}/files/{node_id}/docx-preview-url"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(flush_for_test(&state.metadata_writes, db.pool.clone()).await);
+    let detected: Option<String> =
+        sqlx::query_scalar("SELECT detected_media_type FROM file_objects WHERE node_id = $1")
+            .bind(node_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(detected.as_deref(), Some(DOCX_MEDIA_TYPE));
+
+    sqlx::query("UPDATE file_objects SET byte_len = $2 WHERE node_id = $1")
+        .bind(node_id)
+        .bind(crate::file_preview::PREVIEW_MAX_BYTES + 1)
+        .execute(&db.pool)
+        .await?;
+    let (status, body) = empty_request(
+        rest_app(state.clone(), caller.clone()),
+        "GET",
+        format!("/v1/spaces/{space_id}/files/{node_id}/docx-preview-url"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    sqlx::query(
+        "UPDATE file_objects SET byte_len = $2, encryption_mode = 'client', \
+         encryption_metadata = '{}'::jsonb, detected_media_type = NULL WHERE node_id = $1",
+    )
+    .bind(node_id)
+    .bind(bytes.len() as i64)
+    .execute(&db.pool)
+    .await?;
+    let (status, body) = empty_request(
+        rest_app(state.clone(), caller.clone()),
+        "GET",
+        format!("/v1/spaces/{space_id}/files/{node_id}/docx-preview-url"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    sqlx::query(
+        "UPDATE file_objects SET encryption_mode = 'none', encryption_metadata = NULL \
+         WHERE node_id = $1",
+    )
+    .bind(node_id)
+    .execute(&db.pool)
+    .await?;
     delete_attached_file(&db, &state, &caller, space_id, node_id).await?;
     db.cleanup().await;
     Ok(())

@@ -73,6 +73,8 @@ regex = "1"
 infer = { version = "0.22", default-features = false }
 futures-util = "0.3"
 moka = { version = "0.12", features = ["future"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+roxmltree = { version = "0.21.1", default-features = false, features = ["std"] }
 
 # Auth / OAuth / MCP
 aliri = { version = "0.6.4", default-features = false, features = ["rsa"] }

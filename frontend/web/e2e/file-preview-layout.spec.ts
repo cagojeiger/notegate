@@ -63,12 +63,24 @@ const pdfNode: RestNode = {
   file_preview_kind: "pdf"
 };
 
+const docxNode: RestNode = {
+  ...imageNode,
+  id: "docx-1",
+  name: "preview-document.docx",
+  path: "/preview-document.docx",
+  byte_len: 1024,
+  media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  detected_media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  preview_available: false,
+  file_preview_kind: "docx"
+};
+
 for (const viewport of [
   { name: "desktop", width: 1440, height: 900, mobile: false },
   { name: "tablet", width: 900, height: 1024, mobile: false },
   { name: "mobile", width: 390, height: 844, mobile: true }
 ]) {
-  test(`image and PDF previews stay inside the editor on ${viewport.name}`, async ({ page }) => {
+  test(`image, PDF, and DOCX previews stay inside the editor on ${viewport.name}`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await mockFilePreviewApi(page);
     await page.goto("/");
@@ -101,6 +113,22 @@ for (const viewport of [
     await pdfPreview.getByRole("button", { name: "Zoom in" }).click();
     await expect(pdfPreview.getByRole("button", { name: "Reset zoom" })).toHaveText("125%");
     await expectNoAccessibilityViolations(page);
+
+    if (viewport.mobile) {
+      await page.getByRole("button", { name: "Toggle left sidebar" }).click();
+    }
+    await page.getByRole("button", { name: docxNode.name }).first().click();
+
+    const docxPreview = page.locator("[data-docx-preview]");
+    await expect(docxPreview).toBeVisible();
+    await expectInsideActiveEditor(page, docxPreview);
+    const docxFrame = page.frameLocator(`iframe[title="${docxNode.name} DOCX pages"]`);
+    await expect(docxFrame.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute(
+      "content",
+      /default-src 'none'.*connect-src 'none'/
+    );
+    await expect(docxFrame.getByText("NoteGate DOCX preview", { exact: true })).toBeVisible();
+    await expect(docxFrame.getByText("한글 문서 미리보기", { exact: true })).toBeVisible();
   });
 }
 
@@ -171,6 +199,14 @@ async function mockFilePreviewApi(page: import("@playwright/test").Page) {
       body: createPdf()
     });
   });
+  await page.route("http://storage.test/preview-document.docx", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      headers: { "Access-Control-Allow-Origin": "*" },
+      body: Buffer.from(DOCX_FIXTURE_BASE64, "base64")
+    });
+  });
   await routeJsonApi(page, (url) => responseFor(url, previewSvg));
 }
 
@@ -183,12 +219,12 @@ function responseFor(url: URL, previewSvg: string) {
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`) {
     return {
       parent: { id: space.root_node_id, path: "/" },
-      children: [imageNode, pdfNode],
-      page: pageInfo(2)
+      children: [imageNode, pdfNode, docxNode],
+      page: pageInfo(3)
     };
   }
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes`) {
-    return { nodes: [imageNode, pdfNode], page: pageInfo(2) };
+    return { nodes: [imageNode, pdfNode, docxNode], page: pageInfo(3) };
   }
   if (url.pathname === `/api/v1/spaces/${space.id}/file-change-sync`) {
     return { changes: [], next_after_id: 0, has_more: false, resync_required: false };
@@ -205,6 +241,12 @@ function responseFor(url: URL, previewSvg: string) {
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${pdfNode.id}/reveal`) {
     return { ancestors: [], target: pdfNode };
   }
+  if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${docxNode.id}`) {
+    return docxNode;
+  }
+  if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${docxNode.id}/reveal`) {
+    return { ancestors: [], target: docxNode };
+  }
   if (url.pathname === `/api/v1/spaces/${space.id}/files/${imageNode.id}/preview-url`) {
     return {
       url: `data:image/svg+xml;base64,${previewSvg}`,
@@ -216,6 +258,13 @@ function responseFor(url: URL, previewSvg: string) {
     return {
       url: "http://storage.test/preview-document.pdf",
       media_type: "application/pdf",
+      expires_at: "2026-07-24T12:00:00Z"
+    };
+  }
+  if (url.pathname === `/api/v1/spaces/${space.id}/files/${docxNode.id}/docx-preview-url`) {
+    return {
+      url: "http://storage.test/preview-document.docx",
+      media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       expires_at: "2026-07-24T12:00:00Z"
     };
   }
@@ -267,3 +316,5 @@ function stream(content: string) {
 function pageInfo(returned: number) {
   return { limit: 100, returned, has_more: false, next_cursor: null };
 }
+
+const DOCX_FIXTURE_BASE64 = "UEsDBBQAAAAIAHV+El15bjPX6AAAAK0BAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbH1QyU7DMBD9FWuuKHHggBCK0wPLETiUDxjZk8SqN3nc0v49Tlt6QIXjzFv1+tXeO7GjzDYGBbdtB4KCjsaGScHn+rV5AMEFg0EXAyk4EMNq6NeHRCyqNrCCuZT0KCXrmTxyGxOFiowxeyz1zJNMqDc4kbzrunupYygUSlMWDxj6Zxpx64p42df3qUcmxyCeTsQlSwGm5KzGUnG5C+ZXSnNOaKvyyOHZJr6pBJBXExbk74Cz7r0Ok60h8YG5vKGvLPkVs5Em6q2vyvZ/mys94zhaTRf94pZy1MRcF/euvSAebfjpL49zD99QSwMEFAAAAAgAdX4SXZv9N+qtAAAAKQEAAAsAAABfcmVscy8ucmVsc43POw7CMAwG4KtE3mlaBoRQ0y4IqSsqB7ASN61oHkrCo7cnAwNFDIy2f3+W6/ZpZnanECdnBVRFCYysdGqyWsClP232wGJCq3B2lgQsFKFt6jPNmPJKHCcfWTZsFDCm5A+cRzmSwVg4TzZPBhcMplwGzT3KK2ri27Lc8fBpwNpknRIQOlUB6xdP/9huGCZJRydvhmz6ceIrkWUMmpKAhwuKq3e7yCzwpuarF5sXUEsDBBQAAAAIAHV+El1HjNXVEwEAAJMBAAARAAAAd29yZC9kb2N1bWVudC54bWxtUE1Lw0AQ/SvL3u2mpUoJSXtQ9OQHqOB1m0yTQHZn2R0b68mDf8Fbz54KCnrIb2rqf3C3pRTEy5t5M/PeMJNMnlTN5mBdhTrl/V7EGegM80oXKb+/Oz8aceZI6lzWqCHlC3B8Mk6aOMfsUYEm5g20i5uUl0QmFsJlJSjpemhA+94MrZLkqS1EgzY3FjNwzvurWgyi6EQoWWkeLKeYL0I0AWwAGl8hwYUkYGfXpw/MWJhX0CQitALaLZq/qp+35bp9Yd2q3bwuWffRdu+r7ut73X7+K3WQ0c1WaorbZ9aEa/qDwdA/o4lLnx+PfC52A5fS+iqh8fXhbsRWRUkHOkUiVAdew2zfFdul+31if7M4/HP8C1BLAQIUAxQAAAAIAHV+El15bjPX6AAAAK0BAAATAAAAAAAAAAAAAACAAQAAAABbQ29udGVudF9UeXBlc10ueG1sUEsBAhQDFAAAAAgAdX4SXZv9N+qtAAAAKQEAAAsAAAAAAAAAAAAAAIABGQEAAF9yZWxzLy5yZWxzUEsBAhQDFAAAAAgAdX4SXUeM1dUTAQAAkwEAABEAAAAAAAAAAAAAAIAB7wEAAHdvcmQvZG9jdW1lbnQueG1sUEsFBgAAAAADAAMAuQAAADEDAAAAAA==";

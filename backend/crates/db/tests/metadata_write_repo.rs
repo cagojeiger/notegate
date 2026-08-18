@@ -186,6 +186,40 @@ async fn bulk_metadata_flush_is_monotonic_and_idempotent() -> Result<(), Box<dyn
         0
     );
 
+    sqlx::query(
+        "UPDATE file_objects SET detected_media_type = 'application/zip' WHERE node_id = $1",
+    )
+    .bind(node.id)
+    .execute(&db.pool)
+    .await?;
+    let docx_media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    assert_eq!(
+        repo.set_detected_media_types(&[MediaTypeObservation {
+            space_id,
+            node_id: node.id,
+            media_type: docx_media_type.to_owned(),
+            observed_at: later + Duration::minutes(1),
+        }])
+        .await?,
+        1
+    );
+    assert_eq!(
+        repo.set_detected_media_types(&[MediaTypeObservation {
+            space_id,
+            node_id: node.id,
+            media_type: "image/png".to_owned(),
+            observed_at: later + Duration::minutes(2),
+        }])
+        .await?,
+        0
+    );
+    let media_type: Option<String> =
+        sqlx::query_scalar("SELECT detected_media_type FROM file_objects WHERE node_id = $1")
+            .bind(node.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(media_type.as_deref(), Some(docx_media_type));
+
     db.cleanup().await;
     Ok(())
 }

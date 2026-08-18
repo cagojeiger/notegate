@@ -121,7 +121,7 @@ export function getFilePreviewUrl(
   nodeId: string,
   kind: FilePreviewKind = "image"
 ): Promise<FilePreviewUrlResponse> {
-  const suffix = kind === "pdf" ? "pdf-preview-url" : "preview-url";
+  const suffix = kind === "image" ? "preview-url" : `${kind}-preview-url`;
   return client.get<FilePreviewUrlResponse>(`/api/v1/spaces/${spaceId}/files/${nodeId}/${suffix}`);
 }
 

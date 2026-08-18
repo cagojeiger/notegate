@@ -53,6 +53,8 @@ schemars.workspace = true
 time.workspace = true
 infer.workspace = true
 futures-util.workspace = true
+zip.workspace = true
+roxmltree.workspace = true
 utoipa = { version = "5.5.0", features = ["axum_extras", "chrono", "uuid", "url"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 

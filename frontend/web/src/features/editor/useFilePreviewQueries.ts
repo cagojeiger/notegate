@@ -14,6 +14,7 @@ import type { MarkdownImageLoadOptions, MarkdownImageLoadResult } from "../../sh
 import { createMarkdownPreviewBatcher } from "./markdownPreviewBatcher";
 
 const FILE_PREVIEW_CACHE_GC_MS = 15 * 60 * 1_000;
+const DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export function useFilePreviewUrl(node: RestNode) {
   const client = useApiClient();
@@ -94,6 +95,11 @@ export function filePreviewKindForNode(node: RestNode): FilePreviewKind | null {
   ) return null;
   if (node.file_preview_kind) return node.file_preview_kind;
   if (node.preview_available === true) return "image";
+  if (
+    node.detected_media_type === DOCX_MEDIA_TYPE
+    || node.media_type === DOCX_MEDIA_TYPE
+    || node.name.toLowerCase().endsWith(".docx")
+  ) return "docx";
   if (node.preview_available === false) return null;
   if (node.detected_media_type === "application/pdf" || node.media_type === "application/pdf") {
     return "pdf";

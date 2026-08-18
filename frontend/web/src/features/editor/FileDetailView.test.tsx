@@ -47,6 +47,12 @@ vi.mock("./PdfPreview", () => ({
   )
 }));
 
+vi.mock("./DocxPreview", () => ({
+  DocxPreview: ({ url, name, onError }: { url: string; name: string; onError: () => void }) => (
+    <button type="button" data-testid="docx-preview" data-url={url} onClick={onError}>{name} DOCX preview</button>
+  )
+}));
+
 describe("FileDetailView", () => {
   beforeEach(() => {
     filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery());
@@ -163,6 +169,32 @@ describe("FileDetailView", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
+  it("dispatches a verified DOCX URL to the lazy DOCX renderer", async () => {
+    filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery({
+      data: {
+        url: "https://storage.example/document.docx",
+        media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        expires_at: "2026-06-13T00:15:00Z"
+      }
+    }));
+
+    render(<FileDetailView node={docxNode()} />);
+
+    expect(await screen.findByTestId("docx-preview")).toHaveAttribute(
+      "data-url",
+      "https://storage.example/document.docx"
+    );
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("shows the shared loading state while a DOCX URL is being issued", () => {
+    filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery({ isLoading: true }));
+
+    render(<FileDetailView node={docxNode()} />);
+
+    expect(screen.getByText("Loading preview…")).toBeInTheDocument();
+  });
+
   it("shows an error when preview URL issuance fails", () => {
     filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery({
       isError: true,
@@ -187,6 +219,17 @@ describe("FileDetailView", () => {
     })} />);
 
     expect(screen.getByText("PDF cannot be displayed")).toBeInTheDocument();
+  });
+
+  it("uses DOCX copy when DOCX URL issuance fails", () => {
+    filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery({
+      isError: true,
+      error: new ApiError("storage unavailable", 503)
+    }));
+
+    render(<FileDetailView node={docxNode()} />);
+
+    expect(screen.getByText("DOCX cannot be displayed")).toBeInTheDocument();
   });
 
   it("does not show an error when the file is not previewable", () => {
@@ -276,6 +319,39 @@ describe("FileDetailView", () => {
     expect(refetch).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("Image cannot be displayed")).not.toBeInTheDocument();
   });
+
+  it("recovers a failed DOCX render only after refresh returns a new URL", async () => {
+    let previewUrl = "https://storage.example/broken.docx";
+    const refetch = vi.fn().mockImplementation(async () => {
+      previewUrl = "https://storage.example/refreshed.docx";
+      return {
+        isSuccess: true,
+        data: {
+          url: previewUrl,
+          media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          expires_at: "2026-06-13T00:15:00Z"
+        }
+      };
+    });
+    filePreviewQueryMocks.useFilePreviewUrl.mockImplementation(() => previewQuery({
+      data: {
+        url: previewUrl,
+        media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        expires_at: "2026-06-13T00:15:00Z"
+      },
+      refetch
+    }));
+    render(<FileDetailView node={docxNode()} />);
+
+    fireEvent.click(await screen.findByTestId("docx-preview"));
+
+    expect(await screen.findByTestId("docx-preview")).toHaveAttribute(
+      "data-url",
+      "https://storage.example/refreshed.docx"
+    );
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("DOCX cannot be displayed")).not.toBeInTheDocument();
+  });
 });
 
 function previewQuery(
@@ -305,6 +381,18 @@ function fileNode(overrides: Partial<RestNode> = {}): RestNode {
     detected_media_type: "image/png",
     preview_available: true,
     encryption_mode: "none",
+    ...overrides
+  });
+}
+
+function docxNode(overrides: Partial<RestNode> = {}): RestNode {
+  return fileNode({
+    name: "document.docx",
+    path: "/document.docx",
+    media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    detected_media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    preview_available: false,
+    file_preview_kind: "docx",
     ...overrides
   });
 }

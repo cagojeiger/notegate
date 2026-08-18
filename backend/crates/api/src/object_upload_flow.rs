@@ -291,9 +291,17 @@ pub async fn complete_upload(
     let detected_media_type = if upload.node_id.is_none() {
         match crate::file_preview::detect_object_media_type(
             &state.object_storage,
+            &state.docx_validation_admission,
             &upload.object_key,
             upload.byte_len,
             upload.encryption_mode,
+            &upload.media_type,
+            Some(
+                upload
+                    .original_filename
+                    .as_deref()
+                    .unwrap_or(upload.name.as_str()),
+            ),
         )
         .await
         {

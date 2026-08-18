@@ -147,7 +147,7 @@ object_storage_objects
 - File은 binary/object content다.
 - File size와 single/multipart 기준은 [`performance-limits.md`](./performance-limits.md)의 Object upload 상한을 따른다. REST와 MCP 모두 `HEAD` 크기 검증 뒤 File node를 연결하고, 암호화하지 않은 파일은 실제 media type을 감지한다.
 - Object download는 S3 호환 presigned GET URL로 redirect한다.
-- 10 MiB 이하 PNG, JPEG, WebP, AVIF, GIF는 image preview URL을, 10 MiB 이하 PDF는 file detail 전용 PDF preview URL을 발급할 수 있다. 실제 bytes에서 media type을 감지하며 SVG, client-encrypted file과 10 MiB 초과 file은 preview 대상이 아니다.
+- 10 MiB 이하 PNG, JPEG, WebP, AVIF, GIF는 image preview URL을, 10 MiB 이하 PDF와 검증된 DOCX package는 file detail 전용 preview URL을 발급할 수 있다. 실제 bytes에서 media type과 DOCX package 구조를 검증하며 SVG, client-encrypted file과 10 MiB 초과 file은 preview 대상이 아니다.
 - 완료되지 않은 upload와 soft-delete된 File의 물리 삭제는 `object_storage_objects` 원장과 정리 worker가 재시도한다. 완료된 정리 이력은 cluster-singleton purge가 90일 뒤 삭제한다.
 - Provider multipart 생성과 DB 원장 기록은 하나의 transaction이 아니므로, S3 provider에도 incomplete multipart 자동 abort 정책을 설정한다. 로컬 MinIO는 server 기본 stale multipart cleanup을 2차 안전망으로 사용한다.
 - MCP `file_transfer`는 임시 presigned upload/download URL만 제공하고 bytes는 MCP payload를 통과하지 않는다. URL lifetime은 `performance-limits.md`, Node metadata는 REST metadata API를 따른다.

@@ -20,7 +20,8 @@ use uuid::Uuid;
 use crate::error::ApiError;
 use crate::file_preview::{
     PREVIEW_URL_TTL_SECONDS, audio_preview_media_type, detect_object_media_type,
-    is_preview_size_allowed, is_previewable_image_type, is_previewable_pdf_type,
+    is_preview_size_allowed, is_previewable_docx_type, is_previewable_image_type,
+    is_previewable_pdf_type,
 };
 use crate::rest::dto::{NodeOut, attribution_ids};
 use crate::state::AppState;
@@ -39,6 +40,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/spaces/{space_id}/files/{node_id}/pdf-preview-url",
             get(pdf_preview_url),
+        )
+        .route(
+            "/v1/spaces/{space_id}/files/{node_id}/docx-preview-url",
+            get(docx_preview_url),
         )
         .route(
             "/v1/spaces/{space_id}/files/{node_id}/audio-preview-url",
@@ -193,6 +198,25 @@ pub(crate) async fn pdf_preview_url(
 
 #[utoipa::path(
     get,
+    path = "/api/v1/spaces/{space_id}/files/{node_id}/docx-preview-url",
+    tag = "files",
+    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    responses(
+        (status = 200, description = "Short-lived inline URL for a verified DOCX package up to 10 MiB", body = FilePreviewUrlResponse),
+        (status = 404, description = "File has no supported DOCX preview or exceeds 10 MiB")
+    ),
+    security(("browser_session" = []))
+)]
+pub(crate) async fn docx_preview_url(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+) -> Result<Response, ApiError> {
+    preview_response(&state, &caller, space_id, node_id, PreviewPolicy::Docx).await
+}
+
+#[utoipa::path(
+    get,
     path = "/api/v1/spaces/{space_id}/files/{node_id}/audio-preview-url",
     tag = "files",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
@@ -221,7 +245,13 @@ async fn preview_response(
         .files
         .file_for_download(caller.account_id(), space_id, node_id)
         .await?;
-    let prepared = prepare_preview(state, &file_view.file, policy).await;
+    let prepared = prepare_preview(
+        state,
+        &file_view.file,
+        Some(file_view.node.node.name.as_str()),
+        policy,
+    )
+    .await;
     let detected_media_type = match &prepared {
         Ok(prepared) => prepared.detected_media_type.clone(),
         Err(error) => error.detected_media_type().map(str::to_owned),
@@ -333,6 +363,7 @@ struct BatchPreviewOutcome {
 enum PreviewPolicy {
     Image,
     Pdf,
+    Docx,
     Audio,
 }
 
@@ -349,6 +380,9 @@ impl PreviewPolicy {
             Self::Pdf if is_previewable_pdf_type(detected_media_type) => {
                 Some(detected_media_type.to_owned())
             }
+            Self::Docx if is_previewable_docx_type(detected_media_type) => {
+                Some(detected_media_type.to_owned())
+            }
             Self::Audio => audio_preview_media_type(declared_media_type, detected_media_type),
             _ => None,
         }
@@ -356,7 +390,7 @@ impl PreviewPolicy {
 
     fn allows_size(self, byte_len: i64) -> bool {
         match self {
-            Self::Image | Self::Pdf => is_preview_size_allowed(byte_len),
+            Self::Image | Self::Pdf | Self::Docx => is_preview_size_allowed(byte_len),
             Self::Audio => byte_len > 0,
         }
     }
@@ -365,6 +399,7 @@ impl PreviewPolicy {
         match self {
             Self::Image => "file preview is not available",
             Self::Pdf => "pdf preview is not available",
+            Self::Docx => "docx preview is not available",
             Self::Audio => "audio preview is not available",
         }
     }
@@ -373,6 +408,7 @@ impl PreviewPolicy {
 async fn prepare_preview(
     state: &AppState,
     file: &FileObject,
+    filename_hint: Option<&str>,
     policy: PreviewPolicy,
 ) -> Result<PreparedPreview, PreviewPreparationError> {
     if file.encryption_mode != FileEncryptionMode::None || !policy.allows_size(file.byte_len) {
@@ -381,25 +417,37 @@ async fn prepare_preview(
         });
     }
 
-    let (media_type, detected_media_type) = match file.detected_media_type.as_deref() {
-        Some(media_type) => (media_type.to_owned(), None),
-        None => {
-            let media_type = detect_object_media_type(
-                &state.object_storage,
-                &file.object_key,
-                file.byte_len,
-                file.encryption_mode,
-            )
-            .await
-            .map_err(|error| PreviewPreparationError::Storage {
-                error: error.into(),
-                detected_media_type: None,
-            })?
-            .ok_or(PreviewPreparationError::Unsupported {
-                detected_media_type: None,
-            })?;
-            (media_type.clone(), Some(media_type))
-        }
+    let should_detect_media_type = file.detected_media_type.is_none()
+        || (matches!(policy, PreviewPolicy::Docx)
+            && !file
+                .detected_media_type
+                .as_deref()
+                .is_some_and(is_previewable_docx_type));
+    let (media_type, detected_media_type) = if should_detect_media_type {
+        let media_type = detect_object_media_type(
+            &state.object_storage,
+            &state.docx_validation_admission,
+            &file.object_key,
+            file.byte_len,
+            file.encryption_mode,
+            &file.media_type,
+            file.original_filename.as_deref().or(filename_hint),
+        )
+        .await
+        .map_err(|error| PreviewPreparationError::Storage {
+            error: error.into(),
+            detected_media_type: None,
+        })?
+        .ok_or(PreviewPreparationError::Unsupported {
+            detected_media_type: None,
+        })?;
+        (media_type.clone(), Some(media_type))
+    } else if let Some(media_type) = &file.detected_media_type {
+        (media_type.clone(), None)
+    } else {
+        return Err(PreviewPreparationError::Unsupported {
+            detected_media_type: None,
+        });
     };
     let Some(media_type) = policy.response_media_type(&file.media_type, &media_type) else {
         return Err(PreviewPreparationError::Unsupported {
@@ -465,7 +513,7 @@ async fn batch_preview_item(
         );
     };
 
-    match prepare_preview(state, &file, PreviewPolicy::Image).await {
+    match prepare_preview(state, &file, Some(node.name.as_str()), PreviewPolicy::Image).await {
         Ok(prepared) => {
             let detection = prepared
                 .detected_media_type

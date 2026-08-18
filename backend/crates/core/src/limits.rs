@@ -77,6 +77,8 @@ pub const BROWSER_FILE_MAX_BYTES: usize = 10_737_418_240;
 /// Maximum unfinished object uploads per account. Both active uploads and
 /// objects awaiting expiry deletion count until the physical object is removed.
 pub const OBJECT_UPLOAD_MAX_PENDING: usize = 16;
+/// Maximum DOCX package validations executing concurrently per API process.
+pub const DOCX_VALIDATION_MAX_EXECUTING: usize = 2;
 
 // --- Node metadata limits ---
 

@@ -288,6 +288,19 @@ describe("files api", () => {
     expect(api.get).toHaveBeenCalledWith("/api/v1/spaces/space-1/files/file-1/pdf-preview-url");
   });
 
+  it("requests the dedicated DOCX preview URL", async () => {
+    const response = {
+      url: "https://objects.test/document",
+      media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      expires_at: "2026-06-13T00:15:00Z"
+    };
+    const api = createMockApiClient();
+    api.get.mockResolvedValue(response);
+
+    await expect(getFilePreviewUrl(api, "space-1", "file-1", "docx")).resolves.toEqual(response);
+    expect(api.get).toHaveBeenCalledWith("/api/v1/spaces/space-1/files/file-1/docx-preview-url");
+  });
+
   it("requests the dedicated audio preview URL", async () => {
     const response = {
       url: "https://objects.test/audio",

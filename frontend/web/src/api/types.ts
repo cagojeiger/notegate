@@ -44,7 +44,7 @@ export type Space = {
 };
 
 export type NodeKind = "folder" | "text" | "file";
-export type FilePreviewKind = "image" | "pdf";
+export type FilePreviewKind = "image" | "pdf" | "docx";
 export type FileMediaKind = "image" | "pdf" | "audio" | "other";
 
 export type AccountRef = {

@@ -95,7 +95,9 @@ impl MetadataWriteRepo {
              FROM detected \
              WHERE file.space_id = detected.space_id \
                AND file.node_id = detected.node_id \
-               AND file.detected_media_type IS NULL",
+               AND (file.detected_media_type IS NULL \
+                    OR (file.detected_media_type = 'application/zip' \
+                        AND detected.media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'))",
         )
         .bind(space_ids)
         .bind(node_ids)
