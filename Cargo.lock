@@ -2645,6 +2645,7 @@ version = "0.1.69"
 dependencies = [
  "base64 0.23.1",
  "chrono",
+ "futures-util",
  "hmac 0.13.0",
  "metrics",
  "metrics-exporter-prometheus",
