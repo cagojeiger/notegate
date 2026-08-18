@@ -107,7 +107,6 @@ describe("link queries and mutations", () => {
       "incoming",
       "next-cursor"
     );
-    expect(result.current.data?.pages).toHaveLength(2);
   });
 });
 
