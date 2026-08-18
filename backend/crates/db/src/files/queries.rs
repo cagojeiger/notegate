@@ -24,7 +24,8 @@ pub mod text {
             "SELECT d.content_sha256, d.byte_len, d.line_count, d.storage_format, d.at_rest_encryption \
              FROM text_objects d \
          JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
-         WHERE d.space_id = $1 AND d.node_id = $2 AND n.deleted_at IS NULL",
+         WHERE d.space_id = $1 AND d.node_id = $2 \
+           AND n.deleted_at IS NULL AND n.kind = 'text'",
         )
         .bind(space_id)
         .bind(node_id)
@@ -150,6 +151,32 @@ pub mod text {
             Some(doc_row) => Ok(Some((node_row.into_node()?, doc_row.into_text(crypto)?))),
             None => Ok(None),
         }
+    }
+
+    pub async fn find_text_object(
+        pool: &PgPool,
+        crypto: &PiiCrypto,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> Result<Option<TextObject>> {
+        let columns = TEXT_COLUMNS
+            .split(',')
+            .map(|column| format!("d.{}", column.trim()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let row = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
+            "SELECT {columns} FROM text_objects d \
+             JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
+             WHERE d.space_id = $1 AND d.node_id = $2 \
+               AND n.deleted_at IS NULL AND n.kind = 'text'"
+        )))
+        .bind(space_id)
+        .bind(node_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        row.map(|row| row.into_text(crypto)).transpose()
     }
 
     /// Load live text objects for a bounded set of node ids.
@@ -975,6 +1002,30 @@ pub mod search {
     use super::super::error::map_sqlx_error;
     use super::super::rows::{NodeRow, TEXT_COLUMNS, TextRow};
 
+    const RESOLVE_NODE_PATHS_CTE: &str = "WITH RECURSIVE requested AS ( \
+            SELECT ordinality::bigint AS input_index, input_path, \
+                   string_to_array(trim(both '/' from input_path), '/') AS segments \
+            FROM unnest($2::text[]) WITH ORDINALITY AS input(input_path, ordinality) \
+        ), walk AS ( \
+            SELECT r.input_index, r.input_path, r.segments, root.id AS node_id, 0 AS depth \
+            FROM requested r \
+            JOIN nodes root ON root.space_id = $1 \
+                AND root.parent_id IS NULL \
+                AND root.deleted_at IS NULL \
+            UNION ALL \
+            SELECT w.input_index, w.input_path, w.segments, child.id, w.depth + 1 \
+            FROM walk w \
+            JOIN nodes child ON child.space_id = $1 \
+                AND child.parent_id = w.node_id \
+                AND child.name = w.segments[w.depth + 1] \
+                AND child.deleted_at IS NULL \
+            WHERE w.depth < cardinality(w.segments) \
+        ), resolved AS ( \
+            SELECT input_index, input_path, node_id \
+            FROM walk \
+            WHERE depth = cardinality(segments) \
+        ) ";
+
     #[derive(Debug, FromRow)]
     struct ResolvedNodePathRow {
         input_index: i64,
@@ -1199,29 +1250,7 @@ pub mod search {
             .collect::<Vec<_>>()
             .join(", ");
         let rows = sqlx::query_as::<_, ResolvedNodePathRow>(sqlx::AssertSqlSafe(format!(
-            "WITH RECURSIVE requested AS ( \
-                SELECT ordinality::bigint AS input_index, input_path, \
-                       string_to_array(trim(both '/' from input_path), '/') AS segments \
-                FROM unnest($2::text[]) WITH ORDINALITY AS input(input_path, ordinality) \
-            ), walk AS ( \
-                SELECT r.input_index, r.input_path, r.segments, root.id AS node_id, 0 AS depth \
-                FROM requested r \
-                JOIN nodes root ON root.space_id = $1 \
-                    AND root.parent_id IS NULL \
-                    AND root.deleted_at IS NULL \
-                UNION ALL \
-                SELECT w.input_index, w.input_path, w.segments, child.id, w.depth + 1 \
-                FROM walk w \
-                JOIN nodes child ON child.space_id = $1 \
-                    AND child.parent_id = w.node_id \
-                    AND child.name = w.segments[w.depth + 1] \
-                    AND child.deleted_at IS NULL \
-                WHERE w.depth < cardinality(w.segments) \
-            ), resolved AS ( \
-                SELECT input_index, input_path, node_id \
-                FROM walk \
-                WHERE depth = cardinality(segments) \
-            ) \
+            "{RESOLVE_NODE_PATHS_CTE} \
             SELECT r.input_index, r.input_path, {node_columns} \
             FROM resolved r \
             JOIN nodes n ON n.id = r.node_id AND n.space_id = $1 \
@@ -1259,6 +1288,29 @@ pub mod search {
                 Ok((index, row.input_path, node))
             })
             .collect()
+    }
+
+    pub(crate) async fn resolve_node_ids_by_paths_with<'e, E>(
+        executor: E,
+        space_id: Uuid,
+        paths: &[String],
+    ) -> Result<Vec<(String, Uuid)>>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        sqlx::query_as::<_, (String, Uuid)>(sqlx::AssertSqlSafe(format!(
+            "{RESOLVE_NODE_PATHS_CTE} \
+             SELECT input_path, node_id FROM resolved ORDER BY input_index"
+        )))
+        .bind(space_id)
+        .bind(paths.to_vec())
+        .fetch_all(executor)
+        .await
+        .map_err(map_sqlx_error)
     }
 
     pub async fn node_candidates(

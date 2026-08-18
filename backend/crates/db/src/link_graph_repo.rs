@@ -8,7 +8,7 @@ use notegate_model::{
 use sqlx::{FromRow, PgConnection, PgPool};
 use uuid::Uuid;
 
-use crate::files::queries::{node::derive_path, search::resolve_nodes_by_paths_with};
+use crate::files::queries::{node::derive_path, search::resolve_node_ids_by_paths_with};
 use crate::map_sqlx_error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,7 +42,7 @@ pub struct LinkGraphIncomingReference {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkGraphProjection {
-    Applied { reference_count: usize },
+    Applied,
     Failed,
     Removed,
     Skipped,
@@ -222,10 +222,9 @@ impl LinkGraphRepo {
             .iter()
             .map(|reference| reference.target_path.clone())
             .collect::<Vec<_>>();
-        let target_ids = resolve_nodes_by_paths_with(&mut *tx, space_id, &target_paths)
+        let target_ids = resolve_node_ids_by_paths_with(&mut *tx, space_id, &target_paths)
             .await?
             .into_iter()
-            .map(|(_index, path, node)| (path, node.id))
             .collect::<std::collections::HashMap<_, _>>();
         let mut resolved_target_ids = target_ids.values().copied().collect::<Vec<_>>();
         resolved_target_ids.sort_unstable();
@@ -285,9 +284,7 @@ impl LinkGraphRepo {
 
         mark_projection_applied_in(&mut tx, space_id, source_node_id, claim).await?;
         tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(LinkGraphProjection::Applied {
-            reference_count: references.len(),
-        })
+        Ok(LinkGraphProjection::Applied)
     }
 
     pub async fn fail_projection_target(

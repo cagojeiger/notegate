@@ -182,6 +182,14 @@ impl FilesRepo {
         queries::text::find_text(&self.pool, &self.crypto, space_id, node_id).await
     }
 
+    pub async fn find_text_object(
+        &self,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> Result<Option<TextObject>> {
+        queries::text::find_text_object(&self.pool, &self.crypto, space_id, node_id).await
+    }
+
     pub async fn find_texts(
         &self,
         space_id: Uuid,

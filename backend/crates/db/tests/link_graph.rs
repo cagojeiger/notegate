@@ -241,7 +241,7 @@ async fn stale_source_snapshot_cannot_replace_a_newer_projection()
                 },
             )
             .await?,
-        LinkGraphProjection::Applied { reference_count: 1 }
+        LinkGraphProjection::Applied
     );
     assert_eq!(
         graph.outgoing(space_id, source.id, 10, None).await?[0].target_node_id,
@@ -377,10 +377,7 @@ async fn projection_waiting_for_source_does_not_lock_its_target()
 
     writer.commit().await?;
     let projection_result = tokio::time::timeout(Duration::from_secs(5), projection).await??;
-    assert_eq!(
-        projection_result?,
-        LinkGraphProjection::Applied { reference_count: 1 }
-    );
+    assert_eq!(projection_result?, LinkGraphProjection::Applied);
 
     db.cleanup().await;
     Ok(())
@@ -459,14 +456,8 @@ async fn mutually_linked_sources_project_without_deadlocking()
         tokio::join!(first_projection, second_projection)
     })
     .await?;
-    assert_eq!(
-        first_result?,
-        LinkGraphProjection::Applied { reference_count: 1 }
-    );
-    assert_eq!(
-        second_result?,
-        LinkGraphProjection::Applied { reference_count: 1 }
-    );
+    assert_eq!(first_result?, LinkGraphProjection::Applied);
+    assert_eq!(second_result?, LinkGraphProjection::Applied);
 
     db.cleanup().await;
     Ok(())
@@ -1006,6 +997,52 @@ async fn change_collector_processes_pending_spaces_without_scanning_idle_spaces(
     ));
     assert_eq!(
         collect_due(&db.pool, &work).await?,
+        LinkGraphChangeCollection::Idle
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn exact_pending_space_batch_does_not_schedule_an_empty_continuation()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, _space_id, _root_id) = space_with_root(&db.pool, "link-space-limit").await?;
+    sqlx::query(
+        "INSERT INTO spaces (owner_user_id, name) \
+         SELECT $1, format('link-limit-%s', item) \
+         FROM generate_series(1, 31) AS generated(item)",
+    )
+    .bind(account)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO link_graph_space_states (space_id, available_at) \
+         SELECT id, now() FROM spaces WHERE owner_user_id = $1 \
+         ON CONFLICT (space_id) DO UPDATE SET available_at = EXCLUDED.available_at",
+    )
+    .bind(account)
+    .execute(&db.pool)
+    .await?;
+
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    assert!(matches!(
+        work.collect_changes().await?,
+        LinkGraphChangeCollection::Collected {
+            spaces: 32,
+            events: 0,
+            staged_targets: 0,
+            failed_targets: 0,
+            dispatched_targets: 0,
+            jobs: 0,
+            has_more: false,
+        }
+    ));
+    assert_eq!(
+        work.collect_changes().await?,
         LinkGraphChangeCollection::Idle
     );
 
@@ -1905,7 +1942,7 @@ async fn deleting_a_space_wakes_collection_and_removes_derived_graph_data()
                 },
             )
             .await?,
-        LinkGraphProjection::Applied { reference_count: 1 }
+        LinkGraphProjection::Applied
     );
 
     SpaceRepo::new(db.pool.clone())
@@ -2293,7 +2330,7 @@ async fn expired_claim_cannot_publish_after_the_job_is_reclaimed()
                 },
             )
             .await?,
-        LinkGraphProjection::Applied { reference_count: 1 }
+        LinkGraphProjection::Applied
     );
 
     db.cleanup().await;

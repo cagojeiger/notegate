@@ -176,7 +176,7 @@ impl LinkGraphService {
         require_dashboard_user(caller)?;
         self.require_permission(caller.account_id(), space_id, Permission::Write)
             .await?;
-        if self.files.find_text(space_id, node_id).await?.is_none() {
+        if self.files.text_stats(space_id, node_id).await?.is_none() {
             return Err(ServiceError::NotFound("text not found".to_owned()));
         }
         self.work.request_nodes(space_id, &[node_id]).await?;
@@ -239,14 +239,14 @@ impl LinkGraphService {
         node_id: Uuid,
         claim: LinkGraphProjectionClaim,
     ) -> Result<LinkGraphProjection> {
-        let Some((node, text)) = self.files.find_text(space_id, node_id).await? else {
+        let Some(text) = self.files.find_text_object(space_id, node_id).await? else {
             let projection = self
                 .store
                 .reconcile_non_text_node(space_id, node_id, claim)
                 .await?;
             return match projection {
                 LinkGraphProjection::Removed | LinkGraphProjection::Stale => Ok(projection),
-                LinkGraphProjection::Applied { .. }
+                LinkGraphProjection::Applied
                 | LinkGraphProjection::Failed
                 | LinkGraphProjection::Skipped => Err(Error::internal(
                     "non-text node produced an invalid link projection result",
@@ -256,20 +256,20 @@ impl LinkGraphService {
         if text.storage_format == TextStorageFormat::Encrypted {
             let projection = self
                 .store
-                .cleanup_encrypted_source(space_id, node.id, claim, &text.content_sha256)
+                .cleanup_encrypted_source(space_id, node_id, claim, &text.content_sha256)
                 .await?;
             return match projection {
                 LinkGraphProjection::Skipped
                 | LinkGraphProjection::Removed
                 | LinkGraphProjection::Stale => Ok(projection),
-                LinkGraphProjection::Applied { .. } | LinkGraphProjection::Failed => Err(
-                    Error::internal("encrypted text produced an invalid link projection result"),
-                ),
+                LinkGraphProjection::Applied | LinkGraphProjection::Failed => Err(Error::internal(
+                    "encrypted text produced an invalid link projection result",
+                )),
             };
         }
         let source_path = self
             .files
-            .node_path(space_id, node.id)
+            .node_path(space_id, node_id)
             .await?
             .ok_or_else(|| Error::internal("live link source has no path"))?;
         let content = text
@@ -283,7 +283,7 @@ impl LinkGraphService {
                     .store
                     .fail_projection_target(
                         space_id,
-                        node.id,
+                        node_id,
                         claim,
                         LINK_REFERENCE_LIMIT_FAILURE_CODE,
                         &text.content_sha256,
@@ -302,7 +302,7 @@ impl LinkGraphService {
         self.store
             .replace_source(
                 space_id,
-                node.id,
+                node_id,
                 claim,
                 LinkGraphSourceSnapshot {
                     content_sha256: &text.content_sha256,
@@ -350,7 +350,7 @@ impl LinkGraphService {
 
 fn record_projection(result: &mut LinkGraphProjectionBatch, projection: LinkGraphProjection) {
     match projection {
-        LinkGraphProjection::Applied { .. } => result.projected += 1,
+        LinkGraphProjection::Applied => result.projected += 1,
         LinkGraphProjection::Failed => result.failed += 1,
         LinkGraphProjection::Removed => result.removed += 1,
         LinkGraphProjection::Skipped => result.skipped += 1,

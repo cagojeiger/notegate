@@ -12,7 +12,8 @@ use crate::map_sqlx_error;
 pub const LINK_GRAPH_PROJECT_BATCH_MAX: usize = 50;
 const LINK_GRAPH_CHANGE_BATCH_SIZE: usize = 500;
 const LINK_GRAPH_CHANGE_FETCH_LIMIT: i64 = 501;
-const LINK_GRAPH_CHANGE_SPACE_BATCH_SIZE: i64 = 32;
+const LINK_GRAPH_CHANGE_SPACE_BATCH_SIZE: usize = 32;
+const LINK_GRAPH_CHANGE_SPACE_FETCH_LIMIT: i64 = 33;
 const LINK_GRAPH_FULL_SCAN_BATCH_SIZE: usize = 500;
 const LINK_GRAPH_FULL_SCAN_FETCH_LIMIT: i64 = 501;
 const LINK_GRAPH_DISPATCH_BATCH_SIZE: usize = 500;
@@ -67,7 +68,6 @@ impl LinkGraphWorkRepo {
         validate_node_batch(node_ids)?;
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let scope = TargetScope::Nodes { space_id, node_ids };
-        settle_terminal_targets_in(&mut tx, scope, i64::MAX).await?;
         stage_node_ids_in(&mut tx, space_id, node_ids, true).await?;
         dispatch_targets_in(&mut tx, scope).await?;
         tx.commit().await.map_err(map_sqlx_error)
@@ -88,17 +88,7 @@ impl LinkGraphWorkRepo {
         }
         lock_space_state_in(&mut tx, space_id).await?;
         let full_scan_event_id = start_full_scan_state(&mut tx, space_id).await?;
-        let scope = TargetScope::Space(space_id);
-        let settled =
-            settle_terminal_targets_in(&mut tx, scope, LINK_GRAPH_SETTLEMENT_BATCH_SIZE).await?;
-        run_full_scan_pass(
-            &mut tx,
-            space_id,
-            full_scan_event_id,
-            None,
-            settled.has_more,
-        )
-        .await?;
+        run_full_scan_pass(&mut tx, space_id, full_scan_event_id, None).await?;
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(true)
     }
@@ -134,7 +124,7 @@ impl LinkGraphWorkRepo {
     }
 
     pub async fn collect_changes(&self) -> Result<LinkGraphChangeCollection> {
-        let space_ids: Vec<Uuid> = sqlx::query_scalar(
+        let mut space_ids: Vec<Uuid> = sqlx::query_scalar(
             "SELECT space_id FROM link_graph_space_states \
              WHERE available_at IS NOT NULL AND ( \
                  incremental_event_id IS NOT NULL \
@@ -146,18 +136,18 @@ impl LinkGraphWorkRepo {
                       available_at, space_id \
              LIMIT $1",
         )
-        .bind(LINK_GRAPH_CHANGE_SPACE_BATCH_SIZE)
+        .bind(LINK_GRAPH_CHANGE_SPACE_FETCH_LIMIT)
         .fetch_all(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
 
-        let candidate_count = space_ids.len();
+        let mut has_more = space_ids.len() > LINK_GRAPH_CHANGE_SPACE_BATCH_SIZE;
+        space_ids.truncate(LINK_GRAPH_CHANGE_SPACE_BATCH_SIZE);
         let mut spaces = 0;
         let mut events = 0;
         let mut targets = 0;
         let mut dispatched_targets = 0;
         let mut jobs = 0;
-        let mut has_more = candidate_count == LINK_GRAPH_CHANGE_SPACE_BATCH_SIZE as usize;
         for space_id in space_ids {
             let Some(collected) = self.collect_space_changes(space_id).await? else {
                 continue;
@@ -235,7 +225,6 @@ impl LinkGraphWorkRepo {
                 space_id,
                 full_scan_event_id,
                 state.full_scan_after_node_id,
-                false,
             )
             .await?;
             tx.commit().await.map_err(map_sqlx_error)?;
@@ -255,8 +244,7 @@ impl LinkGraphWorkRepo {
         )
         .await?;
         if !checkpoint_valid {
-            let collected =
-                run_full_scan_pass(&mut tx, space_id, event_window_id, None, false).await?;
+            let collected = run_full_scan_pass(&mut tx, space_id, event_window_id, None).await?;
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(Some(collected));
         }
@@ -292,7 +280,7 @@ impl LinkGraphWorkRepo {
         let plan = classify_changes(&rows);
         if plan.rebuild {
             let mut collected =
-                run_full_scan_pass(&mut tx, space_id, event_window_id, None, false).await?;
+                run_full_scan_pass(&mut tx, space_id, event_window_id, None).await?;
             collected.events = rows.len();
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(Some(collected));
@@ -603,7 +591,6 @@ async fn run_full_scan_pass(
     space_id: Uuid,
     full_scan_event_id: i64,
     after_node_id: Option<Uuid>,
-    pending_after_scan: bool,
 ) -> Result<CollectedSpace> {
     let batch = stage_full_space_batch_in(connection, space_id, after_node_id).await?;
     let dispatched = dispatch_targets_in(connection, TargetScope::Space(space_id)).await?;
@@ -613,7 +600,7 @@ async fn run_full_scan_pass(
     } else {
         latest_event_id(connection, space_id).await? > full_scan_event_id
     };
-    let has_immediate_work = batch.has_more || dispatched.has_more || pending_after_scan;
+    let has_immediate_work = batch.has_more || dispatched.has_more;
     let pending = has_immediate_work || events_after_scan;
     if batch.has_more {
         let last_node_id = batch.last_node_id.ok_or_else(|| {
