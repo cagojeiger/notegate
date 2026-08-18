@@ -189,7 +189,7 @@ button:not(:disabled):active {
 }
 
 .markdown a {
-  color: var(--ng-primary);
+  color: var(--ng-link);
   text-decoration: underline;
   text-underline-offset: 2px;
   text-decoration-thickness: 1px;
