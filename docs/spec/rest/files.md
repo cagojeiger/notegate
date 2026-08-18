@@ -13,6 +13,7 @@ GET  /api/v1/spaces/{space_id}/files/{node_id}
 GET  /api/v1/spaces/{space_id}/files/{node_id}/content
 GET  /api/v1/spaces/{space_id}/files/{node_id}/preview-url
 GET  /api/v1/spaces/{space_id}/files/{node_id}/pdf-preview-url
+GET  /api/v1/spaces/{space_id}/files/{node_id}/docx-preview-url
 GET  /api/v1/spaces/{space_id}/files/{node_id}/audio-preview-url
 POST /api/v1/spaces/{space_id}/file-previews:batchResolve
 ```
@@ -24,6 +25,7 @@ GET  /files/{node_id}   -> { node: RestNode }
 GET  /files/{node_id}/content -> 302 presigned GET redirect
 GET  /files/{node_id}/preview-url -> { url, media_type, expires_at }
 GET  /files/{node_id}/pdf-preview-url -> { url, media_type, expires_at }
+GET  /files/{node_id}/docx-preview-url -> { url, media_type, expires_at }
 GET  /files/{node_id}/audio-preview-url -> { url, media_type, expires_at }
 POST /file-previews:batchResolve -> { results: BatchFilePreviewResult[] }
 ```
@@ -65,10 +67,10 @@ Permission: `read`.
 
 `media_type`은 client 선언값이고 `detected_media_type`은 provider object에서 감지한 값이다.
 
-- `preview_available`: image preview 가능 여부. PDF에서는 `false`다.
-- `file_preview_kind`: preview 종류. PDF는 `"pdf"`다.
+- `preview_available`: image preview 가능 여부. PDF와 DOCX에서는 `false`다.
+- `file_preview_kind`: preview 종류. `"image" | "pdf" | "docx"`다.
 - `file_media_kind`: 표시용 `image | pdf | audio | other` 분류이며 preview URL 계약과 분리된다.
-- Tree/Recent compact 요약은 image/PDF preview field를 포함하고, audio일 때만 `file_media_kind: "audio"`를 포함한다.
+- Tree/Recent compact 요약은 image/PDF/DOCX preview field를 포함하고, audio일 때만 `file_media_kind: "audio"`를 포함한다.
 
 Inline preview는 client 선언값이 아니라 감지 결과와 안전한 container pair로 결정한다.
 
@@ -122,6 +124,25 @@ Permission: `read`.
 
 PDF preview는 file detail 전용이다. Markdown image batch endpoint는 PDF를 `unsupported`로 유지한다.
 
+## DOCX preview
+
+Permission: `read`.
+
+`GET /files/{node_id}/docx-preview-url`은 10 MiB 이하이고 `encryption_mode=none`인 검증된 DOCX package에 임시 presigned GET URL을 반환한다. Upload 완료 시 의심되는 DOCX는 전체 package를 한 번 검증해 server-owned `detected_media_type`으로 저장한다. 기능 도입 전에 ZIP으로 감지됐거나 감지값이 없는 기존 DOCX 후보는 첫 preview 요청에서 같은 검증을 수행해 감지값을 교정한다. Object key는 완료 후 불변이므로 검증된 DOCX 감지값은 image/PDF와 같이 재사용하며 preview마다 object를 다시 읽지 않는다. Client 선언 `media_type`과 `.docx` 원본 파일명은 DOCX 후보를 고르는 힌트일 뿐 최종 허용 판정이 아니며, 응답과 presigned URL의 `Content-Type`은 실제 package 검증 결과인 `application/vnd.openxmlformats-officedocument.wordprocessingml.document`다. 응답은 `Cache-Control: private, no-store`, object URL은 `Content-Disposition: inline`과 `Cache-Control: private, no-store, max-age=0`을 서명한다.
+
+검증은 ZIP container와 `[Content_Types].xml`, `_rels/.rels`, `word/document.xml`을 확인하고 `/word/document.xml`의 exact DOCX main content-type override와 root `officeDocument` relationship을 요구한다. HTML, 일반 ZIP, 다른 OOXML 형식, 손상되거나 구조만 흉내 낸 ZIP, client-encrypted File은 `404`다. Markdown image batch endpoint에서도 DOCX는 `unsupported`로 유지한다.
+
+압축 package는 frontend parsing 전에 다음 resource/security 상한을 통과해야 한다.
+
+- compressed object 10 MiB 이하
+- entry 2,048개 이하
+- entry별 선언 uncompressed size 32 MiB 이하, 전체 64 MiB 이하
+- `[Content_Types].xml`과 `_rels/.rels`는 각각 64 KiB 이하만 bounded decompress
+- canonical path와 Stored/Deflate entry만 허용하고 encrypted entry와 symlink는 거부
+- `word/vbaProject.bin`, `word/activeX/`, `word/embeddings/` active content part는 거부
+
+이 상한은 압축 폭탄의 확장량을 제한하지만 DOCX parser 자체의 모든 취약성을 제거하지는 않는다. Frontend renderer는 오류 시 fail closed하며, 일반 external hyperlink는 package 단계에서 허용하되 unsafe href를 제거하고 `altChunk` rendering은 사용하지 않는다.
+
 ## Audio preview
 
 Permission: `read`.
@@ -131,7 +152,7 @@ Permission: `read`.
 - 감지값이 `video/webm` 또는 `video/mp4`인 브라우저 녹음은 선언값이 각각 `audio/webm` 또는 `audio/mp4`일 때만 대응하는 audio `Content-Type`으로 정규화한다.
 - 선언값과 감지값이 맞지 않는 container, HTML, 알 수 없는 형식과 client-encrypted file은 `404`를 반환한다.
 
-녹음 파일에는 image/PDF의 10 MiB preview 상한을 적용하지 않는다.
+녹음 파일에는 image/PDF/DOCX의 10 MiB preview 상한을 적용하지 않는다.
 
 - URL은 `Content-Disposition: inline`, `Cache-Control: private, no-store, max-age=0`과 검증된 `Content-Type`을 서명한다.
 - Provider의 byte range 요청을 지원한다.

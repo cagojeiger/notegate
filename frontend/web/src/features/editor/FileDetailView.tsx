@@ -8,6 +8,7 @@ import { canPreviewAudio, useAudioPreviewUrl } from "./useAudioPreviewQuery";
 import { filePreviewKindForNode, useFilePreviewUrl } from "./useFilePreviewQueries";
 
 const PdfPreview = lazy(() => import("./PdfPreview").then((module) => ({ default: module.PdfPreview })));
+const DocxPreview = lazy(() => import("./DocxPreview").then((module) => ({ default: module.DocxPreview })));
 
 export function FileDetailView({ node }: { node: RestNode }) {
   const filePreview = useFilePreviewUrl(node);
@@ -24,6 +25,7 @@ export function FileDetailView({ node }: { node: RestNode }) {
     ? previewRecovery
     : { nodeId: node.id, retried: false, failedUrl: null };
   const isPdfPreview = previewKind === "pdf";
+  const isDocxPreview = previewKind === "docx";
   const previewUrl = isAudioFile
     ? preview.data?.url
     : previewKind === null ? undefined : preview.data?.url;
@@ -31,7 +33,9 @@ export function FileDetailView({ node }: { node: RestNode }) {
   const previewRequestFailed = !previewUrl
     && preview.isError
     && (isAudioFile || !(preview.error instanceof ApiError && preview.error.status === 404));
-  const previewFailureLabel = isAudioFile ? "Audio" : isPdfPreview ? "PDF" : "Image";
+  const previewFailureLabel = isAudioFile
+    ? "Audio"
+    : isPdfPreview ? "PDF" : isDocxPreview ? "DOCX" : "Image";
 
   function handlePreviewError() {
     if (!previewUrl) return;
@@ -63,7 +67,20 @@ export function FileDetailView({ node }: { node: RestNode }) {
     );
   }
 
-  if (!isAudioFile && previewUrl && !previewFailed) {
+  if (previewUrl && !previewFailed && isDocxPreview) {
+    return (
+      <Suspense fallback={<div className="grid min-h-0 flex-1 place-items-center text-sm text-muted">Preparing DOCX renderer…</div>}>
+        <DocxPreview
+          key={`${node.id}:${previewUrl}`}
+          url={previewUrl}
+          name={node.name}
+          onError={handlePreviewError}
+        />
+      </Suspense>
+    );
+  }
+
+  if (!isAudioFile && previewUrl && !previewFailed && previewKind === "image") {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">
         <img

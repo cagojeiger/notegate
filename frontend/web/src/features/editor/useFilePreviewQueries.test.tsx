@@ -301,6 +301,36 @@ describe("useFilePreviewUrl", () => {
     )).toBeUndefined();
   });
 
+  it("uses the DOCX endpoint and cache key for DOCX file previews", async () => {
+    const queryClient = createTestQueryClient();
+    const docxNode = fileNode({
+      name: "document.docx",
+      media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      detected_media_type: "application/zip",
+      preview_available: false,
+      file_preview_kind: undefined
+    });
+    vi.mocked(getFilePreviewUrl).mockResolvedValue({
+      url: "https://storage.example/document.docx",
+      media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      expires_at: "2026-06-13T00:15:00Z"
+    });
+
+    const { result } = renderHook(() => useFilePreviewUrl(docxNode), {
+      wrapper: createQueryWrapper(queryClient)
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(getFilePreviewUrl).toHaveBeenCalledWith(mockClient, "space-1", "file-1", "docx");
+    expect(queryClient.getQueryData(
+      queryKeys.filePreviewUrl("space-1", "file-1", "docx")
+    )).toMatchObject({ media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+    expect(queryClient.getQueryData(
+      queryKeys.markdownImagePreview("space-1", docxNode.path)
+    )).toBeUndefined();
+  });
+
   it("clears stale PDF preview metadata when the backend rejects it", async () => {
     const queryClient = createTestQueryClient();
     const pdfNode = fileNode({
@@ -372,9 +402,11 @@ describe("filePreviewKindForNode", () => {
   it("uses backend preview kind when available", () => {
     const imageNode = fileNode({ preview_available: true, file_preview_kind: "image" });
     const pdfNode = fileNode({ preview_available: false, file_preview_kind: "pdf" });
+    const docxNode = fileNode({ preview_available: false, file_preview_kind: "docx" });
 
     expect(filePreviewKindForNode(imageNode)).toBe("image");
     expect(filePreviewKindForNode(pdfNode)).toBe("pdf");
+    expect(filePreviewKindForNode(docxNode)).toBe("docx");
   });
 
   it("keeps legacy image probing and recognizes declared PDFs before discovery", () => {
@@ -383,6 +415,21 @@ describe("filePreviewKindForNode", () => {
       media_type: "application/pdf",
       preview_available: undefined
     }))).toBe("pdf");
+  });
+
+  it("recognizes declared DOCX files before preview discovery", () => {
+    expect(filePreviewKindForNode(fileNode({
+      name: "document.docx",
+      media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      detected_media_type: "application/zip",
+      preview_available: false
+    }))).toBe("docx");
+    expect(filePreviewKindForNode(fileNode({
+      name: "meeting.DOCX",
+      media_type: "application/octet-stream",
+      detected_media_type: "application/zip",
+      preview_available: false
+    }))).toBe("docx");
   });
 
   it("does not preview encrypted or known unsupported files", () => {

@@ -431,6 +431,24 @@ mod tests {
     }
 
     #[test]
+    fn node_out_exposes_docx_preview_kind_without_image_preview() {
+        let mut view = base_view(NodeKind::File);
+        let mut stats = file_stats();
+        stats.encryption_mode = FileEncryptionMode::None;
+        stats.media_type = "text/html".to_owned();
+        stats.detected_media_type = Some(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document".to_owned(),
+        );
+        view.file = Some(stats);
+
+        let out = NodeOut::from_view(&view, &HashMap::new());
+
+        assert_eq!(out.preview_available, Some(false));
+        assert_eq!(out.file_preview_kind, Some(FilePreviewKind::Docx));
+        assert_eq!(out.file_media_kind, Some(FileMediaKind::Other));
+    }
+
+    #[test]
     fn node_out_exposes_audio_media_kind_for_browser_recording() {
         let mut view = base_view(NodeKind::File);
         let mut stats = file_stats();

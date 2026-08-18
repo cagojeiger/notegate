@@ -294,6 +294,13 @@ pub async fn complete_upload(
             &upload.object_key,
             upload.byte_len,
             upload.encryption_mode,
+            &upload.media_type,
+            Some(
+                upload
+                    .original_filename
+                    .as_deref()
+                    .unwrap_or(upload.name.as_str()),
+            ),
         )
         .await
         {
