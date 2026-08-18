@@ -25,6 +25,7 @@ impl ProcessRuntime {
                 state.db.clone(),
                 state.config.background_jobs,
                 state.config.metrics_enabled,
+                state.link_graph.clone(),
                 shutdown.clone(),
             )?)
         } else {

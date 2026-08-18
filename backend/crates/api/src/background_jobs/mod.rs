@@ -1,9 +1,12 @@
 mod handlers;
+mod link_graph;
 
 use handlers::UsageHandler;
+use link_graph::LinkGraphProjectNodesHandler;
 use notegate_core::BackgroundJobsConfig;
-use notegate_db::{PgPool, SpaceUsageReconcileJob, SpaceUsageRepo};
+use notegate_db::{LinkGraphProjectNodesJob, PgPool, SpaceUsageReconcileJob, SpaceUsageRepo};
 use notegate_jobs::{JobQueue, JobQueueResult, JobRegistry, Worker, WorkerConfig};
+use notegate_service::link_graph::LinkGraphService;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -17,11 +20,13 @@ pub(crate) fn spawn(
     pool: PgPool,
     config: BackgroundJobsConfig,
     metrics_enabled: bool,
+    link_graph: LinkGraphService,
     shutdown: CancellationToken,
 ) -> JobQueueResult<BackgroundJobs> {
     let queue = JobQueue::new(pool.clone());
     let handlers = JobRegistry::new()
-        .register::<SpaceUsageReconcileJob>(UsageHandler::new(SpaceUsageRepo::new(pool)))?;
+        .register::<SpaceUsageReconcileJob>(UsageHandler::new(SpaceUsageRepo::new(pool)))?
+        .register::<LinkGraphProjectNodesJob>(LinkGraphProjectNodesHandler::new(link_graph))?;
     let job_kinds = handlers.job_kinds();
     let worker = Worker::new(
         queue.clone(),

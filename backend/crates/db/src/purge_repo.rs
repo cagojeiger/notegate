@@ -16,6 +16,7 @@ const OBJECT_STORAGE_HISTORY_PURGE_BATCH: i64 = 1_000;
 const AUDIT_EVENT_PURGE_BATCH: i64 = 1_000;
 const FILE_CHANGE_EVENT_PURGE_BATCH: i64 = 1_000;
 const MCP_INVOCATION_PURGE_BATCH: i64 = 1_000;
+const LINK_GRAPH_PROJECTION_PURGE_BATCH: i64 = 1_000;
 
 #[derive(Debug, Clone)]
 pub struct PurgeRepo {
@@ -113,6 +114,36 @@ impl PurgeRepo {
              SELECT count(*) AS deleted_count FROM deleted",
         )
         .bind(NODE_PURGE_BATCH)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .get("deleted_count");
+
+        // This work ledger intentionally has no Space/node FK so enqueueing it
+        // cannot invert mutation lock ordering. Reclaim only rows whose owners
+        // have already been hard-deleted.
+        let link_graph_projections_deleted: i64 = sqlx::query(
+            "WITH due AS ( \
+                 SELECT projection.space_id, projection.source_node_id \
+                 FROM node_link_projections projection \
+                 WHERE NOT EXISTS ( \
+                     SELECT 1 FROM spaces space WHERE space.id = projection.space_id \
+                 ) OR NOT EXISTS ( \
+                     SELECT 1 FROM nodes node \
+                     WHERE node.space_id = projection.space_id \
+                       AND node.id = projection.source_node_id \
+                 ) \
+                 ORDER BY projection.space_id, projection.source_node_id \
+                 LIMIT $1 FOR UPDATE OF projection SKIP LOCKED \
+             ), deleted AS ( \
+                 DELETE FROM node_link_projections projection USING due \
+                 WHERE projection.space_id = due.space_id \
+                   AND projection.source_node_id = due.source_node_id \
+                 RETURNING projection.source_node_id \
+             ) \
+             SELECT count(*) AS deleted_count FROM deleted",
+        )
+        .bind(LINK_GRAPH_PROJECTION_PURGE_BATCH)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?
@@ -304,6 +335,7 @@ impl PurgeRepo {
             audit_events_deleted: audit_events_deleted.max(0) as u64,
             file_change_events_deleted: file_change_events_deleted.max(0) as u64,
             mcp_invocations_deleted: mcp_invocations_deleted.max(0) as u64,
+            link_graph_projections_deleted: link_graph_projections_deleted.max(0) as u64,
             object_deletions_queued: queued_for_spaces + queued_for_nodes,
         })
     }
@@ -320,5 +352,6 @@ pub struct PurgeRun {
     pub audit_events_deleted: u64,
     pub file_change_events_deleted: u64,
     pub mcp_invocations_deleted: u64,
+    pub link_graph_projections_deleted: u64,
     pub object_deletions_queued: u64,
 }

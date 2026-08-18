@@ -6,12 +6,13 @@ use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{
     AccountRepo, AgentRepo, ApiKeyRepo, AuditEventRepo, BackgroundJobRepo, BrowserSessionRepo,
-    ConnectionRepo, FilesRepo, McpInvocationRepo, PgPool, SpaceRepo, UsageRepo,
+    ConnectionRepo, FilesRepo, LinkGraphRepo, McpInvocationRepo, PgPool, SpaceRepo, UsageRepo,
 };
 use notegate_service::accounts::AccountService;
 use notegate_service::agents::AgentService;
 use notegate_service::connections::ConnectionService;
 use notegate_service::files::FilesService;
+use notegate_service::link_graph::LinkGraphService;
 use notegate_service::search::SearchService;
 use notegate_service::spaces::SpaceService;
 use notegate_service::usage::UsageService;
@@ -38,6 +39,8 @@ pub type Agents = AgentService;
 pub type Files = FilesService;
 /// Search service over the db-backed [`FilesRepo`].
 pub type Search = SearchService;
+/// Derived Markdown-link graph projection service.
+pub type LinkGraph = LinkGraphService;
 /// User-facing account and Space usage service.
 pub type Usage = UsageService;
 
@@ -57,6 +60,7 @@ pub struct AppState {
     pub agents: Agents,
     pub files: Files,
     pub search: Search,
+    pub link_graph: LinkGraph,
     pub(crate) search_admission: SearchAdmission,
     pub(crate) docx_validation_admission: DocxValidationAdmission,
     pub usage: Usage,
@@ -107,6 +111,11 @@ impl AppState {
             FilesRepo::with_limits_and_crypto(db.clone(), config.limits, pii_crypto.clone())
                 .with_metrics_enabled(config.metrics_enabled);
         let files = FilesService::new(files_repo.clone());
+        let link_graph = LinkGraphService::new(
+            LinkGraphRepo::new(db.clone()),
+            files_repo.clone(),
+            notegate_db::LinkGraphWorkRepo::new(db.clone()),
+        );
         let search = SearchService::with_body_cache_config(files_repo, config.search_body_cache)
             .with_metrics_enabled(config.metrics_enabled);
         let usage = UsageService::new(UsageRepo::new(db.clone()), config.limits);
@@ -130,6 +139,7 @@ impl AppState {
             agents,
             files,
             search,
+            link_graph,
             search_admission: SearchAdmission::default(),
             docx_validation_admission: DocxValidationAdmission::default(),
             usage,

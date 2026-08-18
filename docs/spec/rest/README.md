@@ -12,6 +12,7 @@ V1 REST는 NoteGate 브라우저 UI 전용 resource API다. UI가 선택한 `spa
 | Agents | global | `/api/v1/agents` | `agents.md` |
 | Connections | space | `/api/v1/spaces/{space_id}/agents` | `connections.md` |
 | Nodes | space | `/api/v1/spaces/{space_id}/nodes` | `nodes.md` |
+| Links | space | `/api/v1/spaces/{space_id}/nodes/{node_id}/links`, `/api/v1/spaces/{space_id}/link-index/reindex` | `links.md` |
 | Text | space | `/api/v1/spaces/{space_id}/text` | `text.md` |
 | Files | space | `/api/v1/spaces/{space_id}/files`, `/api/v1/spaces/{space_id}/file-previews:batchResolve` | `files.md` |
 
