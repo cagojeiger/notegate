@@ -123,6 +123,10 @@ for (const viewport of [
     await expect(docxPreview).toBeVisible();
     await expectInsideActiveEditor(page, docxPreview);
     const docxFrame = page.frameLocator(`iframe[title="${docxNode.name} DOCX pages"]`);
+    await expect(docxFrame.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute(
+      "content",
+      /default-src 'none'.*connect-src 'none'/
+    );
     await expect(docxFrame.getByText("NoteGate DOCX preview", { exact: true })).toBeVisible();
     await expect(docxFrame.getByText("한글 문서 미리보기", { exact: true })).toBeVisible();
   });

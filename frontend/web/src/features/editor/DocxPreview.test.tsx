@@ -82,6 +82,10 @@ describe("DocxPreview", () => {
     });
 
     const frameDocument = frame.contentDocument!;
+    expect(frameDocument.head.querySelector('meta[http-equiv="Content-Security-Policy"]'))
+      .toHaveAttribute("content", expect.stringContaining("default-src 'none'"));
+    expect(frameDocument.head.querySelector('meta[http-equiv="Content-Security-Policy"]'))
+      .toHaveAttribute("content", expect.stringContaining("connect-src 'none'"));
     const scriptLink = findFrameText(frameDocument, "Script").closest("a")!;
     const dataLink = findFrameText(frameDocument, "Data").closest("a")!;
     const vbscriptLink = findFrameText(frameDocument, "VBScript").closest("a")!;
@@ -102,6 +106,8 @@ describe("DocxPreview", () => {
     expect(frameDocument.querySelector("img[alt='Embedded']")?.getAttribute("src")).toBe("blob:docx-image");
     expect(frameDocument.head.textContent).not.toContain("https://tracker.example");
     expect(frameDocument.head.textContent).toContain("blob:docx-bullet");
+    expect(frameDocument.querySelector("[data-escaped-url]")?.hasAttribute("style")).toBe(false);
+    expect(frameDocument.querySelector("[data-image-set]")?.hasAttribute("style")).toBe(false);
     expect(document.body).not.toHaveTextContent("Script");
   });
 
@@ -174,12 +180,31 @@ function renderedNodes(options: Partial<Options>) {
   embeddedImage.src = "blob:docx-image";
   wrapper.appendChild(embeddedImage);
 
+  const escapedUrl = document.createElement("div");
+  escapedUrl.dataset.escapedUrl = "true";
+  escapedUrl.setAttribute(
+    "style",
+    "background-image:u\\72l(https://tracker.example/escaped.png)"
+  );
+  wrapper.appendChild(escapedUrl);
+
+  const imageSet = document.createElement("div");
+  imageSet.dataset.imageSet = "true";
+  imageSet.setAttribute(
+    "style",
+    "background-image:image-set(url(https://tracker.example/image-set.png) 1x)"
+  );
+  wrapper.appendChild(imageSet);
+
   const style = document.createElement("style");
   style.textContent = [
     ".ng-docx-wrapper { background-image: url(https://tracker.example/pixel.png); }",
     ".ng-docx-bullet { background-image: url(blob:docx-bullet); }"
   ].join("\n");
-  return [style, wrapper];
+  const escapedStyle = document.createElement("style");
+  escapedStyle.textContent =
+    ".ng-docx-escaped { background-image: u\\72l(https://tracker.example/escaped-style.png); }";
+  return [style, escapedStyle, wrapper];
 }
 
 function okResponse(): Response {

@@ -10,6 +10,18 @@ import {
 type PreviewStatus = "loading" | "ready" | "error";
 
 const DOCX_CLASS_NAME = "ng-docx";
+const DOCX_FRAME_CSP = [
+  "default-src 'none'",
+  "img-src blob:",
+  "media-src blob:",
+  "font-src blob:",
+  "style-src 'unsafe-inline'",
+  "connect-src 'none'",
+  "frame-src 'none'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'"
+].join("; ");
 const BLOCKED_ELEMENTS = new Set([
   "base",
   "embed",
@@ -60,6 +72,7 @@ export function DocxPreview({
           return;
         }
         previewDocument.head.replaceChildren(
+          createFrameCsp(previewDocument),
           ...styleNodes.map((node) => previewDocument.adoptNode(node))
         );
         previewDocument.body.replaceChildren(
@@ -185,7 +198,11 @@ function sanitizeElement(element: Element) {
     element.textContent = sanitizeCssText(element.textContent ?? "");
   }
   const inlineStyle = element.getAttribute("style");
-  if (inlineStyle) element.setAttribute("style", sanitizeCssText(inlineStyle));
+  if (inlineStyle) {
+    const sanitizedStyle = sanitizeInlineStyle(inlineStyle, element.ownerDocument);
+    if (sanitizedStyle) element.setAttribute("style", sanitizedStyle);
+    else element.removeAttribute("style");
+  }
 }
 
 function sanitizeLink(link: HTMLAnchorElement) {
@@ -221,11 +238,60 @@ function sanitizeResourceAttribute(element: Element, attribute: string) {
 }
 
 function sanitizeCssText(css: string) {
-  return css
+  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//gu, "");
+  const normalized = decodeCssEscapes(withoutComments);
+  if (
+    normalized !== withoutComments
+    && (/\burl\s*\(/iu.test(normalized) || /@import\b/iu.test(normalized))
+  ) return "";
+
+  return withoutComments
     .replace(/@import\s+[^;]+;?/giu, "")
     .replace(CSS_URL_PATTERN, (match, _quote: string, value: string) => (
       isSafeResourceUrl(value.trim()) ? match : "url(\"\")"
     ));
+}
+
+function sanitizeInlineStyle(css: string, ownerDocument: Document) {
+  const probe = ownerDocument.createElement("span");
+  probe.style.cssText = css;
+  for (const property of Array.from(probe.style)) {
+    const value = probe.style.getPropertyValue(property);
+    if (hasUnsafeCssResource(value)) probe.style.removeProperty(property);
+  }
+  return probe.style.cssText;
+}
+
+function hasUnsafeCssResource(value: string) {
+  const normalized = decodeCssEscapes(value);
+  if (/\b(?:-webkit-)?image-set\s*\(|\bcross-fade\s*\(/iu.test(normalized)) return true;
+
+  let unsafeUrl = false;
+  const withoutUrls = normalized.replace(
+    CSS_URL_PATTERN,
+    (_match, _quote: string, url: string) => {
+      if (!isSafeResourceUrl(url.trim())) unsafeUrl = true;
+      return "";
+    }
+  );
+  return unsafeUrl || /\burl\s*\(/iu.test(withoutUrls);
+}
+
+function decodeCssEscapes(css: string) {
+  return css.replace(/\\(?:([\da-f]{1,6})\s?|([^\r\n\f]))/giu, (_match, hex: string, escaped: string) => {
+    if (hex) {
+      const codePoint = Number.parseInt(hex, 16);
+      return codePoint === 0 || codePoint > 0x10ffff ? "\u{fffd}" : String.fromCodePoint(codePoint);
+    }
+    return escaped;
+  });
+}
+
+function createFrameCsp(previewDocument: Document) {
+  const meta = previewDocument.createElement("meta");
+  meta.httpEquiv = "Content-Security-Policy";
+  meta.content = DOCX_FRAME_CSP;
+  return meta;
 }
 
 function isSafeResourceUrl(value: string) {
