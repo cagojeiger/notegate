@@ -31,9 +31,6 @@ importers:
       '@dnd-kit/utilities':
         specifier: 3.2.2
         version: 3.2.2(react@18.3.1)
-      '@kfonts/line-seed-sans-kr':
-        specifier: 0.1.0
-        version: 0.1.0
       '@tanstack/react-query':
         specifier: ^5.101.4
         version: 5.101.4(react@18.3.1)
@@ -600,9 +597,6 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
-
-  '@kfonts/line-seed-sans-kr@0.1.0':
-    resolution: {integrity: sha512-oae+rhof1dgUzFrf2Kc9/Ajv6P/1tmapcWOLI/tXfOxjNt769WBLadjy9l1cL9StrDRGxSGw2pzFr71tk1D13g==}
 
   '@mermaid-js/parser@1.2.0':
     resolution: {integrity: sha512-oYPyv8A4As1yH5Bx+04iQEQxXuIQDe0GKCNSRgao6z8AM9jixXIfP0vsppRLvGf+nKIOb9/LdpWA4YuJiVvESA==}
@@ -3634,8 +3628,6 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
-
-  '@kfonts/line-seed-sans-kr@0.1.0': {}
 
   '@mermaid-js/parser@1.2.0':
     dependencies:

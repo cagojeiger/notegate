@@ -202,7 +202,11 @@ describe("EventHistoryModal", () => {
 
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/v1/me/jobs"))).toBe(false);
     await user.click(screen.getByRole("tab", { name: "Jobs" }));
-    expect(await screen.findByText("Usage recalculation")).toBeInTheDocument();
+    const jobTitle = await screen.findByText("Usage recalculation");
+    expect(jobTitle).toHaveClass("text-workbench");
+    expect(jobTitle).not.toHaveClass("truncate");
+    expect(jobTitle).toHaveClass("sm:truncate");
+    expect(jobTitle.closest("li")).toHaveClass("py-2");
     expect(screen.getByText("Running…")).toBeInTheDocument();
     expect(screen.getByText("Space Research")).toBeInTheDocument();
     expect(screen.getByLabelText(/^Queued /)).toBeInTheDocument();

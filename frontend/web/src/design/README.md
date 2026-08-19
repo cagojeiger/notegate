@@ -39,7 +39,7 @@ Prefer `shared/ui` instead of repeating:
 
 ## Theme policy
 
-- Light theme uses cool paper chrome around a clean white editor; dark theme uses ink-slate chrome around a brighter slate surface.
+- Light theme uses lavender-paper chrome around a near-white editor; dark theme uses smoky graphite chrome around a subtly brighter neutral surface.
 - Neutral surfaces own hover. Soft violet identifies selected surfaces, while muted violet is reserved for focus, links, active borders, and primary actions.
 - Violet should stay below roughly 5% of a typical workbench screen; status colors keep their semantic meaning instead of becoming brand decoration.
 - Normal text targets WCAG 2.2 AA contrast of at least 4.5:1.
