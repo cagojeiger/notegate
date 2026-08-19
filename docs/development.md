@@ -59,7 +59,7 @@ cp .env.example .env
 make up
 ```
 
-`web` image는 dashboard와 Rust server를 포함한다. Proxy는 NoteGate를 `http://localhost:9191`에 노출하고 Compose는 PostgreSQL, MinIO, Prometheus, Grafana와 로컬 bucket 초기화 job을 함께 실행한다. Compose는 `all` mode를 사용하며, API 요청, background job, reconciliation은 하나의 `NOTEGATE_DB_MAX_CONNECTIONS` pool을 공유한다.
+`web` image는 dashboard와 Rust server를 포함한다. Proxy는 NoteGate를 `http://localhost:9191`에 노출하고 Compose는 PostgreSQL, MinIO, Prometheus, Grafana와 로컬 bucket 초기화 job을 함께 실행한다. Compose는 `all` mode를 사용하며 `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`는 각 replica에 전달된다.
 
 | Service | URL |
 |---|---|

@@ -37,7 +37,7 @@ impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
             concurrency: 4,
-            lease: Duration::from_secs(180),
+            lease: Duration::from_secs(120),
             safety_poll: Duration::from_secs(10 * 60),
             retry_base: Duration::from_secs(5),
             retry_max: Duration::from_secs(15 * 60),

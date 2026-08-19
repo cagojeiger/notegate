@@ -1158,7 +1158,7 @@ mod tests {
     }
 
     #[test]
-    fn api_mode_does_not_require_background_job_headroom() {
+    fn api_mode_does_not_require_worker_pool_headroom() {
         let mut config = valid_config();
         config.process_mode = ProcessMode::Api;
         config.db_max_connections = 5;

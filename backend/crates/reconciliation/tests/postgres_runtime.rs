@@ -58,7 +58,7 @@ async fn postgres_lock_allows_one_kind_and_releases_on_shutdown()
         return Ok(());
     };
     let app_pool = PgPoolOptions::new()
-        .max_connections(2)
+        .max_connections(1)
         .connect_with(db.pool.connect_options().as_ref().clone())
         .await?;
     let starts = Arc::new(AtomicUsize::new(0));

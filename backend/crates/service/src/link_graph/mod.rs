@@ -24,7 +24,7 @@ use parser::{ParseInternalReferencesError, parse_internal_references};
 
 const LINK_REFERENCE_LIMIT_FAILURE_CODE: &str = "link_reference_limit_exceeded";
 const LINK_GRAPH_SOURCE_CONCURRENCY: usize = 10;
-const LINK_GRAPH_SOURCE_TIMEOUT: Duration = Duration::from_secs(30);
+const LINK_GRAPH_SOURCE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LinkGraphProjectionBatch {
