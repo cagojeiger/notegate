@@ -79,11 +79,53 @@ describe("NodeLinksPanel", () => {
 
     const outgoingSection = screen.getByText("Outgoing").closest("section");
     expect(outgoingSection).not.toBeNull();
-    await user.click(within(outgoingSection!).getByRole("button", { name: "Load more" }));
+    await user.click(within(outgoingSection!).getByRole("button", { name: "Load more outgoing links" }));
     await user.click(screen.getByRole("button", { name: "Sync links for note.md" }));
 
     expect(mocks.fetchOutgoing).toHaveBeenCalledTimes(1);
     expect(mocks.sync).toHaveBeenCalledWith(expect.objectContaining({ id: "node-1" }));
+  });
+
+  it("gives outgoing and backlink pagination buttons distinct accessible names", () => {
+    mocks.useNodeLinksQuery.mockImplementation((_node, direction: "outgoing" | "incoming") => (
+      direction === "outgoing"
+        ? linkQuery([
+            { node_id: "target-1", path: "/docs/target.md", kind: "link", occurrence_count: 2 }
+          ], true, mocks.fetchOutgoing, mocks.refetchOutgoing)
+        : linkQuery([
+            { node_id: "source-1", path: "/docs/source.md", kind: "image", occurrence_count: 1 }
+          ], true, mocks.fetchIncoming, mocks.refetchIncoming)
+    ));
+    renderPanel();
+
+    const outgoingSection = screen.getByText("Outgoing").closest("section");
+    const backlinkSection = screen.getByText("Backlinks").closest("section");
+    expect(outgoingSection).not.toBeNull();
+    expect(backlinkSection).not.toBeNull();
+
+    expect(
+      within(outgoingSection!).getByRole("button", { name: "Load more outgoing links" })
+    ).toHaveTextContent("Load more");
+    expect(
+      within(backlinkSection!).getByRole("button", { name: "Load more backlinks" })
+    ).toHaveTextContent("Load more");
+  });
+
+  it("marks the section count as partial when another page is available", () => {
+    mocks.useNodeLinksQuery.mockImplementation((_node, direction: "outgoing" | "incoming") => (
+      direction === "outgoing"
+        ? pagedLinkQuery([
+            [{ node_id: "target-1", path: "/docs/target.md", kind: "link", occurrence_count: 1 }],
+            [{ node_id: "target-2", path: "/docs/another.md", kind: "link", occurrence_count: 1 }]
+          ], true, mocks.fetchOutgoing, mocks.refetchOutgoing)
+        : linkQuery([], false, mocks.fetchIncoming, mocks.refetchIncoming)
+    ));
+    renderPanel();
+
+    const outgoingSection = screen.getByText("Outgoing").closest("section");
+    expect(outgoingSection).not.toBeNull();
+    expect(within(outgoingSection!).getByText("2+")).toBeInTheDocument();
+    expect(within(outgoingSection!).queryByText("2")).not.toBeInTheDocument();
   });
 
   it("shows only backlinks for non-text nodes", () => {
@@ -94,6 +136,22 @@ describe("NodeLinksPanel", () => {
     expect(screen.queryByText("Outgoing")).not.toBeInTheDocument();
     expect(screen.getByText("Backlinks")).toBeInTheDocument();
     expect(mocks.useNodeLinkStatusQuery).toHaveBeenCalledWith(folder, true);
+  });
+
+  it("keeps backlinks but does not offer outgoing indexing for client-encrypted text", () => {
+    const encrypted = makeRestNode({ text_storage_format: "encrypted" });
+    renderPanel({ node: encrypted });
+
+    expect(screen.queryByText("Index status")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Sync links for note.md" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Outgoing links are unavailable for client-encrypted text.")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Backlinks")).toBeInTheDocument();
+    expect(mocks.useNodeLinksQuery).toHaveBeenCalledWith(encrypted, "outgoing", false);
+    expect(mocks.useNodeLinksQuery).toHaveBeenCalledWith(encrypted, "incoming", true);
   });
 
   it("refreshes the selected node links after Space projection work settles", () => {
@@ -180,9 +238,18 @@ function linkQuery(
   fetchNextPage: () => void,
   refetch: () => void
 ) {
+  return pagedLinkQuery([links], hasNextPage, fetchNextPage, refetch);
+}
+
+function pagedLinkQuery(
+  pages: Array<Array<{ node_id: string | null; path: string; kind: "link" | "image"; occurrence_count: number }>>,
+  hasNextPage: boolean,
+  fetchNextPage: () => void,
+  refetch: () => void
+) {
   return {
     data: {
-      pages: [{
+      pages: pages.map((links) => ({
         links,
         page: {
           limit: 50,
@@ -190,7 +257,7 @@ function linkQuery(
           has_more: hasNextPage,
           next_cursor: hasNextPage ? "next" : null
         }
-      }]
+      }))
     },
     fetchNextPage,
     hasNextPage,

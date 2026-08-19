@@ -1,4 +1,10 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient
+} from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
 import {
@@ -16,13 +22,24 @@ import type { RestNode } from "../../api/types";
 const PENDING_STATUS_POLL_MS = 15_000;
 const SYNCING_STATUS_POLL_MS = 3_000;
 
+function refetchUnlessInvalidated(query: {
+  state: { data: unknown; isInvalidated: boolean };
+}): boolean {
+  return query.state.data === undefined || !query.state.isInvalidated;
+}
+
 export function useNodeLinkStatusQuery(node: RestNode, enabled: boolean) {
   const client = useApiClient();
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: queryKeys.nodeLinkStatus(node.space_id, node.id),
     queryFn: () => getNodeLinkStatus(client, node.space_id, node.id),
     enabled,
-    refetchInterval: (query) => projectionPollInterval(query.state.data)
+    refetchInterval: (query) => linkStatusPollInterval(
+      query.state.data,
+      query.state.status === "error",
+      hasInvalidatedNodeLinks(queryClient, node)
+    )
   });
 }
 
@@ -45,6 +62,9 @@ export function useNodeLinksQuery(
     getNextPageParam: (lastPage) => (
       lastPage.page.has_more ? lastPage.page.next_cursor : undefined
     ),
+    refetchOnMount: refetchUnlessInvalidated,
+    refetchOnWindowFocus: refetchUnlessInvalidated,
+    refetchOnReconnect: refetchUnlessInvalidated,
     enabled
   });
 }
@@ -96,4 +116,21 @@ export function projectionPollInterval(status: NodeLinkProjectionStatus | undefi
   if (status?.status === "syncing") return SYNCING_STATUS_POLL_MS;
   if (status?.status === "pending" || status?.space_pending) return PENDING_STATUS_POLL_MS;
   return false;
+}
+
+export function linkStatusPollInterval(
+  status: NodeLinkProjectionStatus | undefined,
+  statusError: boolean,
+  linksInvalidated: boolean
+): number | false {
+  return projectionPollInterval(status)
+    || (statusError && linksInvalidated ? PENDING_STATUS_POLL_MS : false);
+}
+
+function hasInvalidatedNodeLinks(queryClient: QueryClient, node: RestNode): boolean {
+  return (["outgoing", "incoming"] as const).some((direction) => (
+    queryClient.getQueryState(
+      queryKeys.nodeLinkList(node.space_id, node.id, direction)
+    )?.isInvalidated === true
+  ));
 }

@@ -308,6 +308,24 @@ describe("query invalidation", () => {
     ).toBe(1);
   });
 
+  it("keeps link caches valid for an item update that does not change paths", async () => {
+    const queryClient = createTestQueryClient();
+    const statusKey = queryKeys.nodeLinkStatus("space-1", "folder-1");
+    const listKey = queryKeys.nodeLinkList("space-1", "folder-1", "incoming");
+    queryClient.setQueryData(statusKey, { status: "idle" });
+    queryClient.setQueryData(listKey, { pages: [], pageParams: [] });
+
+    await applyExternalFileChanges(queryClient, "space-1", [{
+      ...delta(11, "folder-1", ["root-1"]),
+      op_type: "item.update",
+      item_kind: "folder",
+      write_lock_changed: true
+    }]);
+
+    expect(queryClient.getQueryData(statusKey)).toEqual({ status: "idle" });
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(false);
+  });
+
   it("refreshes every summary and detail affected by an inherited write lock", () => {
     const queryClient = createTestQueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");

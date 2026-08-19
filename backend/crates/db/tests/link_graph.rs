@@ -658,6 +658,60 @@ async fn change_events_wait_for_and_extend_the_quiet_period()
 }
 
 #[tokio::test]
+async fn item_settings_changes_do_not_delay_link_collection()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (_account, space_id, _root_id) = space_with_root(&db.pool, "link-settings-change").await?;
+    sqlx::query(
+        "UPDATE link_graph_space_states \
+         SET available_at = NULL, pending_since_event_id = NULL \
+         WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .execute(&db.pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO file_change_events (space_id, op_type, metadata) \
+         VALUES ($1, 'item.update', \
+                 '{\"name_changed\": false, \"write_lock_changed\": true}'::jsonb)",
+    )
+    .bind(space_id)
+    .execute(&db.pool)
+    .await?;
+    let unchanged: (Option<chrono::DateTime<chrono::Utc>>, Option<i64>) = sqlx::query_as(
+        "SELECT available_at, pending_since_event_id \
+         FROM link_graph_space_states WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(unchanged, (None, None));
+
+    sqlx::query(
+        "INSERT INTO file_change_events (space_id, op_type, metadata) \
+         VALUES ($1, 'item.update', '{\"name_changed\": true}'::jsonb)",
+    )
+    .bind(space_id)
+    .execute(&db.pool)
+    .await?;
+    let relevant: (Option<chrono::DateTime<chrono::Utc>>, Option<i64>) = sqlx::query_as(
+        "SELECT available_at, pending_since_event_id \
+         FROM link_graph_space_states WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert!(relevant.0.is_some());
+    assert!(relevant.1.is_some());
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn incremental_rebuild_does_not_pull_new_events_across_its_quiet_boundary()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
