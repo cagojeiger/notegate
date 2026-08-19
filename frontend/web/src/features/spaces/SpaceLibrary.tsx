@@ -203,7 +203,8 @@ function SpaceInspector({
   const reindexLinks = useReindexSpaceLinksMutation();
   const linkIndexStatus = useSpaceLinkIndexStatusQuery(space?.id, Boolean(space));
   const isChecking = !!space && Boolean(usage?.reconciliation_pending || usageCheck.isRequesting);
-  const isCooldown = useTimestampInFuture(usage?.reconciliation_available_at);
+  const reconciliationAvailableAt = usage?.reconciliation_available_at;
+  const isCooldown = useTimestampInFuture(reconciliationAvailableAt);
   const checkStatus = usageState === "ready" && usage
     ? isChecking
       ? { message: "Recalculating usage…", className: "text-warning" }
@@ -229,7 +230,9 @@ function SpaceInspector({
           size="xs"
           onClick={usageCheck.onCheck}
           disabled={isChecking || isCooldown || usageCheck.disabled}
-          title={isCooldown ? `Available after ${formatAvailability(usage.reconciliation_available_at)}` : undefined}
+          title={isCooldown && reconciliationAvailableAt
+            ? `Available after ${formatAvailability(reconciliationAvailableAt)}`
+            : undefined}
           aria-label={`Recalculate ${space.name} usage`}
         >
           <RefreshCw size={14} className={isChecking ? "animate-spin" : undefined} />

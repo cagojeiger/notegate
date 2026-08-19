@@ -911,6 +911,7 @@ mod tests {
             "GET /api/v1/spaces/{space_id}/files/{node_id}/preview-url",
             "GET /api/v1/spaces/{space_id}/file-change-events",
             "GET /api/v1/spaces/{space_id}/file-change-sync",
+            "GET /api/v1/spaces/{space_id}/link-index/status",
             "GET /api/v1/spaces/{space_id}/nodes",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}/children",
