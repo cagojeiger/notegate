@@ -218,7 +218,7 @@ function SpaceInspector({
     : null;
   const usageAction = space && usageState === "error"
     ? (
-      <Button variant="ghost" size="xs" onClick={onRetryUsage} disabled={usageFetching} aria-label={`Retry ${space.name} usage`}>
+      <Button variant="secondary" size="xs" onClick={onRetryUsage} disabled={usageFetching} aria-label={`Retry ${space.name} usage`}>
         <RefreshCw size={14} className={usageFetching ? "animate-spin" : undefined} />
         Try again
       </Button>
@@ -226,7 +226,7 @@ function SpaceInspector({
     : space && usage
       ? (
         <Button
-          variant="ghost"
+          variant="secondary"
           size="xs"
           onClick={usageCheck.onCheck}
           disabled={isChecking || isCooldown || usageCheck.disabled}
@@ -324,7 +324,7 @@ function SpaceInspector({
               help="Rebuilds Markdown link relationships for this Space in the background."
               actions={space ? (
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="xs"
                   disabled={space.permission !== "write" || linkIndexUnavailable}
                   onClick={() => reindexLinks.mutate(space.id)}

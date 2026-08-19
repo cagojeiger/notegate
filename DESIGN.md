@@ -49,7 +49,7 @@
 - 선택 상태: hover, selected, inspected, active 상태가 행의 padding, 높이, 글자 굵기를 바꾸지 않아야 한다. Files/Recent 행은 장식용 side rail 없이 배경만 바꾸고, `aria-current`로 열린 항목을 표현한다.
 - 형태: Workbench의 붙어 있는 control과 row는 4 px, section surface는 6 px radius를 기본으로 한다. Inspector는 중첩 카드 대신 얇은 seam으로 나뉜 flat section을 사용한다. 큰 radius와 그림자는 modal과 떠 있는 surface에만 사용한다.
 - 아이콘: 기능 아이콘은 원칙적으로 16 px Lucide와 1.75 px stroke를 사용한다.
-- Section header의 동작은 메타데이터 또는 `xs` ghost control로 제한한다. 인덱스 재구축·사용량 재계산 같은 유지보수 동작은 강한 외곽선으로 제목과 경쟁하지 않으며, 섹션에 주요 데이터가 있으면 데이터 다음에 배치한다. 모바일에서는 시각적 밀도와 별개로 44 px touch target을 유지한다.
+- Section header의 동작은 메타데이터 또는 `xs` control로 제한한다. 인덱스 재구축·사용량 재계산 같은 유지보수 동작은 Primary 채움 대신 얇은 Secondary 경계로 클릭 가능한 버튼임을 명확히 하고, 섹션에 주요 데이터가 있으면 데이터 다음에 배치한다. 모바일에서는 시각적 밀도와 별개로 44 px touch target을 유지한다.
 - Workbench의 텍스트 버튼은 `xs`, `sm`, `md` 크기에 관계없이 13 px 기본 글자 크기를 사용한다. size variant는 높이와 좌우 padding만 바꾸며, 버튼 간 정보 위계는 variant·색·배치로 표현한다.
 - 브랜드: Workbench 안의 앱 아이콘은 동일한 도형을 유지하면서 Light와 Dark surface에 맞는 전용 색상 변형을 사용한다. 워드마크, favicon과 설치용 PWA 아이콘은 테마와 무관한 고정 자산으로 유지한다.
 - 움직임: 짧은 색상·투명도 전환만 사용하고 `prefers-reduced-motion`을 존중한다.
