@@ -126,7 +126,7 @@ background_job_attempts
 - Process mode는 실행 책임만 분리한다. 모든 mode는 같은 binary와 전체 `Config` 계약을 사용한다.
 - 기본 동시 실행 수는 process당 4이고 최대 64다.
 - `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`로 process별 동시 실행 수를 설정한다.
-- `all` mode의 API 요청, worker, reconciliation은 하나의 `NOTEGATE_DB_MAX_CONNECTIONS` 풀을 공유한다. 기본값과 worker/all mode의 최소값은 10이며, 더 높은 job concurrency는 `background_jobs.concurrency + 2`도 충족해야 한다. 이는 별도 연결 예약이 아니며, pool이 차면 모든 실행 경로가 같은 SQLx acquire 대기열에서 backpressure를 받는다.
+- `all` mode의 API 요청, worker, reconciliation은 하나의 `NOTEGATE_DB_MAX_CONNECTIONS` 풀을 공유한다. 기본값은 10이며, worker가 실행되는 mode에서는 job concurrency보다 최소 2개의 연결 여유를 둔다. pool이 차면 모든 실행 경로가 같은 SQLx acquire 대기열에서 backpressure를 받는다.
 - 기본 lease는 3분이며 worker는 lease의 3분의 1 간격으로 heartbeat한다.
 - Handler timeout은 kind별로 정한다.
 - 자동 재시도는 5초에서 시작해 최대 15분까지 증가하는 exponential backoff와 ±10% jitter를 사용한다.
