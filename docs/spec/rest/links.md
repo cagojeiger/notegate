@@ -53,8 +53,8 @@ POST /api/v1/spaces/{space_id}/link-index/reindex
 GET /api/v1/spaces/{space_id}/link-index/status
 ```
 
-Browser user와 Space write 권한이 필요하다. 첫 endpoint는 Text 하나를, 두 번째 endpoint는 Space의 live Text와 남아 있는 source projection을 비동기 처리 대상으로 접수한다. 실패한 target도 같은 요청으로 다시 활성화한다. 처리량 상한에 도달하면 projection 상태에 보관했다가 여유가 생길 때 background queue에 등록한다. POST는 `202 Accepted`를 반환한다. Space reindex가 이미 진행 중이면 재시작하지 않고 `{"status":"already_pending"}`을 반환한다. GET status는 `{"pending":true|false}`로 다른 탭과 새로고침 후에도 같은 실행 가능 상태를 제공한다.
+Browser user와 Space write 권한이 필요하다. 첫 endpoint는 Text 하나를, 두 번째 endpoint는 Space의 live Text와 남아 있는 source projection을 비동기 처리 대상으로 접수한다. 실패한 target도 같은 요청으로 다시 활성화한다. 처리량 상한에 도달하면 projection 상태에 보관했다가 여유가 생길 때 background queue에 등록한다. POST는 `202 Accepted`를 반환한다. Space reindex가 이미 진행 중이면 재시작하지 않고 `{"status":"already_pending","job_id":null}`을 반환한다. Link projection은 여러 job으로 분할될 수 있으므로 단일 `job_id`를 반환하지 않는다. GET status는 `{"pending":true|false}`로 다른 탭과 새로고침 후에도 같은 실행 가능 상태를 제공한다.
 
 ```json
-{"status":"accepted"}
+{"status":"accepted","job_id":null}
 ```

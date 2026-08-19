@@ -25,6 +25,36 @@ pub(crate) use events::{
 };
 pub use nodes::{NodeOut, NodeRef, NodeSummaryOut, attribution_ids, parse_kind};
 
+/// Common acknowledgement returned by asynchronous browser commands.
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AsyncOperationStatus {
+    Accepted,
+    AlreadyPending,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+pub(crate) struct AsyncOperationResponse {
+    pub status: AsyncOperationStatus,
+    pub job_id: Option<Uuid>,
+}
+
+impl AsyncOperationResponse {
+    pub(crate) const fn accepted(job_id: Option<Uuid>) -> Self {
+        Self {
+            status: AsyncOperationStatus::Accepted,
+            job_id,
+        }
+    }
+
+    pub(crate) const fn already_pending(job_id: Option<Uuid>) -> Self {
+        Self {
+            status: AsyncOperationStatus::AlreadyPending,
+            job_id,
+        }
+    }
+}
+
 /// A lightweight account reference: `{id, kind, display_name}`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct AccountRef {

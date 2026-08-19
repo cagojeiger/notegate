@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::page::Page;
+use crate::rest::dto::AsyncOperationResponse;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -90,11 +91,6 @@ impl From<LinkReferencePage> for LinkReferencesResponse {
             page: pagination,
         }
     }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct LinkGraphAcceptedResponse {
-    status: &'static str,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -224,21 +220,21 @@ pub(crate) async fn get_incoming_links(
         ("space_id" = Uuid, Path, description = "Space id"),
         ("node_id" = Uuid, Path, description = "Node id"),
     ),
-    responses((status = 202, description = "Accept node link synchronization", body = LinkGraphAcceptedResponse)),
+    responses((status = 202, description = "Accept node link synchronization", body = AsyncOperationResponse)),
     security(("browser_session" = []))
 )]
 pub(crate) async fn sync_node_links(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
-) -> Result<(StatusCode, Json<LinkGraphAcceptedResponse>), ApiError> {
+) -> Result<(StatusCode, Json<AsyncOperationResponse>), ApiError> {
     state
         .link_graph
         .request_node(&caller, space_id, node_id)
         .await?;
     Ok((
         StatusCode::ACCEPTED,
-        Json(LinkGraphAcceptedResponse { status: "accepted" }),
+        Json(AsyncOperationResponse::accepted(None)),
     ))
 }
 
@@ -247,20 +243,19 @@ pub(crate) async fn sync_node_links(
     path = "/api/v1/spaces/{space_id}/link-index/reindex",
     tag = "links",
     params(("space_id" = Uuid, Path, description = "Space id")),
-    responses((status = 202, description = "Accept full Space link reindex", body = LinkGraphAcceptedResponse)),
+    responses((status = 202, description = "Accept full Space link reindex", body = AsyncOperationResponse)),
     security(("browser_session" = []))
 )]
 pub(crate) async fn reindex_space(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(space_id): Path<Uuid>,
-) -> Result<(StatusCode, Json<LinkGraphAcceptedResponse>), ApiError> {
-    let status = match state.link_graph.request_space(&caller, space_id).await? {
-        LinkGraphSpaceRequestOutcome::Requested => "accepted",
-        LinkGraphSpaceRequestOutcome::AlreadyPending => "already_pending",
+) -> Result<(StatusCode, Json<AsyncOperationResponse>), ApiError> {
+    let response = match state.link_graph.request_space(&caller, space_id).await? {
+        LinkGraphSpaceRequestOutcome::Requested => AsyncOperationResponse::accepted(None),
+        LinkGraphSpaceRequestOutcome::AlreadyPending => {
+            AsyncOperationResponse::already_pending(None)
+        }
     };
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(LinkGraphAcceptedResponse { status }),
-    ))
+    Ok((StatusCode::ACCEPTED, Json(response)))
 }

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use notegate_core::Result;
-use notegate_jobs::{JobQueue, JobSpec, NewJob};
+use notegate_jobs::{JobHistoryContext, JobQueue, JobSpec, NewJob};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{FromRow, PgConnection, PgPool};
@@ -427,8 +427,17 @@ impl From<ProjectionTargetRow> for LinkGraphProjectionTarget {
 #[derive(Debug, FromRow)]
 struct DispatchCandidateRow {
     space_id: Uuid,
+    owner_user_id: Option<Uuid>,
+    space_name: Option<String>,
     node_id: Uuid,
     expected_content_sha256: Option<String>,
+}
+
+#[derive(Debug)]
+struct DispatchSpaceBatch {
+    owner_user_id: Option<Uuid>,
+    space_name: Option<String>,
+    sources: Vec<LinkGraphProjectSource>,
 }
 
 #[derive(Debug, FromRow)]
@@ -767,9 +776,11 @@ async fn dispatch_targets_in(
     }
 
     let mut rows = sqlx::query_as::<_, DispatchCandidateRow>(
-        "SELECT projection.space_id, projection.source_node_id AS node_id, \
+        "SELECT projection.space_id, space.owner_user_id, space.name AS space_name, \
+                projection.source_node_id AS node_id, \
                 text.content_sha256 AS expected_content_sha256 \
          FROM node_link_projections projection \
+         LEFT JOIN spaces space ON space.id = projection.space_id \
          LEFT JOIN nodes node ON node.space_id = projection.space_id \
            AND node.id = projection.source_node_id AND node.kind = 'text' \
            AND node.deleted_at IS NULL \
@@ -792,11 +803,16 @@ async fn dispatch_targets_in(
     rows.truncate(LINK_GRAPH_DISPATCH_BATCH_SIZE);
     let candidate_count = rows.len();
 
-    let mut by_space = BTreeMap::<Uuid, Vec<LinkGraphProjectSource>>::new();
+    let mut by_space = BTreeMap::<Uuid, DispatchSpaceBatch>::new();
     for row in rows {
         by_space
             .entry(row.space_id)
-            .or_default()
+            .or_insert_with(|| DispatchSpaceBatch {
+                owner_user_id: row.owner_user_id,
+                space_name: row.space_name.clone(),
+                sources: Vec::new(),
+            })
+            .sources
             .push(LinkGraphProjectSource {
                 node_id: row.node_id,
                 expected_content_sha256: row.expected_content_sha256,
@@ -805,8 +821,8 @@ async fn dispatch_targets_in(
 
     let mut targets = 0;
     let mut jobs = 0;
-    'spaces: for (space_id, sources) in by_space {
-        for batch in sources.chunks(LINK_GRAPH_PROJECT_BATCH_MAX) {
+    'spaces: for (space_id, space_batch) in by_space {
+        for batch in space_batch.sources.chunks(LINK_GRAPH_PROJECT_BATCH_MAX) {
             if jobs == job_capacity {
                 break 'spaces;
             }
@@ -814,13 +830,23 @@ async fn dispatch_targets_in(
                 space_id,
                 sources: batch.to_vec(),
             };
-            let enqueued = JobQueue::enqueue_in(
-                connection,
-                &NewJob::<LinkGraphProjectNodesJob>::new(payload)
-                    .max_attempts(LINK_GRAPH_PROJECT_MAX_ATTEMPTS),
-            )
-            .await
-            .map_err(job_error)?;
+            let mut job = NewJob::<LinkGraphProjectNodesJob>::new(payload)
+                .max_attempts(LINK_GRAPH_PROJECT_MAX_ATTEMPTS);
+            if let (Some(owner_user_id), Some(space_name)) =
+                (space_batch.owner_user_id, space_batch.space_name.as_ref())
+            {
+                job = job.record_in_history(
+                    owner_user_id,
+                    Some(
+                        JobHistoryContext::new("space")
+                            .id(space_id)
+                            .label(space_name),
+                    ),
+                );
+            }
+            let enqueued = JobQueue::enqueue_in(connection, &job)
+                .await
+                .map_err(job_error)?;
             sqlx::query(
                 "UPDATE node_link_projections \
                  SET active_job_id = $3, active_request_version = request_version \

@@ -34,7 +34,7 @@ describe("links api", () => {
 
   it("requests node and Space link rebuilds", async () => {
     const client = createMockApiClient();
-    client.post.mockResolvedValue({ status: "accepted" });
+    client.post.mockResolvedValue({ status: "accepted", job_id: null });
 
     await requestNodeLinkSync(client, "space-1", "node-1");
     await requestSpaceLinkReindex(client, "space-1");

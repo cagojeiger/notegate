@@ -81,10 +81,19 @@ async fn reconciliation_request_allows_only_one_concurrent_queue()
     assert_eq!(
         outcomes
             .iter()
-            .filter(|outcome| **outcome == UsageReconciliationOutcome::AlreadyQueued)
+            .filter(|outcome| matches!(outcome, UsageReconciliationOutcome::AlreadyQueued { .. }))
             .count(),
         1
     );
+    let queued_job_id = outcomes.iter().find_map(|outcome| match outcome {
+        UsageReconciliationOutcome::Queued { job_id } => Some(*job_id),
+        _ => None,
+    });
+    let pending_job_id = outcomes.iter().find_map(|outcome| match outcome {
+        UsageReconciliationOutcome::AlreadyQueued { job_id } => Some(*job_id),
+        _ => None,
+    });
+    assert_eq!(queued_job_id, pending_job_id);
 
     let queued: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \

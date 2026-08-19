@@ -20,10 +20,10 @@ async fn lists_owned_visible_jobs_and_loads_attempts() -> Result<(), Box<dyn std
     insert_succeeded_attempt(&db.pool, owned_job).await?;
     let generic_job = insert_succeeded_job(&db.pool, "document_export", space_id, true).await?;
     let link_job =
-        insert_succeeded_job(&db.pool, "link_graph_project_nodes", space_id, false).await?;
+        insert_succeeded_job(&db.pool, "link_graph_project_nodes", space_id, true).await?;
     insert_succeeded_attempt(&db.pool, link_job).await?;
     insert_succeeded_job(&db.pool, "space_usage_reconcile", other_space_id, true).await?;
-    insert_succeeded_job(&db.pool, "link_graph_project_nodes", other_space_id, false).await?;
+    insert_succeeded_job(&db.pool, "link_graph_project_nodes", other_space_id, true).await?;
     insert_succeeded_job(&db.pool, "internal_maintenance", space_id, false).await?;
 
     let repo = BackgroundJobRepo::new(db.pool.clone());

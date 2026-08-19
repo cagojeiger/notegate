@@ -30,20 +30,12 @@ impl BackgroundJobRepo {
         let cursor_id = cursor.map(|cursor| cursor.id);
         let rows = sqlx::query_as::<_, BackgroundJobRow>(
             "SELECT job.job_id, job.job_kind, job.status, \
-                    COALESCE(job.context_kind, CASE WHEN link_space.id IS NOT NULL \
-                        THEN 'space' END) AS context_kind, \
-                    COALESCE(job.context_id, link_space.id) AS context_id, \
-                    COALESCE(job.context_label, link_space.name) AS context_label, \
+                    job.context_kind, job.context_id, job.context_label, \
                     job.attempt_count, job.failure_count, job.max_attempts, \
                     job.last_error_code, job.created_at, job.updated_at, job.completed_at \
              FROM background_jobs job \
-             LEFT JOIN spaces link_space \
-               ON job.job_kind = 'link_graph_project_nodes' \
-              AND link_space.owner_user_id = $1 \
-              AND link_space.id::text = job.payload ->> 'space_id' \
-             WHERE ((job.history_visibility = 'visible' \
-                     AND job.history_owner_account_id = $1) \
-                    OR link_space.id IS NOT NULL) \
+             WHERE job.history_visibility = 'visible' \
+               AND job.history_owner_account_id = $1 \
                AND ($2::timestamptz IS NULL OR (job.created_at, job.job_id) < ($2, $3)) \
              ORDER BY job.created_at DESC, job.job_id DESC \
              LIMIT $4",
@@ -65,21 +57,13 @@ impl BackgroundJobRepo {
     ) -> Result<Option<BackgroundJobDetail>> {
         let row = sqlx::query_as::<_, BackgroundJobRow>(
             "SELECT job.job_id, job.job_kind, job.status, \
-                    COALESCE(job.context_kind, CASE WHEN link_space.id IS NOT NULL \
-                        THEN 'space' END) AS context_kind, \
-                    COALESCE(job.context_id, link_space.id) AS context_id, \
-                    COALESCE(job.context_label, link_space.name) AS context_label, \
+                    job.context_kind, job.context_id, job.context_label, \
                     job.attempt_count, job.failure_count, job.max_attempts, \
                     job.last_error_code, job.created_at, job.updated_at, job.completed_at \
              FROM background_jobs job \
-             LEFT JOIN spaces link_space \
-               ON job.job_kind = 'link_graph_project_nodes' \
-              AND link_space.owner_user_id = $2 \
-              AND link_space.id::text = job.payload ->> 'space_id' \
              WHERE job.job_id = $1 \
-               AND ((job.history_visibility = 'visible' \
-                     AND job.history_owner_account_id = $2) \
-                    OR link_space.id IS NOT NULL)",
+               AND job.history_visibility = 'visible' \
+               AND job.history_owner_account_id = $2",
         )
         .bind(job_id)
         .bind(owner_account_id)

@@ -94,7 +94,7 @@ describe("SpaceLibrary usage", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
       if (init?.method === "POST") {
         pending = true;
-        return jsonResponse({ status: "queued" }, 202);
+        return jsonResponse({ status: "accepted", job_id: "job-1" }, 202);
       }
       return jsonResponse({
         ...usage,

@@ -571,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn openapi_includes_usage_routes() {
+    fn openapi_uses_the_shared_async_operation_response() {
         let doc = ApiDoc::openapi();
         let value = serde_json::to_value(doc).expect("serializes openapi");
 
@@ -579,15 +579,17 @@ mod tests {
             response_ref(&value, "/api/v1/me/usage", "get", "200"),
             "#/components/schemas/CurrentUserUsageOut"
         );
-        assert_eq!(
-            response_ref(
-                &value,
-                "/api/v1/spaces/{space_id}/usage/reconcile",
-                "post",
-                "202"
-            ),
-            "#/components/schemas/ReconciliationQueuedResponse"
-        );
+        for path in [
+            "/api/v1/spaces/{space_id}/usage/reconcile",
+            "/api/v1/spaces/{space_id}/nodes/{node_id}/links/sync",
+            "/api/v1/spaces/{space_id}/link-index/reindex",
+        ] {
+            assert_eq!(
+                response_ref(&value, path, "post", "202"),
+                "#/components/schemas/AsyncOperationResponse",
+                "unexpected async response for {path}"
+            );
+        }
         assert_eq!(
             response_ref(
                 &value,

@@ -58,7 +58,7 @@ describe("link queries and mutations", () => {
   it("marks a node pending before requesting its link sync", async () => {
     const node = makeRestNode();
     const queryClient = createTestQueryClient();
-    vi.mocked(requestNodeLinkSync).mockResolvedValue({ status: "accepted" });
+    vi.mocked(requestNodeLinkSync).mockResolvedValue({ status: "accepted", job_id: null });
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderLinkHook(queryClient, useSyncNodeLinksMutation);
 
@@ -78,7 +78,7 @@ describe("link queries and mutations", () => {
 
   it("resets the Space link family after accepting a full reindex", async () => {
     const queryClient = createTestQueryClient();
-    vi.mocked(requestSpaceLinkReindex).mockResolvedValue({ status: "accepted" });
+    vi.mocked(requestSpaceLinkReindex).mockResolvedValue({ status: "accepted", job_id: null });
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderLinkHook(queryClient, useReindexSpaceLinksMutation);

@@ -25,7 +25,6 @@ payload_too_large -> 413 request body limit exceeded
 node_write_locked    -> 423 target node or an ancestor is write-locked
 subtree_write_locked -> 423 source subtree contains a directly write-locked node
 rate_limited   -> 429 process-wide HTTP capacity exceeded
-usage_reconciliation_pending  -> 409 reconciliation job already queued
 usage_reconciliation_cooldown -> 409 reconciliation completed within the cooldown window
 internal_error -> 500 redacted internal error
 usage_recalculation_in_progress -> 503 temporary read-only maintenance

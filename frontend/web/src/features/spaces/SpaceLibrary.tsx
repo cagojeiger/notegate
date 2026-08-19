@@ -1,7 +1,6 @@
 import { Bot, FolderOpen, Link2, LockKeyhole, Pin, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { ApiError } from "../../api/errors";
 import type { UpdateSpaceInput } from "../../api/spaces";
 import type { Space } from "../../api/types";
 import type { CurrentUserUsage, SpaceUsage } from "../../api/usage";
@@ -76,9 +75,7 @@ export function SpaceLibrary({
   const selectedUsage = selectedSpace ? usageBySpaceId.get(selectedSpace.id) : undefined;
   const currentUsageState = usageState(usageQuery);
   const updatePending = updateSpace.isPending || updateInspectorSpace.isPending;
-  const selectedCheckError = checkUsage.isError
-    && checkUsage.variables === selectedSpace?.id
-    && !(checkUsage.error instanceof ApiError && checkUsage.error.kind === "usage_reconciliation_pending")
+  const selectedCheckError = checkUsage.isError && checkUsage.variables === selectedSpace?.id
     ? checkUsage.error
     : null;
 

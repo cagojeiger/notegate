@@ -108,7 +108,7 @@ export function useCheckSpaceUsageMutation() {
     mutationFn: (spaceId: string) => requestSpaceUsageCheck(client, spaceId),
     meta: { silentError: true },
     onSettled: (_response, error, spaceId) => {
-      const pending = !error || (error instanceof ApiError && error.kind === "usage_reconciliation_pending");
+      const pending = !error;
       const cooldown = error instanceof ApiError && error.kind === "usage_reconciliation_cooldown";
       if (!pending && !cooldown) return;
 

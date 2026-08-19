@@ -376,6 +376,55 @@ async fn job_history_migration_backfills_active_jobs() -> Result<(), Box<dyn std
 }
 
 #[tokio::test]
+async fn link_job_history_migration_backfills_existing_jobs()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup_before(39).await? else {
+        return Ok(());
+    };
+    let (owner_account_id, space_id, _) =
+        space_with_root(&db.pool, "link-jobs-history-backfill").await?;
+    let job_id: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO background_jobs (job_kind, payload, status, completed_at) \
+         VALUES ('link_graph_project_nodes', jsonb_build_object('space_id', $1), \
+                 'succeeded', now()) \
+         RETURNING job_id",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+
+    db.apply_migration(39).await?;
+
+    let history: (
+        String,
+        Option<uuid::Uuid>,
+        Option<String>,
+        Option<uuid::Uuid>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT history_visibility, history_owner_account_id, \
+                context_kind, context_id, context_label \
+         FROM background_jobs WHERE job_id = $1",
+    )
+    .bind(job_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        history,
+        (
+            "visible".to_owned(),
+            Some(owner_account_id),
+            Some("space".to_owned()),
+            Some(space_id),
+            Some("ws-link-jobs-history-backfill".to_owned())
+        )
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn concurrent_workers_claim_distinct_supported_jobs() -> Result<(), Box<dyn std::error::Error>>
 {
     let Some(db) = TestDb::setup().await? else {

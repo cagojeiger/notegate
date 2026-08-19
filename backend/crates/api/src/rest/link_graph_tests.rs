@@ -56,6 +56,7 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{accepted}");
     assert_eq!(accepted["status"], json!("accepted"));
+    assert!(accepted["job_id"].is_null());
 
     let (status, index_status) = get_json(
         rest_app(state.clone(), owner.clone()),
@@ -64,14 +65,21 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     .await?;
     assert_eq!(status, StatusCode::OK, "{index_status}");
     assert_eq!(index_status["pending"], json!(true));
-    assert!(accepted.get("job_id").is_none());
-    let (stored_job_id, payload): (uuid::Uuid, serde_json::Value) = sqlx::query_as(
-        "SELECT job_id, payload FROM background_jobs \
+    let (stored_job_id, payload, history_visibility, history_owner_account_id): (
+        uuid::Uuid,
+        serde_json::Value,
+        String,
+        Option<uuid::Uuid>,
+    ) = sqlx::query_as(
+        "SELECT job_id, payload, history_visibility, history_owner_account_id \
+         FROM background_jobs \
          WHERE job_kind = 'link_graph_project_nodes' \
          ORDER BY created_at DESC LIMIT 1",
     )
     .fetch_one(&db.pool)
     .await?;
+    assert_eq!(history_visibility, "visible");
+    assert_eq!(history_owner_account_id, Some(owner.account_id()));
     let (status, graph_state) = get_json(
         rest_app(state.clone(), owner.clone()),
         format!("/v1/spaces/{space_id}/nodes/{node_id}/links"),
@@ -124,6 +132,7 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{accepted}");
     assert_eq!(accepted["status"], json!("accepted"));
+    assert!(accepted["job_id"].is_null());
 
     let (status, duplicate) = empty_request(
         rest_app(state.clone(), owner.clone()),
@@ -133,6 +142,7 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{duplicate}");
     assert_eq!(duplicate["status"], json!("already_pending"));
+    assert!(duplicate["job_id"].is_null());
 
     let mut api_owner = owner.clone();
     api_owner.channel = Channel::Api;

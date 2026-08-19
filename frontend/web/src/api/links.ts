@@ -1,5 +1,5 @@
 import type { ApiClient } from "./client";
-import type { Page } from "./types";
+import type { AsyncOperationResponse, Page } from "./types";
 
 export type NodeLinkProjectionStatus = {
   status: "idle" | "pending" | "syncing" | "failed";
@@ -21,10 +21,6 @@ export type NodeLink = {
 export type NodeLinksResponse = {
   links: NodeLink[];
   page: Page;
-};
-
-export type LinkSyncAcceptedResponse = {
-  status: "accepted" | "already_pending";
 };
 
 export type SpaceLinkIndexStatus = {
@@ -59,8 +55,8 @@ export function requestNodeLinkSync(
   client: ApiClient,
   spaceId: string,
   nodeId: string
-): Promise<LinkSyncAcceptedResponse> {
-  return client.post<LinkSyncAcceptedResponse>(
+): Promise<AsyncOperationResponse> {
+  return client.post<AsyncOperationResponse>(
     `/api/v1/spaces/${spaceId}/nodes/${nodeId}/links/sync`
   );
 }
@@ -68,8 +64,8 @@ export function requestNodeLinkSync(
 export function requestSpaceLinkReindex(
   client: ApiClient,
   spaceId: string
-): Promise<LinkSyncAcceptedResponse> {
-  return client.post<LinkSyncAcceptedResponse>(
+): Promise<AsyncOperationResponse> {
+  return client.post<AsyncOperationResponse>(
     `/api/v1/spaces/${spaceId}/link-index/reindex`
   );
 }

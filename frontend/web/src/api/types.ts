@@ -288,6 +288,11 @@ export type McpInvocationListResponse = {
 
 export type BackgroundJobStatus = "queued" | "running" | "succeeded" | "dead";
 
+export type AsyncOperationResponse = {
+  status: "accepted" | "already_pending";
+  job_id: string | null;
+};
+
 export type BackgroundJob = {
   id: string;
   kind: string;

@@ -1,4 +1,5 @@
 import type { ApiClient } from "./client";
+import type { AsyncOperationResponse } from "./types";
 
 export type QuotaUsage = {
   used: number;
@@ -20,15 +21,10 @@ export type CurrentUserUsage = {
   spaces: SpaceUsage[];
 };
 
-export type ReconciliationQueuedResponse = {
-  status: "queued";
-  job_id: string;
-};
-
 export function getCurrentUserUsage(client: ApiClient): Promise<CurrentUserUsage> {
   return client.get<CurrentUserUsage>("/api/v1/me/usage");
 }
 
-export function requestSpaceUsageCheck(client: ApiClient, spaceId: string): Promise<ReconciliationQueuedResponse> {
-  return client.post<ReconciliationQueuedResponse>(`/api/v1/spaces/${spaceId}/usage/reconcile`);
+export function requestSpaceUsageCheck(client: ApiClient, spaceId: string): Promise<AsyncOperationResponse> {
+  return client.post<AsyncOperationResponse>(`/api/v1/spaces/${spaceId}/usage/reconcile`);
 }

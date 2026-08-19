@@ -150,7 +150,7 @@ describe("useUsageQuery", () => {
 
   it("switches a backed-off owner to pending polling after a manual check", async () => {
     get.mockResolvedValue(usage());
-    post.mockResolvedValue({ status: "queued" });
+    post.mockResolvedValue({ status: "accepted", job_id: "job-1" });
     const queryClient = testQueryClient();
     const view = renderHook(() => ({
       usage: useUsageQuery(),
