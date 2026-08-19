@@ -72,13 +72,22 @@ async fn claim_projection_job(
     Ok((job, request_version))
 }
 
-async fn clear_projection_work(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
-    sqlx::query("DELETE FROM node_link_projections")
+async fn clear_projection_work(
+    pool: &sqlx::PgPool,
+    space_id: Uuid,
+) -> Result<(), Box<dyn std::error::Error>> {
+    sqlx::query("DELETE FROM node_link_projections WHERE space_id = $1")
+        .bind(space_id)
         .execute(pool)
         .await?;
-    sqlx::query("DELETE FROM background_jobs")
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "DELETE FROM background_jobs \
+         WHERE job_kind = $1 AND payload ->> 'space_id' = $2",
+    )
+    .bind(LinkGraphProjectNodesJob::KIND)
+    .bind(space_id.to_string())
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -734,7 +743,7 @@ async fn incremental_rebuild_does_not_pull_new_events_across_its_quiet_boundary(
         )
         .await?;
     collect_due(&db.pool, &work).await?;
-    clear_projection_work(&db.pool).await?;
+    clear_projection_work(&db.pool, space_id).await?;
 
     sqlx::query(
         "INSERT INTO file_change_events (space_id, node_id, op_type, metadata) \
@@ -860,7 +869,7 @@ async fn change_collector_coalesces_content_changes_and_rebuilds_after_delete()
             has_more: false,
         }
     ));
-    clear_projection_work(&db.pool).await?;
+    clear_projection_work(&db.pool, space_id).await?;
 
     files
         .save_text_content(
@@ -923,7 +932,7 @@ async fn change_collector_coalesces_content_changes_and_rebuilds_after_delete()
         )
         .await?;
     collect_due(&db.pool, &work).await?;
-    clear_projection_work(&db.pool).await?;
+    clear_projection_work(&db.pool, space_id).await?;
 
     files
         .soft_delete_node(space_id, folder.id, account, true)
@@ -979,7 +988,7 @@ async fn delete_change_stages_a_full_scan_in_bounded_passes()
         )
         .await?;
     collect_due(&db.pool, &work).await?;
-    clear_projection_work(&db.pool).await?;
+    clear_projection_work(&db.pool, space_id).await?;
 
     insert_text_nodes(&db.pool, account, space_id, root_id, "live", 501).await?;
     files
@@ -1236,7 +1245,7 @@ async fn a_pruned_first_pending_event_falls_back_to_a_full_scan()
     .await?;
     assert!(staged);
 
-    clear_projection_work(&db.pool).await?;
+    clear_projection_work(&db.pool, space_id).await?;
     files
         .save_text_content(
             space_id,
@@ -1248,7 +1257,7 @@ async fn a_pruned_first_pending_event_falls_back_to_a_full_scan()
         )
         .await?;
     collect_due(&db.pool, &work).await?;
-    clear_projection_work(&db.pool).await?;
+    clear_projection_work(&db.pool, space_id).await?;
     let checkpoint: i64 = sqlx::query_scalar(
         "SELECT last_processed_event_id FROM link_graph_space_states \
          WHERE space_id = $1",
@@ -1317,7 +1326,7 @@ async fn a_full_scan_absorbs_the_remaining_event_backlog() -> Result<(), Box<dyn
         )
         .await?;
     collect_due(&db.pool, &work).await?;
-    clear_projection_work(&db.pool).await?;
+    clear_projection_work(&db.pool, space_id).await?;
 
     sqlx::query(
         "INSERT INTO file_change_events (space_id, node_id, op_type, metadata) \
