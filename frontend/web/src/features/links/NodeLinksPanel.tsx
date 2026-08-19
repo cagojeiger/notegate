@@ -81,7 +81,7 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
             expanded={activeDirection === "outgoing"}
             links={outgoing}
             loading={outgoingQuery.isLoading}
-            error={outgoingQuery.isError && !outgoingQuery.data}
+            error={outgoingQuery.isError && !outgoingQuery.isFetchNextPageError}
             loadMoreError={outgoingQuery.isFetchNextPageError}
             fetchingMore={outgoingQuery.isFetchingNextPage}
             hasMore={outgoingQuery.hasNextPage}
@@ -106,7 +106,7 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
           expanded={activeDirection === "incoming"}
           links={incoming}
           loading={incomingQuery.isLoading}
-          error={incomingQuery.isError && !incomingQuery.data}
+          error={incomingQuery.isError && !incomingQuery.isFetchNextPageError}
           loadMoreError={incomingQuery.isFetchNextPageError}
           fetchingMore={incomingQuery.isFetchingNextPage}
           hasMore={incomingQuery.hasNextPage}

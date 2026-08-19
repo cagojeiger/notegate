@@ -166,6 +166,24 @@ describe("NodeLinksPanel", () => {
     expect(mocks.fetchOutgoing).toHaveBeenCalledOnce();
   });
 
+  it("surfaces a failed refetch while keeping cached links visible", async () => {
+    const user = userEvent.setup();
+    mocks.useNodeLinksQuery.mockImplementation((_node, direction: "outgoing" | "incoming") => {
+      const query = direction === "outgoing"
+        ? linkQuery([
+            { node_id: "target-1", path: "/docs/target.md", kind: "link", occurrence_count: 1 }
+          ], false, mocks.fetchOutgoing, mocks.refetchOutgoing)
+        : linkQuery([], false, mocks.fetchIncoming, mocks.refetchIncoming);
+      return direction === "outgoing" ? { ...query, isError: true } : query;
+    });
+    renderPanel();
+
+    expect(screen.getByRole("button", { name: "Open /docs/target.md" })).toBeInTheDocument();
+    expect(screen.getByText("Could not load links.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mocks.refetchOutgoing).toHaveBeenCalledOnce();
+  });
+
   it("marks the section count as partial when another page is available", () => {
     mocks.useNodeLinksQuery.mockImplementation((_node, direction: "outgoing" | "incoming") => (
       direction === "outgoing"
