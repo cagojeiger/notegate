@@ -1,6 +1,7 @@
-import { AlertTriangle, Image, Link2, RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { RefreshCw } from "lucide-react";
 
-import type { NodeLink, NodeLinkProjectionStatus } from "../../api/links";
+import type { NodeLinkDirection, NodeLinkProjectionStatus } from "../../api/links";
 import type { RestNode } from "../../api/types";
 import { Button, SectionHeader } from "../../shared/ui";
 import {
@@ -12,6 +13,7 @@ import {
   isLinkProjectionActive,
   useRefreshNodeLinksAfterProjection
 } from "./useRefreshNodeLinksAfterProjection";
+import { NodeLinkSection } from "./NodeLinkSection";
 
 type NodeLinksPanelProps = {
   node: RestNode;
@@ -21,6 +23,12 @@ type NodeLinksPanelProps = {
 
 export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProps) {
   const indexableText = node.kind === "text" && node.text_storage_format !== "encrypted";
+  const [selectedDirection, setSelectedDirection] = useState<NodeLinkDirection | null>(
+    indexableText ? "outgoing" : "incoming"
+  );
+  const activeDirection = indexableText
+    ? selectedDirection
+    : selectedDirection === "incoming" ? "incoming" : null;
   const statusQuery = useNodeLinkStatusQuery(node, true);
   const outgoingQuery = useNodeLinksQuery(node, "outgoing", indexableText);
   const incomingQuery = useNodeLinksQuery(node, "incoming", true);
@@ -39,9 +47,9 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
   const incoming = incomingQuery.data?.pages.flatMap((page) => page.links) ?? [];
 
   return (
-    <div className="space-y-4">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       {indexableText ? (
-        <section>
+        <section className="shrink-0">
           <SectionHeader
             title="Index status"
             actions={canSync ? (
@@ -64,42 +72,50 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
         </section>
       ) : null}
 
-      {indexableText ? (
-        <LinkSection
-          title="Outgoing"
-          emptyMessage="No outgoing links."
-          links={outgoing}
-          loading={outgoingQuery.isLoading}
-          error={outgoingQuery.isError}
-          fetchingMore={outgoingQuery.isFetchingNextPage}
-          hasMore={outgoingQuery.hasNextPage}
-          loadMoreLabel="Load more outgoing links"
-          onRetry={() => { void outgoingQuery.refetch(); }}
-          onLoadMore={() => { void outgoingQuery.fetchNextPage(); }}
+      <div className="flex min-h-0 flex-1 flex-col divide-y divide-seam border-y border-seam">
+        {indexableText ? (
+          <NodeLinkSection
+            direction="outgoing"
+            title="Links from this document"
+            emptyMessage="This document does not link to another item."
+            expanded={activeDirection === "outgoing"}
+            links={outgoing}
+            loading={outgoingQuery.isLoading}
+            error={outgoingQuery.isError && !outgoingQuery.isFetchNextPageError}
+            loadMoreError={outgoingQuery.isFetchNextPageError}
+            fetchingMore={outgoingQuery.isFetchingNextPage}
+            hasMore={outgoingQuery.hasNextPage}
+            onToggle={() => setSelectedDirection((current) => current === "outgoing" ? null : "outgoing")}
+            onRetry={() => { void outgoingQuery.refetch(); }}
+            onLoadMore={() => { void outgoingQuery.fetchNextPage(); }}
+            onOpenNode={openLinkedNode}
+          />
+        ) : node.kind === "text" ? (
+          <div className="shrink-0 px-1 py-2">
+            <p className="text-xs font-semibold text-text">Links from this document</p>
+            <p className="mt-1 text-xs text-muted">
+              Links from client-encrypted text cannot be indexed.
+            </p>
+          </div>
+        ) : null}
+
+        <NodeLinkSection
+          direction="incoming"
+          title="Links to this document"
+          emptyMessage="No documents link to this item."
+          expanded={activeDirection === "incoming"}
+          links={incoming}
+          loading={incomingQuery.isLoading}
+          error={incomingQuery.isError && !incomingQuery.isFetchNextPageError}
+          loadMoreError={incomingQuery.isFetchNextPageError}
+          fetchingMore={incomingQuery.isFetchingNextPage}
+          hasMore={incomingQuery.hasNextPage}
+          onToggle={() => setSelectedDirection((current) => current === "incoming" ? null : "incoming")}
+          onRetry={() => { void incomingQuery.refetch(); }}
+          onLoadMore={() => { void incomingQuery.fetchNextPage(); }}
           onOpenNode={openLinkedNode}
         />
-      ) : node.kind === "text" ? (
-        <section>
-          <SectionHeader title="Outgoing" />
-          <p className="text-xs text-muted">
-            Outgoing links are unavailable for client-encrypted text.
-          </p>
-        </section>
-      ) : null}
-
-      <LinkSection
-        title="Backlinks"
-        emptyMessage="No backlinks."
-        links={incoming}
-        loading={incomingQuery.isLoading}
-        error={incomingQuery.isError}
-        fetchingMore={incomingQuery.isFetchingNextPage}
-        hasMore={incomingQuery.hasNextPage}
-        loadMoreLabel="Load more backlinks"
-        onRetry={() => { void incomingQuery.refetch(); }}
-        onLoadMore={() => { void incomingQuery.fetchNextPage(); }}
-        onOpenNode={openLinkedNode}
-      />
+      </div>
     </div>
   );
 }
@@ -129,111 +145,6 @@ function ProjectionStatus({
     >
       {label}
     </p>
-  );
-}
-
-function LinkSection({
-  title,
-  emptyMessage,
-  links,
-  loading,
-  error,
-  fetchingMore,
-  hasMore,
-  loadMoreLabel,
-  onRetry,
-  onLoadMore,
-  onOpenNode
-}: {
-  title: string;
-  emptyMessage: string;
-  links: NodeLink[];
-  loading: boolean;
-  error: boolean;
-  fetchingMore: boolean;
-  hasMore: boolean;
-  loadMoreLabel: string;
-  onRetry: () => void;
-  onLoadMore: () => void;
-  onOpenNode: (nodeId: string) => void;
-}) {
-  return (
-    <section>
-      <SectionHeader
-        title={title}
-        actions={(
-          <span className="text-xs tabular-nums text-muted">
-            <span aria-hidden="true">{links.length}{hasMore ? "+" : ""}</span>
-            <span className="sr-only">
-              {links.length} links loaded{hasMore ? ", more available" : ""}
-            </span>
-          </span>
-        )}
-      />
-      {loading ? <p className="text-xs text-muted">Loading links…</p> : null}
-      {error ? (
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-danger">Could not load links.</p>
-          <Button secondary size="xs" onClick={onRetry}>Retry</Button>
-        </div>
-      ) : null}
-      {!loading && !error && links.length === 0 ? (
-        <p className="text-xs text-muted">{emptyMessage}</p>
-      ) : null}
-      {links.length > 0 ? (
-        <ul className="divide-y divide-seam border-y border-seam">
-          {links.map((link) => (
-            <li key={`${link.kind}:${link.path}`}>
-              <LinkRow link={link} onOpenNode={onOpenNode} />
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {hasMore ? (
-        <Button
-          secondary
-          size="xs"
-          className="mt-2 w-full"
-          disabled={fetchingMore}
-          onClick={onLoadMore}
-          aria-label={loadMoreLabel}
-        >
-          {fetchingMore ? "Loading…" : "Load more"}
-        </Button>
-      ) : null}
-    </section>
-  );
-}
-
-function LinkRow({ link, onOpenNode }: { link: NodeLink; onOpenNode: (nodeId: string) => void }) {
-  const content = (
-    <>
-      {link.node_id ? (
-        link.kind === "image" ? <Image size={14} aria-hidden="true" /> : <Link2 size={14} aria-hidden="true" />
-      ) : (
-        <AlertTriangle size={14} className="text-danger" aria-hidden="true" />
-      )}
-      <span className="min-w-0 flex-1 break-words text-left">{link.path}</span>
-      {link.occurrence_count > 1 ? (
-        <span className="shrink-0 text-xs tabular-nums text-muted">×{link.occurrence_count}</span>
-      ) : null}
-      {!link.node_id ? <span className="shrink-0 text-xs text-danger">Broken</span> : null}
-    </>
-  );
-
-  if (!link.node_id) {
-    return <div className="flex min-h-workbench-row items-start gap-2 px-1 py-1.5 text-workbench text-muted">{content}</div>;
-  }
-  return (
-    <button
-      type="button"
-      className="flex min-h-workbench-row w-full items-start gap-2 px-1 py-1.5 text-workbench text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
-      onClick={() => onOpenNode(link.node_id!)}
-      aria-label={`Open ${link.path}`}
-      title={link.path}
-    >
-      {content}
-    </button>
   );
 }
 

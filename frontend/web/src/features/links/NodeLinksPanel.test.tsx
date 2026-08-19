@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +7,11 @@ import { queryKeys } from "../../api/queryKeys";
 import { makeRestNode } from "../../test/fixtures";
 import { createTestQueryClient } from "../../test/queryClient";
 import { NodeLinksPanel } from "./NodeLinksPanel";
+
+const intersectionObservers: Array<{
+  callback: IntersectionObserverCallback;
+  options?: IntersectionObserverInit;
+}> = [];
 
 const mocks = vi.hoisted(() => ({
   fetchIncoming: vi.fn(),
@@ -27,6 +32,20 @@ vi.mock("./useLinkQueries", () => ({
 
 describe("NodeLinksPanel", () => {
   beforeEach(() => {
+    intersectionObservers.length = 0;
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        intersectionObservers.push({ callback, options });
+      }
+
+      disconnect() {}
+      observe() {}
+      takeRecords() { return []; }
+      unobserve() {}
+      root = null;
+      rootMargin = "";
+      thresholds = [];
+    });
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.useNodeLinkStatusQuery.mockReturnValue({
       data: {
@@ -66,6 +85,7 @@ describe("NodeLinksPanel", () => {
     expect(screen.getByText("Broken")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Open /docs/target.md" }));
+    await user.click(screen.getByRole("button", { name: /Links to this document/ }));
     await user.click(screen.getByRole("button", { name: "Open /docs/source.md" }));
 
     expect(onOpenNode).toHaveBeenNthCalledWith(1, "target-1", "node-1");
@@ -73,20 +93,34 @@ describe("NodeLinksPanel", () => {
     expect(screen.queryByRole("button", { name: "Open /missing.md" })).not.toBeInTheDocument();
   });
 
-  it("loads the next page and requests a manual node sync", async () => {
+  it("loads the next page automatically and requests a manual node sync", async () => {
     const user = userEvent.setup();
     renderPanel();
 
-    const outgoingSection = screen.getByText("Outgoing").closest("section");
-    expect(outgoingSection).not.toBeNull();
-    await user.click(within(outgoingSection!).getByRole("button", { name: "Load more outgoing links" }));
+    expect(intersectionObservers).toHaveLength(1);
+    expect(intersectionObservers[0]!.options).toMatchObject({
+      root: screen.getByRole("region", { name: "Links from this document" }),
+      rootMargin: "160px 0px"
+    });
+    act(() => {
+      intersectionObservers[0]!.callback(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        {} as IntersectionObserver
+      );
+      intersectionObservers[0]!.callback(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        {} as IntersectionObserver
+      );
+    });
     await user.click(screen.getByRole("button", { name: "Sync links for note.md" }));
 
     expect(mocks.fetchOutgoing).toHaveBeenCalledTimes(1);
     expect(mocks.sync).toHaveBeenCalledWith(expect.objectContaining({ id: "node-1" }));
+    expect(screen.queryByRole("button", { name: /load more/i })).not.toBeInTheDocument();
   });
 
-  it("gives outgoing and backlink pagination buttons distinct accessible names", () => {
+  it("keeps both relation headers visible and expands only the selected list", async () => {
+    const user = userEvent.setup();
     mocks.useNodeLinksQuery.mockImplementation((_node, direction: "outgoing" | "incoming") => (
       direction === "outgoing"
         ? linkQuery([
@@ -98,17 +132,56 @@ describe("NodeLinksPanel", () => {
     ));
     renderPanel();
 
-    const outgoingSection = screen.getByText("Outgoing").closest("section");
-    const backlinkSection = screen.getByText("Backlinks").closest("section");
-    expect(outgoingSection).not.toBeNull();
-    expect(backlinkSection).not.toBeNull();
+    const outgoing = screen.getByRole("button", { name: /Links from this document/ });
+    const incoming = screen.getByRole("button", { name: /Links to this document/ });
+    expect(outgoing).toHaveAttribute("aria-expanded", "true");
+    expect(incoming).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("region", { name: "Links from this document" })).toBeVisible();
 
-    expect(
-      within(outgoingSection!).getByRole("button", { name: "Load more outgoing links" })
-    ).toHaveTextContent("Load more");
-    expect(
-      within(backlinkSection!).getByRole("button", { name: "Load more backlinks" })
-    ).toHaveTextContent("Load more");
+    await user.click(incoming);
+    expect(outgoing).toHaveAttribute("aria-expanded", "false");
+    expect(incoming).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("region", { name: "Links to this document" })).toBeVisible();
+    expect(intersectionObservers).toHaveLength(2);
+
+    await user.click(incoming);
+    expect(incoming).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "Links to this document" })).not.toBeInTheDocument();
+  });
+
+  it("requires an explicit retry after loading another page fails", async () => {
+    const user = userEvent.setup();
+    mocks.useNodeLinksQuery.mockImplementation((_node, direction: "outgoing" | "incoming") => {
+      const query = direction === "outgoing"
+        ? linkQuery([
+            { node_id: "target-1", path: "/docs/target.md", kind: "link", occurrence_count: 1 }
+          ], true, mocks.fetchOutgoing, mocks.refetchOutgoing)
+        : linkQuery([], false, mocks.fetchIncoming, mocks.refetchIncoming);
+      return direction === "outgoing" ? { ...query, isFetchNextPageError: true } : query;
+    });
+    renderPanel();
+
+    expect(intersectionObservers).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mocks.fetchOutgoing).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces a failed refetch while keeping cached links visible", async () => {
+    const user = userEvent.setup();
+    mocks.useNodeLinksQuery.mockImplementation((_node, direction: "outgoing" | "incoming") => {
+      const query = direction === "outgoing"
+        ? linkQuery([
+            { node_id: "target-1", path: "/docs/target.md", kind: "link", occurrence_count: 1 }
+          ], false, mocks.fetchOutgoing, mocks.refetchOutgoing)
+        : linkQuery([], false, mocks.fetchIncoming, mocks.refetchIncoming);
+      return direction === "outgoing" ? { ...query, isError: true } : query;
+    });
+    renderPanel();
+
+    expect(screen.getByRole("button", { name: "Open /docs/target.md" })).toBeInTheDocument();
+    expect(screen.getByText("Could not load links.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mocks.refetchOutgoing).toHaveBeenCalledOnce();
   });
 
   it("marks the section count as partial when another page is available", () => {
@@ -122,7 +195,7 @@ describe("NodeLinksPanel", () => {
     ));
     renderPanel();
 
-    const outgoingSection = screen.getByText("Outgoing").closest("section");
+    const outgoingSection = screen.getByText("Links from this document").closest("section");
     expect(outgoingSection).not.toBeNull();
     expect(within(outgoingSection!).getByText("2+")).toBeInTheDocument();
     expect(within(outgoingSection!).queryByText("2")).not.toBeInTheDocument();
@@ -133,8 +206,8 @@ describe("NodeLinksPanel", () => {
     renderPanel({ node: folder });
 
     expect(screen.queryByText("Index status")).not.toBeInTheDocument();
-    expect(screen.queryByText("Outgoing")).not.toBeInTheDocument();
-    expect(screen.getByText("Backlinks")).toBeInTheDocument();
+    expect(screen.queryByText("Links from this document")).not.toBeInTheDocument();
+    expect(screen.getByText("Links to this document")).toBeInTheDocument();
     expect(mocks.useNodeLinkStatusQuery).toHaveBeenCalledWith(folder, true);
   });
 
@@ -147,9 +220,9 @@ describe("NodeLinksPanel", () => {
       screen.queryByRole("button", { name: "Sync links for note.md" })
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText("Outgoing links are unavailable for client-encrypted text.")
+      screen.getByText("Links from client-encrypted text cannot be indexed.")
     ).toBeInTheDocument();
-    expect(screen.getByText("Backlinks")).toBeInTheDocument();
+    expect(screen.getByText("Links to this document")).toBeInTheDocument();
     expect(mocks.useNodeLinksQuery).toHaveBeenCalledWith(encrypted, "outgoing", false);
     expect(mocks.useNodeLinksQuery).toHaveBeenCalledWith(encrypted, "incoming", true);
   });
@@ -262,6 +335,7 @@ function pagedLinkQuery(
     fetchNextPage,
     hasNextPage,
     isError: false,
+    isFetchNextPageError: false,
     isFetchingNextPage: false,
     isLoading: false,
     refetch
