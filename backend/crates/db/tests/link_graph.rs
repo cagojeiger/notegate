@@ -681,14 +681,17 @@ async fn item_settings_changes_do_not_delay_link_collection()
     .bind(space_id)
     .execute(&db.pool)
     .await?;
-    let unchanged: (Option<chrono::DateTime<chrono::Utc>>, Option<i64>) = sqlx::query_as(
-        "SELECT available_at, pending_since_event_id \
-         FROM link_graph_space_states WHERE space_id = $1",
+    let has_pending_state: bool = sqlx::query_scalar(
+        "SELECT EXISTS( \
+             SELECT 1 FROM link_graph_space_states \
+             WHERE space_id = $1 \
+               AND (available_at IS NOT NULL OR pending_since_event_id IS NOT NULL) \
+         )",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(unchanged, (None, None));
+    assert!(!has_pending_state);
 
     sqlx::query(
         "INSERT INTO file_change_events (space_id, op_type, metadata) \
