@@ -170,6 +170,10 @@ describe("EventHistoryModal", () => {
   it("shows queue jobs and loads attempt history only when expanded", async () => {
     const user = userEvent.setup();
     const job = backgroundJob("job-1", "running");
+    const linkJob = {
+      ...backgroundJob("job-2", "succeeded"),
+      kind: "link_graph_project_nodes"
+    };
     const finishedJob = {
       ...backgroundJob("job-1", "succeeded"),
       completed_at: "2026-07-10T02:12:00.039Z"
@@ -189,7 +193,7 @@ describe("EventHistoryModal", () => {
         });
       }
       if (path.includes("/api/v1/me/jobs?")) {
-        return jsonResponse({ jobs: [job], page: { ...page, returned: 1 } });
+        return jsonResponse({ jobs: [job, linkJob], page: { ...page, returned: 2 } });
       }
       return jsonResponse({ events: [], page });
     });
@@ -207,9 +211,10 @@ describe("EventHistoryModal", () => {
     expect(jobTitle).not.toHaveClass("truncate");
     expect(jobTitle).toHaveClass("sm:truncate");
     expect(jobTitle.closest("li")).toHaveClass("py-2");
+    expect(screen.getByText("Link indexing")).toBeInTheDocument();
     expect(screen.getByText("Running…")).toBeInTheDocument();
-    expect(screen.getByText("Space Research")).toBeInTheDocument();
-    expect(screen.getByLabelText(/^Queued /)).toBeInTheDocument();
+    expect(screen.getAllByText("Space Research")).toHaveLength(2);
+    expect(screen.getAllByLabelText(/^Queued /)).toHaveLength(2);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/api/v1/me/jobs/job-1"))).toBe(false);
 
     await user.click(screen.getByRole("button", { name: "Show attempts for Usage recalculation" }));
@@ -220,7 +225,7 @@ describe("EventHistoryModal", () => {
     expect(screen.getByText("Queue 28 ms")).toBeInTheDocument();
     expect(screen.getByText("Run 11 ms")).toBeInTheDocument();
     expect(screen.getByLabelText(/^Started /)).toBeInTheDocument();
-    expect(screen.getAllByLabelText(/^Finished /)).toHaveLength(2);
+    expect(screen.getAllByLabelText(/^Finished /)).toHaveLength(3);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/api/v1/me/jobs/job-1"))).toBe(true);
   });
 

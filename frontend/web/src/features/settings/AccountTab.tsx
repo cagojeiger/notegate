@@ -22,7 +22,7 @@ export function AccountTab({ me, onSignOut }: { me: Me | undefined; onSignOut: (
 
       <section>
         <SectionHeader title="Appearance" />
-        <button type="button" onClick={toggleTheme} className="flex w-full items-center justify-between rounded-xl border border-border bg-surface p-4 text-sm transition hover:bg-panel">
+        <button type="button" onClick={toggleTheme} className="flex w-full items-center justify-between rounded-xl border border-border bg-surface p-4 text-workbench transition hover:bg-panel">
           <span>Theme</span>
           <span className="flex items-center gap-2 capitalize text-muted">{theme === "light" ? <Sun size={16} /> : <Moon size={16} />} {theme}</span>
         </button>

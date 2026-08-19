@@ -19,14 +19,19 @@ async fn lists_owned_visible_jobs_and_loads_attempts() -> Result<(), Box<dyn std
     let owned_job = insert_succeeded_job(&db.pool, "space_usage_reconcile", space_id, true).await?;
     insert_succeeded_attempt(&db.pool, owned_job).await?;
     let generic_job = insert_succeeded_job(&db.pool, "document_export", space_id, true).await?;
+    let link_job =
+        insert_succeeded_job(&db.pool, "link_graph_project_nodes", space_id, true).await?;
+    insert_succeeded_attempt(&db.pool, link_job).await?;
     insert_succeeded_job(&db.pool, "space_usage_reconcile", other_space_id, true).await?;
+    insert_succeeded_job(&db.pool, "link_graph_project_nodes", other_space_id, true).await?;
     insert_succeeded_job(&db.pool, "internal_maintenance", space_id, false).await?;
 
     let repo = BackgroundJobRepo::new(db.pool.clone());
     let jobs = repo.list_by_owner(owner_id, 10, None).await?;
-    assert_eq!(jobs.len(), 2);
+    assert_eq!(jobs.len(), 3);
     assert!(jobs.iter().any(|job| job.id == owned_job));
     assert!(jobs.iter().any(|job| job.id == generic_job));
+    assert!(jobs.iter().any(|job| job.id == link_job));
     assert!(
         jobs.iter()
             .all(|job| job.context_kind.as_deref() == Some("space"))
@@ -48,6 +53,17 @@ async fn lists_owned_visible_jobs_and_loads_attempts() -> Result<(), Box<dyn std
             .and_then(|attempt| attempt.outcome.as_deref()),
         Some("succeeded")
     );
+    let link_detail = repo
+        .get_by_owner(owner_id, link_job)
+        .await?
+        .expect("owned link job detail");
+    assert_eq!(link_detail.job.context_kind.as_deref(), Some("space"));
+    assert_eq!(link_detail.job.context_id, Some(space_id));
+    assert_eq!(
+        link_detail.job.context_label.as_deref(),
+        Some("ws-jobs-owned")
+    );
+    assert_eq!(link_detail.attempts.len(), 1);
 
     db.cleanup().await;
     Ok(())

@@ -1,5 +1,6 @@
 //! User-facing quota and usage views.
 
+use chrono::{DateTime, Utc};
 use notegate_core::limits::Limits;
 use notegate_core::tier::{UserTier, effective_file_tree_limits};
 use notegate_db::{
@@ -56,7 +57,7 @@ impl UsageService {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsageReconciliationOutcome {
     Queued { job_id: Uuid },
-    AlreadyQueued,
+    AlreadyQueued { job_id: Uuid },
     Cooldown,
 }
 
@@ -64,7 +65,9 @@ impl From<DbUsageReconciliationOutcome> for UsageReconciliationOutcome {
     fn from(outcome: DbUsageReconciliationOutcome) -> Self {
         match outcome {
             DbUsageReconciliationOutcome::Queued { job_id } => Self::Queued { job_id },
-            DbUsageReconciliationOutcome::AlreadyQueued => Self::AlreadyQueued,
+            DbUsageReconciliationOutcome::AlreadyQueued { job_id } => {
+                Self::AlreadyQueued { job_id }
+            }
             DbUsageReconciliationOutcome::Cooldown => Self::Cooldown,
         }
     }
@@ -84,6 +87,7 @@ pub struct SpaceUsage {
     pub text_bytes: QuotaUsage,
     pub file_bytes: QuotaUsage,
     pub reconciliation_pending: bool,
+    pub reconciliation_available_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,6 +117,7 @@ fn build_usage(snapshot: UserUsageSnapshot, runtime_limits: Limits) -> CurrentUs
                 limit: limits.space_max_file_bytes,
             },
             reconciliation_pending: space.reconciliation_pending,
+            reconciliation_available_at: space.reconciliation_available_at,
         })
         .collect();
 
@@ -152,6 +157,7 @@ mod tests {
                     live_text_bytes: 512,
                     live_file_bytes: 128,
                     reconciliation_pending: true,
+                    reconciliation_available_at: Utc::now(),
                 }],
             },
             Limits {
@@ -202,6 +208,7 @@ mod tests {
                     live_text_bytes: 0,
                     live_file_bytes: 0,
                     reconciliation_pending: false,
+                    reconciliation_available_at: Utc::now(),
                 }],
             },
             Limits {

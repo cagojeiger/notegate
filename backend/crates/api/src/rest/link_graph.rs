@@ -4,12 +4,14 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use notegate_model::{Caller, LinkReference, LinkReferencePage, ListLinkReferences};
+use notegate_service::link_graph::LinkGraphSpaceRequestOutcome;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::page::Page;
+use crate::rest::dto::AsyncOperationResponse;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -33,6 +35,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/spaces/{space_id}/link-index/reindex",
             post(reindex_space),
+        )
+        .route(
+            "/v1/spaces/{space_id}/link-index/status",
+            get(get_space_link_index_status),
         )
 }
 
@@ -88,8 +94,25 @@ impl From<LinkReferencePage> for LinkReferencesResponse {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct LinkGraphAcceptedResponse {
-    status: &'static str,
+pub(crate) struct SpaceLinkIndexStatusResponse {
+    pending: bool,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/spaces/{space_id}/link-index/status",
+    tag = "links",
+    params(("space_id" = Uuid, Path, description = "Space id")),
+    responses((status = 200, description = "Get Space link index work state", body = SpaceLinkIndexStatusResponse)),
+    security(("browser_session" = []))
+)]
+pub(crate) async fn get_space_link_index_status(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(space_id): Path<Uuid>,
+) -> Result<Json<SpaceLinkIndexStatusResponse>, ApiError> {
+    let pending = state.link_graph.space_pending(&caller, space_id).await?;
+    Ok(Json(SpaceLinkIndexStatusResponse { pending }))
 }
 
 #[utoipa::path(
@@ -197,21 +220,21 @@ pub(crate) async fn get_incoming_links(
         ("space_id" = Uuid, Path, description = "Space id"),
         ("node_id" = Uuid, Path, description = "Node id"),
     ),
-    responses((status = 202, description = "Accept node link synchronization", body = LinkGraphAcceptedResponse)),
+    responses((status = 202, description = "Accept node link synchronization", body = AsyncOperationResponse)),
     security(("browser_session" = []))
 )]
 pub(crate) async fn sync_node_links(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
-) -> Result<(StatusCode, Json<LinkGraphAcceptedResponse>), ApiError> {
+) -> Result<(StatusCode, Json<AsyncOperationResponse>), ApiError> {
     state
         .link_graph
         .request_node(&caller, space_id, node_id)
         .await?;
     Ok((
         StatusCode::ACCEPTED,
-        Json(LinkGraphAcceptedResponse { status: "accepted" }),
+        Json(AsyncOperationResponse::accepted(None)),
     ))
 }
 
@@ -220,17 +243,19 @@ pub(crate) async fn sync_node_links(
     path = "/api/v1/spaces/{space_id}/link-index/reindex",
     tag = "links",
     params(("space_id" = Uuid, Path, description = "Space id")),
-    responses((status = 202, description = "Accept full Space link reindex", body = LinkGraphAcceptedResponse)),
+    responses((status = 202, description = "Accept full Space link reindex", body = AsyncOperationResponse)),
     security(("browser_session" = []))
 )]
 pub(crate) async fn reindex_space(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(space_id): Path<Uuid>,
-) -> Result<(StatusCode, Json<LinkGraphAcceptedResponse>), ApiError> {
-    state.link_graph.request_space(&caller, space_id).await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(LinkGraphAcceptedResponse { status: "accepted" }),
-    ))
+) -> Result<(StatusCode, Json<AsyncOperationResponse>), ApiError> {
+    let response = match state.link_graph.request_space(&caller, space_id).await? {
+        LinkGraphSpaceRequestOutcome::Requested => AsyncOperationResponse::accepted(None),
+        LinkGraphSpaceRequestOutcome::AlreadyPending => {
+            AsyncOperationResponse::already_pending(None)
+        }
+    };
+    Ok((StatusCode::ACCEPTED, Json(response)))
 }

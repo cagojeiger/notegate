@@ -43,6 +43,13 @@ async fn current_user_usage_reads_space_counters() -> Result<(), Box<dyn std::er
     assert_eq!(space.live_text_bytes, 123);
     assert_eq!(space.live_file_bytes, 45);
     assert!(!space.reconciliation_pending);
+    let available_at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+        "SELECT reconciled_at + interval '1 hour' FROM space_usage WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(space.reconciliation_available_at, available_at);
 
     db.cleanup().await;
     Ok(())
@@ -74,10 +81,19 @@ async fn reconciliation_request_allows_only_one_concurrent_queue()
     assert_eq!(
         outcomes
             .iter()
-            .filter(|outcome| **outcome == UsageReconciliationOutcome::AlreadyQueued)
+            .filter(|outcome| matches!(outcome, UsageReconciliationOutcome::AlreadyQueued { .. }))
             .count(),
         1
     );
+    let queued_job_id = outcomes.iter().find_map(|outcome| match outcome {
+        UsageReconciliationOutcome::Queued { job_id } => Some(*job_id),
+        _ => None,
+    });
+    let pending_job_id = outcomes.iter().find_map(|outcome| match outcome {
+        UsageReconciliationOutcome::AlreadyQueued { job_id } => Some(*job_id),
+        _ => None,
+    });
+    assert_eq!(queued_job_id, pending_job_id);
 
     let queued: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \

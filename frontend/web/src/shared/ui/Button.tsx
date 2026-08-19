@@ -20,9 +20,9 @@ export function Button({
   size?: ButtonSize;
 }) {
   const sizeClass = size === "xs"
-    ? "min-h-workbench-control px-2 text-xs md:min-h-6"
+    ? "min-h-workbench-control px-2 text-workbench md:min-h-6"
     : size === "sm"
-      ? "min-h-workbench-control px-2 text-xs"
+      ? "min-h-workbench-control px-2 text-workbench"
       : "min-h-workbench-control px-2.5 text-workbench";
   const variantClass = {
     primary: "bg-primary text-primary-contrast shadow-[var(--ng-inset-shadow)] hover:bg-[var(--ng-primary-hover)]",

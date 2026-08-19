@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  getSpaceLinkIndexStatus,
   listNodeLinks,
   requestNodeLinkSync,
   requestSpaceLinkReindex,
@@ -22,6 +23,7 @@ import {
   projectionPollInterval,
   useNodeLinksQuery,
   useReindexSpaceLinksMutation,
+  useSpaceLinkIndexStatusQuery,
   useSyncNodeLinksMutation
 } from "./useLinkQueries";
 
@@ -35,7 +37,8 @@ vi.mock("../../api/links", async (importOriginal) => {
     ...original,
     listNodeLinks: vi.fn(),
     requestNodeLinkSync: vi.fn(),
-    requestSpaceLinkReindex: vi.fn()
+    requestSpaceLinkReindex: vi.fn(),
+    getSpaceLinkIndexStatus: vi.fn()
   };
 });
 
@@ -43,6 +46,7 @@ describe("link queries and mutations", () => {
   beforeEach(() => {
     vi.mocked(requestNodeLinkSync).mockReset();
     vi.mocked(requestSpaceLinkReindex).mockReset();
+    vi.mocked(getSpaceLinkIndexStatus).mockReset();
     vi.mocked(listNodeLinks).mockReset();
   });
 
@@ -54,7 +58,7 @@ describe("link queries and mutations", () => {
   it("marks a node pending before requesting its link sync", async () => {
     const node = makeRestNode();
     const queryClient = createTestQueryClient();
-    vi.mocked(requestNodeLinkSync).mockResolvedValue({ status: "accepted" });
+    vi.mocked(requestNodeLinkSync).mockResolvedValue({ status: "accepted", job_id: null });
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderLinkHook(queryClient, useSyncNodeLinksMutation);
 
@@ -74,7 +78,7 @@ describe("link queries and mutations", () => {
 
   it("resets the Space link family after accepting a full reindex", async () => {
     const queryClient = createTestQueryClient();
-    vi.mocked(requestSpaceLinkReindex).mockResolvedValue({ status: "accepted" });
+    vi.mocked(requestSpaceLinkReindex).mockResolvedValue({ status: "accepted", job_id: null });
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderLinkHook(queryClient, useReindexSpaceLinksMutation);
@@ -89,6 +93,27 @@ describe("link queries and mutations", () => {
       queryKey: queryKeys.linkLists("space-1"),
       refetchType: "none"
     });
+    expect(queryClient.getQueryData(queryKeys.spaceLinkIndexStatus("space-1"))).toEqual({
+      pending: true
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.spaceLinkIndexStatus("space-1"),
+      exact: true
+    });
+  });
+
+  it("loads the authoritative Space link index status", async () => {
+    const queryClient = createTestQueryClient();
+    vi.mocked(getSpaceLinkIndexStatus).mockResolvedValue({ pending: true });
+    const { result } = renderLinkHook(
+      queryClient,
+      () => useSpaceLinkIndexStatusQuery("space-1", true)
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(getSpaceLinkIndexStatus).toHaveBeenCalledWith(expect.anything(), "space-1");
+    expect(result.current.data).toEqual({ pending: true });
   });
 
   it("passes the server cursor through paginated link requests", async () => {

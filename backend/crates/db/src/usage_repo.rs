@@ -43,6 +43,7 @@ impl UsageRepo {
 
         let rows = sqlx::query_as::<_, SpaceUsageRow>(
             "SELECT s.id, s.name, su.live_node_count, su.live_text_bytes, su.live_file_bytes, \
+                    su.reconciled_at, \
                     EXISTS ( \
                         SELECT 1 FROM background_jobs job \
                         WHERE job.job_kind = 'space_usage_reconcile' \
@@ -95,12 +96,12 @@ impl UsageRepo {
 
         let state = sqlx::query_as::<_, ReconcileRequestRow>(
             "SELECT su.reconciled_at, now() AS requested_at, \
-                    EXISTS ( \
-                        SELECT 1 FROM background_jobs job \
+                    (SELECT job.job_id FROM background_jobs job \
                         WHERE job.job_kind = 'space_usage_reconcile' \
                           AND job.status IN ('queued', 'running') \
                           AND job.payload ->> 'space_id' = su.space_id::text \
-                    ) AS pending \
+                        ORDER BY job.created_at DESC, job.job_id DESC \
+                        LIMIT 1) AS pending_job_id \
              FROM space_usage su WHERE su.space_id = $1 FOR UPDATE",
         )
         .bind(space_id)
@@ -109,8 +110,8 @@ impl UsageRepo {
         .map_err(map_request_lock_error)?
         .ok_or_else(|| Error::internal("live space is missing its usage counter"))?;
 
-        let no_queue_outcome = if state.pending {
-            Some(UsageReconciliationOutcome::AlreadyQueued)
+        let no_queue_outcome = if let Some(job_id) = state.pending_job_id {
+            Some(UsageReconciliationOutcome::AlreadyQueued { job_id })
         } else if state.reconciled_at
             > state.requested_at - Duration::seconds(MANUAL_RECONCILE_COOLDOWN_SECONDS)
         {
@@ -156,7 +157,7 @@ fn map_request_lock_error(error: sqlx::Error) -> Error {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsageReconciliationOutcome {
     Queued { job_id: Uuid },
-    AlreadyQueued,
+    AlreadyQueued { job_id: Uuid },
     Cooldown,
 }
 
@@ -174,6 +175,7 @@ pub struct SpaceUsageSnapshot {
     pub live_text_bytes: usize,
     pub live_file_bytes: usize,
     pub reconciliation_pending: bool,
+    pub reconciliation_available_at: DateTime<Utc>,
 }
 
 impl TryFrom<SpaceUsageRow> for SpaceUsageSnapshot {
@@ -184,6 +186,7 @@ impl TryFrom<SpaceUsageRow> for SpaceUsageSnapshot {
         let live_node_count = row.live_node_count.ok_or_else(missing_counter)?;
         let live_text_bytes = row.live_text_bytes.ok_or_else(missing_counter)?;
         let live_file_bytes = row.live_file_bytes.ok_or_else(missing_counter)?;
+        let reconciled_at = row.reconciled_at.ok_or_else(missing_counter)?;
         Ok(Self {
             id: row.id,
             name: row.name,
@@ -191,6 +194,8 @@ impl TryFrom<SpaceUsageRow> for SpaceUsageSnapshot {
             live_text_bytes: to_usize(live_text_bytes, "text byte")?,
             live_file_bytes: to_usize(live_file_bytes, "file byte")?,
             reconciliation_pending: row.reconciliation_pending,
+            reconciliation_available_at: reconciled_at
+                + Duration::seconds(MANUAL_RECONCILE_COOLDOWN_SECONDS),
         })
     }
 }
@@ -207,6 +212,7 @@ struct SpaceUsageRow {
     live_node_count: Option<i64>,
     live_text_bytes: Option<i64>,
     live_file_bytes: Option<i64>,
+    reconciled_at: Option<DateTime<Utc>>,
     reconciliation_pending: bool,
 }
 
@@ -214,7 +220,7 @@ struct SpaceUsageRow {
 struct ReconcileRequestRow {
     reconciled_at: DateTime<Utc>,
     requested_at: DateTime<Utc>,
-    pending: bool,
+    pending_job_id: Option<Uuid>,
 }
 
 #[derive(Debug, FromRow)]

@@ -182,6 +182,39 @@ test("Space Library keeps the mobile inspector scrollable", async ({ page }) => 
   await expect(inspector.getByText("Files", { exact: true })).toBeInViewport();
 });
 
+for (const viewport of [
+  { name: "desktop", width: 1280, height: 900, mobile: false, minimumActionHeight: 24 },
+  { name: "mobile", width: 390, height: 844, mobile: true, minimumActionHeight: 44 }
+]) {
+  test(`Space Inspector keeps maintenance actions secondary on ${viewport.name}`, async ({ page }) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await mockSpaceLibraryApi(page);
+    await page.goto("/");
+    await page.getByRole("button", { name: "Open space library" }).click();
+    if (viewport.mobile) await page.getByRole("button", { name: "Inspect Daily" }).click();
+
+    const inspector = viewport.mobile
+      ? page.getByRole("dialog", { name: "Space Inspector" })
+      : page.getByRole("complementary", { name: "Space inspector" });
+    const reindex = inspector.getByRole("button", { name: "Reindex links in Daily" });
+    const recalculate = inspector.getByRole("button", { name: "Recalculate Daily usage" });
+    const filesUsage = inspector.getByRole("progressbar", { name: "Files usage" });
+
+    await recalculate.scrollIntoViewIfNeeded();
+    await expect(reindex).toHaveText("Reindex");
+    await expect(recalculate).toHaveText("Recalculate");
+
+    const [filesUsageBox, recalculateBox, reindexBox] = await Promise.all([
+      filesUsage.boundingBox(),
+      recalculate.boundingBox(),
+      reindex.boundingBox()
+    ]);
+    expect(recalculateBox?.y).toBeGreaterThanOrEqual((filesUsageBox?.y ?? 0) + (filesUsageBox?.height ?? 0) + 8);
+    expect(recalculateBox?.height).toBeGreaterThanOrEqual(viewport.minimumActionHeight);
+    expect(reindexBox?.height).toBeGreaterThanOrEqual(viewport.minimumActionHeight);
+  });
+}
+
 test("opening an unpinned Space does not add it to navigation", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockSpaceLibraryApi(page);
@@ -246,6 +279,9 @@ async function mockSpaceLibraryApi(page: Page) {
     const url = new URL(request.url());
 
     if (url.pathname === "/api/v1/me") return respond(route, me);
+    if (/^\/api\/v1\/spaces\/[^/]+\/link-index\/status$/.test(url.pathname)) {
+      return respond(route, { pending: false });
+    }
     if (url.pathname === "/api/v1/me/usage") {
       return respond(route, {
         tier: "free",

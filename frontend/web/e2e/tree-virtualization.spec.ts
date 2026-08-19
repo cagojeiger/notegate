@@ -66,6 +66,13 @@ for (const viewport of [
     if (viewport.opensOverlay) expect(firstRowBox?.height).toBeLessThan(44);
     expect(secondRowBox?.y).toBeGreaterThanOrEqual((firstRowBox?.y ?? 0) + (firstRowBox?.height ?? 0));
 
+    const recentRows = page.locator("[data-recent-list] [data-node-row]");
+    await expect(recentRows).toHaveCount(2);
+    const firstRecentBox = await recentRows.nth(0).boundingBox();
+    const secondRecentBox = await recentRows.nth(1).boundingBox();
+    expect(firstRecentBox?.height).toBeGreaterThanOrEqual(38);
+    expect(secondRecentBox?.y).toBeGreaterThanOrEqual((firstRecentBox?.y ?? 0) + (firstRecentBox?.height ?? 0) + 2);
+
     const filesSeparator = page.getByRole("separator", { name: "Resize Files section" });
     const sidebarSeparator = page.getByRole("separator", { name: "Resize Files sidebar" });
     await expect(filesSeparator).toHaveAttribute("aria-valuenow", "67");
@@ -151,8 +158,8 @@ function responseFor(url: URL, children: RestNode[]) {
   }
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes`) {
     return {
-      nodes: [recentNode()],
-      page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
+      nodes: [recentNode(), secondRecentNode()],
+      page: { limit: 50, returned: 2, has_more: false, next_cursor: null }
     };
   }
   if (url.pathname === `/api/v1/spaces/${space.id}/file-change-sync`) {
@@ -210,5 +217,14 @@ function recentNode(): RestNode {
     name: "recent-entry.md",
     kind: "text",
     path: "/recent-entry.md"
+  };
+}
+
+function secondRecentNode(): RestNode {
+  return {
+    ...recentNode(),
+    id: "recent-2",
+    name: "second-recent-entry.md",
+    path: "/second-recent-entry.md"
   };
 }

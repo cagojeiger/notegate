@@ -85,14 +85,6 @@ impl ApiError {
         }
     }
 
-    pub fn usage_reconciliation_pending() -> Self {
-        Self::new(
-            StatusCode::CONFLICT,
-            "usage_reconciliation_pending",
-            "space usage reconciliation is already queued",
-        )
-    }
-
     pub fn usage_reconciliation_cooldown() -> Self {
         Self::new(
             StatusCode::CONFLICT,

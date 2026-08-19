@@ -108,16 +108,19 @@ export function useCheckSpaceUsageMutation() {
     mutationFn: (spaceId: string) => requestSpaceUsageCheck(client, spaceId),
     meta: { silentError: true },
     onSettled: (_response, error, spaceId) => {
-      const refreshPendingState = !error || (error instanceof ApiError && error.kind === "usage_reconciliation_pending");
-      if (!refreshPendingState) return;
+      const pending = !error;
+      const cooldown = error instanceof ApiError && error.kind === "usage_reconciliation_cooldown";
+      if (!pending && !cooldown) return;
 
       pollingBackoff.reset();
-      queryClient.setQueryData<CurrentUserUsage>(queryKeys.usage, (current) => current ? {
-        ...current,
-        spaces: current.spaces.map((space) => space.id === spaceId
-          ? { ...space, reconciliation_pending: true }
-          : space)
-      } : current);
+      if (pending) {
+        queryClient.setQueryData<CurrentUserUsage>(queryKeys.usage, (current) => current ? {
+          ...current,
+          spaces: current.spaces.map((space) => space.id === spaceId
+            ? { ...space, reconciliation_pending: true }
+            : space)
+        } : current);
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
     }
   });

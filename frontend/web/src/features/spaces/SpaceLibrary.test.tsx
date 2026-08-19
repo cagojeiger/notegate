@@ -19,7 +19,8 @@ const mocks = vi.hoisted(() => ({
   useUsageQuery: vi.fn(),
   useReorderSpacesMutation: vi.fn(),
   useUpdateSpaceMutation: vi.fn(),
-  useReindexSpaceLinksMutation: vi.fn()
+  useReindexSpaceLinksMutation: vi.fn(),
+  useSpaceLinkIndexStatusQuery: vi.fn()
 }));
 
 vi.mock("./useUsageQueries", () => ({
@@ -33,7 +34,8 @@ vi.mock("./useSpaceQueries", () => ({
 }));
 
 vi.mock("../links/useLinkQueries", () => ({
-  useReindexSpaceLinksMutation: mocks.useReindexSpaceLinksMutation
+  useReindexSpaceLinksMutation: mocks.useReindexSpaceLinksMutation,
+  useSpaceLinkIndexStatusQuery: mocks.useSpaceLinkIndexStatusQuery
 }));
 
 const spaces: Space[] = [
@@ -62,8 +64,10 @@ function renderLibrary(options: {
   usagePollingEnabled?: boolean;
   inspectorOpen?: boolean;
   onOpenSpace?: (space: Space) => void;
+  spaces?: Space[];
 } = {}) {
   const isMobile = options.isMobile ?? false;
+  const librarySpaces = options.spaces ?? spaces;
 
   function LibraryHarness() {
     const [inspectorOpen, setInspectorOpen] = useState(
@@ -72,8 +76,8 @@ function renderLibrary(options: {
 
     return (
       <SpaceLibrary
-        spaces={spaces}
-        activeSpace={spaces[0]}
+        spaces={librarySpaces}
+        activeSpace={librarySpaces[0] ?? null}
         isMobile={isMobile}
         usagePollingEnabled={options.usagePollingEnabled ?? true}
         inspectorOpen={inspectorOpen}
@@ -142,6 +146,11 @@ describe("SpaceLibrary", () => {
       isSuccess: false,
       mutate: mocks.reindexLinks,
       variables: undefined
+    });
+    mocks.useSpaceLinkIndexStatusQuery.mockReturnValue({
+      data: { pending: false },
+      isError: false,
+      isLoading: false
     });
   });
 
@@ -261,12 +270,15 @@ describe("SpaceLibrary", () => {
     expect(mocks.reorder).not.toHaveBeenCalled();
   });
 
-  it("checks the selected space usage from the inspector", async () => {
+  it("recalculates usage after the metrics with a secondary maintenance action", async () => {
     const user = userEvent.setup();
     renderLibrary();
 
-    expect(screen.getByRole("progressbar", { name: "Items usage" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Check Daily usage" }));
+    const filesUsage = screen.getByRole("progressbar", { name: "Files usage" });
+    const recalculate = screen.getByRole("button", { name: "Recalculate Daily usage" });
+    expect(recalculate).toHaveClass("md:min-h-6", "text-workbench", "border", "bg-surface");
+    expect(filesUsage.compareDocumentPosition(recalculate) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    await user.click(recalculate);
 
     expect(mocks.resetUsageCheck).toHaveBeenCalledTimes(1);
     expect(mocks.checkUsage).toHaveBeenCalledWith("daily");
@@ -276,9 +288,72 @@ describe("SpaceLibrary", () => {
     const user = userEvent.setup();
     renderLibrary();
 
-    await user.click(screen.getByRole("button", { name: "Reindex links in Daily" }));
+    const reindex = screen.getByRole("button", { name: "Reindex links in Daily" });
+    expect(reindex).toHaveClass("md:min-h-6", "text-workbench", "border", "bg-surface");
+    await user.click(reindex);
 
     expect(mocks.reindexLinks).toHaveBeenCalledWith("daily");
+  });
+
+  it("does not load or show link index status for a read-only Space", () => {
+    const readOnlySpace = makeSpace({
+      id: "shared",
+      name: "Shared",
+      permission: "read"
+    });
+    mocks.useSpaceLinkIndexStatusQuery.mockReturnValue({
+      data: { pending: true },
+      isError: true,
+      isLoading: false
+    });
+
+    renderLibrary({ spaces: [readOnlySpace] });
+
+    expect(mocks.useSpaceLinkIndexStatusQuery).toHaveBeenLastCalledWith("shared", false);
+    const reindex = screen.getByRole("button", { name: "Reindex links in Shared" });
+    expect(reindex).toBeDisabled();
+    expect(reindex).toHaveTextContent(/^Reindex$/);
+    expect(screen.queryByText("Link indexing is in progress.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Could not load link index status.")).not.toBeInTheDocument();
+  });
+
+  it("disables reindex while the server reports link indexing in progress", () => {
+    mocks.useSpaceLinkIndexStatusQuery.mockReturnValue({
+      data: { pending: true },
+      isError: false,
+      isLoading: false
+    });
+
+    renderLibrary();
+
+    expect(screen.getByRole("button", { name: "Reindex links in Daily" })).toBeDisabled();
+    expect(screen.getByText("Link indexing is in progress.")).toBeInTheDocument();
+  });
+
+  it("disables usage recalculation until the server cooldown expires", () => {
+    mocks.useUsageQuery.mockReturnValue({
+      isFetching: false,
+      isLoading: false,
+      isError: false,
+      refetch: mocks.retryUsage,
+      data: {
+        tier: "free",
+        spaces: [{
+          id: "daily",
+          name: "Daily",
+          items: { used: 12, limit: 100 },
+          text_bytes: { used: 2048, limit: 10240 },
+          file_bytes: { used: 4096, limit: 20480 },
+          reconciliation_pending: false,
+          reconciliation_available_at: "2099-01-01T00:00:00Z"
+        }]
+      }
+    });
+
+    renderLibrary();
+
+    expect(screen.getByRole("button", { name: "Recalculate Daily usage" })).toBeDisabled();
+    expect(screen.getByText("Usage is already up to date.")).toBeInTheDocument();
   });
 
   it("retries usage loading from the inspector", async () => {

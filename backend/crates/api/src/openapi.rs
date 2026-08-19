@@ -87,6 +87,7 @@ pub struct PublicApiDoc;
         rest::link_graph::get_outgoing_links,
         rest::link_graph::get_incoming_links,
         rest::link_graph::sync_node_links,
+        rest::link_graph::get_space_link_index_status,
         rest::link_graph::reindex_space,
         rest::nodes::resolve_path,
         rest::nodes::list,
@@ -570,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn openapi_includes_usage_routes() {
+    fn openapi_uses_the_shared_async_operation_response() {
         let doc = ApiDoc::openapi();
         let value = serde_json::to_value(doc).expect("serializes openapi");
 
@@ -578,15 +579,17 @@ mod tests {
             response_ref(&value, "/api/v1/me/usage", "get", "200"),
             "#/components/schemas/CurrentUserUsageOut"
         );
-        assert_eq!(
-            response_ref(
-                &value,
-                "/api/v1/spaces/{space_id}/usage/reconcile",
-                "post",
-                "202"
-            ),
-            "#/components/schemas/ReconciliationQueuedResponse"
-        );
+        for path in [
+            "/api/v1/spaces/{space_id}/usage/reconcile",
+            "/api/v1/spaces/{space_id}/nodes/{node_id}/links/sync",
+            "/api/v1/spaces/{space_id}/link-index/reindex",
+        ] {
+            assert_eq!(
+                response_ref(&value, path, "post", "202"),
+                "#/components/schemas/AsyncOperationResponse",
+                "unexpected async response for {path}"
+            );
+        }
         assert_eq!(
             response_ref(
                 &value,
@@ -910,6 +913,7 @@ mod tests {
             "GET /api/v1/spaces/{space_id}/files/{node_id}/preview-url",
             "GET /api/v1/spaces/{space_id}/file-change-events",
             "GET /api/v1/spaces/{space_id}/file-change-sync",
+            "GET /api/v1/spaces/{space_id}/link-index/status",
             "GET /api/v1/spaces/{space_id}/nodes",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}/children",

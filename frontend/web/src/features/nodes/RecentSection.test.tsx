@@ -107,15 +107,31 @@ describe("RecentSection", () => {
     expect(recentToggle.querySelectorAll("svg")).toHaveLength(1);
     expect(view.container.querySelector("[data-recent-list] [data-node-disclosure-space]")).not.toBeInTheDocument();
   });
+
+  it("separates two-line list items without loosening compact rows", () => {
+    mocks.useRecentNodesQuery.mockReturnValue(query([
+      page([node("node-1"), node("node-2")], false, null)
+    ]));
+
+    const view = renderRecent(vi.fn(), vi.fn(), "list");
+
+    expect(view.container.querySelector("[data-recent-list] > div")).toHaveClass("space-y-0.5");
+    for (const row of view.container.querySelectorAll("[data-node-row]")) {
+      expect(row).toHaveClass("py-0.5");
+    }
+    for (const metadata of view.container.querySelectorAll("[data-node-row] .text-faint")) {
+      expect(metadata.parentElement).toHaveClass("space-y-0.5");
+    }
+  });
 });
 
-function renderRecent(onOpenNode = vi.fn(), onInspectNode = vi.fn()) {
+function renderRecent(onOpenNode = vi.fn(), onInspectNode = vi.fn(), density: "list" | "compact" = "compact") {
   return render(
     <RecentSection
       activeSpace={space}
       openedNodeId={null}
       inspectedNodeId={null}
-      density="compact"
+      density={density}
       open
       onToggle={vi.fn()}
       onToggleDensity={vi.fn()}

@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use crate::error::{ApiError, ErrorResponse};
 use crate::page::Page;
-use crate::rest::dto::SpaceOut;
+use crate::rest::dto::{AsyncOperationResponse, SpaceOut};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -72,12 +72,6 @@ pub(crate) struct ReorderBody {
 pub(crate) struct ReorderItem {
     space_id: Uuid,
     sort_order: i32,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct ReconciliationQueuedResponse {
-    status: &'static str,
-    job_id: Uuid,
 }
 
 #[utoipa::path(
@@ -244,8 +238,8 @@ pub(crate) async fn delete(
     tag = "spaces",
     params(("space_id" = Uuid, Path, description = "Space id")),
     responses(
-        (status = 202, description = "Queue usage reconciliation", body = ReconciliationQueuedResponse),
-        (status = 409, description = "Reconciliation is already pending or within its cooldown", body = ErrorResponse),
+        (status = 202, description = "Accept usage reconciliation", body = AsyncOperationResponse),
+        (status = 409, description = "Reconciliation is within its cooldown", body = ErrorResponse),
         (status = 503, description = "Space usage is temporarily locked for maintenance", body = ErrorResponse),
     ),
     security(("browser_session" = []))
@@ -254,7 +248,7 @@ pub(crate) async fn request_usage_reconciliation(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(space_id): Path<Uuid>,
-) -> Result<(StatusCode, Json<ReconciliationQueuedResponse>), ApiError> {
+) -> Result<(StatusCode, Json<AsyncOperationResponse>), ApiError> {
     let outcome = state
         .usage
         .request_space_reconciliation(caller.account.kind, caller.account_id(), space_id)
@@ -262,12 +256,12 @@ pub(crate) async fn request_usage_reconciliation(
     match outcome {
         UsageReconciliationOutcome::Queued { job_id } => Ok((
             StatusCode::ACCEPTED,
-            Json(ReconciliationQueuedResponse {
-                status: "queued",
-                job_id,
-            }),
+            Json(AsyncOperationResponse::accepted(Some(job_id))),
         )),
-        UsageReconciliationOutcome::AlreadyQueued => Err(ApiError::usage_reconciliation_pending()),
+        UsageReconciliationOutcome::AlreadyQueued { job_id } => Ok((
+            StatusCode::ACCEPTED,
+            Json(AsyncOperationResponse::already_pending(Some(job_id))),
+        )),
         UsageReconciliationOutcome::Cooldown => Err(ApiError::usage_reconciliation_cooldown()),
     }
 }

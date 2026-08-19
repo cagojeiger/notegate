@@ -62,6 +62,7 @@ describe("NodeRow", () => {
 
     expect(view.container.querySelector("[data-node-row]")).toHaveClass("min-h-tree-row", "font-ui", "text-workbench");
     expect(view.container.querySelector("[data-node-row]")).toHaveStyle({ paddingLeft: "28px" });
+    expect(view.container.querySelector("[data-node-row]")).not.toHaveClass("py-0.5");
   });
 
   it("keeps Recent metadata secondary in the navigation typeface", () => {
@@ -80,9 +81,11 @@ describe("NodeRow", () => {
     );
 
     expect(view.container.querySelector("[data-node-row]")).toHaveClass("min-h-tree-row", "font-ui", "text-workbench");
-    expect(view.container.querySelector("[data-node-row]")).not.toHaveClass("py-0.5");
+    expect(view.container.querySelector("[data-node-row]")).toHaveClass("py-0.5");
     expect(view.container.querySelector("[data-node-disclosure-space]")).not.toBeInTheDocument();
-    expect(screen.getByText("/report.pdf · 2026-08-05")).toHaveClass("text-[10px]", "leading-[14px]");
+    const metadata = screen.getByText("/report.pdf · 2026-08-05");
+    expect(metadata).toHaveClass("text-[10px]", "leading-[14px]");
+    expect(metadata.parentElement).toHaveClass("space-y-0.5");
   });
 
   it("highlights the inspected node without marking it as open", () => {

@@ -47,7 +47,8 @@ User caller만 가능하다. 현재 tier와 소유 Space별 live Text/File/item 
       "items": {"used": 319, "limit": 1999},
       "text_bytes": {"used": 48120320, "limit": 134217728},
       "file_bytes": {"used": 80000000, "limit": 134217728},
-      "reconciliation_pending": false
+      "reconciliation_pending": false,
+      "reconciliation_available_at": "2026-08-19T10:00:00Z"
     }
   ]
 }

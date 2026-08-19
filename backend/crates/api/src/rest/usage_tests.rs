@@ -66,6 +66,7 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     assert!(usage["spaces"][0].get("content_bytes").is_none());
     assert!(usage["spaces"][0].get("agent_connections").is_none());
     assert_eq!(usage["spaces"][0]["reconciliation_pending"], json!(false));
+    assert!(usage["spaces"][0]["reconciliation_available_at"].is_string());
 
     let (status, cooldown) = empty_request(
         rest_app(state.clone(), owner.clone()),
@@ -91,7 +92,7 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     )
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
-    assert_eq!(queued["status"], json!("queued"));
+    assert_eq!(queued["status"], json!("accepted"));
     let queued_job_id = queued["job_id"].as_str().expect("queued job id");
     let job_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT job_id FROM background_jobs \
@@ -113,8 +114,9 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
         format!("/v1/spaces/{space_id}/usage/reconcile"),
     )
     .await?;
-    assert_eq!(status, StatusCode::CONFLICT, "{duplicate}");
-    assert_eq!(duplicate["kind"], json!("usage_reconciliation_pending"));
+    assert_eq!(status, StatusCode::ACCEPTED, "{duplicate}");
+    assert_eq!(duplicate["status"], json!("already_pending"));
+    assert_eq!(duplicate["job_id"], queued["job_id"]);
 
     let (stranger_account, stranger_user) = state
         .accounts

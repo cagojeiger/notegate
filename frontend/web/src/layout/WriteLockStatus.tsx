@@ -42,7 +42,7 @@ export function WriteLockStatus({
         <button
           ref={triggerRef}
           type="button"
-          className="min-h-workbench-control shrink-0 rounded px-1.5 py-1 text-xs font-medium text-primary outline-none hover:bg-panel-strong focus-visible:ring-2 focus-visible:ring-primary/45 md:min-h-6"
+          className="min-h-workbench-control shrink-0 rounded px-1.5 py-1 text-workbench font-medium text-primary outline-none hover:bg-panel-strong focus-visible:ring-2 focus-visible:ring-primary/45 md:min-h-6"
           aria-expanded={open}
           aria-controls={open ? panelId : undefined}
           aria-haspopup="dialog"
