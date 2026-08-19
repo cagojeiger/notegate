@@ -8,11 +8,12 @@ Link API는 표준 Markdown link와 image에서 비동기로 계산한 같은 Sp
 GET /api/v1/spaces/{space_id}/nodes/{node_id}/links
 ```
 
-Space read 권한이 필요하다. `status`는 `idle`, `pending`, `syncing`, `failed` 중 하나다. Collector가 아직 Space 변경을 분류하지 않았으면 live Text는 보수적으로 `pending`이다. 새 변경이 기존 실패를 대체할 수 있으므로 `pending`과 `syncing`이 이전 `failed`보다 우선한다. `projected_at`은 이 source Text의 outgoing 관계 전체가 마지막으로 교체된 시각이며, 아직 계산되지 않았으면 `null`이다. 실패해도 마지막 성공 projection은 유지된다. `failure_code`와 `failed_at`은 `status`가 `failed`일 때만 존재한다. Folder와 file도 조회할 수 있지만 source projection은 Text에만 존재한다.
+Space read 권한이 필요하다. `status`는 `idle`, `pending`, `syncing`, `failed` 중 하나다. `space_pending`은 아직 분류되지 않았거나 완료되지 않은 Space 단위 변경이 있음을 뜻하며, `status`가 `idle`이어도 갱신 중으로 해석한다. Collector가 아직 Space 변경을 분류하지 않았으면 live Text는 보수적으로 `pending`이다. 새 변경이 기존 실패를 대체할 수 있으므로 `pending`과 `syncing`이 이전 `failed`보다 우선한다. `projected_at`은 이 source Text의 outgoing 관계 전체가 마지막으로 교체된 시각이며, 아직 계산되지 않았으면 `null`이다. 실패해도 마지막 성공 projection은 유지된다. `failure_code`와 `failed_at`은 `status`가 `failed`일 때만 존재한다. Folder와 file도 조회할 수 있지만 source projection은 Text에만 존재한다.
 
 ```json
 {
   "status":"idle",
+  "space_pending":false,
   "projected_at":"2026-08-17T12:00:00Z",
   "failure_code":null,
   "failed_at":null

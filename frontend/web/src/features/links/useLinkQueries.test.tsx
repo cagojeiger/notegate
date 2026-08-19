@@ -1,13 +1,24 @@
-import { QueryClientProvider } from "@tanstack/react-query";
+import {
+  focusManager,
+  onlineManager,
+  QueryClientProvider,
+  type InfiniteData
+} from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { listNodeLinks, requestNodeLinkSync, requestSpaceLinkReindex } from "../../api/links";
+import {
+  listNodeLinks,
+  requestNodeLinkSync,
+  requestSpaceLinkReindex,
+  type NodeLinksResponse
+} from "../../api/links";
 import { queryKeys } from "../../api/queryKeys";
 import { makeRestNode } from "../../test/fixtures";
 import { createTestQueryClient } from "../../test/queryClient";
 import {
+  linkStatusPollInterval,
   projectionPollInterval,
   useNodeLinksQuery,
   useReindexSpaceLinksMutation,
@@ -33,6 +44,11 @@ describe("link queries and mutations", () => {
     vi.mocked(requestNodeLinkSync).mockReset();
     vi.mocked(requestSpaceLinkReindex).mockReset();
     vi.mocked(listNodeLinks).mockReset();
+  });
+
+  afterEach(() => {
+    focusManager.setFocused(undefined);
+    onlineManager.setOnline(true);
   });
 
   it("marks a node pending before requesting its link sync", async () => {
@@ -108,6 +124,88 @@ describe("link queries and mutations", () => {
       "next-cursor"
     );
   });
+
+  it("does not replay cached invalidated link pages on mount", async () => {
+    const node = makeRestNode();
+    const queryClient = createTestQueryClient();
+    const queryKey = queryKeys.nodeLinkList(node.space_id, node.id, "incoming");
+    queryClient.setQueryData<InfiniteData<NodeLinksResponse, string | null>>(queryKey, {
+      pages: [
+        linkPage("source-1", true, "next-cursor"),
+        linkPage("source-2", false, null)
+      ],
+      pageParams: [null, "next-cursor"]
+    });
+    await queryClient.invalidateQueries({
+      queryKey,
+      exact: true,
+      refetchType: "none"
+    });
+
+    const { result } = renderLinkHook(
+      queryClient,
+      () => useNodeLinksQuery(node, "incoming", true)
+    );
+
+    expect(result.current.data?.pages).toHaveLength(2);
+    expect(result.current.isFetching).toBe(false);
+    expect(listNodeLinks).not.toHaveBeenCalled();
+  });
+
+  it("does not replay cached invalidated link pages on focus or reconnect", async () => {
+    const node = makeRestNode();
+    const queryClient = createTestQueryClient({
+      defaultOptions: {
+        queries: {
+          refetchOnWindowFocus: true,
+          refetchOnReconnect: true
+        }
+      }
+    });
+    const queryKey = queryKeys.nodeLinkList(node.space_id, node.id, "incoming");
+    queryClient.setQueryData<InfiniteData<NodeLinksResponse, string | null>>(queryKey, {
+      pages: [linkPage("source-1", false, null)],
+      pageParams: [null]
+    });
+    await queryClient.invalidateQueries({
+      queryKey,
+      exact: true,
+      refetchType: "none"
+    });
+    const view = renderLinkHook(
+      queryClient,
+      () => useNodeLinksQuery(node, "incoming", true)
+    );
+
+    await act(async () => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+      onlineManager.setOnline(false);
+      onlineManager.setOnline(true);
+    });
+
+    expect(view.result.current.data?.pages).toHaveLength(1);
+    expect(listNodeLinks).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it("refetches cached stale link data when it was not explicitly invalidated", async () => {
+    const node = makeRestNode();
+    const queryClient = createTestQueryClient();
+    const queryKey = queryKeys.nodeLinkList(node.space_id, node.id, "incoming");
+    queryClient.setQueryData<InfiniteData<NodeLinksResponse, string | null>>(queryKey, {
+      pages: [linkPage("source-1", false, null)],
+      pageParams: [null]
+    });
+    vi.mocked(listNodeLinks).mockResolvedValue(linkPage("source-2", false, null));
+
+    renderLinkHook(
+      queryClient,
+      () => useNodeLinksQuery(node, "incoming", true)
+    );
+
+    await waitFor(() => expect(listNodeLinks).toHaveBeenCalledTimes(1));
+  });
 });
 
 describe("projection polling", () => {
@@ -119,6 +217,13 @@ describe("projection polling", () => {
     expect(projectionPollInterval(linkStatus("idle"))).toBe(false);
     expect(projectionPollInterval(linkStatus("failed"))).toBe(false);
     expect(projectionPollInterval(undefined)).toBe(false);
+  });
+
+  it("retries a failed status query only while link data is invalidated", () => {
+    expect(linkStatusPollInterval(linkStatus("syncing"), true, true)).toBe(3_000);
+    expect(linkStatusPollInterval(undefined, true, true)).toBe(15_000);
+    expect(linkStatusPollInterval(undefined, true, false)).toBe(false);
+    expect(linkStatusPollInterval(undefined, false, true)).toBe(false);
   });
 });
 

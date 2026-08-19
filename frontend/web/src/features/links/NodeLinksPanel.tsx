@@ -1,9 +1,6 @@
 import { AlertTriangle, Image, Link2, RefreshCw } from "lucide-react";
-import { useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 
 import type { NodeLink, NodeLinkProjectionStatus } from "../../api/links";
-import { queryKeys } from "../../api/queryKeys";
 import type { RestNode } from "../../api/types";
 import { Button, SectionHeader } from "../../shared/ui";
 import {
@@ -11,6 +8,10 @@ import {
   useNodeLinkStatusQuery,
   useSyncNodeLinksMutation
 } from "./useLinkQueries";
+import {
+  isLinkProjectionActive,
+  useRefreshNodeLinksAfterProjection
+} from "./useRefreshNodeLinksAfterProjection";
 
 type NodeLinksPanelProps = {
   node: RestNode;
@@ -19,50 +20,27 @@ type NodeLinksPanelProps = {
 };
 
 export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProps) {
-  const queryClient = useQueryClient();
+  const indexableText = node.kind === "text" && node.text_storage_format !== "encrypted";
   const statusQuery = useNodeLinkStatusQuery(node, true);
-  const outgoingQuery = useNodeLinksQuery(node, "outgoing", node.kind === "text");
+  const outgoingQuery = useNodeLinksQuery(node, "outgoing", indexableText);
   const incomingQuery = useNodeLinksQuery(node, "incoming", true);
   const syncMutation = useSyncNodeLinksMutation();
-  const previousStatus = useRef<{ nodeId: string; updating: boolean }>({
-    updating: false,
-    nodeId: node.id
-  });
   const status = statusQuery.data?.status;
   const busy = status === "pending" || status === "syncing" || syncMutation.isPending;
-  const updating = isRelationUpdateActive(statusQuery.data);
   const openLinkedNode = (targetNodeId: string) => onOpenNode(targetNodeId, node.id);
 
-  useEffect(() => {
-    const previous = previousStatus.current;
-    const outgoingKey = queryKeys.nodeLinkList(node.space_id, node.id, "outgoing");
-    const incomingKey = queryKeys.nodeLinkList(node.space_id, node.id, "incoming");
-    const invalidated = queryClient.getQueryState(outgoingKey)?.isInvalidated === true
-      || queryClient.getQueryState(incomingKey)?.isInvalidated === true;
-    if (
-      previous.nodeId === node.id
-      && statusQuery.data !== undefined
-      && !updating
-      && (previous.updating || invalidated)
-    ) {
-      void queryClient.resetQueries({
-        queryKey: outgoingKey,
-        exact: true
-      });
-      void queryClient.resetQueries({
-        queryKey: incomingKey,
-        exact: true
-      });
-    }
-    previousStatus.current = { nodeId: node.id, updating };
-  }, [node.id, node.space_id, queryClient, statusQuery.data, updating]);
+  useRefreshNodeLinksAfterProjection({
+    spaceId: node.space_id,
+    nodeId: node.id,
+    status: statusQuery.data
+  });
 
   const outgoing = outgoingQuery.data?.pages.flatMap((page) => page.links) ?? [];
   const incoming = incomingQuery.data?.pages.flatMap((page) => page.links) ?? [];
 
   return (
     <div className="space-y-4">
-      {node.kind === "text" ? (
+      {indexableText ? (
         <section>
           <SectionHeader
             title="Index status"
@@ -86,7 +64,7 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
         </section>
       ) : null}
 
-      {node.kind === "text" ? (
+      {indexableText ? (
         <LinkSection
           title="Outgoing"
           emptyMessage="No outgoing links."
@@ -95,10 +73,18 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
           error={outgoingQuery.isError}
           fetchingMore={outgoingQuery.isFetchingNextPage}
           hasMore={outgoingQuery.hasNextPage}
+          loadMoreLabel="Load more outgoing links"
           onRetry={() => { void outgoingQuery.refetch(); }}
           onLoadMore={() => { void outgoingQuery.fetchNextPage(); }}
           onOpenNode={openLinkedNode}
         />
+      ) : node.kind === "text" ? (
+        <section>
+          <SectionHeader title="Outgoing" />
+          <p className="text-xs text-muted">
+            Outgoing links are unavailable for client-encrypted text.
+          </p>
+        </section>
       ) : null}
 
       <LinkSection
@@ -109,6 +95,7 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
         error={incomingQuery.isError}
         fetchingMore={incomingQuery.isFetchingNextPage}
         hasMore={incomingQuery.hasNextPage}
+        loadMoreLabel="Load more backlinks"
         onRetry={() => { void incomingQuery.refetch(); }}
         onLoadMore={() => { void incomingQuery.fetchNextPage(); }}
         onOpenNode={openLinkedNode}
@@ -132,7 +119,7 @@ function ProjectionStatus({
   const label = projectionStatusLabel(status);
   const tone = status.status === "failed"
     ? "text-danger"
-    : isRelationUpdateActive(status)
+    : isLinkProjectionActive(status)
       ? "text-warning"
       : "text-muted";
   return (
@@ -153,6 +140,7 @@ function LinkSection({
   error,
   fetchingMore,
   hasMore,
+  loadMoreLabel,
   onRetry,
   onLoadMore,
   onOpenNode
@@ -164,6 +152,7 @@ function LinkSection({
   error: boolean;
   fetchingMore: boolean;
   hasMore: boolean;
+  loadMoreLabel: string;
   onRetry: () => void;
   onLoadMore: () => void;
   onOpenNode: (nodeId: string) => void;
@@ -172,7 +161,14 @@ function LinkSection({
     <section>
       <SectionHeader
         title={title}
-        actions={<span className="text-xs tabular-nums text-muted">{links.length}</span>}
+        actions={(
+          <span className="text-xs tabular-nums text-muted">
+            <span aria-hidden="true">{links.length}{hasMore ? "+" : ""}</span>
+            <span className="sr-only">
+              {links.length} links loaded{hasMore ? ", more available" : ""}
+            </span>
+          </span>
+        )}
       />
       {loading ? <p className="text-xs text-muted">Loading links…</p> : null}
       {error ? (
@@ -200,6 +196,7 @@ function LinkSection({
           className="mt-2 w-full"
           disabled={fetchingMore}
           onClick={onLoadMore}
+          aria-label={loadMoreLabel}
         >
           {fetchingMore ? "Loading…" : "Load more"}
         </Button>
@@ -238,14 +235,6 @@ function LinkRow({ link, onOpenNode }: { link: NodeLink; onOpenNode: (nodeId: st
       {content}
     </button>
   );
-}
-
-function isActiveStatus(status: NodeLinkProjectionStatus["status"] | undefined): boolean {
-  return status === "pending" || status === "syncing";
-}
-
-function isRelationUpdateActive(status: NodeLinkProjectionStatus | undefined): boolean {
-  return status?.space_pending === true || isActiveStatus(status?.status);
 }
 
 function projectionStatusLabel(status: NodeLinkProjectionStatus): string {

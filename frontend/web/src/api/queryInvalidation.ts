@@ -77,7 +77,9 @@ export async function applyExternalFileChanges(
   let descendantWriteLockChanged = false;
 
   invalidateFileChangeEvents(queryClient, spaceId);
-  invalidateSpaceLinks(queryClient, spaceId);
+  if (changes.some(affectsLinkGraph)) {
+    invalidateSpaceLinks(queryClient, spaceId);
+  }
 
   for (const change of changes) {
     subtreeChanged ||= change.subtree_changed;
@@ -133,6 +135,10 @@ export async function applyExternalFileChanges(
   if (pathChanged) {
     removeMarkdownImageQueries(queryClient, spaceId);
   }
+}
+
+function affectsLinkGraph(change: FileChangeDelta): boolean {
+  return change.op_type !== "item.update" || change.path_changed;
 }
 
 export async function invalidateFileSyncFallback(queryClient: QueryClient, spaceId: string) {
