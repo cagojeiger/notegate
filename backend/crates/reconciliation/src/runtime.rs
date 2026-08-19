@@ -1,10 +1,10 @@
 use std::panic::AssertUnwindSafe;
-use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::FutureExt as _;
 use futures_util::future::join_all;
-use sqlx::{Connection as _, PgConnection, PgPool};
+use sqlx::pool::PoolConnection;
+use sqlx::{PgPool, Postgres};
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument as _;
@@ -16,8 +16,8 @@ use crate::{
     ReconciliationRegistry,
 };
 
-const LOCK_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(10);
-const LOCK_RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
+const LOCK_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(30);
+const LOCK_RELEASE_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct ReconciliationRuntime {
     entries: Vec<RegisteredReconciler>,
@@ -401,14 +401,12 @@ trait ReconciliationLock: Send {
 
 #[derive(Clone)]
 struct PostgresLockProvider {
-    options: Arc<sqlx::postgres::PgConnectOptions>,
+    pool: PgPool,
 }
 
 impl PostgresLockProvider {
     fn new(pool: &PgPool) -> Self {
-        Self {
-            options: pool.connect_options(),
-        }
+        Self { pool: pool.clone() }
     }
 }
 
@@ -416,20 +414,27 @@ impl LockProvider for PostgresLockProvider {
     type Guard = PostgresLock;
 
     async fn try_acquire(&self, lock_key: i64) -> Result<Option<Self::Guard>, ReconciliationError> {
-        let mut connection = PgConnection::connect_with(self.options.as_ref()).await?;
+        let mut connection = self.pool.acquire().await?;
+        // Session advisory locks must never escape into a reused pooled connection.
+        connection.close_on_drop();
         let acquired: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock($1)")
             .bind(lock_key)
-            .fetch_one(&mut connection)
+            .fetch_one(&mut *connection)
             .await?;
-        Ok(acquired.then_some(PostgresLock {
-            connection,
-            lock_key,
-        }))
+        if acquired {
+            Ok(Some(PostgresLock {
+                connection,
+                lock_key,
+            }))
+        } else {
+            connection.return_to_pool().await;
+            Ok(None)
+        }
     }
 }
 
 struct PostgresLock {
-    connection: PgConnection,
+    connection: PoolConnection<Postgres>,
     lock_key: i64,
 }
 
@@ -437,12 +442,12 @@ impl ReconciliationLock for PostgresLock {
     async fn release(mut self) -> Result<(), ReconciliationError> {
         let released: bool = sqlx::query_scalar("SELECT pg_advisory_unlock($1)")
             .bind(self.lock_key)
-            .fetch_one(&mut self.connection)
+            .fetch_one(&mut *self.connection)
             .await?;
         if !released {
             return Err(ReconciliationError::AdvisoryLockNotHeld(self.lock_key));
         }
-        self.connection.close().await?;
+        self.connection.return_to_pool().await;
         Ok(())
     }
 }
@@ -457,8 +462,8 @@ impl ReconciliationLock for PostgresLock {
 mod tests {
     use std::collections::HashSet;
     use std::io;
-    use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     use crate::{
         Reconciler, ReconciliationDirective, ReconciliationFailure, ReconciliationFuture,

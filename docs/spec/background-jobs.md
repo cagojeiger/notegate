@@ -126,8 +126,8 @@ background_job_attempts
 - Process mode는 실행 책임만 분리한다. 모든 mode는 같은 binary와 전체 `Config` 계약을 사용한다.
 - 기본 동시 실행 수는 process당 4이고 최대 64다.
 - `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`로 process별 동시 실행 수를 설정한다.
-- Worker의 공유 database pool은 concurrency보다 최소 2개 커야 한다. LISTEN 연결 하나와 heartbeat, metric·control 조회가 공유할 최소 여유를 남긴다. `all` mode 운영값은 데이터 HTTP 부하까지 포함해 이 최솟값보다 크게 잡는다.
-- 기본 lease는 2분이며 worker는 lease의 3분의 1 간격으로 heartbeat한다.
+- `all` mode의 API 요청, worker, reconciliation은 하나의 `NOTEGATE_DB_MAX_CONNECTIONS` 풀을 공유한다. 기본값과 worker/all mode의 최소값은 10이며, 더 높은 job concurrency는 `background_jobs.concurrency + 2`도 충족해야 한다. 이는 별도 연결 예약이 아니며, pool이 차면 모든 실행 경로가 같은 SQLx acquire 대기열에서 backpressure를 받는다.
+- 기본 lease는 3분이며 worker는 lease의 3분의 1 간격으로 heartbeat한다.
 - Handler timeout은 kind별로 정한다.
 - 자동 재시도는 5초에서 시작해 최대 15분까지 증가하는 exponential backoff와 ±10% jitter를 사용한다.
 - Handler가 명시한 `retry_after`는 더 일찍 실행되지 않도록 +0~20% jitter를 적용한다.
@@ -141,7 +141,7 @@ background_job_attempts
 - Worker가 비정상 종료되어 attempt를 닫지 못하면 lease recovery가 `lease_expired`로 마감하고 재시도하거나 `dead`로 전환한다.
 - Lease recovery와 retention 정리는 consumer loop와 독립적인 범용 reconciliation runtime이 수행한다.
 - 모든 `all` 또는 `worker` mode replica가 같은 reconciler를 등록한다. 각 kind는 PostgreSQL session advisory lock으로 같은 database에서 동시에 하나만 실행된다.
-- Advisory lock은 handler가 공유 pool을 기다리는 동안 pool slot을 점유하지 않도록 별도 session을 사용한다. 한 process에서 동시에 실행되는 reconciler kind 수만큼 database 연결이 공유 pool 밖에서 추가될 수 있다.
+- Advisory lock은 공유 pool에서 빌린 session에 유지된다. lock을 얻지 못한 session은 즉시 pool로 반환하고, 취소·오류 경로의 session은 닫아 session lock이 재사용 connection에 남지 않게 한다.
 - Lease recovery는 60초, retention 정리는 1시간의 고정 주기로 실행한다. 각 실행은 제한된 시간 동안 batch를 처리하고 backlog가 남으면 lock을 해제한 뒤 1초 후 다시 선점한다. 실패는 다음 고정 주기에서 현재 상태를 다시 읽어 수렴한다.
 - Reconciler 구현은 반복 실행해도 같은 현재 상태로 수렴해야 한다. Runtime은 동일 kind의 동시 실행을 막지만 exactly-once 실행은 보장하지 않는다.
 - Queue consumer 또는 reconciliation runtime이 shutdown 신호 없이 종료되면 해당 process도 오류로 종료한다. Best-effort metadata write-behind와 metrics upkeep은 실패를 기록하되 process를 종료하지 않는다.

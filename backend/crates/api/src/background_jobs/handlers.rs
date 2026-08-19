@@ -20,7 +20,7 @@ impl UsageHandler {
 
 impl JobHandler<SpaceUsageReconcileJob> for UsageHandler {
     fn timeout(&self) -> Duration {
-        Duration::from_secs(60)
+        Duration::from_secs(120)
     }
 
     fn handle<'a>(

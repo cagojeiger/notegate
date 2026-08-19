@@ -22,6 +22,7 @@ use crate::tier::UserTier;
 
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:9191";
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
+const MIN_WORKER_DB_MAX_CONNECTIONS: u32 = DEFAULT_DB_MAX_CONNECTIONS;
 const DEFAULT_JWKS_CACHE_TTL_SECS: u64 = 300;
 const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
 const DEFAULT_BROWSER_SESSION_MAX_TTL_SECS: u64 = 30 * 86_400;
@@ -660,9 +661,11 @@ fn validate_background_jobs(config: &Config, errors: &mut ValidationErrors) {
         return;
     }
     if config.process_mode.runs_worker() {
-        let required_connections = u32::try_from(config.background_jobs.concurrency)
-            .unwrap_or(u32::MAX)
-            .saturating_add(2);
+        let required_connections = MIN_WORKER_DB_MAX_CONNECTIONS.max(
+            u32::try_from(config.background_jobs.concurrency)
+                .unwrap_or(u32::MAX)
+                .saturating_add(2),
+        );
         if config.db_max_connections < required_connections {
             errors.add(
                 "db_max_connections",
@@ -874,7 +877,7 @@ mod tests {
                     "NOTEGATE_LOOKUP_ROOT_SECRET",
                     "env-lookup-root-secret-32-bytes-long",
                 ),
-                ("NOTEGATE_DB_MAX_CONNECTIONS", "7"),
+                ("NOTEGATE_DB_MAX_CONNECTIONS", "11"),
                 ("NOTEGATE_PROCESS_MODE", "worker"),
                 ("NOTEGATE_BACKGROUND_JOBS__CONCURRENCY", "5"),
                 ("NOTEGATE_METRICS_ENABLED", "true"),
@@ -893,7 +896,7 @@ mod tests {
 
         assert_eq!(config.bind_addr.to_string(), super::DEFAULT_BIND_ADDR);
         assert_eq!(config.database_url, "postgres://env");
-        assert_eq!(config.db_max_connections, 7);
+        assert_eq!(config.db_max_connections, 11);
         assert_eq!(config.process_mode, ProcessMode::Worker);
         assert_eq!(config.background_jobs.concurrency, 5);
         assert!(config.metrics_enabled);
@@ -1079,7 +1082,7 @@ mod tests {
         assert!(config.validate().is_err());
 
         let mut config = valid_config();
-        config.db_max_connections = 5;
+        config.db_max_connections = 9;
         config.background_jobs.concurrency = 4;
         assert!(config.validate().is_err());
 
@@ -1158,7 +1161,7 @@ mod tests {
     }
 
     #[test]
-    fn api_mode_does_not_require_worker_pool_headroom() {
+    fn api_mode_does_not_require_background_job_headroom() {
         let mut config = valid_config();
         config.process_mode = ProcessMode::Api;
         config.db_max_connections = 5;

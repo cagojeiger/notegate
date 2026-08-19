@@ -7,7 +7,7 @@ use notegate_reconciliation::{
 };
 
 const CHANGE_COLLECTION_INTERVAL: Duration = Duration::from_secs(60);
-const CHANGE_COLLECTION_TIMEOUT: Duration = Duration::from_secs(60);
+const CHANGE_COLLECTION_TIMEOUT: Duration = Duration::from_secs(120);
 const BACKLOG_CONTINUATION_DELAY: Duration = Duration::from_secs(1);
 
 pub(super) struct LinkGraphChangeCollector {

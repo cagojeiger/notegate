@@ -21,7 +21,7 @@ impl LinkGraphProjectNodesHandler {
 
 impl JobHandler<LinkGraphProjectNodesJob> for LinkGraphProjectNodesHandler {
     fn timeout(&self) -> Duration {
-        Duration::from_secs(70)
+        Duration::from_secs(300)
     }
 
     fn handle<'a>(
