@@ -224,7 +224,7 @@ export function AuxiliarySidebar({
         aria-labelledby={`${panelIdPrefix}-links-tab`}
         tabIndex={0}
         hidden={selectedView !== "links"}
-        className="h-full overflow-y-auto p-3"
+        className="h-full min-h-0 overflow-hidden p-3"
       >
         {activeNode && selectedView === "links" ? (
           <NodeLinksPanel
