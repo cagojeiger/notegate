@@ -76,6 +76,7 @@ const docxNode: RestNode = {
 };
 
 for (const viewport of [
+  { name: "wide desktop", width: 1920, height: 1080, mobile: false },
   { name: "desktop", width: 1440, height: 900, mobile: false },
   { name: "tablet", width: 900, height: 1024, mobile: false },
   { name: "mobile", width: 390, height: 844, mobile: true }
@@ -129,6 +130,7 @@ for (const viewport of [
     );
     await expect(docxFrame.getByText("NoteGate DOCX preview", { exact: true })).toBeVisible();
     await expect(docxFrame.getByText("한글 문서 미리보기", { exact: true })).toBeVisible();
+    await expectDocxPagesHorizontallyReachable(docxFrame);
   });
 }
 
@@ -283,6 +285,46 @@ async function expectInsideActiveEditor(
   expect(contentBox!.y).toBeGreaterThanOrEqual(editorBox!.y);
   expect(contentBox!.x + contentBox!.width).toBeLessThanOrEqual(editorBox!.x + editorBox!.width + 1);
   expect(contentBox!.y + contentBox!.height).toBeLessThanOrEqual(editorBox!.y + editorBox!.height + 1);
+}
+
+async function expectDocxPagesHorizontallyReachable(
+  frame: import("@playwright/test").FrameLocator
+) {
+  const frameBody = frame.locator("body");
+  const initial = await frameBody.evaluate(() => {
+    const page = document.querySelector<HTMLElement>(".ng-docx-wrapper > section.ng-docx");
+    const scroller = document.scrollingElement;
+    if (!page || !scroller) throw new Error("DOCX page or scroll container is missing");
+
+    const pageBox = page.getBoundingClientRect();
+    return {
+      clientWidth: scroller.clientWidth,
+      pageLeft: pageBox.left,
+      pageRight: pageBox.right,
+      scrollWidth: scroller.scrollWidth
+    };
+  });
+
+  expect(initial.pageLeft).toBeGreaterThanOrEqual(0);
+  expect(initial.pageRight).toBeLessThanOrEqual(initial.scrollWidth + 1);
+
+  if (initial.scrollWidth > initial.clientWidth) {
+    const atEnd = await frameBody.evaluate(() => {
+      const page = document.querySelector<HTMLElement>(".ng-docx-wrapper > section.ng-docx")!;
+      const scroller = document.scrollingElement!;
+      scroller.scrollLeft = scroller.scrollWidth;
+      return {
+        clientWidth: scroller.clientWidth,
+        pageRight: page.getBoundingClientRect().right,
+        scrollLeft: scroller.scrollLeft
+      };
+    });
+    expect(atEnd.scrollLeft).toBeGreaterThan(0);
+    expect(atEnd.pageRight).toBeLessThanOrEqual(atEnd.clientWidth + 1);
+  } else {
+    expect(Math.abs(initial.pageLeft - (initial.clientWidth - initial.pageRight)))
+      .toBeLessThanOrEqual(1);
+  }
 }
 
 function createPdf() {

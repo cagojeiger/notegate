@@ -86,6 +86,11 @@ describe("DocxPreview", () => {
       .toHaveAttribute("content", expect.stringContaining("default-src 'none'"));
     expect(frameDocument.head.querySelector('meta[http-equiv="Content-Security-Policy"]'))
       .toHaveAttribute("content", expect.stringContaining("connect-src 'none'"));
+    const layoutStyle = frameDocument.head.querySelector<HTMLStyleElement>(
+      "style[data-notegate-docx-layout]"
+    );
+    expect(layoutStyle?.textContent).toContain("align-items: flex-start");
+    expect(layoutStyle?.textContent).toContain("margin-inline: auto");
     const scriptLink = findFrameText(frameDocument, "Script").closest("a")!;
     const dataLink = findFrameText(frameDocument, "Data").closest("a")!;
     const vbscriptLink = findFrameText(frameDocument, "VBScript").closest("a")!;
