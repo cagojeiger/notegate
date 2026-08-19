@@ -53,6 +53,32 @@ vi.mock("./DocxPreview", () => ({
   )
 }));
 
+vi.mock("./AudioPreview", () => ({
+  AudioPreview: ({
+    url,
+    name,
+    mediaType,
+    byteLen,
+    onError
+  }: {
+    url: string;
+    name: string;
+    mediaType: string;
+    byteLen?: number;
+    onError: () => void;
+  }) => (
+    <audio
+      src={url}
+      controls
+      preload="metadata"
+      aria-label={`Play ${name}`}
+      data-media-type={mediaType}
+      data-byte-len={byteLen}
+      onError={onError}
+    />
+  )
+}));
+
 describe("FileDetailView", () => {
   beforeEach(() => {
     filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery());
@@ -91,7 +117,7 @@ describe("FileDetailView", () => {
     expect(screen.getByText("application/pdf")).toBeInTheDocument();
   });
 
-  it("plays verified audio from a short-lived URL without buffering it into a Blob", () => {
+  it("dispatches verified audio and its repair metadata to the audio preview", () => {
     audioPreviewQueryMocks.useAudioPreviewUrl.mockReturnValue(previewQuery({
       data: {
         url: "https://storage.example/meeting.m4a",
@@ -105,7 +131,8 @@ describe("FileDetailView", () => {
       media_type: "audio/mp4",
       detected_media_type: "video/mp4",
       preview_available: false,
-      file_media_kind: "audio"
+      file_media_kind: "audio",
+      byte_len: 2048
     })} />);
 
     expect(screen.getByText("Audio recording")).toBeInTheDocument();
@@ -116,6 +143,8 @@ describe("FileDetailView", () => {
     );
     expect(screen.getByLabelText("Play meeting.m4a")).toHaveAttribute("preload", "metadata");
     expect(screen.getByLabelText("Play meeting.m4a")).toHaveAttribute("controls");
+    expect(screen.getByLabelText("Play meeting.m4a")).toHaveAttribute("data-media-type", "audio/mp4");
+    expect(screen.getByLabelText("Play meeting.m4a")).toHaveAttribute("data-byte-len", "2048");
   });
 
   it("keeps a failed audio URL hidden when its single refresh cannot replace it", async () => {

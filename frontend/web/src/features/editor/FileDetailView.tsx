@@ -4,6 +4,7 @@ import { AudioLines } from "lucide-react";
 import { ApiError } from "../../api/errors";
 import type { RestNode } from "../../api/types";
 import { Card, MetaRow } from "../../shared/ui";
+import { AudioPreview } from "./AudioPreview";
 import { canPreviewAudio, useAudioPreviewUrl } from "./useAudioPreviewQuery";
 import { filePreviewKindForNode, useFilePreviewUrl } from "./useFilePreviewQueries";
 
@@ -112,13 +113,12 @@ export function FileDetailView({ node }: { node: RestNode }) {
         <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{node.name}</h1>
         {isAudioFile && previewUrl && !previewFailed ? (
           <div className="mt-8 rounded-2xl border border-border bg-surface p-4">
-            <audio
+            <AudioPreview
               key={previewUrl}
-              className="w-full"
-              src={previewUrl}
-              controls
-              preload="metadata"
-              aria-label={`Play ${node.name}`}
+              url={previewUrl}
+              name={node.name}
+              mediaType={preview.data?.media_type ?? node.media_type ?? ""}
+              byteLen={node.byte_len}
               onError={handlePreviewError}
             />
           </div>
