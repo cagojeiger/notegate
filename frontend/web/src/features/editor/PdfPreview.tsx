@@ -184,7 +184,7 @@ export function PdfPreview({
             title="Reset zoom"
             disabled={zoom === 1}
             onClick={() => setZoom(1)}
-            className="h-7 min-w-11 rounded-md px-1 text-xs tabular-nums text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-default"
+            className="h-7 min-w-11 rounded-md px-1 text-workbench tabular-nums text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-default"
           >
             {Math.round(zoom * 100)}%
           </button>

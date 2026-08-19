@@ -7,7 +7,8 @@ use futures_util::stream::{self, StreamExt as _};
 use notegate_core::{Error, Result, limits};
 use notegate_db::{
     FilesRepo, LINK_GRAPH_PROJECT_BATCH_MAX, LinkGraphProjectSource, LinkGraphProjection,
-    LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphSourceSnapshot, LinkGraphStoredReference,
+    LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphSourceSnapshot,
+    LinkGraphSpaceRequestOutcome as DbLinkGraphSpaceRequestOutcome, LinkGraphStoredReference,
     LinkGraphWorkRepo,
 };
 use notegate_jobs::ClaimFence;
@@ -33,6 +34,12 @@ pub struct LinkGraphProjectionBatch {
     pub removed: usize,
     pub skipped: usize,
     pub stale: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkGraphSpaceRequestOutcome {
+    Requested,
+    AlreadyPending,
 }
 
 #[derive(Debug, Clone)]
@@ -190,14 +197,35 @@ impl LinkGraphService {
         Ok(())
     }
 
-    pub async fn request_space(&self, caller: &Caller, space_id: Uuid) -> ServiceResult<()> {
+    pub async fn space_pending(&self, caller: &Caller, space_id: Uuid) -> ServiceResult<bool> {
         require_dashboard_user(caller)?;
         self.require_permission(caller.account_id(), space_id, Permission::Write)
             .await?;
-        if !self.work.request_space(space_id).await? {
-            return Err(ServiceError::NotFound("space not found".to_owned()));
+        self.work
+            .space_pending(space_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))
+    }
+
+    pub async fn request_space(
+        &self,
+        caller: &Caller,
+        space_id: Uuid,
+    ) -> ServiceResult<LinkGraphSpaceRequestOutcome> {
+        require_dashboard_user(caller)?;
+        self.require_permission(caller.account_id(), space_id, Permission::Write)
+            .await?;
+        match self.work.request_space(space_id).await? {
+            DbLinkGraphSpaceRequestOutcome::Requested => {
+                Ok(LinkGraphSpaceRequestOutcome::Requested)
+            }
+            DbLinkGraphSpaceRequestOutcome::AlreadyPending => {
+                Ok(LinkGraphSpaceRequestOutcome::AlreadyPending)
+            }
+            DbLinkGraphSpaceRequestOutcome::NotFound => {
+                Err(ServiceError::NotFound("space not found".to_owned()))
+            }
         }
-        Ok(())
     }
 
     pub async fn project_job(

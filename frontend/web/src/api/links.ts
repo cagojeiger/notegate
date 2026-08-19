@@ -24,7 +24,11 @@ export type NodeLinksResponse = {
 };
 
 export type LinkSyncAcceptedResponse = {
-  status: "accepted";
+  status: "accepted" | "already_pending";
+};
+
+export type SpaceLinkIndexStatus = {
+  pending: boolean;
 };
 
 export function getNodeLinkStatus(
@@ -67,5 +71,14 @@ export function requestSpaceLinkReindex(
 ): Promise<LinkSyncAcceptedResponse> {
   return client.post<LinkSyncAcceptedResponse>(
     `/api/v1/spaces/${spaceId}/link-index/reindex`
+  );
+}
+
+export function getSpaceLinkIndexStatus(
+  client: ApiClient,
+  spaceId: string
+): Promise<SpaceLinkIndexStatus> {
+  return client.get<SpaceLinkIndexStatus>(
+    `/api/v1/spaces/${spaceId}/link-index/status`
   );
 }

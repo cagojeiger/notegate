@@ -56,6 +56,14 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{accepted}");
     assert_eq!(accepted["status"], json!("accepted"));
+
+    let (status, index_status) = get_json(
+        rest_app(state.clone(), owner.clone()),
+        format!("/v1/spaces/{space_id}/link-index/status"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{index_status}");
+    assert_eq!(index_status["pending"], json!(true));
     assert!(accepted.get("job_id").is_none());
     let (stored_job_id, payload): (uuid::Uuid, serde_json::Value) = sqlx::query_as(
         "SELECT job_id, payload FROM background_jobs \
@@ -115,7 +123,7 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     )
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{accepted}");
-    assert_eq!(accepted["status"], json!("accepted"));
+    assert_eq!(accepted["status"], json!("already_pending"));
 
     let mut api_owner = owner.clone();
     api_owner.channel = Channel::Api;

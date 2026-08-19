@@ -175,7 +175,9 @@ function BackgroundJobRow({ job }: { job: BackgroundJob }) {
 }
 
 function jobLabel(kind: string) {
-  return kind === "space_usage_reconcile" ? "Usage recalculation" : kind;
+  if (kind === "space_usage_reconcile") return "Usage recalculation";
+  if (kind === "link_graph_project_nodes") return "Link indexing";
+  return kind;
 }
 
 function formatJobContext(kind: string | null, label: string) {

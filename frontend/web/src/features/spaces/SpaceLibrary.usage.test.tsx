@@ -86,7 +86,7 @@ describe("SpaceLibrary usage", () => {
     renderLibrary({ externalPollingOwner: true });
 
     expect(await screen.findByText("45.9 MB / 128 MB")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/me/usage"))).toHaveLength(1);
   });
 
   it("queues a usage check from the inspector and shows progress", async () => {
@@ -104,33 +104,44 @@ describe("SpaceLibrary usage", () => {
     const user = userEvent.setup();
     renderLibrary();
 
-    await user.click(await screen.findByRole("button", { name: "Check Personal usage" }));
+    await user.click(await screen.findByRole("button", { name: "Recalculate Personal usage" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/spaces/space-1/usage/reconcile",
       expect.objectContaining({ method: "POST" })
     ));
-    expect(await screen.findByText("Checking usage…")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Check Personal usage" })).toBeDisabled();
+    expect(await screen.findByText("Recalculating usage…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Recalculate Personal usage" })).toBeDisabled();
   });
 
   it("presents a reconciliation cooldown as up to date", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => init?.method === "POST"
-      ? jsonResponse({ kind: "usage_reconciliation_cooldown", message: "space usage was reconciled recently; try again later" }, 409)
-      : jsonResponse(usage));
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      if (init?.method === "POST") {
+        return jsonResponse({ kind: "usage_reconciliation_cooldown", message: "space usage was reconciled recently; try again later" }, 409);
+      }
+      if (String(input).endsWith("/link-index/status")) return jsonResponse({ pending: false });
+      return jsonResponse({
+        ...usage,
+        spaces: usage.spaces.map((item) => ({
+          ...item,
+          reconciliation_available_at: "2099-01-01T00:00:00Z"
+        }))
+      });
+    });
     const user = userEvent.setup();
     renderLibrary();
 
-    await user.click(await screen.findByRole("button", { name: "Check Personal usage" }));
+    await user.click(await screen.findByRole("button", { name: "Recalculate Personal usage" }));
 
     expect(await screen.findByText("Usage is already up to date.")).toBeInTheDocument();
     expect(screen.queryByText(/reconciled recently/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Check Personal usage" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Recalculate Personal usage" })).toBeDisabled();
   });
 
   it("retries after the usage query fails", async () => {
     let failures = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      if (String(input).endsWith("/link-index/status")) return jsonResponse({ pending: false });
       if (failures < 2) {
         failures += 1;
         return jsonResponse({ kind: "internal_error", message: "temporarily unavailable" }, 500);
@@ -143,6 +154,6 @@ describe("SpaceLibrary usage", () => {
     const retry = await screen.findByRole("button", { name: "Retry Personal usage" }, { timeout: 3_000 });
     await user.click(retry);
 
-    expect(await screen.findByRole("button", { name: "Check Personal usage" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Recalculate Personal usage" })).toBeInTheDocument();
   });
 });

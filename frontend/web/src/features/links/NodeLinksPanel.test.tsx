@@ -112,7 +112,10 @@ describe("NodeLinksPanel", () => {
         {} as IntersectionObserver
       );
     });
-    await user.click(screen.getByRole("button", { name: "Sync links for note.md" }));
+    const sync = screen.getByRole("button", { name: "Sync links for note.md" });
+    expect(sync).toHaveClass("md:min-h-6", "text-workbench");
+    expect(sync).not.toHaveClass("border");
+    await user.click(sync);
 
     expect(mocks.fetchOutgoing).toHaveBeenCalledTimes(1);
     expect(mocks.sync).toHaveBeenCalledWith(expect.objectContaining({ id: "node-1" }));

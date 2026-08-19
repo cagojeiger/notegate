@@ -66,6 +66,7 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     assert!(usage["spaces"][0].get("content_bytes").is_none());
     assert!(usage["spaces"][0].get("agent_connections").is_none());
     assert_eq!(usage["spaces"][0]["reconciliation_pending"], json!(false));
+    assert!(usage["spaces"][0]["reconciliation_available_at"].is_string());
 
     let (status, cooldown) = empty_request(
         rest_app(state.clone(), owner.clone()),

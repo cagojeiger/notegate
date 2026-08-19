@@ -13,7 +13,8 @@ use common::{TestDb, space_with_root};
 use notegate_db::{
     FilesRepo, LINK_GRAPH_ACTIVE_JOB_MAX, LinkGraphChangeCollection, LinkGraphProjectNodesJob,
     LinkGraphProjection, LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphSourceSnapshot,
-    LinkGraphStoredReference, LinkGraphWorkRepo, SpaceRepo, TextMutationKind,
+    LinkGraphSpaceRequestOutcome, LinkGraphStoredReference, LinkGraphWorkRepo, SpaceRepo,
+    TextMutationKind,
 };
 use notegate_jobs::{ClaimedJob, JobQueue, JobSpec};
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
@@ -1522,7 +1523,10 @@ async fn dead_projection_job_is_recorded_and_manual_sync_reactivates_the_node()
 
     mark_job_dead(&db.pool, reactivated.1).await?;
     collect_due(&db.pool, &work).await?;
-    assert!(work.request_space(space_id).await?);
+    assert_eq!(
+        work.request_space(space_id).await?,
+        LinkGraphSpaceRequestOutcome::Requested
+    );
     let full_reindex_job_id: Uuid = sqlx::query_scalar(
         "SELECT active_job_id FROM node_link_projections \
          WHERE space_id = $1 AND source_node_id = $2",
@@ -2028,7 +2032,10 @@ async fn full_reindex_reactivates_work_for_a_hard_deleted_node()
         .execute(&db.pool)
         .await?;
 
-    assert!(work.request_space(space_id).await?);
+    assert_eq!(
+        work.request_space(space_id).await?,
+        LinkGraphSpaceRequestOutcome::Requested
+    );
     let next_job_id: Uuid = sqlx::query_scalar(
         "SELECT active_job_id FROM node_link_projections \
          WHERE space_id = $1 AND source_node_id = $2",
@@ -2225,7 +2232,10 @@ async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_cha
     let node_count = 1_001_i64;
     insert_text_nodes(&db.pool, account, space_id, root_id, "doc", node_count).await?;
 
-    assert!(work.request_space(space_id).await?);
+    assert_eq!(
+        work.request_space(space_id).await?,
+        LinkGraphSpaceRequestOutcome::Requested
+    );
 
     let (initial_job_count, initial_queued_nodes): (i64, i64) = sqlx::query_as(
         "SELECT count(*), COALESCE(sum(jsonb_array_length(payload -> 'sources')), 0) \
@@ -2377,7 +2387,7 @@ async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_cha
 }
 
 #[tokio::test]
-async fn manual_reindex_restarts_an_active_full_scan_from_a_new_event_boundary()
+async fn manual_reindex_does_not_restart_an_active_full_scan()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -2385,8 +2395,13 @@ async fn manual_reindex_restarts_an_active_full_scan_from_a_new_event_boundary()
     let (account, space_id, root_id) = space_with_root(&db.pool, "link-full-restart").await?;
     let work = LinkGraphWorkRepo::new(db.pool.clone());
     insert_text_nodes(&db.pool, account, space_id, root_id, "restart", 1_001).await?;
+    assert_eq!(work.space_pending(space_id).await?, Some(false));
 
-    assert!(work.request_space(space_id).await?);
+    assert_eq!(
+        work.request_space(space_id).await?,
+        LinkGraphSpaceRequestOutcome::Requested
+    );
+    assert_eq!(work.space_pending(space_id).await?, Some(true));
     let (first_boundary, first_cursor): (i64, Uuid) = sqlx::query_as(
         "SELECT full_scan_event_id, full_scan_after_node_id \
          FROM link_graph_space_states \
@@ -2425,8 +2440,11 @@ async fn manual_reindex_restarts_an_active_full_scan_from_a_new_event_boundary()
     .execute(&db.pool)
     .await?;
 
-    assert!(work.request_space(space_id).await?);
-    let (restarted_boundary, restarted_cursor): (i64, Uuid) = sqlx::query_as(
+    assert_eq!(
+        work.request_space(space_id).await?,
+        LinkGraphSpaceRequestOutcome::AlreadyPending
+    );
+    let (unchanged_boundary, unchanged_cursor): (i64, Uuid) = sqlx::query_as(
         "SELECT full_scan_event_id, full_scan_after_node_id \
          FROM link_graph_space_states \
          WHERE space_id = $1",
@@ -2434,8 +2452,8 @@ async fn manual_reindex_restarts_an_active_full_scan_from_a_new_event_boundary()
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
-    assert!(restarted_boundary > first_boundary);
-    assert_eq!(restarted_cursor, first_cursor);
+    assert_eq!(unchanged_boundary, first_boundary);
+    assert_eq!(unchanged_cursor, middle_cursor);
 
     assert!(matches!(
         collect_due(&db.pool, &work).await?,
@@ -2458,9 +2476,10 @@ async fn manual_reindex_restarts_an_active_full_scan_from_a_new_event_boundary()
     .fetch_one(&db.pool)
     .await?;
     assert!(final_state.0);
-    assert_eq!(final_state.1, restarted_boundary);
+    assert!(final_state.1 > first_boundary);
     assert_eq!(final_state.2, None);
     assert_eq!(final_state.3, None);
+    assert_eq!(work.space_pending(space_id).await?, Some(false));
 
     db.cleanup().await;
     Ok(())

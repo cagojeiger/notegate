@@ -9,11 +9,13 @@ import {
 import { useApiClient } from "../../api/ApiProvider";
 import {
   getNodeLinkStatus,
+  getSpaceLinkIndexStatus,
   listNodeLinks,
   requestNodeLinkSync,
   requestSpaceLinkReindex,
   type NodeLinkDirection,
-  type NodeLinkProjectionStatus
+  type NodeLinkProjectionStatus,
+  type SpaceLinkIndexStatus
 } from "../../api/links";
 import { queryKeys } from "../../api/queryKeys";
 import { invalidateSpaceLinks } from "../../api/queryInvalidation";
@@ -106,9 +108,38 @@ export function useReindexSpaceLinksMutation() {
   return useMutation({
     meta: { silentError: true },
     mutationFn: (spaceId: string) => requestSpaceLinkReindex(client, spaceId),
+    onMutate: async (spaceId) => {
+      await queryClient.cancelQueries({
+        queryKey: queryKeys.spaceLinkIndexStatus(spaceId),
+        exact: true
+      });
+      queryClient.setQueryData<SpaceLinkIndexStatus>(
+        queryKeys.spaceLinkIndexStatus(spaceId),
+        { pending: true }
+      );
+    },
     onSuccess: (_response, spaceId) => {
       invalidateSpaceLinks(queryClient, spaceId);
+    },
+    onSettled: (_response, _error, spaceId) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.spaceLinkIndexStatus(spaceId),
+        exact: true
+      });
     }
+  });
+}
+
+export function useSpaceLinkIndexStatusQuery(spaceId: string | undefined, enabled: boolean) {
+  const client = useApiClient();
+  return useQuery({
+    queryKey: queryKeys.spaceLinkIndexStatus(spaceId ?? "none"),
+    queryFn: () => {
+      if (!spaceId) throw new Error("Space id is required");
+      return getSpaceLinkIndexStatus(client, spaceId);
+    },
+    enabled: enabled && Boolean(spaceId),
+    refetchInterval: (query) => query.state.data?.pending ? SYNCING_STATUS_POLL_MS : false
   });
 }
 

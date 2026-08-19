@@ -4,6 +4,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use notegate_model::{Caller, LinkReference, LinkReferencePage, ListLinkReferences};
+use notegate_service::link_graph::LinkGraphSpaceRequestOutcome;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -33,6 +34,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/spaces/{space_id}/link-index/reindex",
             post(reindex_space),
+        )
+        .route(
+            "/v1/spaces/{space_id}/link-index/status",
+            get(get_space_link_index_status),
         )
 }
 
@@ -90,6 +95,28 @@ impl From<LinkReferencePage> for LinkReferencesResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct LinkGraphAcceptedResponse {
     status: &'static str,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct SpaceLinkIndexStatusResponse {
+    pending: bool,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/spaces/{space_id}/link-index/status",
+    tag = "links",
+    params(("space_id" = Uuid, Path, description = "Space id")),
+    responses((status = 200, description = "Get Space link index work state", body = SpaceLinkIndexStatusResponse)),
+    security(("browser_session" = []))
+)]
+pub(crate) async fn get_space_link_index_status(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(space_id): Path<Uuid>,
+) -> Result<Json<SpaceLinkIndexStatusResponse>, ApiError> {
+    let pending = state.link_graph.space_pending(&caller, space_id).await?;
+    Ok(Json(SpaceLinkIndexStatusResponse { pending }))
 }
 
 #[utoipa::path(
@@ -228,9 +255,12 @@ pub(crate) async fn reindex_space(
     Extension(caller): Extension<Caller>,
     Path(space_id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<LinkGraphAcceptedResponse>), ApiError> {
-    state.link_graph.request_space(&caller, space_id).await?;
+    let status = match state.link_graph.request_space(&caller, space_id).await? {
+        LinkGraphSpaceRequestOutcome::Requested => "accepted",
+        LinkGraphSpaceRequestOutcome::AlreadyPending => "already_pending",
+    };
     Ok((
         StatusCode::ACCEPTED,
-        Json(LinkGraphAcceptedResponse { status: "accepted" }),
+        Json(LinkGraphAcceptedResponse { status }),
     ))
 }

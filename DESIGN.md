@@ -34,6 +34,7 @@
 - 의미 보존: 상태는 색상과 함께 텍스트, 아이콘 또는 형태로 표현한다.
 - 일관된 도구 언어: 브랜드 자산은 제품 식별에만 쓰고, 동작과 객체에는 Lucide 아이콘을 사용한다.
 - 안정적인 배치: 동적 상태가 나타나도 주요 탐색과 편집 영역이 불필요하게 이동하지 않게 한다.
+- 서버 상태 우선: 유지보수 동작의 실행 가능 여부는 서버가 제공하는 pending·available 시각을 기준으로 하며, 로컬 mutation 상태는 조회가 갱신될 때까지의 즉각적인 피드백에만 사용한다.
 - 대안 제공: 드래그, hover 또는 색상만으로 수행하거나 이해해야 하는 기능을 만들지 않는다.
 
 ## 시각 언어
@@ -44,9 +45,12 @@
 - Files/Recent section label은 대문자 변환이나 별도 자간 없이 title case 13 px Medium으로 표시한다.
 - Reading 글꼴: Markdown과 일반 텍스트 본문은 기존 운영체제 UI stack을 유지한다. Markdown은 기존 16 px/1.7 line-height와 문서 간격을 그대로 유지하고, 코드·경로·식별자는 기존 monospace stack을 사용한다.
 - 간격: 4 px 리듬을 기준으로 desktop chrome은 36 px header, 28 px control, 26 px row, 22 px status bar를 기본으로 한다. 모바일의 toolbar와 독립 control은 44 px를 유지하되, 전체 폭이 하나의 target인 Files/Recent 행은 36 px로 조밀하게 표시한다.
+- Recent 목록 보기는 파일명과 경로를 한 항목으로 묶기 위해 행 안쪽 상하 2 px, 두 줄 사이 2 px, 항목 사이 2 px를 사용한다. 한 줄짜리 압축 보기와 Files 행의 밀도는 유지한다.
 - 선택 상태: hover, selected, inspected, active 상태가 행의 padding, 높이, 글자 굵기를 바꾸지 않아야 한다. Files/Recent 행은 장식용 side rail 없이 배경만 바꾸고, `aria-current`로 열린 항목을 표현한다.
 - 형태: Workbench의 붙어 있는 control과 row는 4 px, section surface는 6 px radius를 기본으로 한다. Inspector는 중첩 카드 대신 얇은 seam으로 나뉜 flat section을 사용한다. 큰 radius와 그림자는 modal과 떠 있는 surface에만 사용한다.
 - 아이콘: 기능 아이콘은 원칙적으로 16 px Lucide와 1.75 px stroke를 사용한다.
+- Section header의 동작은 메타데이터 또는 `xs` ghost control로 제한한다. 인덱스 재구축·사용량 재계산 같은 유지보수 동작은 강한 외곽선으로 제목과 경쟁하지 않으며, 섹션에 주요 데이터가 있으면 데이터 다음에 배치한다. 모바일에서는 시각적 밀도와 별개로 44 px touch target을 유지한다.
+- Workbench의 텍스트 버튼은 `xs`, `sm`, `md` 크기에 관계없이 13 px 기본 글자 크기를 사용한다. size variant는 높이와 좌우 padding만 바꾸며, 버튼 간 정보 위계는 variant·색·배치로 표현한다.
 - 브랜드: Workbench 안의 앱 아이콘은 동일한 도형을 유지하면서 Light와 Dark surface에 맞는 전용 색상 변형을 사용한다. 워드마크, favicon과 설치용 PWA 아이콘은 테마와 무관한 고정 자산으로 유지한다.
 - 움직임: 짧은 색상·투명도 전환만 사용하고 `prefers-reduced-motion`을 존중한다.
 

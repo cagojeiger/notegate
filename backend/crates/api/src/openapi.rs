@@ -87,6 +87,7 @@ pub struct PublicApiDoc;
         rest::link_graph::get_outgoing_links,
         rest::link_graph::get_incoming_links,
         rest::link_graph::sync_node_links,
+        rest::link_graph::get_space_link_index_status,
         rest::link_graph::reindex_space,
         rest::nodes::resolve_path,
         rest::nodes::list,

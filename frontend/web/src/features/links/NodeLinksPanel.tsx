@@ -54,7 +54,7 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
             title="Index status"
             actions={canSync ? (
               <Button
-                secondary
+                variant="ghost"
                 size="xs"
                 disabled={busy}
                 onClick={() => syncMutation.mutate(node)}

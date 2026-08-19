@@ -12,6 +12,7 @@ export type SpaceUsage = {
   text_bytes: QuotaUsage;
   file_bytes: QuotaUsage;
   reconciliation_pending: boolean;
+  reconciliation_available_at?: string;
 };
 
 export type CurrentUserUsage = {

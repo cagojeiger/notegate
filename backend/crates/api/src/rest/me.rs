@@ -13,6 +13,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use chrono::{DateTime, Utc};
 use notegate_model::{Caller, ListAuditEvents, ListBackgroundJobs, ListMcpInvocations};
 use notegate_service::usage::{CurrentUserUsage, QuotaUsage};
 use serde::{Deserialize, Serialize};
@@ -68,6 +69,7 @@ pub(crate) struct SpaceUsageOut {
     text_bytes: QuotaUsageOut,
     file_bytes: QuotaUsageOut,
     reconciliation_pending: bool,
+    reconciliation_available_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -90,6 +92,7 @@ impl From<CurrentUserUsage> for CurrentUserUsageOut {
                     text_bytes: space.text_bytes.into(),
                     file_bytes: space.file_bytes.into(),
                     reconciliation_pending: space.reconciliation_pending,
+                    reconciliation_available_at: space.reconciliation_available_at,
                 })
                 .collect(),
         }

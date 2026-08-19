@@ -88,7 +88,7 @@ export function NodeRow({
       onTouchMove={clearLongPress}
       onTouchEnd={clearLongPress}
       onTouchCancel={clearLongPress}
-      className={`group relative flex min-h-tree-row w-full items-center gap-1 rounded-workbench pr-1.5 font-ui text-workbench transition active:bg-[var(--ng-selection)] active:text-text ${inspected ? "bg-[var(--ng-selection)] text-text" : opened ? "bg-[var(--ng-active-surface)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"} ${dropTarget ? "ring-1 ring-inset ring-primary bg-[var(--ng-selection)] text-text" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+      className={`group relative flex min-h-tree-row w-full items-center gap-1 rounded-workbench pr-1.5 font-ui text-workbench transition active:bg-[var(--ng-selection)] active:text-text ${meta ? "py-0.5" : ""} ${inspected ? "bg-[var(--ng-selection)] text-text" : opened ? "bg-[var(--ng-active-surface)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"} ${dropTarget ? "ring-1 ring-inset ring-primary bg-[var(--ng-selection)] text-text" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
       style={{ paddingLeft: `${6 + depth * 11}px` }}
       onContextMenu={(event) => { event.stopPropagation(); onNodeContextMenu(node, event); }}
     >
@@ -117,7 +117,7 @@ export function NodeRow({
             </span>
           ) : null}
         </span>
-        <span className="min-w-0 flex-1">
+        <span className={`min-w-0 flex-1 ${meta ? "space-y-0.5" : ""}`}>
           <span className="block truncate">{node.name}</span>
           {meta ? <span className="block truncate text-[10px] leading-[14px] text-faint">{meta}</span> : null}
         </span>

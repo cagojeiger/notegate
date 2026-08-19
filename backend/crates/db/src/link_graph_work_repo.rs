@@ -62,6 +62,13 @@ pub enum LinkGraphChangeCollection {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkGraphSpaceRequestOutcome {
+    Requested,
+    AlreadyPending,
+    NotFound,
+}
+
 #[derive(Debug, Clone)]
 pub struct LinkGraphWorkRepo {
     pool: PgPool,
@@ -81,7 +88,27 @@ impl LinkGraphWorkRepo {
         tx.commit().await.map_err(map_sqlx_error)
     }
 
-    pub async fn request_space(&self, space_id: Uuid) -> Result<bool> {
+    pub async fn space_pending(&self, space_id: Uuid) -> Result<Option<bool>> {
+        sqlx::query_scalar(
+            "SELECT ( \
+                 EXISTS ( \
+                     SELECT 1 FROM link_graph_space_states state \
+                     WHERE state.space_id = space.id AND state.available_at IS NOT NULL \
+                 ) OR EXISTS ( \
+                     SELECT 1 FROM node_link_projections projection \
+                     WHERE projection.space_id = space.id AND projection.needs_projection \
+                 ) \
+             ) \
+             FROM spaces space \
+             WHERE space.id = $1 AND space.deleted_at IS NULL",
+        )
+        .bind(space_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)
+    }
+
+    pub async fn request_space(&self, space_id: Uuid) -> Result<LinkGraphSpaceRequestOutcome> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let live: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM spaces WHERE id = $1 AND deleted_at IS NULL)",
@@ -92,13 +119,17 @@ impl LinkGraphWorkRepo {
         .map_err(map_sqlx_error)?;
         if !live {
             tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(false);
+            return Ok(LinkGraphSpaceRequestOutcome::NotFound);
         }
         lock_space_state_in(&mut tx, space_id).await?;
+        if space_pending_in(&mut tx, space_id).await? {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return Ok(LinkGraphSpaceRequestOutcome::AlreadyPending);
+        }
         let full_scan_event_id = start_full_scan_state(&mut tx, space_id).await?;
         run_full_scan_pass(&mut tx, space_id, full_scan_event_id, None).await?;
         tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(true)
+        Ok(LinkGraphSpaceRequestOutcome::Requested)
     }
 
     pub async fn dispatch_ready_nodes(&self, space_id: Uuid, node_ids: &[Uuid]) -> Result<()> {
@@ -882,6 +913,24 @@ async fn lock_space_state_in(connection: &mut PgConnection, space_id: Uuid) -> R
         .await
         .map_err(map_sqlx_error)?;
     Ok(())
+}
+
+async fn space_pending_in(connection: &mut PgConnection, space_id: Uuid) -> Result<bool> {
+    sqlx::query_scalar(
+        "SELECT ( \
+             EXISTS ( \
+                 SELECT 1 FROM link_graph_space_states state \
+                 WHERE state.space_id = $1 AND state.available_at IS NOT NULL \
+             ) OR EXISTS ( \
+                 SELECT 1 FROM node_link_projections projection \
+                 WHERE projection.space_id = $1 AND projection.needs_projection \
+             ) \
+         )",
+    )
+    .bind(space_id)
+    .fetch_one(&mut *connection)
+    .await
+    .map_err(map_sqlx_error)
 }
 
 async fn start_full_scan_state(connection: &mut PgConnection, space_id: Uuid) -> Result<i64> {

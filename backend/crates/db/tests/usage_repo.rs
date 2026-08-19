@@ -43,6 +43,13 @@ async fn current_user_usage_reads_space_counters() -> Result<(), Box<dyn std::er
     assert_eq!(space.live_text_bytes, 123);
     assert_eq!(space.live_file_bytes, 45);
     assert!(!space.reconciliation_pending);
+    let available_at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+        "SELECT reconciled_at + interval '1 hour' FROM space_usage WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(space.reconciliation_available_at, available_at);
 
     db.cleanup().await;
     Ok(())

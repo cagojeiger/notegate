@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createMockApiClient } from "../test/apiClient";
 import {
+  getSpaceLinkIndexStatus,
   getNodeLinkStatus,
   listNodeLinks,
   requestNodeLinkSync,
@@ -45,6 +46,17 @@ describe("links api", () => {
     expect(client.post).toHaveBeenNthCalledWith(
       2,
       "/api/v1/spaces/space-1/link-index/reindex"
+    );
+  });
+
+  it("loads the Space link index status", async () => {
+    const client = createMockApiClient();
+    client.get.mockResolvedValue({ pending: true });
+
+    await getSpaceLinkIndexStatus(client, "space-1");
+
+    expect(client.get).toHaveBeenCalledWith(
+      "/api/v1/spaces/space-1/link-index/status"
     );
   });
 });
