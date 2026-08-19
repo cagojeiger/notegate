@@ -10,14 +10,30 @@ export function BrandAppIcon({
   decorative?: boolean;
 }) {
   return (
-    <img
-      src="/brand/source/app-icon.svg"
-      width={size}
-      height={size}
-      alt={decorative ? "" : "NoteGate"}
+    <span
+      role={decorative ? undefined : "img"}
+      aria-label={decorative ? undefined : "NoteGate"}
       aria-hidden={decorative || undefined}
-      className={cn("shrink-0", className)}
-    />
+      className={cn("grid shrink-0", className)}
+      style={{ width: size, height: size }}
+    >
+      <img
+        src="/brand/source/app-icon-light.svg"
+        width={size}
+        height={size}
+        alt=""
+        aria-hidden="true"
+        className="ng-brand-theme-light col-start-1 row-start-1 h-full w-full"
+      />
+      <img
+        src="/brand/source/app-icon-dark.svg"
+        width={size}
+        height={size}
+        alt=""
+        aria-hidden="true"
+        className="ng-brand-theme-dark col-start-1 row-start-1 h-full w-full"
+      />
+    </span>
   );
 }
 

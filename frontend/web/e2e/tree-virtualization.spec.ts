@@ -49,7 +49,8 @@ for (const viewport of [
     await expect(tree).toBeVisible();
     const treeFontFamily = await tree.evaluate((element) => getComputedStyle(element).fontFamily);
     const titleFontFamily = await page.locator("header").first().evaluate((element) => getComputedStyle(element).fontFamily);
-    expect(treeFontFamily).toContain("LINE Seed Sans KR");
+    expect(treeFontFamily).toContain("-apple-system");
+    expect(treeFontFamily).not.toContain("LINE Seed Sans KR");
     expect(treeFontFamily).toBe(titleFontFamily);
     if (!viewport.opensOverlay) {
       const inspectorFontFamily = await page.getByRole("complementary", { name: "Inspector" })

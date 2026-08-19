@@ -4,7 +4,6 @@ import ReactDOM from "react-dom/client";
 import { App } from "./app/App";
 import { installDeploymentRecovery } from "./app/deploymentRecovery";
 import { bootstrapUiStore } from "./stores/uiStore";
-import "./design/fonts.css";
 import "./styles/globals.css";
 
 installDeploymentRecovery();

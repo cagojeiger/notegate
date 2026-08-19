@@ -54,7 +54,7 @@ export function EventHistoryModal({
   return (
     <Modal title="History" onClose={onClose} width="max-w-5xl">
       <Tabs items={tabs} value={tab} onChange={setTab} label="History sections" />
-      <div className="min-h-[34rem] max-h-[min(68vh,42rem)] overflow-y-auto pr-1">
+      <div className="min-h-[20rem] max-h-[min(68vh,42rem)] overflow-y-auto pr-1 sm:min-h-[24rem]">
         {canViewAuditEvents && tab === "audit" ? <AuditEventsPanel /> : null}
         {canViewAuditEvents && tab === "mcp" ? <McpInvocationsPanel /> : null}
         {canViewAuditEvents && tab === "jobs" ? <BackgroundJobsPanel /> : null}
@@ -100,15 +100,15 @@ function BackgroundJobRow({ job }: { job: BackgroundJob }) {
   const toggleLabel = `${open ? "Hide" : "Show"} attempts for ${jobLabel(currentJob.kind)}`;
 
   return (
-    <li className="group relative flex gap-3 border-b border-seam py-3 last:border-b-0">
+    <li className="group relative flex gap-3 border-b border-seam py-2 last:border-b-0">
       <div className="relative flex w-4 shrink-0 justify-center" aria-hidden="true">
         <span className="absolute bottom-[-0.75rem] top-3 w-px bg-seam group-last:hidden" />
         <span className={`relative mt-1.5 size-2 rounded-full ring-4 ring-surface ${presentation.dot}`} />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
           <div className="min-w-0">
-            <div className="truncate text-sm font-medium text-text">{jobLabel(currentJob.kind)}</div>
+            <div className="text-workbench font-medium text-text sm:truncate">{jobLabel(currentJob.kind)}</div>
             <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted">
               {currentJob.context_label ? <><span className="truncate" title={currentJob.context_label}>{formatJobContext(currentJob.context_kind, currentJob.context_label)}</span><span aria-hidden="true">·</span></> : null}
               <span className={presentation.text}>{presentation.label}</span>
@@ -118,7 +118,7 @@ function BackgroundJobRow({ job }: { job: BackgroundJob }) {
               {currentJob.last_error_code ? <><span aria-hidden="true">·</span><span className="font-mono text-danger">{currentJob.last_error_code}</span></> : null}
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex items-center justify-between gap-1 sm:shrink-0 sm:justify-start">
             <JobTimes job={currentJob} />
             <button
               type="button"
@@ -200,7 +200,7 @@ function formatAttemptOutcome(outcome: string) {
 
 function JobTimes({ job }: { job: BackgroundJob }) {
   return (
-    <div className="flex flex-col items-end text-xs text-muted">
+    <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted sm:flex-col sm:items-end sm:gap-x-0">
       <LifecycleTime label="Queued" value={job.created_at} />
       {job.completed_at ? <LifecycleTime label="Finished" value={job.completed_at} /> : null}
     </div>
@@ -242,7 +242,7 @@ function AuditEventsPanel() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-3">
-                    <div className="truncate text-sm font-medium text-text">{action}</div>
+                    <div className="truncate text-workbench font-medium text-text">{action}</div>
                     <EventTime value={event.created_at} />
                   </div>
                   <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted">
@@ -306,7 +306,7 @@ function McpInvocationRow({ invocation }: { invocation: McpInvocation }) {
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-3">
-          <div className="truncate text-sm font-medium text-text" title={invocation.purpose ?? undefined}>
+          <div className="truncate text-workbench font-medium text-text" title={invocation.purpose ?? undefined}>
             {invocation.purpose ?? "Checked caller identity"}
           </div>
           <EventTime value={invocation.created_at} />
@@ -401,7 +401,7 @@ function FileChangeEventRow({ event }: { event: FileChangeEvent }) {
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-3">
-          <div className="truncate text-sm font-medium text-text">{formatFileChangeAction(event)}</div>
+          <div className="truncate text-workbench font-medium text-text">{formatFileChangeAction(event)}</div>
           <div className="flex shrink-0 items-center gap-1">
             <EventTime value={event.created_at} />
             {details.length > 0 ? (
@@ -464,7 +464,7 @@ function RefreshButton({
 }
 
 function EventQueryState<T extends EventListResponse>({ query, itemCount, emptyLabel }: { query: EventHistoryQuery<T>; itemCount: number; emptyLabel: string }) {
-  if (query.isLoading) return <div className="text-sm text-muted">Loading…</div>;
+  if (query.isLoading) return <div className="text-workbench text-muted">Loading…</div>;
   if (query.isError) return <EmptyState>Could not load history.</EmptyState>;
   if (itemCount === 0) return <EmptyState>{emptyLabel}</EmptyState>;
   return null;

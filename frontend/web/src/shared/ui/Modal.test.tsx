@@ -47,6 +47,9 @@ describe("Modal", () => {
     const close = screen.getByRole("button", { name: "Close" });
     const save = screen.getByRole("button", { name: "Save" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveClass("font-ui", "text-workbench");
+    expect(dialog).toHaveClass("rounded-lg");
+    expect(screen.getByRole("heading", { name: "Accessible modal" })).toHaveClass("text-base");
     await waitFor(() => expect(close).toHaveFocus());
 
     await user.tab({ shift: true });

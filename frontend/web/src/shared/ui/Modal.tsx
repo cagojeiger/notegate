@@ -97,14 +97,14 @@ export function Modal({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`relative w-full ${width} border border-border bg-panel shadow-[var(--ng-focus-shadow)] ${
+        className={`relative w-full ${width} border border-border bg-panel font-ui text-workbench shadow-[var(--ng-focus-shadow)] ${
           bottomSheet
             ? "flex h-[82dvh] flex-col overflow-hidden rounded-t-2xl border-b-0"
-            : "max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl p-6"
+            : "max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg p-6"
         }`}
       >
         <div className={`flex items-center justify-between ${bottomSheet ? "h-12 shrink-0 border-b border-seam px-3" : "mb-4"}`}>
-          <h2 id={titleId} className={bottomSheet ? "text-sm font-medium" : "text-lg font-semibold"}>{title}</h2>
+          <h2 id={titleId} className={bottomSheet ? "text-sm font-medium" : "text-base font-semibold"}>{title}</h2>
           <IconButton label="Close" onClick={onClose}><X size={16} /></IconButton>
         </div>
         {bottomSheet ? (
