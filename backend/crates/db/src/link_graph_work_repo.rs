@@ -93,10 +93,14 @@ impl LinkGraphWorkRepo {
             "SELECT ( \
                  EXISTS ( \
                      SELECT 1 FROM link_graph_space_states state \
-                     WHERE state.space_id = space.id AND state.available_at IS NOT NULL \
+                     WHERE state.space_id = space.id \
+                       AND state.full_scan_event_id IS NOT NULL \
                  ) OR EXISTS ( \
                      SELECT 1 FROM node_link_projections projection \
-                     WHERE projection.space_id = space.id AND projection.needs_projection \
+                     JOIN background_jobs job ON job.job_id = projection.active_job_id \
+                     WHERE projection.space_id = space.id \
+                       AND projection.needs_projection \
+                       AND job.status IN ('queued', 'running') \
                  ) \
              ) \
              FROM spaces space \
@@ -122,7 +126,7 @@ impl LinkGraphWorkRepo {
             return Ok(LinkGraphSpaceRequestOutcome::NotFound);
         }
         lock_space_state_in(&mut tx, space_id).await?;
-        if full_scan_pending_in(&mut tx, space_id).await? {
+        if reindex_pending_in(&mut tx, space_id).await? {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(LinkGraphSpaceRequestOutcome::AlreadyPending);
         }
@@ -915,11 +919,19 @@ async fn lock_space_state_in(connection: &mut PgConnection, space_id: Uuid) -> R
     Ok(())
 }
 
-async fn full_scan_pending_in(connection: &mut PgConnection, space_id: Uuid) -> Result<bool> {
+async fn reindex_pending_in(connection: &mut PgConnection, space_id: Uuid) -> Result<bool> {
     sqlx::query_scalar(
-        "SELECT EXISTS ( \
-             SELECT 1 FROM link_graph_space_states state \
-             WHERE state.space_id = $1 AND state.full_scan_event_id IS NOT NULL \
+        "SELECT ( \
+             EXISTS ( \
+                 SELECT 1 FROM link_graph_space_states state \
+                 WHERE state.space_id = $1 AND state.full_scan_event_id IS NOT NULL \
+             ) OR EXISTS ( \
+                 SELECT 1 FROM node_link_projections projection \
+                 JOIN background_jobs job ON job.job_id = projection.active_job_id \
+                 WHERE projection.space_id = $1 \
+                   AND projection.needs_projection \
+                   AND job.status IN ('queued', 'running') \
+             ) \
          )",
     )
     .bind(space_id)

@@ -123,7 +123,16 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     )
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{accepted}");
-    assert_eq!(accepted["status"], json!("already_pending"));
+    assert_eq!(accepted["status"], json!("accepted"));
+
+    let (status, duplicate) = empty_request(
+        rest_app(state.clone(), owner.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/link-index/reindex"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::ACCEPTED, "{duplicate}");
+    assert_eq!(duplicate["status"], json!("already_pending"));
 
     let mut api_owner = owner.clone();
     api_owner.channel = Channel::Api;
