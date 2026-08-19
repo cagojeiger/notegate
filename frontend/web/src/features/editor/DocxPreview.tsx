@@ -10,6 +10,14 @@ import {
 type PreviewStatus = "loading" | "ready" | "error";
 
 const DOCX_CLASS_NAME = "ng-docx";
+const DOCX_FRAME_LAYOUT_CSS = `
+.${DOCX_CLASS_NAME}-wrapper {
+  align-items: flex-start;
+}
+.${DOCX_CLASS_NAME}-wrapper > section.${DOCX_CLASS_NAME} {
+  margin-inline: auto;
+}
+`;
 const DOCX_FRAME_CSP = [
   "default-src 'none'",
   "img-src blob:",
@@ -73,7 +81,8 @@ export function DocxPreview({
         }
         previewDocument.head.replaceChildren(
           createFrameCsp(previewDocument),
-          ...styleNodes.map((node) => previewDocument.adoptNode(node))
+          ...styleNodes.map((node) => previewDocument.adoptNode(node)),
+          createFrameLayoutStyle(previewDocument)
         );
         previewDocument.body.replaceChildren(
           ...bodyNodes.map((node) => previewDocument.adoptNode(node))
@@ -295,6 +304,13 @@ function createFrameCsp(previewDocument: Document) {
   meta.httpEquiv = "Content-Security-Policy";
   meta.content = DOCX_FRAME_CSP;
   return meta;
+}
+
+function createFrameLayoutStyle(previewDocument: Document) {
+  const style = previewDocument.createElement("style");
+  style.dataset.notegateDocxLayout = "true";
+  style.textContent = DOCX_FRAME_LAYOUT_CSS;
+  return style;
 }
 
 function isSafeResourceUrl(value: string) {
