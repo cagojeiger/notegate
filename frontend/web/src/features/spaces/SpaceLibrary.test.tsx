@@ -64,8 +64,10 @@ function renderLibrary(options: {
   usagePollingEnabled?: boolean;
   inspectorOpen?: boolean;
   onOpenSpace?: (space: Space) => void;
+  spaces?: Space[];
 } = {}) {
   const isMobile = options.isMobile ?? false;
+  const librarySpaces = options.spaces ?? spaces;
 
   function LibraryHarness() {
     const [inspectorOpen, setInspectorOpen] = useState(
@@ -74,8 +76,8 @@ function renderLibrary(options: {
 
     return (
       <SpaceLibrary
-        spaces={spaces}
-        activeSpace={spaces[0]}
+        spaces={librarySpaces}
+        activeSpace={librarySpaces[0] ?? null}
         isMobile={isMobile}
         usagePollingEnabled={options.usagePollingEnabled ?? true}
         inspectorOpen={inspectorOpen}
@@ -291,6 +293,28 @@ describe("SpaceLibrary", () => {
     await user.click(reindex);
 
     expect(mocks.reindexLinks).toHaveBeenCalledWith("daily");
+  });
+
+  it("does not load or show link index status for a read-only Space", () => {
+    const readOnlySpace = makeSpace({
+      id: "shared",
+      name: "Shared",
+      permission: "read"
+    });
+    mocks.useSpaceLinkIndexStatusQuery.mockReturnValue({
+      data: { pending: true },
+      isError: true,
+      isLoading: false
+    });
+
+    renderLibrary({ spaces: [readOnlySpace] });
+
+    expect(mocks.useSpaceLinkIndexStatusQuery).toHaveBeenLastCalledWith("shared", false);
+    const reindex = screen.getByRole("button", { name: "Reindex links in Shared" });
+    expect(reindex).toBeDisabled();
+    expect(reindex).toHaveTextContent(/^Reindex$/);
+    expect(screen.queryByText("Link indexing is in progress.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Could not load link index status.")).not.toBeInTheDocument();
   });
 
   it("disables reindex while the server reports link indexing in progress", () => {

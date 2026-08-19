@@ -2457,6 +2457,125 @@ async fn manual_reindex_does_not_restart_an_active_full_scan()
 }
 
 #[tokio::test]
+async fn capacity_saturated_full_reindex_keeps_its_staged_batch_pending()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "link-full-capacity").await?;
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    insert_text_nodes(&db.pool, account, space_id, root_id, "capacity", 500).await?;
+    sqlx::query(
+        "INSERT INTO background_jobs (job_kind, payload) \
+         SELECT $1, '{}'::jsonb FROM generate_series(1::bigint, $2)",
+    )
+    .bind(LinkGraphProjectNodesJob::KIND)
+    .bind(LINK_GRAPH_ACTIVE_JOB_MAX)
+    .execute(&db.pool)
+    .await?;
+
+    assert_eq!(work.space_pending(space_id).await?, Some(false));
+    assert_eq!(
+        work.request_space(space_id).await?,
+        LinkGraphSpaceRequestOutcome::Requested
+    );
+    let (staged_targets, full_scan_finished, min_version, max_version): (i64, bool, i64, i64) =
+        sqlx::query_as(
+            "SELECT \
+                 (SELECT count(*) FROM node_link_projections \
+                  WHERE space_id = $1 AND needs_projection \
+                    AND active_job_id IS NULL AND failed_at IS NULL), \
+                 (SELECT full_scan_event_id IS NULL FROM link_graph_space_states \
+                  WHERE space_id = $1), \
+                 (SELECT min(request_version) FROM node_link_projections \
+                  WHERE space_id = $1), \
+                 (SELECT max(request_version) FROM node_link_projections \
+                  WHERE space_id = $1)",
+        )
+        .bind(space_id)
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(staged_targets, 500);
+    assert!(full_scan_finished);
+    assert_eq!((min_version, max_version), (1, 1));
+    assert_eq!(work.space_pending(space_id).await?, Some(true));
+
+    assert_eq!(
+        work.request_space(space_id).await?,
+        LinkGraphSpaceRequestOutcome::AlreadyPending
+    );
+    let (min_version, max_version): (i64, i64) = sqlx::query_as(
+        "SELECT min(request_version), max(request_version) \
+         FROM node_link_projections WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!((min_version, max_version), (1, 1));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn unsettled_succeeded_projection_keeps_reindex_pending()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "link-succeeded-pending").await?;
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    let graph = LinkGraphRepo::new(db.pool.clone());
+    insert_text_nodes(&db.pool, account, space_id, root_id, "succeeded", 1).await?;
+    let source_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM nodes \
+         WHERE space_id = $1 AND parent_id = $2 AND kind = 'text'",
+    )
+    .bind(space_id)
+    .bind(root_id)
+    .fetch_one(&db.pool)
+    .await?;
+    work.request_nodes(space_id, &[source_id]).await?;
+    let (request_version, job_id): (i64, Uuid) = sqlx::query_as(
+        "SELECT request_version, active_job_id FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
+    )
+    .bind(space_id)
+    .bind(source_id)
+    .fetch_one(&db.pool)
+    .await?;
+    sqlx::query(
+        "UPDATE background_jobs \
+         SET status = 'succeeded', completed_at = now(), updated_at = now() \
+         WHERE job_id = $1",
+    )
+    .bind(job_id)
+    .execute(&db.pool)
+    .await?;
+
+    let node_state = graph.state(space_id, source_id).await?;
+    assert_eq!(node_state.status, NodeLinkGraphStatus::Failed);
+    assert!(node_state.space_pending);
+    assert_eq!(work.space_pending(space_id).await?, Some(true));
+    assert_eq!(
+        work.request_space(space_id).await?,
+        LinkGraphSpaceRequestOutcome::AlreadyPending
+    );
+    let unchanged_version: i64 = sqlx::query_scalar(
+        "SELECT request_version FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
+    )
+    .bind(space_id)
+    .bind(source_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(unchanged_version, request_version);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn expired_claim_cannot_publish_after_the_job_is_reclaimed()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {

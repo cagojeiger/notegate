@@ -7,7 +7,10 @@
 )]
 
 use axum::http::StatusCode;
-use notegate_db::{LinkGraphProjectNodesJob, LinkGraphProjectNodesPayload, test_support::TestDb};
+use notegate_db::{
+    LINK_GRAPH_ACTIVE_JOB_MAX, LinkGraphProjectNodesJob, LinkGraphProjectNodesPayload,
+    test_support::TestDb,
+};
 use notegate_jobs::{JobQueue, JobSpec};
 use notegate_model::{Caller, CallerIdentity, Channel, ResolveAttrs};
 use notegate_service::files::{CreateText, WriteTarget, WriteText, WriteTextBody};
@@ -182,6 +185,75 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     )
     .await?;
     assert_eq!(status, StatusCode::NOT_FOUND, "{hidden}");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rest_reindex_stays_pending_when_projection_job_capacity_is_saturated()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state(&db);
+    let (owner, space_id, root_id) = caller_and_space(&state).await?;
+    state
+        .files
+        .create_text(
+            owner.account_id(),
+            space_id,
+            CreateText {
+                parent_node_id: root_id,
+                name: "source.md".to_owned(),
+            },
+        )
+        .await?;
+    sqlx::query(
+        "INSERT INTO background_jobs (job_kind, payload) \
+         SELECT $1, '{}'::jsonb FROM generate_series(1::bigint, $2)",
+    )
+    .bind(LinkGraphProjectNodesJob::KIND)
+    .bind(LINK_GRAPH_ACTIVE_JOB_MAX)
+    .execute(&db.pool)
+    .await?;
+
+    let (status, accepted) = empty_request(
+        rest_app(state.clone(), owner.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/link-index/reindex"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::ACCEPTED, "{accepted}");
+    assert_eq!(accepted["status"], json!("accepted"));
+
+    let staged_without_job: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+             SELECT 1 FROM node_link_projections \
+             WHERE space_id = $1 AND needs_projection \
+               AND active_job_id IS NULL AND failed_at IS NULL \
+         )",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert!(staged_without_job);
+    let (status, index_status) = get_json(
+        rest_app(state.clone(), owner.clone()),
+        format!("/v1/spaces/{space_id}/link-index/status"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{index_status}");
+    assert_eq!(index_status["pending"], json!(true));
+
+    let (status, duplicate) = empty_request(
+        rest_app(state, owner),
+        "POST",
+        format!("/v1/spaces/{space_id}/link-index/reindex"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::ACCEPTED, "{duplicate}");
+    assert_eq!(duplicate["status"], json!("already_pending"));
 
     db.cleanup().await;
     Ok(())

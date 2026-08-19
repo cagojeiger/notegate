@@ -198,7 +198,8 @@ function SpaceInspector({
   showHeader = true
 }: SpaceInspectorProps) {
   const reindexLinks = useReindexSpaceLinksMutation();
-  const linkIndexStatus = useSpaceLinkIndexStatusQuery(space?.id, Boolean(space));
+  const canReindexLinks = space?.permission === "write";
+  const linkIndexStatus = useSpaceLinkIndexStatusQuery(space?.id, canReindexLinks);
   const isChecking = !!space && Boolean(usage?.reconciliation_pending || usageCheck.isRequesting);
   const reconciliationAvailableAt = usage?.reconciliation_available_at;
   const isCooldown = useTimestampInFuture(reconciliationAvailableAt);
@@ -239,7 +240,7 @@ function SpaceInspector({
       : undefined;
   const reindexForCurrentSpace = Boolean(space && reindexLinks.variables === space.id);
   const reindexPending = reindexForCurrentSpace && reindexLinks.isPending;
-  const linkIndexPending = Boolean(linkIndexStatus.data?.pending || reindexPending);
+  const linkIndexPending = canReindexLinks && Boolean(linkIndexStatus.data?.pending || reindexPending);
   const linkIndexUnavailable = linkIndexStatus.isLoading || linkIndexStatus.isError || linkIndexPending;
 
   return (
@@ -323,7 +324,7 @@ function SpaceInspector({
                 <Button
                   variant="secondary"
                   size="xs"
-                  disabled={space.permission !== "write" || linkIndexUnavailable}
+                  disabled={!canReindexLinks || linkIndexUnavailable}
                   onClick={() => reindexLinks.mutate(space.id)}
                   aria-label={`Reindex links in ${space.name}`}
                 >
@@ -337,7 +338,7 @@ function SpaceInspector({
             ) : reindexForCurrentSpace && reindexLinks.isSuccess ? (
               <p className="text-xs text-muted" role="status">Link index is up to date.</p>
             ) : null}
-            {linkIndexStatus.isError ? (
+            {canReindexLinks && linkIndexStatus.isError ? (
               <p className="text-xs text-danger" role="alert">Could not load link index status.</p>
             ) : reindexForCurrentSpace && reindexLinks.isError ? (
               <p className="text-xs text-danger" role="alert">Could not request link reindex.</p>

@@ -89,27 +89,8 @@ impl LinkGraphWorkRepo {
     }
 
     pub async fn space_pending(&self, space_id: Uuid) -> Result<Option<bool>> {
-        sqlx::query_scalar(
-            "SELECT ( \
-                 EXISTS ( \
-                     SELECT 1 FROM link_graph_space_states state \
-                     WHERE state.space_id = space.id \
-                       AND state.full_scan_event_id IS NOT NULL \
-                 ) OR EXISTS ( \
-                     SELECT 1 FROM node_link_projections projection \
-                     JOIN background_jobs job ON job.job_id = projection.active_job_id \
-                     WHERE projection.space_id = space.id \
-                       AND projection.needs_projection \
-                       AND job.status IN ('queued', 'running') \
-                 ) \
-             ) \
-             FROM spaces space \
-             WHERE space.id = $1 AND space.deleted_at IS NULL",
-        )
-        .bind(space_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_sqlx_error)
+        let mut connection = self.pool.acquire().await.map_err(map_sqlx_error)?;
+        space_pending_in(&mut connection, space_id).await
     }
 
     pub async fn request_space(&self, space_id: Uuid) -> Result<LinkGraphSpaceRequestOutcome> {
@@ -126,7 +107,7 @@ impl LinkGraphWorkRepo {
             return Ok(LinkGraphSpaceRequestOutcome::NotFound);
         }
         lock_space_state_in(&mut tx, space_id).await?;
-        if reindex_pending_in(&mut tx, space_id).await? {
+        if space_pending_in(&mut tx, space_id).await? == Some(true) {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(LinkGraphSpaceRequestOutcome::AlreadyPending);
         }
@@ -945,23 +926,35 @@ async fn lock_space_state_in(connection: &mut PgConnection, space_id: Uuid) -> R
     Ok(())
 }
 
-async fn reindex_pending_in(connection: &mut PgConnection, space_id: Uuid) -> Result<bool> {
+async fn space_pending_in(connection: &mut PgConnection, space_id: Uuid) -> Result<Option<bool>> {
     sqlx::query_scalar(
         "SELECT ( \
              EXISTS ( \
                  SELECT 1 FROM link_graph_space_states state \
-                 WHERE state.space_id = $1 AND state.full_scan_event_id IS NOT NULL \
+                 WHERE state.space_id = space.id \
+                   AND state.full_scan_event_id IS NOT NULL \
              ) OR EXISTS ( \
                  SELECT 1 FROM node_link_projections projection \
-                 JOIN background_jobs job ON job.job_id = projection.active_job_id \
-                 WHERE projection.space_id = $1 \
+                 LEFT JOIN background_jobs job ON job.job_id = projection.active_job_id \
+                 WHERE projection.space_id = space.id \
                    AND projection.needs_projection \
-                   AND job.status IN ('queued', 'running') \
+                   AND ( \
+                       (projection.active_job_id IS NULL \
+                        AND projection.failed_at IS NULL) \
+                       OR job.status IN ('queued', 'running', 'succeeded') \
+                       OR ( \
+                           job.status = 'dead' \
+                           AND projection.active_request_version \
+                               IS DISTINCT FROM projection.request_version \
+                       ) \
+                   ) \
              ) \
-         )",
+         ) \
+         FROM spaces space \
+         WHERE space.id = $1 AND space.deleted_at IS NULL",
     )
     .bind(space_id)
-    .fetch_one(&mut *connection)
+    .fetch_optional(&mut *connection)
     .await
     .map_err(map_sqlx_error)
 }
