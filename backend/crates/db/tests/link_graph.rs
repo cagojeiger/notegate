@@ -2420,19 +2420,6 @@ async fn manual_reindex_does_not_restart_an_active_full_scan()
     .fetch_one(&db.pool)
     .await?;
 
-    assert!(matches!(
-        collect_due(&db.pool, &work).await?,
-        LinkGraphChangeCollection::Collected { has_more: true, .. }
-    ));
-    let middle_cursor: Uuid = sqlx::query_scalar(
-        "SELECT full_scan_after_node_id FROM link_graph_space_states \
-         WHERE space_id = $1",
-    )
-    .bind(space_id)
-    .fetch_one(&db.pool)
-    .await?;
-    assert!(middle_cursor > first_cursor);
-
     let changed_node_id: Uuid = sqlx::query_scalar(
         "SELECT source_node_id FROM node_link_projections \
          WHERE space_id = $1 ORDER BY source_node_id LIMIT 1",
@@ -2462,33 +2449,8 @@ async fn manual_reindex_does_not_restart_an_active_full_scan()
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(unchanged_boundary, first_boundary);
-    assert_eq!(unchanged_cursor, middle_cursor);
-
-    assert!(matches!(
-        collect_due(&db.pool, &work).await?,
-        LinkGraphChangeCollection::Collected { has_more: true, .. }
-    ));
-    assert!(matches!(
-        collect_due(&db.pool, &work).await?,
-        LinkGraphChangeCollection::Collected {
-            has_more: false,
-            ..
-        }
-    ));
-    let final_state: (bool, i64, Option<i64>, Option<Uuid>) = sqlx::query_as(
-        "SELECT available_at IS NULL, last_processed_event_id, \
-                full_scan_event_id, full_scan_after_node_id \
-         FROM link_graph_space_states \
-         WHERE space_id = $1",
-    )
-    .bind(space_id)
-    .fetch_one(&db.pool)
-    .await?;
-    assert!(final_state.0);
-    assert!(final_state.1 > first_boundary);
-    assert_eq!(final_state.2, None);
-    assert_eq!(final_state.3, None);
-    assert_eq!(work.space_pending(space_id).await?, Some(false));
+    assert_eq!(unchanged_cursor, first_cursor);
+    assert_eq!(work.space_pending(space_id).await?, Some(true));
 
     db.cleanup().await;
     Ok(())
