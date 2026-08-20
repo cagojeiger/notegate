@@ -44,7 +44,7 @@ export function StatusBar({
               <HardDrive size={13} aria-hidden="true" />
               {formatBytes(usedBytes)} used
             </span>
-            {usage.reconciliation_pending ? (
+            {usage.reconciliation?.status === "pending" ? (
               <span role="status" title="Usage is updating" aria-label="Usage is updating">
                 <RefreshCw size={12} aria-hidden="true" />
               </span>

@@ -11,10 +11,10 @@ use std::time::Duration;
 
 use common::{TestDb, space_with_root};
 use notegate_db::{
-    FilesRepo, LINK_GRAPH_ACTIVE_JOB_MAX, LinkGraphChangeCollection, LinkGraphProjectNodesJob,
-    LinkGraphProjection, LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphSourceSnapshot,
-    LinkGraphSpaceRequestOutcome, LinkGraphStoredReference, LinkGraphWorkRepo, SpaceRepo,
-    TextMutationKind,
+    FilesRepo, LINK_GRAPH_ACTIVE_JOB_MAX, LinkGraphChangeCollection, LinkGraphNodeRequestOutcome,
+    LinkGraphProjectNodesJob, LinkGraphProjection, LinkGraphProjectionClaim, LinkGraphRepo,
+    LinkGraphSourceSnapshot, LinkGraphSpaceRequestOutcome, LinkGraphStoredReference,
+    LinkGraphWorkRepo, SpaceRepo, TextMutationKind,
 };
 use notegate_jobs::{ClaimedJob, JobQueue, JobSpec};
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
@@ -1503,7 +1503,10 @@ async fn dead_projection_job_is_recorded_and_manual_sync_reactivates_the_node()
     .await?;
     assert_eq!(job_count, 1);
 
-    work.request_nodes(space_id, &[source.id]).await?;
+    assert_eq!(
+        work.request_node(space_id, source.id).await?,
+        LinkGraphNodeRequestOutcome::Requested
+    );
     let reactivated: (
         i64,
         Uuid,
@@ -1708,7 +1711,10 @@ async fn manual_sync_supersedes_an_unsettled_dead_projection_job()
     .await?;
     mark_job_dead(&db.pool, first_job_id).await?;
 
-    work.request_nodes(space_id, &[source.id]).await?;
+    assert_eq!(
+        work.request_node(space_id, source.id).await?,
+        LinkGraphNodeRequestOutcome::Requested
+    );
 
     let (request_version, active_job_id, active_request_version, failure_code): (
         i64,
@@ -1839,6 +1845,61 @@ async fn duplicate_node_requests_coalesce_before_job_dispatch()
     .await?;
     assert_eq!(target_count, 1);
     assert_eq!(payload["sources"].as_array().expect("sources").len(), 1);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn concurrent_manual_node_requests_enqueue_once() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) =
+        space_with_root(&db.pool, "link-concurrent-node-request").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    let (source, _) = files
+        .insert_text(
+            space_id,
+            root_id,
+            "source.md",
+            &text("source", 'c'),
+            account,
+        )
+        .await?;
+
+    let first = work.clone();
+    let second = work.clone();
+    let (first_result, second_result) = tokio::join!(
+        first.request_node(space_id, source.id),
+        second.request_node(space_id, source.id),
+    );
+    let outcomes = [first_result?, second_result?];
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, LinkGraphNodeRequestOutcome::Requested))
+            .count(),
+        1
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, LinkGraphNodeRequestOutcome::AlreadyPending))
+            .count(),
+        1
+    );
+    let job_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM background_jobs \
+         WHERE job_kind = 'link_graph_project_nodes' \
+           AND payload ->> 'space_id' = $1::text \
+           AND status IN ('queued', 'running')",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(job_count, 1);
 
     db.cleanup().await;
     Ok(())
@@ -2557,6 +2618,10 @@ async fn unsettled_succeeded_projection_keeps_reindex_pending()
     assert_eq!(node_state.status, NodeLinkGraphStatus::Failed);
     assert!(node_state.space_pending);
     assert_eq!(work.space_pending(space_id).await?, Some(true));
+    assert_eq!(
+        work.request_node(space_id, source_id).await?,
+        LinkGraphNodeRequestOutcome::AlreadyPending
+    );
     assert_eq!(
         work.request_space(space_id).await?,
         LinkGraphSpaceRequestOutcome::AlreadyPending

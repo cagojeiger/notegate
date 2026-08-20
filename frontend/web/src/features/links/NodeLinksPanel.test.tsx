@@ -53,7 +53,8 @@ describe("NodeLinksPanel", () => {
         space_pending: false,
         projected_at: "2026-08-18T00:00:00Z",
         failure_code: null,
-        failed_at: null
+        failed_at: null,
+        availability: { can_trigger: true, reason: null, retry_at: null }
       },
       isError: false,
       isLoading: false
@@ -120,6 +121,43 @@ describe("NodeLinksPanel", () => {
     expect(mocks.fetchOutgoing).toHaveBeenCalledTimes(1);
     expect(mocks.sync).toHaveBeenCalledWith(expect.objectContaining({ id: "node-1" }));
     expect(screen.queryByRole("button", { name: /load more/i })).not.toBeInTheDocument();
+  });
+
+  it("disables manual sync when the server reports the command unavailable", () => {
+    mocks.useNodeLinkStatusQuery.mockReturnValue({
+      data: {
+        status: "failed",
+        space_pending: true,
+        projected_at: null,
+        failure_code: "job_unsettled",
+        failed_at: "2026-08-20T00:00:00Z",
+        availability: { can_trigger: false, reason: "pending", retry_at: null }
+      },
+      isError: false,
+      isLoading: false
+    });
+
+    renderPanel();
+
+    expect(screen.getByRole("button", { name: "Sync links for note.md" })).toBeDisabled();
+  });
+
+  it("fails closed while a cached status still lacks command availability", () => {
+    mocks.useNodeLinkStatusQuery.mockReturnValue({
+      data: {
+        status: "idle",
+        space_pending: false,
+        projected_at: null,
+        failure_code: null,
+        failed_at: null
+      },
+      isError: false,
+      isLoading: false
+    });
+
+    renderPanel();
+
+    expect(screen.getByRole("button", { name: "Sync links for note.md" })).toBeDisabled();
   });
 
   it("keeps both relation headers visible and expands only the selected list", async () => {
@@ -238,7 +276,8 @@ describe("NodeLinksPanel", () => {
         space_pending: true,
         projected_at: null,
         failure_code: null,
-        failed_at: null
+        failed_at: null,
+        availability: { can_trigger: true, reason: null, retry_at: null }
       },
       isError: false,
       isLoading: false
@@ -253,7 +292,8 @@ describe("NodeLinksPanel", () => {
         space_pending: false,
         projected_at: "2026-08-18T00:00:00Z",
         failure_code: null,
-        failed_at: null
+        failed_at: null,
+        availability: { can_trigger: true, reason: null, retry_at: null }
       },
       isError: false,
       isLoading: false

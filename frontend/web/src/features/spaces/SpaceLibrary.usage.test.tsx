@@ -30,7 +30,10 @@ const usage: CurrentUserUsage = {
     items: { used: 319, limit: 1_999 },
     text_bytes: { used: 48_120_320, limit: 134_217_728 },
     file_bytes: { used: 80_000_000, limit: 134_217_728 },
-    reconciliation_pending: false
+    reconciliation: {
+      status: "idle",
+      availability: { can_trigger: true, reason: null, retry_at: null }
+    }
   }]
 };
 
@@ -94,11 +97,22 @@ describe("SpaceLibrary usage", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
       if (init?.method === "POST") {
         pending = true;
-        return jsonResponse({ status: "accepted", job_id: "job-1" }, 202);
+        return jsonResponse({
+          result: "accepted",
+          availability: { can_trigger: false, reason: "pending", retry_at: null }
+        }, 202);
       }
       return jsonResponse({
         ...usage,
-        spaces: usage.spaces.map((item) => ({ ...item, reconciliation_pending: pending }))
+        spaces: usage.spaces.map((item) => ({
+          ...item,
+          reconciliation: pending
+            ? {
+              status: "pending",
+              availability: { can_trigger: false, reason: "pending", retry_at: null }
+            }
+            : item.reconciliation
+        }))
       });
     });
     const user = userEvent.setup();
@@ -107,7 +121,7 @@ describe("SpaceLibrary usage", () => {
     await user.click(await screen.findByRole("button", { name: "Recalculate Personal usage" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/spaces/space-1/usage/reconcile",
+      "/api/v1/spaces/space-1/actions/reconcile-usage",
       expect.objectContaining({ method: "POST" })
     ));
     expect(await screen.findByText("Recalculating usage…")).toBeInTheDocument();
@@ -119,12 +133,22 @@ describe("SpaceLibrary usage", () => {
       if (init?.method === "POST") {
         return jsonResponse({ kind: "usage_reconciliation_cooldown", message: "space usage was reconciled recently; try again later" }, 409);
       }
-      if (String(input).endsWith("/link-index/status")) return jsonResponse({ pending: false });
+      if (String(input).endsWith("/link-index")) return jsonResponse({
+        status: "idle",
+        availability: { can_trigger: true, reason: null, retry_at: null }
+      });
       return jsonResponse({
         ...usage,
         spaces: usage.spaces.map((item) => ({
           ...item,
-          reconciliation_available_at: "2099-01-01T00:00:00Z"
+          reconciliation: {
+            status: "idle",
+            availability: {
+              can_trigger: false,
+              reason: "cooldown",
+              retry_at: "2099-01-01T00:00:00Z"
+            }
+          }
         }))
       });
     });
@@ -141,7 +165,10 @@ describe("SpaceLibrary usage", () => {
   it("retries after the usage query fails", async () => {
     let failures = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
-      if (String(input).endsWith("/link-index/status")) return jsonResponse({ pending: false });
+      if (String(input).endsWith("/link-index")) return jsonResponse({
+        status: "idle",
+        availability: { can_trigger: true, reason: null, retry_at: null }
+      });
       if (failures < 2) {
         failures += 1;
         return jsonResponse({ kind: "internal_error", message: "temporarily unavailable" }, 500);

@@ -126,12 +126,12 @@ Queue 공통 계약은 `background-jobs.md`를 따른다.
 사용자 Refresh는 counter를 다시 조회할 뿐 재계산하지 않는다. Owner user는 특정 Space의 reconciliation을 요청할 수 있다.
 
 ```http
-POST /api/v1/spaces/{space_id}/usage/reconcile
+POST /api/v1/spaces/{space_id}/actions/reconcile-usage
 ```
 
-요청은 중복 job과 최근 reconciliation 완료 후 1시간 cooldown을 검사한 뒤 job을 생성하고 `202 Accepted`를 반환한다. 중복 job은 새 job을 만들지 않고 `202`와 `status=already_pending`, 기존 `job_id`를 반환한다. Cooldown은 `409 usage_reconciliation_cooldown`으로 구분한다. HTTP 요청 안에서 COUNT/SUM을 실행하지 않는다. Agent는 요청할 수 없다.
+요청은 중복 job과 최근 reconciliation 완료 후 1시간 cooldown을 검사한 뒤 job을 생성하고 `202 Accepted`와 공통 `AsyncCommandAck`를 반환한다. 중복 job은 새 job을 만들지 않고 `202`와 `result=already_pending`을 반환한다. Cooldown은 `409 usage_reconciliation_cooldown`으로 구분한다. HTTP 요청 안에서 COUNT/SUM을 실행하지 않고 command API는 내부 job ID를 노출하지 않는다. Agent는 요청할 수 없다.
 
-`GET /api/v1/me/usage`의 Space별 `reconciliation_pending`은 활성 job 존재 여부를 나타낸다. `reconciliation_available_at`은 1시간 cooldown이 끝나는 서버 시각이다. Client는 두 값을 기준으로 실행 버튼을 비활성화하고, POST 이후 Usage를 다시 조회해 `reconciliation_pending=false`를 확인한다.
+`GET /api/v1/me/usage`의 Space별 `reconciliation.status`는 활성 작업 여부를 나타낸다. `reconciliation.availability`는 실행 가능 여부와 cooldown 종료 시각을 제공한다. Client는 이 서버 상태와 현재 POST mutation 상태를 함께 사용해 버튼을 비활성화하고, POST 이후 같은 Usage cache를 갱신한다.
 
 ## Full recalculation
 

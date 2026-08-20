@@ -1,17 +1,21 @@
 use axum::extract::{Extension, Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use notegate_model::{Caller, LinkReference, LinkReferencePage, ListLinkReferences};
-use notegate_service::link_graph::LinkGraphSpaceRequestOutcome;
+use notegate_model::{
+    Caller, LinkReference, LinkReferencePage, ListLinkReferences, NodeLinkGraphStatus,
+};
+use notegate_service::link_graph::{
+    LinkGraphNodeRequestOutcome, LinkGraphRequestEligibility, LinkGraphSpaceRequestOutcome,
+};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::page::Page;
-use crate::rest::dto::AsyncOperationResponse;
+use crate::rest::dto::{AsyncCommandAck, CommandAvailability};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -29,15 +33,15 @@ pub fn routes() -> Router<AppState> {
             get(get_incoming_links),
         )
         .route(
-            "/v1/spaces/{space_id}/nodes/{node_id}/links/sync",
+            "/v1/spaces/{space_id}/nodes/{node_id}/actions/reindex-links",
             post(sync_node_links),
         )
         .route(
-            "/v1/spaces/{space_id}/link-index/reindex",
+            "/v1/spaces/{space_id}/actions/reindex-links",
             post(reindex_space),
         )
         .route(
-            "/v1/spaces/{space_id}/link-index/status",
+            "/v1/spaces/{space_id}/link-index",
             get(get_space_link_index_status),
         )
 }
@@ -55,6 +59,7 @@ pub(crate) struct NodeLinksResponse {
     projected_at: Option<DateTime<Utc>>,
     failure_code: Option<String>,
     failed_at: Option<DateTime<Utc>>,
+    availability: CommandAvailability,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -95,12 +100,20 @@ impl From<LinkReferencePage> for LinkReferencesResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct SpaceLinkIndexStatusResponse {
-    pending: bool,
+    status: SpaceLinkIndexStatus,
+    availability: CommandAvailability,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SpaceLinkIndexStatus {
+    Idle,
+    Pending,
 }
 
 #[utoipa::path(
     get,
-    path = "/api/v1/spaces/{space_id}/link-index/status",
+    path = "/api/v1/spaces/{space_id}/link-index",
     tag = "links",
     params(("space_id" = Uuid, Path, description = "Space id")),
     responses((status = 200, description = "Get Space link index work state", body = SpaceLinkIndexStatusResponse)),
@@ -111,8 +124,15 @@ pub(crate) async fn get_space_link_index_status(
     Extension(caller): Extension<Caller>,
     Path(space_id): Path<Uuid>,
 ) -> Result<Json<SpaceLinkIndexStatusResponse>, ApiError> {
-    let pending = state.link_graph.space_pending(&caller, space_id).await?;
-    Ok(Json(SpaceLinkIndexStatusResponse { pending }))
+    let view = state.link_graph.space_view(&caller, space_id).await?;
+    Ok(Json(SpaceLinkIndexStatusResponse {
+        status: if view.pending {
+            SpaceLinkIndexStatus::Pending
+        } else {
+            SpaceLinkIndexStatus::Idle
+        },
+        availability: command_availability(view.request_eligibility, view.pending),
+    }))
 }
 
 #[utoipa::path(
@@ -131,17 +151,36 @@ pub(crate) async fn get_node_links(
     Extension(caller): Extension<Caller>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<NodeLinksResponse>, ApiError> {
-    let graph_state = state
+    let view = state
         .link_graph
-        .node_state(caller.account_id(), space_id, node_id)
+        .node_view(&caller, space_id, node_id)
         .await?;
+    let active = matches!(
+        view.state.status,
+        NodeLinkGraphStatus::Pending | NodeLinkGraphStatus::Syncing
+    );
+    let availability =
+        command_availability(view.request_eligibility, view.request_pending || active);
     Ok(Json(NodeLinksResponse {
-        status: graph_state.status.as_str(),
-        space_pending: graph_state.space_pending,
-        projected_at: graph_state.projected_at,
-        failure_code: graph_state.failure_code,
-        failed_at: graph_state.failed_at,
+        status: view.state.status.as_str(),
+        space_pending: view.state.space_pending,
+        projected_at: view.state.projected_at,
+        failure_code: view.state.failure_code,
+        failed_at: view.state.failed_at,
+        availability,
     }))
+}
+
+fn command_availability(
+    eligibility: LinkGraphRequestEligibility,
+    pending: bool,
+) -> CommandAvailability {
+    match eligibility {
+        LinkGraphRequestEligibility::Forbidden => CommandAvailability::forbidden(),
+        LinkGraphRequestEligibility::Unsupported => CommandAvailability::unsupported(),
+        LinkGraphRequestEligibility::Available if pending => CommandAvailability::pending(),
+        LinkGraphRequestEligibility::Available => CommandAvailability::available(),
+    }
 }
 
 #[utoipa::path(
@@ -214,48 +253,85 @@ pub(crate) async fn get_incoming_links(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/spaces/{space_id}/nodes/{node_id}/links/sync",
+    path = "/api/v1/spaces/{space_id}/nodes/{node_id}/actions/reindex-links",
     tag = "links",
     params(
         ("space_id" = Uuid, Path, description = "Space id"),
         ("node_id" = Uuid, Path, description = "Node id"),
     ),
-    responses((status = 202, description = "Accept node link synchronization", body = AsyncOperationResponse)),
+    responses((
+        status = 202,
+        description = "Accept node link synchronization",
+        body = AsyncCommandAck,
+        headers(("Location" = String, description = "Node link state resource"))
+    )),
     security(("browser_session" = []))
 )]
 pub(crate) async fn sync_node_links(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
-) -> Result<(StatusCode, Json<AsyncOperationResponse>), ApiError> {
-    state
+) -> Result<
+    (
+        StatusCode,
+        [(header::HeaderName, String); 1],
+        Json<AsyncCommandAck>,
+    ),
+    ApiError,
+> {
+    let response = match state
         .link_graph
         .request_node(&caller, space_id, node_id)
-        .await?;
+        .await?
+    {
+        LinkGraphNodeRequestOutcome::Requested => AsyncCommandAck::accepted(),
+        LinkGraphNodeRequestOutcome::AlreadyPending => AsyncCommandAck::already_pending(),
+    };
     Ok((
         StatusCode::ACCEPTED,
-        Json(AsyncOperationResponse::accepted(None)),
+        [(
+            header::LOCATION,
+            format!("/api/v1/spaces/{space_id}/nodes/{node_id}/links"),
+        )],
+        Json(response),
     ))
 }
 
 #[utoipa::path(
     post,
-    path = "/api/v1/spaces/{space_id}/link-index/reindex",
+    path = "/api/v1/spaces/{space_id}/actions/reindex-links",
     tag = "links",
     params(("space_id" = Uuid, Path, description = "Space id")),
-    responses((status = 202, description = "Accept full Space link reindex", body = AsyncOperationResponse)),
+    responses((
+        status = 202,
+        description = "Accept full Space link reindex",
+        body = AsyncCommandAck,
+        headers(("Location" = String, description = "Space link index state resource"))
+    )),
     security(("browser_session" = []))
 )]
 pub(crate) async fn reindex_space(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(space_id): Path<Uuid>,
-) -> Result<(StatusCode, Json<AsyncOperationResponse>), ApiError> {
+) -> Result<
+    (
+        StatusCode,
+        [(header::HeaderName, String); 1],
+        Json<AsyncCommandAck>,
+    ),
+    ApiError,
+> {
     let response = match state.link_graph.request_space(&caller, space_id).await? {
-        LinkGraphSpaceRequestOutcome::Requested => AsyncOperationResponse::accepted(None),
-        LinkGraphSpaceRequestOutcome::AlreadyPending => {
-            AsyncOperationResponse::already_pending(None)
-        }
+        LinkGraphSpaceRequestOutcome::Requested => AsyncCommandAck::accepted(),
+        LinkGraphSpaceRequestOutcome::AlreadyPending => AsyncCommandAck::already_pending(),
     };
-    Ok((StatusCode::ACCEPTED, Json(response)))
+    Ok((
+        StatusCode::ACCEPTED,
+        [(
+            header::LOCATION,
+            format!("/api/v1/spaces/{space_id}/link-index"),
+        )],
+        Json(response),
+    ))
 }

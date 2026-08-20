@@ -6,7 +6,10 @@
     clippy::unwrap_in_result
 )]
 
-use axum::http::{StatusCode, header::RETRY_AFTER};
+use axum::http::{
+    StatusCode,
+    header::{LOCATION, RETRY_AFTER},
+};
 use notegate_core::tier::effective_file_tree_limits;
 use notegate_db::{AgentRepo, test_support::TestDb};
 use notegate_model::{Caller, CallerIdentity, Channel, CreateAgent, ResolveAttrs};
@@ -65,13 +68,20 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     );
     assert!(usage["spaces"][0].get("content_bytes").is_none());
     assert!(usage["spaces"][0].get("agent_connections").is_none());
-    assert_eq!(usage["spaces"][0]["reconciliation_pending"], json!(false));
-    assert!(usage["spaces"][0]["reconciliation_available_at"].is_string());
+    assert_eq!(
+        usage["spaces"][0]["reconciliation"]["status"],
+        json!("idle")
+    );
+    assert_eq!(
+        usage["spaces"][0]["reconciliation"]["availability"]["reason"],
+        json!("cooldown")
+    );
+    assert!(usage["spaces"][0]["reconciliation"]["availability"]["retry_at"].is_string());
 
     let (status, cooldown) = empty_request(
         rest_app(state.clone(), owner.clone()),
         "POST",
-        format!("/v1/spaces/{space_id}/usage/reconcile"),
+        format!("/v1/spaces/{space_id}/actions/reconcile-usage"),
     )
     .await?;
     assert_eq!(status, StatusCode::CONFLICT, "{cooldown}");
@@ -85,38 +95,40 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     .bind(space_id)
     .execute(&db.pool)
     .await?;
-    let (status, queued) = empty_request(
+    let queued_response = json_response(
         rest_app(state.clone(), owner.clone()),
         "POST",
-        format!("/v1/spaces/{space_id}/usage/reconcile"),
+        format!("/v1/spaces/{space_id}/actions/reconcile-usage"),
+        json!(null),
     )
     .await?;
+    assert_eq!(queued_response.headers()[LOCATION], "/api/v1/me/usage");
+    let (status, queued) = decode_response(queued_response).await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
-    assert_eq!(queued["status"], json!("accepted"));
-    let queued_job_id = queued["job_id"].as_str().expect("queued job id");
-    let job_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT job_id FROM background_jobs \
+    assert_eq!(queued["result"], json!("accepted"));
+    assert_eq!(queued["availability"]["reason"], json!("pending"));
+    assert!(queued.get("job_id").is_none());
+    let job_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM background_jobs \
          WHERE job_kind = 'space_usage_reconcile' \
            AND payload ->> 'space_id' = $1::text \
            AND status IN ('queued', 'running')",
     )
     .bind(space_id)
-    .fetch_optional(&db.pool)
+    .fetch_one(&db.pool)
     .await?;
-    assert_eq!(
-        job_id.map(|id| id.to_string()).as_deref(),
-        Some(queued_job_id)
-    );
+    assert_eq!(job_count, 1);
 
     let (status, duplicate) = empty_request(
         rest_app(state.clone(), owner.clone()),
         "POST",
-        format!("/v1/spaces/{space_id}/usage/reconcile"),
+        format!("/v1/spaces/{space_id}/actions/reconcile-usage"),
     )
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{duplicate}");
-    assert_eq!(duplicate["status"], json!("already_pending"));
-    assert_eq!(duplicate["job_id"], queued["job_id"]);
+    assert_eq!(duplicate["result"], json!("already_pending"));
+    assert_eq!(duplicate["availability"]["reason"], json!("pending"));
+    assert!(duplicate.get("job_id").is_none());
 
     let (stranger_account, stranger_user) = state
         .accounts
@@ -134,7 +146,7 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     let (status, hidden) = empty_request(
         rest_app(state.clone(), stranger),
         "POST",
-        format!("/v1/spaces/{space_id}/usage/reconcile"),
+        format!("/v1/spaces/{space_id}/actions/reconcile-usage"),
     )
     .await?;
     assert_eq!(status, StatusCode::NOT_FOUND, "{hidden}");
@@ -167,7 +179,7 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     let (status, forbidden) = empty_request(
         rest_app(state.clone(), agent_caller),
         "POST",
-        format!("/v1/spaces/{space_id}/usage/reconcile"),
+        format!("/v1/spaces/{space_id}/actions/reconcile-usage"),
     )
     .await?;
     assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");

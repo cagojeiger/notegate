@@ -13,7 +13,10 @@ export function usageResponse(
       items: { used: itemsUsed, limit: 2_000 },
       text_bytes: { used: 0, limit: 1024 * 1024 },
       file_bytes: { used: 0, limit: 1024 * 1024 * 1024 },
-      reconciliation_pending: false
+      reconciliation: {
+        status: "idle",
+        availability: { can_trigger: true, reason: null, retry_at: null }
+      }
     }]
   };
 }

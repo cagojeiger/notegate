@@ -7,7 +7,7 @@
 //! authorization (no live permission ⇒ 404, insufficient permission ⇒ 403).
 
 use axum::extract::{Extension, Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use notegate_model::Caller;
@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use crate::error::{ApiError, ErrorResponse};
 use crate::page::Page;
-use crate::rest::dto::{AsyncOperationResponse, SpaceOut};
+use crate::rest::dto::{AsyncCommandAck, SpaceOut};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -31,7 +31,7 @@ pub fn routes() -> Router<AppState> {
             get(get_one).patch(update).delete(delete),
         )
         .route(
-            "/v1/spaces/{space_id}/usage/reconcile",
+            "/v1/spaces/{space_id}/actions/reconcile-usage",
             post(request_usage_reconciliation),
         )
 }
@@ -234,11 +234,16 @@ pub(crate) async fn delete(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/spaces/{space_id}/usage/reconcile",
+    path = "/api/v1/spaces/{space_id}/actions/reconcile-usage",
     tag = "spaces",
     params(("space_id" = Uuid, Path, description = "Space id")),
     responses(
-        (status = 202, description = "Accept usage reconciliation", body = AsyncOperationResponse),
+        (
+            status = 202,
+            description = "Accept usage reconciliation",
+            body = AsyncCommandAck,
+            headers(("Location" = String, description = "Usage state resource"))
+        ),
         (status = 409, description = "Reconciliation is within its cooldown", body = ErrorResponse),
         (status = 503, description = "Space usage is temporarily locked for maintenance", body = ErrorResponse),
     ),
@@ -248,19 +253,28 @@ pub(crate) async fn request_usage_reconciliation(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(space_id): Path<Uuid>,
-) -> Result<(StatusCode, Json<AsyncOperationResponse>), ApiError> {
+) -> Result<
+    (
+        StatusCode,
+        [(header::HeaderName, String); 1],
+        Json<AsyncCommandAck>,
+    ),
+    ApiError,
+> {
     let outcome = state
         .usage
         .request_space_reconciliation(caller.account.kind, caller.account_id(), space_id)
         .await?;
     match outcome {
-        UsageReconciliationOutcome::Queued { job_id } => Ok((
+        UsageReconciliationOutcome::Queued => Ok((
             StatusCode::ACCEPTED,
-            Json(AsyncOperationResponse::accepted(Some(job_id))),
+            [(header::LOCATION, "/api/v1/me/usage".to_owned())],
+            Json(AsyncCommandAck::accepted()),
         )),
-        UsageReconciliationOutcome::AlreadyQueued { job_id } => Ok((
+        UsageReconciliationOutcome::AlreadyQueued => Ok((
             StatusCode::ACCEPTED,
-            Json(AsyncOperationResponse::already_pending(Some(job_id))),
+            [(header::LOCATION, "/api/v1/me/usage".to_owned())],
+            Json(AsyncCommandAck::already_pending()),
         )),
         UsageReconciliationOutcome::Cooldown => Err(ApiError::usage_reconciliation_cooldown()),
     }

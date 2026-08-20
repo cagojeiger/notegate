@@ -55,8 +55,9 @@ pub use link_graph_repo::{
 };
 pub use link_graph_work_repo::{
     LINK_GRAPH_ACTIVE_JOB_MAX, LINK_GRAPH_PROJECT_BATCH_MAX, LinkGraphChangeCollection,
-    LinkGraphProjectNodesJob, LinkGraphProjectNodesPayload, LinkGraphProjectSource,
-    LinkGraphProjectionTarget, LinkGraphSpaceRequestOutcome, LinkGraphWorkRepo,
+    LinkGraphNodeRequestOutcome, LinkGraphProjectNodesJob, LinkGraphProjectNodesPayload,
+    LinkGraphProjectSource, LinkGraphProjectionTarget, LinkGraphSpaceRequestOutcome,
+    LinkGraphWorkRepo,
 };
 pub use mcp_invocation_repo::{McpInvocationRepo, NewMcpInvocation};
 pub use metadata_write_repo::{MediaTypeObservation, MetadataWriteRepo};

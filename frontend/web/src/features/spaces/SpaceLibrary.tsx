@@ -200,9 +200,15 @@ function SpaceInspector({
   const reindexLinks = useReindexSpaceLinksMutation();
   const canReindexLinks = space?.permission === "write";
   const linkIndexStatus = useSpaceLinkIndexStatusQuery(space?.id, canReindexLinks);
-  const isChecking = !!space && Boolean(usage?.reconciliation_pending || usageCheck.isRequesting);
-  const reconciliationAvailableAt = usage?.reconciliation_available_at;
-  const isCooldown = useTimestampInFuture(reconciliationAvailableAt);
+  const isChecking = !!space && Boolean(
+    usage?.reconciliation?.status === "pending" || usageCheck.isRequesting
+  );
+  const usageAvailability = usage?.reconciliation?.availability;
+  const reconciliationAvailableAt = usageAvailability?.retry_at ?? undefined;
+  const retryInFuture = useTimestampInFuture(reconciliationAvailableAt);
+  const isCooldown = usageAvailability?.reason === "cooldown" && retryInFuture;
+  const canCheckUsage = usageAvailability?.can_trigger === true
+    || (usageAvailability?.reason === "cooldown" && !isCooldown);
   const checkStatus = usageState === "ready" && usage
     ? isChecking
       ? { message: "Recalculating usage…", className: "text-warning" }
@@ -227,7 +233,7 @@ function SpaceInspector({
           variant="secondary"
           size="xs"
           onClick={usageCheck.onCheck}
-          disabled={isChecking || isCooldown || usageCheck.disabled}
+          disabled={isChecking || !canCheckUsage || usageCheck.disabled}
           title={isCooldown && reconciliationAvailableAt
             ? `Available after ${formatAvailability(reconciliationAvailableAt)}`
             : undefined}
@@ -240,8 +246,13 @@ function SpaceInspector({
       : undefined;
   const reindexForCurrentSpace = Boolean(space && reindexLinks.variables === space.id);
   const reindexPending = reindexForCurrentSpace && reindexLinks.isPending;
-  const linkIndexPending = canReindexLinks && Boolean(linkIndexStatus.data?.pending || reindexPending);
-  const linkIndexUnavailable = linkIndexStatus.isLoading || linkIndexStatus.isError || linkIndexPending;
+  const linkIndexPending = canReindexLinks && Boolean(
+    linkIndexStatus.data?.status === "pending" || reindexPending
+  );
+  const linkIndexUnavailable = linkIndexStatus.isLoading
+    || linkIndexStatus.isError
+    || linkIndexStatus.data?.availability?.can_trigger !== true
+    || reindexPending;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-panel md:border-l md:border-seam">

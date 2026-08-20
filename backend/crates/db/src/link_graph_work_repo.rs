@@ -69,6 +69,12 @@ pub enum LinkGraphSpaceRequestOutcome {
     NotFound,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkGraphNodeRequestOutcome {
+    Requested,
+    AlreadyPending,
+}
+
 #[derive(Debug, Clone)]
 pub struct LinkGraphWorkRepo {
     pool: PgPool,
@@ -77,6 +83,30 @@ pub struct LinkGraphWorkRepo {
 impl LinkGraphWorkRepo {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    pub async fn request_node(
+        &self,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> Result<LinkGraphNodeRequestOutcome> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        lock_space_state_in(&mut tx, space_id).await?;
+        if node_request_pending_in(&mut tx, space_id, node_id).await? {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return Ok(LinkGraphNodeRequestOutcome::AlreadyPending);
+        }
+        stage_node_ids_in(&mut tx, space_id, &[node_id], true).await?;
+        dispatch_targets_in(
+            &mut tx,
+            TargetScope::Nodes {
+                space_id,
+                node_ids: &[node_id],
+            },
+        )
+        .await?;
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(LinkGraphNodeRequestOutcome::Requested)
     }
 
     pub async fn request_nodes(&self, space_id: Uuid, node_ids: &[Uuid]) -> Result<()> {
@@ -91,6 +121,11 @@ impl LinkGraphWorkRepo {
     pub async fn space_pending(&self, space_id: Uuid) -> Result<Option<bool>> {
         let mut connection = self.pool.acquire().await.map_err(map_sqlx_error)?;
         space_pending_in(&mut connection, space_id).await
+    }
+
+    pub async fn node_request_pending(&self, space_id: Uuid, node_id: Uuid) -> Result<bool> {
+        let mut connection = self.pool.acquire().await.map_err(map_sqlx_error)?;
+        node_request_pending_in(&mut connection, space_id, node_id).await
     }
 
     pub async fn request_space(&self, space_id: Uuid) -> Result<LinkGraphSpaceRequestOutcome> {
@@ -955,6 +990,37 @@ async fn space_pending_in(connection: &mut PgConnection, space_id: Uuid) -> Resu
     )
     .bind(space_id)
     .fetch_optional(&mut *connection)
+    .await
+    .map_err(map_sqlx_error)
+}
+
+async fn node_request_pending_in(
+    connection: &mut PgConnection,
+    space_id: Uuid,
+    node_id: Uuid,
+) -> Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS ( \
+             SELECT 1 \
+             FROM node_link_projections projection \
+             LEFT JOIN background_jobs job ON job.job_id = projection.active_job_id \
+             WHERE projection.space_id = $1 \
+               AND projection.source_node_id = $2 \
+               AND projection.needs_projection \
+               AND ( \
+                   (projection.active_job_id IS NULL AND projection.failed_at IS NULL) \
+                   OR job.status IN ('queued', 'running', 'succeeded') \
+                   OR ( \
+                       job.status = 'dead' \
+                       AND projection.active_request_version \
+                           IS DISTINCT FROM projection.request_version \
+                   ) \
+               ) \
+         )",
+    )
+    .bind(space_id)
+    .bind(node_id)
+    .fetch_one(&mut *connection)
     .await
     .map_err(map_sqlx_error)
 }

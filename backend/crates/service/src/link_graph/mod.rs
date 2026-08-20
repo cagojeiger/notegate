@@ -6,8 +6,9 @@ use std::time::Duration;
 use futures_util::stream::{self, StreamExt as _};
 use notegate_core::{Error, Result, limits};
 use notegate_db::{
-    FilesRepo, LINK_GRAPH_PROJECT_BATCH_MAX, LinkGraphProjectSource, LinkGraphProjection,
-    LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphSourceSnapshot,
+    FilesRepo, LINK_GRAPH_PROJECT_BATCH_MAX,
+    LinkGraphNodeRequestOutcome as DbLinkGraphNodeRequestOutcome, LinkGraphProjectSource,
+    LinkGraphProjection, LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphSourceSnapshot,
     LinkGraphSpaceRequestOutcome as DbLinkGraphSpaceRequestOutcome, LinkGraphStoredReference,
     LinkGraphWorkRepo,
 };
@@ -42,6 +43,32 @@ pub enum LinkGraphSpaceRequestOutcome {
     AlreadyPending,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkGraphNodeRequestOutcome {
+    Requested,
+    AlreadyPending,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkGraphRequestEligibility {
+    Available,
+    Forbidden,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeLinkGraphView {
+    pub state: NodeLinkGraphState,
+    pub request_eligibility: LinkGraphRequestEligibility,
+    pub request_pending: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpaceLinkGraphView {
+    pub pending: bool,
+    pub request_eligibility: LinkGraphRequestEligibility,
+}
+
 #[derive(Debug, Clone)]
 pub struct LinkGraphService {
     store: LinkGraphRepo,
@@ -66,6 +93,44 @@ impl LinkGraphService {
             .state(space_id, node_id)
             .await
             .map_err(ServiceError::from)
+    }
+
+    pub async fn node_view(
+        &self,
+        caller: &Caller,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> ServiceResult<NodeLinkGraphView> {
+        let permission = self
+            .files
+            .permission_for(space_id, caller.account_id())
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))?;
+        self.files
+            .find_node(space_id, node_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))?;
+        let text = self.files.text_stats(space_id, node_id).await?;
+        let request_eligibility = if caller.account.kind != AccountKind::User
+            || caller.channel != Channel::Browser
+            || permission != Permission::Write
+        {
+            LinkGraphRequestEligibility::Forbidden
+        } else if text
+            .as_ref()
+            .is_none_or(|text| text.storage_format == TextStorageFormat::Encrypted)
+        {
+            LinkGraphRequestEligibility::Unsupported
+        } else {
+            LinkGraphRequestEligibility::Available
+        };
+        let state = self.store.state(space_id, node_id).await?;
+        let request_pending = self.work.node_request_pending(space_id, node_id).await?;
+        Ok(NodeLinkGraphView {
+            state,
+            request_eligibility,
+            request_pending,
+        })
     }
 
     pub async fn outgoing(
@@ -186,25 +251,52 @@ impl LinkGraphService {
         caller: &Caller,
         space_id: Uuid,
         node_id: Uuid,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<LinkGraphNodeRequestOutcome> {
         require_dashboard_user(caller)?;
         self.require_permission(caller.account_id(), space_id, Permission::Write)
             .await?;
-        if self.files.text_stats(space_id, node_id).await?.is_none() {
+        let text = self.files.text_stats(space_id, node_id).await?;
+        if text.is_none() {
             return Err(ServiceError::NotFound("text not found".to_owned()));
         }
-        self.work.request_nodes(space_id, &[node_id]).await?;
-        Ok(())
+        if text.is_some_and(|text| text.storage_format == TextStorageFormat::Encrypted) {
+            return Err(ServiceError::InvalidInput(
+                "client-encrypted text cannot be link indexed".to_owned(),
+            ));
+        }
+        match self.work.request_node(space_id, node_id).await? {
+            DbLinkGraphNodeRequestOutcome::Requested => Ok(LinkGraphNodeRequestOutcome::Requested),
+            DbLinkGraphNodeRequestOutcome::AlreadyPending => {
+                Ok(LinkGraphNodeRequestOutcome::AlreadyPending)
+            }
+        }
     }
 
-    pub async fn space_pending(&self, caller: &Caller, space_id: Uuid) -> ServiceResult<bool> {
+    pub async fn space_view(
+        &self,
+        caller: &Caller,
+        space_id: Uuid,
+    ) -> ServiceResult<SpaceLinkGraphView> {
         require_dashboard_user(caller)?;
-        self.require_permission(caller.account_id(), space_id, Permission::Write)
+        let permission = self
+            .files
+            .permission_for(space_id, caller.account_id())
             .await?;
-        self.work
+        let permission =
+            permission.ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))?;
+        let pending = self
+            .work
             .space_pending(space_id)
             .await?
-            .ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))
+            .ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))?;
+        Ok(SpaceLinkGraphView {
+            pending,
+            request_eligibility: if permission == Permission::Write {
+                LinkGraphRequestEligibility::Available
+            } else {
+                LinkGraphRequestEligibility::Forbidden
+            },
+        })
     }
 
     pub async fn request_space(

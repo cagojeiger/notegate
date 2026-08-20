@@ -34,29 +34,35 @@ describe("links api", () => {
 
   it("requests node and Space link rebuilds", async () => {
     const client = createMockApiClient();
-    client.post.mockResolvedValue({ status: "accepted", job_id: null });
+    client.post.mockResolvedValue({
+      result: "accepted",
+      availability: { can_trigger: false, reason: "pending", retry_at: null }
+    });
 
     await requestNodeLinkSync(client, "space-1", "node-1");
     await requestSpaceLinkReindex(client, "space-1");
 
     expect(client.post).toHaveBeenNthCalledWith(
       1,
-      "/api/v1/spaces/space-1/nodes/node-1/links/sync"
+      "/api/v1/spaces/space-1/nodes/node-1/actions/reindex-links"
     );
     expect(client.post).toHaveBeenNthCalledWith(
       2,
-      "/api/v1/spaces/space-1/link-index/reindex"
+      "/api/v1/spaces/space-1/actions/reindex-links"
     );
   });
 
   it("loads the Space link index status", async () => {
     const client = createMockApiClient();
-    client.get.mockResolvedValue({ pending: true });
+    client.get.mockResolvedValue({
+      status: "pending",
+      availability: { can_trigger: false, reason: "pending", retry_at: null }
+    });
 
     await getSpaceLinkIndexStatus(client, "space-1");
 
     expect(client.get).toHaveBeenCalledWith(
-      "/api/v1/spaces/space-1/link-index/status"
+      "/api/v1/spaces/space-1/link-index"
     );
   });
 });

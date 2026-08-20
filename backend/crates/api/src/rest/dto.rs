@@ -25,32 +25,90 @@ pub(crate) use events::{
 };
 pub use nodes::{NodeOut, NodeRef, NodeSummaryOut, attribution_ids, parse_kind};
 
-/// Common acknowledgement returned by asynchronous browser commands.
+/// Common result returned by asynchronous browser commands.
 #[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum AsyncOperationStatus {
+pub(crate) enum AsyncCommandResult {
     Accepted,
     AlreadyPending,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, ToSchema)]
-pub(crate) struct AsyncOperationResponse {
-    pub status: AsyncOperationStatus,
-    pub job_id: Option<Uuid>,
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CommandUnavailableReason {
+    Pending,
+    Cooldown,
+    Forbidden,
+    Unsupported,
 }
 
-impl AsyncOperationResponse {
-    pub(crate) const fn accepted(job_id: Option<Uuid>) -> Self {
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+pub(crate) struct CommandAvailability {
+    pub can_trigger: bool,
+    pub reason: Option<CommandUnavailableReason>,
+    pub retry_at: Option<DateTime<Utc>>,
+}
+
+impl CommandAvailability {
+    pub(crate) const fn available() -> Self {
         Self {
-            status: AsyncOperationStatus::Accepted,
-            job_id,
+            can_trigger: true,
+            reason: None,
+            retry_at: None,
         }
     }
 
-    pub(crate) const fn already_pending(job_id: Option<Uuid>) -> Self {
+    pub(crate) const fn pending() -> Self {
         Self {
-            status: AsyncOperationStatus::AlreadyPending,
-            job_id,
+            can_trigger: false,
+            reason: Some(CommandUnavailableReason::Pending),
+            retry_at: None,
+        }
+    }
+
+    pub(crate) const fn cooldown(retry_at: DateTime<Utc>) -> Self {
+        Self {
+            can_trigger: false,
+            reason: Some(CommandUnavailableReason::Cooldown),
+            retry_at: Some(retry_at),
+        }
+    }
+
+    pub(crate) const fn forbidden() -> Self {
+        Self {
+            can_trigger: false,
+            reason: Some(CommandUnavailableReason::Forbidden),
+            retry_at: None,
+        }
+    }
+
+    pub(crate) const fn unsupported() -> Self {
+        Self {
+            can_trigger: false,
+            reason: Some(CommandUnavailableReason::Unsupported),
+            retry_at: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+pub(crate) struct AsyncCommandAck {
+    pub result: AsyncCommandResult,
+    pub availability: CommandAvailability,
+}
+
+impl AsyncCommandAck {
+    pub(crate) const fn accepted() -> Self {
+        Self {
+            result: AsyncCommandResult::Accepted,
+            availability: CommandAvailability::pending(),
+        }
+    }
+
+    pub(crate) const fn already_pending() -> Self {
+        Self {
+            result: AsyncCommandResult::AlreadyPending,
+            availability: CommandAvailability::pending(),
         }
     }
 }

@@ -249,8 +249,11 @@ function responseFor(url: URL) {
       page: { limit: 100, returned: 1, has_more: false, next_cursor: null }
     };
   }
-  if (url.pathname === `/api/v1/spaces/${space.id}/link-index/status`) {
-    return { pending: false };
+  if (url.pathname === `/api/v1/spaces/${space.id}/link-index`) {
+    return {
+      status: "idle",
+      availability: { can_trigger: true, reason: null, retry_at: null }
+    };
   }
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`) {
     return {

@@ -34,5 +34,8 @@ const usage: SpaceUsage = {
   items: { used: 319, limit: 1_999 },
   text_bytes: { used: 1024 * 1024, limit: 128 * 1024 * 1024 },
   file_bytes: { used: 2 * 1024 * 1024, limit: 100 * 1024 * 1024 * 1024 },
-  reconciliation_pending: false
+  reconciliation: {
+    status: "idle",
+    availability: { can_trigger: true, reason: null, retry_at: null }
+  }
 };

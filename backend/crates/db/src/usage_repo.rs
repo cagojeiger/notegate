@@ -96,12 +96,10 @@ impl UsageRepo {
 
         let state = sqlx::query_as::<_, ReconcileRequestRow>(
             "SELECT su.reconciled_at, now() AS requested_at, \
-                    (SELECT job.job_id FROM background_jobs job \
+                    EXISTS (SELECT 1 FROM background_jobs job \
                         WHERE job.job_kind = 'space_usage_reconcile' \
                           AND job.status IN ('queued', 'running') \
-                          AND job.payload ->> 'space_id' = su.space_id::text \
-                        ORDER BY job.created_at DESC, job.job_id DESC \
-                        LIMIT 1) AS pending_job_id \
+                          AND job.payload ->> 'space_id' = su.space_id::text) AS pending \
              FROM space_usage su WHERE su.space_id = $1 FOR UPDATE",
         )
         .bind(space_id)
@@ -110,8 +108,8 @@ impl UsageRepo {
         .map_err(map_request_lock_error)?
         .ok_or_else(|| Error::internal("live space is missing its usage counter"))?;
 
-        let no_queue_outcome = if let Some(job_id) = state.pending_job_id {
-            Some(UsageReconciliationOutcome::AlreadyQueued { job_id })
+        let no_queue_outcome = if state.pending {
+            Some(UsageReconciliationOutcome::AlreadyQueued)
         } else if state.reconciled_at
             > state.requested_at - Duration::seconds(MANUAL_RECONCILE_COOLDOWN_SECONDS)
         {
@@ -124,7 +122,7 @@ impl UsageRepo {
             return Ok(outcome);
         }
 
-        let enqueued = JobQueue::enqueue_in(
+        JobQueue::enqueue_in(
             &mut tx,
             &NewJob::<SpaceUsageReconcileJob>::new(SpaceUsagePayload { space_id })
                 .record_in_history(
@@ -139,9 +137,7 @@ impl UsageRepo {
         .await
         .map_err(|error| Error::internal(error.to_string()))?;
         tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(UsageReconciliationOutcome::Queued {
-            job_id: enqueued.job_id,
-        })
+        Ok(UsageReconciliationOutcome::Queued)
     }
 }
 
@@ -156,8 +152,8 @@ fn map_request_lock_error(error: sqlx::Error) -> Error {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsageReconciliationOutcome {
-    Queued { job_id: Uuid },
-    AlreadyQueued { job_id: Uuid },
+    Queued,
+    AlreadyQueued,
     Cooldown,
 }
 
@@ -220,7 +216,7 @@ struct SpaceUsageRow {
 struct ReconcileRequestRow {
     reconciled_at: DateTime<Utc>,
     requested_at: DateTime<Utc>,
-    pending_job_id: Option<Uuid>,
+    pending: bool,
 }
 
 #[derive(Debug, FromRow)]
