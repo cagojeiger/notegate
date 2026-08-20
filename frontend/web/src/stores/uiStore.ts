@@ -21,6 +21,7 @@ type UiState = {
   primaryWidth: number;
   auxiliaryWidth: number;
   treeRatio: number;
+  linkRatio: number;
   treeSectionOpen: boolean;
   recentSectionOpen: boolean;
   recentDensity: "list" | "compact";
@@ -50,6 +51,7 @@ type UiState = {
   setPrimaryWidth: (width: number) => void;
   setAuxiliaryWidth: (width: number) => void;
   setTreeRatio: (ratio: number) => void;
+  setLinkRatio: (ratio: number) => void;
   toggleTreeSection: () => void;
   toggleRecentSection: () => void;
   toggleRecentDensity: () => void;
@@ -78,6 +80,7 @@ export function createUiStore(persistence: UiStorePersistence): UiStore {
   primaryWidth: WORKBENCH_LAYOUT.defaultPrimaryWidth,
   auxiliaryWidth: WORKBENCH_LAYOUT.defaultAuxiliaryWidth,
   treeRatio: WORKBENCH_LAYOUT.defaultTreeRatio,
+  linkRatio: WORKBENCH_LAYOUT.defaultLinkRatio,
   treeSectionOpen: true,
   recentSectionOpen: true,
   recentDensity: "list",
@@ -155,6 +158,7 @@ export function createUiStore(persistence: UiStorePersistence): UiStore {
   setPrimaryWidth: (width) => set({ primaryWidth: Math.max(WORKBENCH_LAYOUT.minPrimaryWidth, Math.min(WORKBENCH_LAYOUT.maxPrimaryWidth, Math.round(width))) }),
   setAuxiliaryWidth: (width) => set({ auxiliaryWidth: Math.max(WORKBENCH_LAYOUT.minAuxiliaryWidth, Math.min(WORKBENCH_LAYOUT.maxAuxiliaryWidth, Math.round(width))) }),
   setTreeRatio: (ratio) => set({ treeRatio: Math.max(WORKBENCH_LAYOUT.minTreeRatio, Math.min(WORKBENCH_LAYOUT.maxTreeRatio, ratio)) }),
+  setLinkRatio: (ratio) => set({ linkRatio: Math.max(WORKBENCH_LAYOUT.minLinkRatio, Math.min(WORKBENCH_LAYOUT.maxLinkRatio, ratio)) }),
   toggleTreeSection: () => set((state) => ({ treeSectionOpen: !state.treeSectionOpen })),
   toggleRecentSection: () => set((state) => ({ recentSectionOpen: !state.recentSectionOpen })),
   toggleRecentDensity: () => set((state) => ({ recentDensity: state.recentDensity === "list" ? "compact" : "list" })),

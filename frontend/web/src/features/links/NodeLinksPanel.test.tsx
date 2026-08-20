@@ -1,9 +1,11 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
+import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
+import { useUiStore } from "../../stores/uiStore";
 import { makeRestNode } from "../../test/fixtures";
 import { createTestQueryClient } from "../../test/queryClient";
 import { NodeLinksPanel } from "./NodeLinksPanel";
@@ -32,6 +34,7 @@ vi.mock("./useLinkQueries", () => ({
 
 describe("NodeLinksPanel", () => {
   beforeEach(() => {
+    useUiStore.setState({ linkRatio: WORKBENCH_LAYOUT.defaultLinkRatio });
     intersectionObservers.length = 0;
     vi.stubGlobal("IntersectionObserver", class {
       constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
@@ -86,7 +89,6 @@ describe("NodeLinksPanel", () => {
     expect(screen.getByText("Broken")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Open /docs/target.md" }));
-    await user.click(screen.getByRole("button", { name: /Links to this document/ }));
     await user.click(screen.getByRole("button", { name: "Open /docs/source.md" }));
 
     expect(onOpenNode).toHaveBeenNthCalledWith(1, "target-1", "node-1");
@@ -160,7 +162,7 @@ describe("NodeLinksPanel", () => {
     expect(screen.getByRole("button", { name: "Sync links for note.md" })).toBeDisabled();
   });
 
-  it("keeps both relation headers visible and expands only the selected list", async () => {
+  it("shows both lists by default and gives the remaining list the full height when one closes", async () => {
     const user = userEvent.setup();
     mocks.useNodeLinksQuery.mockImplementation((_node, direction: "outgoing" | "incoming") => (
       direction === "outgoing"
@@ -176,18 +178,114 @@ describe("NodeLinksPanel", () => {
     const outgoing = screen.getByRole("button", { name: /Links from this document/ });
     const incoming = screen.getByRole("button", { name: /Links to this document/ });
     expect(outgoing).toHaveAttribute("aria-expanded", "true");
-    expect(incoming).toHaveAttribute("aria-expanded", "false");
+    expect(incoming).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("region", { name: "Links from this document" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Links to this document" })).toBeVisible();
+    expect(screen.getByTestId("node-link-sections")).toHaveStyle({
+      gridTemplateRows: "0.5fr 6px 0.5fr"
+    });
 
-    await user.click(incoming);
+    await user.click(outgoing);
     expect(outgoing).toHaveAttribute("aria-expanded", "false");
     expect(incoming).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("region", { name: "Links to this document" })).toBeVisible();
-    expect(intersectionObservers).toHaveLength(2);
+    expect(screen.queryByRole("region", { name: "Links from this document" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("node-link-sections")).toHaveStyle({
+      gridTemplateRows: "auto 6px 1fr"
+    });
 
+    await user.click(outgoing);
+    expect(outgoing).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("separator", { name: "Resize link sections" })).toBeInTheDocument();
+  });
+
+  it("keeps each open list independently paginated", () => {
+    mocks.useNodeLinksQuery.mockImplementation((_node, direction: "outgoing" | "incoming") => (
+      direction === "outgoing"
+        ? linkQuery([
+            { node_id: "target-1", path: "/docs/target.md", kind: "link", occurrence_count: 1 }
+          ], true, mocks.fetchOutgoing, mocks.refetchOutgoing)
+        : linkQuery([
+            { node_id: "source-1", path: "/docs/source.md", kind: "link", occurrence_count: 1 }
+          ], true, mocks.fetchIncoming, mocks.refetchIncoming)
+    ));
+    renderPanel();
+
+    expect(intersectionObservers).toHaveLength(2);
+    expect(intersectionObservers.map((observer) => observer.options?.root)).toEqual([
+      screen.getByRole("region", { name: "Links from this document" }),
+      screen.getByRole("region", { name: "Links to this document" })
+    ]);
+  });
+
+  it("resizes the two lists with the keyboard and restores that ratio after reopening", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    const separator = screen.getByRole("separator", { name: "Resize link sections" });
+    separator.focus();
+    await user.keyboard("{ArrowUp}");
+    expect(separator).toHaveAttribute("aria-valuenow", "45");
+
+    const incoming = screen.getByRole("button", { name: /Links to this document/ });
     await user.click(incoming);
-    expect(incoming).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("region", { name: "Links to this document" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("node-link-sections")).toHaveStyle({
+      gridTemplateRows: "1fr 6px auto"
+    });
+    await user.click(incoming);
+
+    expect(screen.getByRole("separator", { name: "Resize link sections" }))
+      .toHaveAttribute("aria-valuenow", "45");
+    expect(screen.getByTestId("node-link-sections")).toHaveStyle({
+      gridTemplateRows: "0.45fr 6px 0.55fr"
+    });
+  });
+
+  it("resizes the two lists with pointer coordinates and clamps the result", () => {
+    renderPanel();
+
+    const grid = screen.getByTestId("node-link-sections");
+    vi.spyOn(grid, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 100,
+      width: 320,
+      height: 400,
+      top: 100,
+      right: 320,
+      bottom: 500,
+      left: 0,
+      toJSON: () => ({})
+    });
+    const separator = screen.getByRole("separator", { name: "Resize link sections" });
+
+    fireEvent.pointerDown(separator);
+    fireEvent.pointerMove(window, { clientY: 220 });
+    expect(separator).toHaveAttribute("aria-valuenow", "30");
+    expect(grid).toHaveStyle({ gridTemplateRows: "0.3fr 6px 0.7fr" });
+
+    fireEvent.pointerMove(window, { clientY: 0 });
+    expect(separator).toHaveAttribute("aria-valuenow", "20");
+    fireEvent.pointerUp(window);
+  });
+
+  it("keeps the session split ratio while reopening both lists for another node", async () => {
+    const user = userEvent.setup();
+    const firstPanel = renderPanel();
+
+    const separator = screen.getByRole("separator", { name: "Resize link sections" });
+    separator.focus();
+    await user.keyboard("{ArrowUp}");
+    await user.click(screen.getByRole("button", { name: /Links from this document/ }));
+    firstPanel.unmount();
+
+    renderPanel({ node: makeRestNode({ id: "node-2", name: "second.md", path: "/second.md" }) });
+
+    expect(screen.getByRole("separator", { name: "Resize link sections" }))
+      .toHaveAttribute("aria-valuenow", "45");
+    expect(screen.getByRole("button", { name: /Links from this document/ }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /Links to this document/ }))
+      .toHaveAttribute("aria-expanded", "true");
   });
 
   it("requires an explicit retry after loading another page fails", async () => {
