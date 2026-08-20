@@ -11,11 +11,51 @@ type PreviewStatus = "loading" | "ready" | "error";
 
 const DOCX_CLASS_NAME = "ng-docx";
 const DOCX_FRAME_LAYOUT_CSS = `
+html,
+body {
+  box-sizing: border-box;
+  margin: 0;
+  min-width: 0;
+  background: transparent;
+}
+body {
+  overflow-x: hidden;
+}
 .${DOCX_CLASS_NAME}-wrapper {
-  align-items: flex-start;
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: clamp(12px, 2.5vw, 32px);
+  background: transparent;
 }
 .${DOCX_CLASS_NAME}-wrapper > section.${DOCX_CLASS_NAME} {
-  margin-inline: auto;
+  box-sizing: border-box;
+  display: block;
+  width: min(100%, 64rem) !important;
+  min-height: 0 !important;
+  margin: 0 auto !important;
+  padding: 0 clamp(16px, 4vw, 56px) !important;
+  overflow: visible;
+  box-shadow: none !important;
+}
+.${DOCX_CLASS_NAME}-wrapper > section.${DOCX_CLASS_NAME}:first-child {
+  padding-top: clamp(24px, 5vw, 64px) !important;
+}
+.${DOCX_CLASS_NAME}-wrapper > section.${DOCX_CLASS_NAME}:last-child {
+  padding-bottom: clamp(24px, 5vw, 64px) !important;
+}
+.${DOCX_CLASS_NAME}-wrapper > section.${DOCX_CLASS_NAME} > article {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.${DOCX_CLASS_NAME}-wrapper img,
+.${DOCX_CLASS_NAME}-wrapper svg,
+.${DOCX_CLASS_NAME}-wrapper canvas,
+.${DOCX_CLASS_NAME}-wrapper video {
+  max-width: 100% !important;
+  height: auto !important;
 }
 `;
 const DOCX_FRAME_CSP = [
@@ -121,7 +161,7 @@ export function DocxPreview({
         className={status === "ready"
           ? "min-h-0 flex-1 border-0 bg-bg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
           : "hidden"}
-        title={`${name} DOCX pages`}
+        title={`${name} DOCX document`}
         sandbox="allow-same-origin"
         referrerPolicy="no-referrer"
       />
@@ -168,8 +208,11 @@ async function loadAndRenderDocx(
 function createRenderOptions(resourceUrls: Set<string>): Partial<Options> {
   return {
     className: DOCX_CLASS_NAME,
+    breakPages: false,
     experimental: false,
+    ignoreHeight: true,
     ignoreFonts: true,
+    ignoreWidth: true,
     renderAltChunks: false,
     renderChanges: false,
     renderComments: false,
