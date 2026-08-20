@@ -121,6 +121,15 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     assert_eq!(status, StatusCode::ACCEPTED, "{duplicate}");
     assert_eq!(duplicate["result"], json!("already_pending"));
 
+    let (status, legacy_duplicate) = empty_request(
+        rest_app(state.clone(), owner.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/nodes/{node_id}/links/sync"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::ACCEPTED, "{legacy_duplicate}");
+    assert_eq!(legacy_duplicate["result"], json!("already_pending"));
+
     let (status, index_status) = get_json(
         rest_app(state.clone(), owner.clone()),
         format!("/v1/spaces/{space_id}/link-index"),
@@ -216,6 +225,15 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     assert_eq!(duplicate["result"], json!("already_pending"));
     assert!(duplicate.get("job_id").is_none());
 
+    let (status, legacy_duplicate) = empty_request(
+        rest_app(state.clone(), owner.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/link-index/reindex"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::ACCEPTED, "{legacy_duplicate}");
+    assert_eq!(legacy_duplicate["result"], json!("already_pending"));
+
     let mut api_owner = owner.clone();
     api_owner.channel = Channel::Api;
     let (status, unavailable) = get_json(
@@ -227,7 +245,9 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     assert_eq!(unavailable["availability"]["reason"], json!("forbidden"));
     for path in [
         format!("/v1/spaces/{space_id}/nodes/{node_id}/actions/reindex-links"),
+        format!("/v1/spaces/{space_id}/nodes/{node_id}/links/sync"),
         format!("/v1/spaces/{space_id}/actions/reindex-links"),
+        format!("/v1/spaces/{space_id}/link-index/reindex"),
     ] {
         let (status, forbidden) =
             empty_request(rest_app(state.clone(), api_owner.clone()), "POST", path).await?;
@@ -249,7 +269,9 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     };
     for path in [
         format!("/v1/spaces/{space_id}/nodes/{node_id}/actions/reindex-links"),
+        format!("/v1/spaces/{space_id}/nodes/{node_id}/links/sync"),
         format!("/v1/spaces/{space_id}/actions/reindex-links"),
+        format!("/v1/spaces/{space_id}/link-index/reindex"),
     ] {
         let (status, hidden) =
             empty_request(rest_app(state.clone(), stranger.clone()), "POST", path).await?;

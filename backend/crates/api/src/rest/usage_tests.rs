@@ -68,6 +68,7 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     );
     assert!(usage["spaces"][0].get("content_bytes").is_none());
     assert!(usage["spaces"][0].get("agent_connections").is_none());
+    assert_eq!(usage["spaces"][0]["reconciliation_pending"], json!(false));
     assert_eq!(
         usage["spaces"][0]["reconciliation"]["status"],
         json!("idle")
@@ -129,6 +130,30 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     assert_eq!(duplicate["result"], json!("already_pending"));
     assert_eq!(duplicate["availability"]["reason"], json!("pending"));
     assert!(duplicate.get("job_id").is_none());
+
+    let (status, legacy_duplicate) = empty_request(
+        rest_app(state.clone(), owner.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/usage/reconcile"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::ACCEPTED, "{legacy_duplicate}");
+    assert_eq!(legacy_duplicate["result"], json!("already_pending"));
+
+    let (status, pending_usage) = get_json(
+        rest_app(state.clone(), owner.clone()),
+        "/v1/me/usage".into(),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{pending_usage}");
+    assert_eq!(
+        pending_usage["spaces"][0]["reconciliation_pending"],
+        json!(true)
+    );
+    assert_eq!(
+        pending_usage["spaces"][0]["reconciliation"]["status"],
+        json!("pending")
+    );
 
     let (stranger_account, stranger_user) = state
         .accounts

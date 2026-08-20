@@ -47,6 +47,7 @@ User caller만 가능하다. 현재 tier와 소유 Space별 live Text/File/item 
       "items": {"used": 319, "limit": 1999},
       "text_bytes": {"used": 48120320, "limit": 134217728},
       "file_bytes": {"used": 80000000, "limit": 134217728},
+      "reconciliation_pending": false,
       "reconciliation": {
         "status": "idle",
         "availability": {
@@ -60,7 +61,7 @@ User caller만 가능하다. 현재 tier와 소유 Space별 live Text/File/item 
 }
 ```
 
-Account, Agent, Agent API key, connection limit은 각 리소스 API에서 별도로 검사하며 이 응답에 포함하지 않는다. 사용량의 계산 기준과 reconciliation 동작은 `../usage-and-quotas.md`를 따른다.
+`reconciliation_pending`은 `reconciliation.status == pending`의 boolean 요약이다. 실행 가능 여부는 `reconciliation.availability`를 기준으로 판단한다. Account, Agent, Agent API key, connection limit은 각 리소스 API에서 별도로 검사하며 이 응답에 포함하지 않는다. 사용량의 계산 기준과 reconciliation 동작은 `../usage-and-quotas.md`를 따른다.
 
 ## Current user event history
 

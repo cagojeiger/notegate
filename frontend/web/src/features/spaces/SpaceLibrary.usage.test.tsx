@@ -128,7 +128,7 @@ describe("SpaceLibrary usage", () => {
     expect(screen.getByRole("button", { name: "Recalculate Personal usage" })).toBeDisabled();
   });
 
-  it("presents a reconciliation cooldown as up to date", async () => {
+  it("presents a previous API cooldown as up to date", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       if (init?.method === "POST") {
         return jsonResponse({ kind: "usage_reconciliation_cooldown", message: "space usage was reconciled recently; try again later" }, 409);
@@ -138,18 +138,15 @@ describe("SpaceLibrary usage", () => {
         availability: { can_trigger: true, reason: null, retry_at: null }
       });
       return jsonResponse({
-        ...usage,
-        spaces: usage.spaces.map((item) => ({
-          ...item,
-          reconciliation: {
-            status: "idle",
-            availability: {
-              can_trigger: false,
-              reason: "cooldown",
-              retry_at: "2099-01-01T00:00:00Z"
-            }
-          }
-        }))
+        tier: usage.tier,
+        spaces: [{
+          id: usage.spaces[0]?.id,
+          name: usage.spaces[0]?.name,
+          items: usage.spaces[0]?.items,
+          text_bytes: usage.spaces[0]?.text_bytes,
+          file_bytes: usage.spaces[0]?.file_bytes,
+          reconciliation_pending: false
+        }]
       });
     });
     const user = userEvent.setup();
@@ -159,7 +156,7 @@ describe("SpaceLibrary usage", () => {
 
     expect(await screen.findByText("Usage is already up to date.")).toBeInTheDocument();
     expect(screen.queryByText(/reconciled recently/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Recalculate Personal usage" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Recalculate Personal usage" })).toBeEnabled();
   });
 
   it("retries after the usage query fails", async () => {

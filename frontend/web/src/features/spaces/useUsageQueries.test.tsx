@@ -9,6 +9,7 @@ import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "../../api/client";
+import { ApiError } from "../../api/errors";
 import { POLLING } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
 import type { CurrentUserUsage } from "../../api/usage";
@@ -186,6 +187,34 @@ describe("useUsageQuery", () => {
     get.mockResolvedValue(usage());
     await refetchUsage(queryClient);
     expect(usageInterval(queryClient)).toBe(POLLING.usageSummaryIdleMs[0]);
+  });
+
+  it("treats the previous pending conflict as an active reconciliation", async () => {
+    get.mockResolvedValue(usage());
+    post.mockRejectedValue(new ApiError(
+      "space usage reconciliation is already queued",
+      409,
+      "usage_reconciliation_pending"
+    ));
+    const queryClient = testQueryClient();
+    const view = renderHook(() => ({
+      usage: useUsageQuery(),
+      check: useCheckSpaceUsageMutation()
+    }), { wrapper: createWrapper(queryClient) });
+
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+    get.mockResolvedValue(usage({ pending: true }));
+    await act(async () => {
+      await expect(view.result.current.check.mutateAsync("space-1")).rejects.toMatchObject({
+        kind: "usage_reconciliation_pending"
+      });
+    });
+
+    await waitFor(() => {
+      expect(queryClient.getQueryData<CurrentUserUsage>(queryKeys.usage))
+        .toEqual(usage({ pending: true }));
+    });
+    expect(usageInterval(queryClient)).toBe(POLLING.usagePendingMs);
   });
 
   it("can disable usage loading for non-user callers", () => {

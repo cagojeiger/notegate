@@ -109,11 +109,12 @@ export function useCheckSpaceUsageMutation() {
     meta: { silentError: true },
     onSettled: (response, error, spaceId) => {
       const pending = response?.availability.reason === "pending";
+      const legacyPending = error instanceof ApiError && error.kind === "usage_reconciliation_pending";
       const cooldown = error instanceof ApiError && error.kind === "usage_reconciliation_cooldown";
-      if (!pending && !cooldown) return;
+      if (!pending && !legacyPending && !cooldown) return;
 
       pollingBackoff.reset();
-      if (pending && response) {
+      if (pending || legacyPending) {
         queryClient.setQueryData<CurrentUserUsage>(queryKeys.usage, (current) => current ? {
           ...current,
           spaces: current.spaces.map((space) => space.id === spaceId
@@ -121,7 +122,11 @@ export function useCheckSpaceUsageMutation() {
               ...space,
               reconciliation: {
                 status: "pending",
-                availability: response.availability
+                availability: response?.availability ?? {
+                  can_trigger: false,
+                  reason: "pending",
+                  retry_at: null
+                }
               }
             }
             : space)

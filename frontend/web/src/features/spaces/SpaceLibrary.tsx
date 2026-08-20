@@ -1,6 +1,7 @@
 import { Bot, FolderOpen, Link2, LockKeyhole, Pin, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { ApiError } from "../../api/errors";
 import type { UpdateSpaceInput } from "../../api/spaces";
 import type { Space } from "../../api/types";
 import type { CurrentUserUsage, SpaceUsage } from "../../api/usage";
@@ -76,6 +77,7 @@ export function SpaceLibrary({
   const currentUsageState = usageState(usageQuery);
   const updatePending = updateSpace.isPending || updateInspectorSpace.isPending;
   const selectedCheckError = checkUsage.isError && checkUsage.variables === selectedSpace?.id
+    && !(checkUsage.error instanceof ApiError && checkUsage.error.kind === "usage_reconciliation_pending")
     ? checkUsage.error
     : null;
 
@@ -207,12 +209,14 @@ function SpaceInspector({
   const reconciliationAvailableAt = usageAvailability?.retry_at ?? undefined;
   const retryInFuture = useTimestampInFuture(reconciliationAvailableAt);
   const isCooldown = usageAvailability?.reason === "cooldown" && retryInFuture;
+  const previousApiCooldown = usageCheck.error instanceof ApiError
+    && usageCheck.error.kind === "usage_reconciliation_cooldown";
   const canCheckUsage = usageAvailability?.can_trigger === true
     || (usageAvailability?.reason === "cooldown" && !isCooldown);
   const checkStatus = usageState === "ready" && usage
     ? isChecking
       ? { message: "Recalculating usage…", className: "text-warning" }
-      : isCooldown
+      : isCooldown || previousApiCooldown
         ? { message: "Usage is already up to date.", className: "text-muted" }
         : usageCheck.error
           ? { message: "Usage could not be checked. Try again shortly.", className: "text-danger" }
@@ -249,6 +253,7 @@ function SpaceInspector({
   const linkIndexPending = canReindexLinks && Boolean(
     linkIndexStatus.data?.status === "pending" || reindexPending
   );
+  const linkIndexStatusUnknown = linkIndexStatus.data?.status === "unknown";
   const linkIndexUnavailable = linkIndexStatus.isLoading
     || linkIndexStatus.isError
     || linkIndexStatus.data?.availability?.can_trigger !== true
@@ -347,7 +352,9 @@ function SpaceInspector({
             {linkIndexPending ? (
               <p className="text-xs text-muted" role="status">Link indexing is in progress.</p>
             ) : reindexForCurrentSpace && reindexLinks.isSuccess ? (
-              <p className="text-xs text-muted" role="status">Link index is up to date.</p>
+              <p className="text-xs text-muted" role="status">
+                {linkIndexStatusUnknown ? "Link reindex requested." : "Link index is up to date."}
+              </p>
             ) : null}
             {canReindexLinks && linkIndexStatus.isError ? (
               <p className="text-xs text-danger" role="alert">Could not load link index status.</p>

@@ -37,7 +37,15 @@ pub fn routes() -> Router<AppState> {
             post(sync_node_links),
         )
         .route(
+            "/v1/spaces/{space_id}/nodes/{node_id}/links/sync",
+            post(sync_node_links),
+        )
+        .route(
             "/v1/spaces/{space_id}/actions/reindex-links",
+            post(reindex_space),
+        )
+        .route(
+            "/v1/spaces/{space_id}/link-index/reindex",
             post(reindex_space),
         )
         .route(

@@ -68,6 +68,7 @@ pub(crate) struct SpaceUsageOut {
     items: QuotaUsageOut,
     text_bytes: QuotaUsageOut,
     file_bytes: QuotaUsageOut,
+    reconciliation_pending: bool,
     reconciliation: UsageReconciliationStatusOut,
 }
 
@@ -99,7 +100,8 @@ impl From<CurrentUserUsage> for CurrentUserUsageOut {
                 .spaces
                 .into_iter()
                 .map(|space| {
-                    let availability = if space.reconciliation_pending {
+                    let reconciliation_pending = space.reconciliation_pending;
+                    let availability = if reconciliation_pending {
                         CommandAvailability::pending()
                     } else if space.reconciliation_available_at > now {
                         CommandAvailability::cooldown(space.reconciliation_available_at)
@@ -112,8 +114,9 @@ impl From<CurrentUserUsage> for CurrentUserUsageOut {
                         items: space.items.into(),
                         text_bytes: space.text_bytes.into(),
                         file_bytes: space.file_bytes.into(),
+                        reconciliation_pending,
                         reconciliation: UsageReconciliationStatusOut {
-                            status: if space.reconciliation_pending {
+                            status: if reconciliation_pending {
                                 UsageReconciliationStatus::Pending
                             } else {
                                 UsageReconciliationStatus::Idle

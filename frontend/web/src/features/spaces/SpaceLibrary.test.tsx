@@ -342,6 +342,29 @@ describe("SpaceLibrary", () => {
     expect(screen.getByText("Link indexing is in progress.")).toBeInTheDocument();
   });
 
+  it("does not report completion when the previous backend cannot expose status", () => {
+    mocks.useSpaceLinkIndexStatusQuery.mockReturnValue({
+      data: {
+        status: "unknown",
+        availability: { can_trigger: true, reason: null, retry_at: null }
+      },
+      isError: false,
+      isLoading: false
+    });
+    mocks.useReindexSpaceLinksMutation.mockReturnValue({
+      isError: false,
+      isPending: false,
+      isSuccess: true,
+      mutate: mocks.reindexLinks,
+      variables: "daily"
+    });
+
+    renderLibrary();
+
+    expect(screen.getByText("Link reindex requested.")).toBeInTheDocument();
+    expect(screen.queryByText("Link index is up to date.")).not.toBeInTheDocument();
+  });
+
   it("fails closed while a cached link index status lacks command availability", () => {
     mocks.useSpaceLinkIndexStatusQuery.mockReturnValue({
       data: { status: "idle" },

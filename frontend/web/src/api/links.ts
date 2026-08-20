@@ -1,4 +1,6 @@
 import type { ApiClient } from "./client";
+import { postAsyncCommand } from "./asyncCommands";
+import { isApiRouteNotFound } from "./errors";
 import type { AsyncCommandAck, CommandAvailability, Page } from "./types";
 
 export type NodeLinkProjectionStatus = {
@@ -25,18 +27,29 @@ export type NodeLinksResponse = {
 };
 
 export type SpaceLinkIndexStatus = {
-  status: "idle" | "pending";
+  status: "idle" | "pending" | "unknown";
   availability: CommandAvailability;
 };
 
-export function getNodeLinkStatus(
+type NodeLinkProjectionStatusWire = Omit<NodeLinkProjectionStatus, "availability"> & {
+  availability?: CommandAvailability;
+};
+
+export async function getNodeLinkStatus(
   client: ApiClient,
   spaceId: string,
   nodeId: string
 ): Promise<NodeLinkProjectionStatus> {
-  return client.get<NodeLinkProjectionStatus>(
+  const status = await client.get<NodeLinkProjectionStatusWire>(
     `/api/v1/spaces/${spaceId}/nodes/${nodeId}/links`
   );
+  const pending = status.status === "pending" || status.status === "syncing" || status.space_pending;
+  return {
+    ...status,
+    availability: status.availability ?? (pending
+      ? { can_trigger: false, reason: "pending", retry_at: null }
+      : { can_trigger: true, reason: null, retry_at: null })
+  };
 }
 
 export function listNodeLinks(
@@ -53,30 +66,44 @@ export function listNodeLinks(
   );
 }
 
-export function requestNodeLinkSync(
+export async function requestNodeLinkSync(
   client: ApiClient,
   spaceId: string,
   nodeId: string
 ): Promise<AsyncCommandAck> {
-  return client.post<AsyncCommandAck>(
-    `/api/v1/spaces/${spaceId}/nodes/${nodeId}/actions/reindex-links`
+  return postAsyncCommand(
+    client,
+    `/api/v1/spaces/${spaceId}/nodes/${nodeId}/actions/reindex-links`,
+    `/api/v1/spaces/${spaceId}/nodes/${nodeId}/links/sync`
   );
 }
 
-export function requestSpaceLinkReindex(
+export async function requestSpaceLinkReindex(
   client: ApiClient,
   spaceId: string
 ): Promise<AsyncCommandAck> {
-  return client.post<AsyncCommandAck>(
-    `/api/v1/spaces/${spaceId}/actions/reindex-links`
+  return postAsyncCommand(
+    client,
+    `/api/v1/spaces/${spaceId}/actions/reindex-links`,
+    `/api/v1/spaces/${spaceId}/link-index/reindex`
   );
 }
 
-export function getSpaceLinkIndexStatus(
+export async function getSpaceLinkIndexStatus(
   client: ApiClient,
   spaceId: string
 ): Promise<SpaceLinkIndexStatus> {
-  return client.get<SpaceLinkIndexStatus>(
-    `/api/v1/spaces/${spaceId}/link-index`
-  );
+  try {
+    return await client.get<SpaceLinkIndexStatus>(
+      `/api/v1/spaces/${spaceId}/link-index`
+    );
+  } catch (error) {
+    if (isApiRouteNotFound(error)) {
+      return {
+        status: "unknown",
+        availability: { can_trigger: true, reason: null, retry_at: null }
+      };
+    }
+    throw error;
+  }
 }

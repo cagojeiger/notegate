@@ -16,7 +16,8 @@ Space read 권한이 필요하다. `status`는 `idle`, `pending`, `syncing`, `fa
   "space_pending":false,
   "projected_at":"2026-08-17T12:00:00Z",
   "failure_code":null,
-  "failed_at":null
+  "failed_at":null,
+  "availability":{"can_trigger":true,"reason":null,"retry_at":null}
 }
 ```
 

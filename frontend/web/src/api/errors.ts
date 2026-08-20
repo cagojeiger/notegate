@@ -10,6 +10,12 @@ export class ApiError extends Error {
   }
 }
 
+export function isApiRouteNotFound(error: unknown): error is ApiError {
+  return error instanceof ApiError
+    && error.status === 404
+    && error.message === "api route not found";
+}
+
 type ErrorLikeBody = {
   error?: string | {
     message?: string;

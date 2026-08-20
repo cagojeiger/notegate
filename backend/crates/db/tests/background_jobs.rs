@@ -376,7 +376,7 @@ async fn job_history_migration_backfills_active_jobs() -> Result<(), Box<dyn std
 }
 
 #[tokio::test]
-async fn link_job_history_migration_backfills_existing_jobs()
+async fn link_job_history_migration_backfills_and_preserves_rolling_writes()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup_before(39).await? else {
         return Ok(());
@@ -394,6 +394,16 @@ async fn link_job_history_migration_backfills_existing_jobs()
     .await?;
 
     db.apply_migration(39).await?;
+
+    let rolling_job_id: uuid::Uuid = sqlx::query_scalar(
+        "SELECT enqueue_background_job( \
+             'link_graph_project_nodes', jsonb_build_object('space_id', $1), \
+             now(), 8, 'hidden', NULL::uuid, NULL::text, NULL::uuid, NULL::text \
+         )",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
 
     let history: (
         String,
@@ -415,6 +425,28 @@ async fn link_job_history_migration_backfills_existing_jobs()
             "visible".to_owned(),
             Some(owner_account_id),
             Some("space".to_owned()),
+            Some(space_id),
+            Some("ws-link-jobs-history-backfill".to_owned())
+        )
+    );
+
+    let rolling_history: (
+        String,
+        Option<uuid::Uuid>,
+        Option<uuid::Uuid>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT history_visibility, history_owner_account_id, context_id, context_label \
+             FROM background_jobs WHERE job_id = $1",
+    )
+    .bind(rolling_job_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        rolling_history,
+        (
+            "visible".to_owned(),
+            Some(owner_account_id),
             Some(space_id),
             Some("ws-link-jobs-history-backfill".to_owned())
         )

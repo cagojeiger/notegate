@@ -34,6 +34,10 @@ pub fn routes() -> Router<AppState> {
             "/v1/spaces/{space_id}/actions/reconcile-usage",
             post(request_usage_reconciliation),
         )
+        .route(
+            "/v1/spaces/{space_id}/usage/reconcile",
+            post(request_usage_reconciliation),
+        )
 }
 
 #[derive(Debug, Deserialize)]
