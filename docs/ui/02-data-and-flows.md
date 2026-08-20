@@ -239,6 +239,20 @@ open a verified audio File
 - 재생, 일시정지, seek를 browser native control로 제공한다. URL 만료 뒤 media request가 실패하면 새 URL을 한 번 발급받아 복구한다.
 - client-side encrypted File과 확인되지 않은 media type은 inline 재생하지 않고 Download만 제공한다.
 
+### Preview DOCX
+
+```text
+open a verified DOCX File
+-> GET /api/v1/spaces/{space_id}/files/{node_id}/docx-preview-url
+-> render the document in a scriptless sandbox
+-> flow content continuously within the current editor width
+-> retain Download for exact print layout
+```
+
+- DOCX preview는 page width, height와 page break를 화면에 강제하지 않는다.
+- 일반 내용은 editor 폭에 맞춰 재배치하고, 넓은 embedded content만 문서 안에서 가로로 탐색할 수 있게 한다.
+- 원본의 표, 이미지와 문단 서식은 유지하되 정확한 인쇄 배치는 Download한 원본이 정본이다.
+
 ### Record audio
 
 ```text

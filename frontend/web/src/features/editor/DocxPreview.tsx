@@ -11,11 +11,52 @@ type PreviewStatus = "loading" | "ready" | "error";
 
 const DOCX_CLASS_NAME = "ng-docx";
 const DOCX_FRAME_LAYOUT_CSS = `
-.${DOCX_CLASS_NAME}-wrapper {
-  align-items: flex-start;
+html,
+body {
+  box-sizing: border-box;
+  margin: 0;
+  min-width: 0;
+  background: transparent;
 }
-.${DOCX_CLASS_NAME}-wrapper > section.${DOCX_CLASS_NAME} {
-  margin-inline: auto;
+body {
+  overflow-x: hidden;
+}
+[data-notegate-docx-flow] {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: clamp(12px, 2.5vw, 32px);
+  background: transparent;
+}
+[data-notegate-docx-section] {
+  box-sizing: border-box;
+  display: block;
+  width: 100% !important;
+  max-width: 64rem !important;
+  min-height: 0 !important;
+  margin: 0 auto !important;
+  padding: 0 clamp(16px, 4vw, 56px) !important;
+  overflow: visible;
+  box-shadow: none !important;
+}
+[data-notegate-docx-section]:first-child {
+  padding-top: clamp(24px, 5vw, 64px) !important;
+}
+[data-notegate-docx-section]:last-child {
+  padding-bottom: clamp(24px, 5vw, 64px) !important;
+}
+[data-notegate-docx-content] {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+[data-notegate-docx-flow] img,
+[data-notegate-docx-flow] svg,
+[data-notegate-docx-flow] canvas,
+[data-notegate-docx-flow] video {
+  max-width: 100% !important;
+  height: auto !important;
 }
 `;
 const DOCX_FRAME_CSP = [
@@ -121,7 +162,7 @@ export function DocxPreview({
         className={status === "ready"
           ? "min-h-0 flex-1 border-0 bg-bg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
           : "hidden"}
-        title={`${name} DOCX pages`}
+        title={`${name} DOCX document`}
         sandbox="allow-same-origin"
         referrerPolicy="no-referrer"
       />
@@ -147,6 +188,7 @@ async function loadAndRenderDocx(
   const document = await parseAsync(bytes, options);
   if (signal.aborted) throw new DOMException("DOCX preview canceled", "AbortError");
   const nodes = await renderDocument(document, options);
+  applyContinuousLayoutContract(nodes);
 
   for (const node of nodes) {
     collectObjectUrls(node, resourceUrls);
@@ -165,11 +207,30 @@ async function loadAndRenderDocx(
   };
 }
 
+function applyContinuousLayoutContract(nodes: Node[]) {
+  for (const node of nodes) {
+    for (const wrapper of elementsIn(node)) {
+      if (!wrapper.classList.contains(`${DOCX_CLASS_NAME}-wrapper`)) continue;
+      wrapper.setAttribute("data-notegate-docx-flow", "");
+
+      for (const section of Array.from(wrapper.children)) {
+        if (!section.matches(`section.${DOCX_CLASS_NAME}`)) continue;
+        section.setAttribute("data-notegate-docx-section", "");
+        section.querySelector(":scope > article")
+          ?.setAttribute("data-notegate-docx-content", "");
+      }
+    }
+  }
+}
+
 function createRenderOptions(resourceUrls: Set<string>): Partial<Options> {
   return {
     className: DOCX_CLASS_NAME,
+    breakPages: false,
     experimental: false,
+    ignoreHeight: true,
     ignoreFonts: true,
+    ignoreWidth: true,
     renderAltChunks: false,
     renderChanges: false,
     renderComments: false,

@@ -123,14 +123,17 @@ for (const viewport of [
     const docxPreview = page.locator("[data-docx-preview]");
     await expect(docxPreview).toBeVisible();
     await expectInsideActiveEditor(page, docxPreview);
-    const docxFrame = page.frameLocator(`iframe[title="${docxNode.name} DOCX pages"]`);
+    const docxFrame = page.frameLocator(`iframe[title="${docxNode.name} DOCX document"]`);
     await expect(docxFrame.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute(
       "content",
       /default-src 'none'.*connect-src 'none'/
     );
     await expect(docxFrame.getByText("NoteGate DOCX preview", { exact: true })).toBeVisible();
     await expect(docxFrame.getByText("한글 문서 미리보기", { exact: true })).toBeVisible();
-    await expectDocxPagesHorizontallyReachable(docxFrame);
+    await expect(docxFrame.getByText("Second page content", { exact: true })).toBeVisible();
+    await expect(docxFrame.locator("[data-notegate-docx-flow]")).toBeVisible();
+    await expect(docxFrame.locator("[data-notegate-docx-section]")).toHaveCount(1);
+    await expectDocxFlowFitsViewport(docxFrame);
   });
 }
 
@@ -287,44 +290,40 @@ async function expectInsideActiveEditor(
   expect(contentBox!.y + contentBox!.height).toBeLessThanOrEqual(editorBox!.y + editorBox!.height + 1);
 }
 
-async function expectDocxPagesHorizontallyReachable(
+async function expectDocxFlowFitsViewport(
   frame: import("@playwright/test").FrameLocator
 ) {
   const frameBody = frame.locator("body");
-  const initial = await frameBody.evaluate(() => {
-    const page = document.querySelector<HTMLElement>(".ng-docx-wrapper > section.ng-docx");
+  const layout = await frameBody.evaluate(() => {
+    const documentSection = document.querySelector<HTMLElement>("[data-notegate-docx-section]");
+    const wrapper = document.querySelector<HTMLElement>("[data-notegate-docx-flow]");
     const scroller = document.scrollingElement;
-    if (!page || !scroller) throw new Error("DOCX page or scroll container is missing");
+    if (!documentSection || !wrapper || !scroller) {
+      throw new Error("DOCX document or scroll container is missing");
+    }
 
-    const pageBox = page.getBoundingClientRect();
+    const documentBox = documentSection.getBoundingClientRect();
+    const documentStyle = getComputedStyle(documentSection);
+    const wrapperStyle = getComputedStyle(wrapper);
+    const availableWidth = scroller.clientWidth
+      - Number.parseFloat(wrapperStyle.paddingLeft)
+      - Number.parseFloat(wrapperStyle.paddingRight);
     return {
       clientWidth: scroller.clientWidth,
-      pageLeft: pageBox.left,
-      pageRight: pageBox.right,
-      scrollWidth: scroller.scrollWidth
+      documentLeft: documentBox.left,
+      documentRight: documentBox.right,
+      documentWidth: documentBox.width,
+      expectedWidth: Math.min(availableWidth, Number.parseFloat(documentStyle.maxWidth)),
+      scrollWidth: scroller.scrollWidth,
+      sectionMinHeight: documentStyle.minHeight
     };
   });
 
-  expect(initial.pageLeft).toBeGreaterThanOrEqual(0);
-  expect(initial.pageRight).toBeLessThanOrEqual(initial.scrollWidth + 1);
-
-  if (initial.scrollWidth > initial.clientWidth) {
-    const atEnd = await frameBody.evaluate(() => {
-      const page = document.querySelector<HTMLElement>(".ng-docx-wrapper > section.ng-docx")!;
-      const scroller = document.scrollingElement!;
-      scroller.scrollLeft = scroller.scrollWidth;
-      return {
-        clientWidth: scroller.clientWidth,
-        pageRight: page.getBoundingClientRect().right,
-        scrollLeft: scroller.scrollLeft
-      };
-    });
-    expect(atEnd.scrollLeft).toBeGreaterThan(0);
-    expect(atEnd.pageRight).toBeLessThanOrEqual(atEnd.clientWidth + 1);
-  } else {
-    expect(Math.abs(initial.pageLeft - (initial.clientWidth - initial.pageRight)))
-      .toBeLessThanOrEqual(1);
-  }
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  expect(layout.documentLeft).toBeGreaterThanOrEqual(0);
+  expect(layout.documentRight).toBeLessThanOrEqual(layout.clientWidth + 1);
+  expect(Math.abs(layout.documentWidth - layout.expectedWidth)).toBeLessThanOrEqual(1);
+  expect(layout.sectionMinHeight).toBe("0px");
 }
 
 function createPdf() {
@@ -359,4 +358,4 @@ function pageInfo(returned: number) {
   return { limit: 100, returned, has_more: false, next_cursor: null };
 }
 
-const DOCX_FIXTURE_BASE64 = "UEsDBBQAAAAIAHV+El15bjPX6AAAAK0BAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbH1QyU7DMBD9FWuuKHHggBCK0wPLETiUDxjZk8SqN3nc0v49Tlt6QIXjzFv1+tXeO7GjzDYGBbdtB4KCjsaGScHn+rV5AMEFg0EXAyk4EMNq6NeHRCyqNrCCuZT0KCXrmTxyGxOFiowxeyz1zJNMqDc4kbzrunupYygUSlMWDxj6Zxpx64p42df3qUcmxyCeTsQlSwGm5KzGUnG5C+ZXSnNOaKvyyOHZJr6pBJBXExbk74Cz7r0Ok60h8YG5vKGvLPkVs5Em6q2vyvZ/mys94zhaTRf94pZy1MRcF/euvSAebfjpL49zD99QSwMEFAAAAAgAdX4SXZv9N+qtAAAAKQEAAAsAAABfcmVscy8ucmVsc43POw7CMAwG4KtE3mlaBoRQ0y4IqSsqB7ASN61oHkrCo7cnAwNFDIy2f3+W6/ZpZnanECdnBVRFCYysdGqyWsClP232wGJCq3B2lgQsFKFt6jPNmPJKHCcfWTZsFDCm5A+cRzmSwVg4TzZPBhcMplwGzT3KK2ri27Lc8fBpwNpknRIQOlUB6xdP/9huGCZJRydvhmz6ceIrkWUMmpKAhwuKq3e7yCzwpuarF5sXUEsDBBQAAAAIAHV+El1HjNXVEwEAAJMBAAARAAAAd29yZC9kb2N1bWVudC54bWxtUE1Lw0AQ/SvL3u2mpUoJSXtQ9OQHqOB1m0yTQHZn2R0b68mDf8Fbz54KCnrIb2rqf3C3pRTEy5t5M/PeMJNMnlTN5mBdhTrl/V7EGegM80oXKb+/Oz8aceZI6lzWqCHlC3B8Mk6aOMfsUYEm5g20i5uUl0QmFsJlJSjpemhA+94MrZLkqS1EgzY3FjNwzvurWgyi6EQoWWkeLKeYL0I0AWwAGl8hwYUkYGfXpw/MWJhX0CQitALaLZq/qp+35bp9Yd2q3bwuWffRdu+r7ut73X7+K3WQ0c1WaorbZ9aEa/qDwdA/o4lLnx+PfC52A5fS+iqh8fXhbsRWRUkHOkUiVAdew2zfFdul+31if7M4/HP8C1BLAQIUAxQAAAAIAHV+El15bjPX6AAAAK0BAAATAAAAAAAAAAAAAACAAQAAAABbQ29udGVudF9UeXBlc10ueG1sUEsBAhQDFAAAAAgAdX4SXZv9N+qtAAAAKQEAAAsAAAAAAAAAAAAAAIABGQEAAF9yZWxzLy5yZWxzUEsBAhQDFAAAAAgAdX4SXUeM1dUTAQAAkwEAABEAAAAAAAAAAAAAAIAB7wEAAHdvcmQvZG9jdW1lbnQueG1sUEsFBgAAAAADAAMAuQAAADEDAAAAAA==";
+const DOCX_FIXTURE_BASE64 = "UEsDBAoAAAAIAHV+El15bjPX6AAAAK0BAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbH1QyU7DMBD9FWuuKHHggBCK0wPLETiUDxjZk8SqN3nc0v49Tlt6QIXjzFv1+tXeO7GjzDYGBbdtB4KCjsaGScHn+rV5AMEFg0EXAyk4EMNq6NeHRCyqNrCCuZT0KCXrmTxyGxOFiowxeyz1zJNMqDc4kbzrunupYygUSlMWDxj6Zxpx64p42df3qUcmxyCeTsQlSwGm5KzGUnG5C+ZXSnNOaKvyyOHZJr6pBJBXExbk74Cz7r0Ok60h8YG5vKGvLPkVs5Em6q2vyvZ/mys94zhaTRf94pZy1MRcF/euvSAebfjpL49zD99QSwMECgAAAAgAdX4SXZv9N+qtAAAAKQEAAAsAAABfcmVscy8ucmVsc43POw7CMAwG4KtE3mlaBoRQ0y4IqSsqB7ASN61oHkrCo7cnAwNFDIy2f3+W6/ZpZnanECdnBVRFCYysdGqyWsClP232wGJCq3B2lgQsFKFt6jPNmPJKHCcfWTZsFDCm5A+cRzmSwVg4TzZPBhcMplwGzT3KK2ri27Lc8fBpwNpknRIQOlUB6xdP/9huGCZJRydvhmz6ceIrkWUMmpKAhwuKq3e7yCzwpuarF5sXUEsDBAoAAAAIAK5ZFF1z+LFqLgEAAPIBAAARAAAAd29yZC9kb2N1bWVudC54bWyFUT1PwzAQ/SuWd+o2KqiKmnYAwcSHVJBY3eSaRIp9lm0aysTAX2DrzFQJJBjymxr4D5xbVZUQguX5zu/u3fl5OL5XFZuDdSXqhPc6Xc5Ap5iVOk/4zfXpwYAz56XOZIUaEr4Ax8ejYR1nmN4p0J6RgHZxnfDCexML4dIClHQdNKCJm6FV0lNqc1GjzYzFFJwjfVWJqNs9EkqWmgfJKWaLcJoANoAfXaCHM+mBnVwe3zJjYV5CPRSBCmg3aH52fT0v180ja1fN59OSta9N+7Jq3z/Wzds/rVPLiF8YeqmROXDx15QJpKgzFgoZRZ7c+FXeQeqvNj0mnzzQADKrF0V98rqOC4oPBxSLbcG53KyAhu772xJb5oXfp1P0HtU+r2C2Y7fr7uaJnaVi/12jb1BLAwQKAAAAAACuWRRdAAAAAAAAAAAAAAAABQAAAHdvcmQvUEsBAhQACgAAAAgAdX4SXXluM9foAAAArQEAABMAAAAAAAAAAAAAAAAAAAAAAFtDb250ZW50X1R5cGVzXS54bWxQSwECFAAKAAAACAB1fhJdm/036q0AAAApAQAACwAAAAAAAAAAAAAAAAAZAQAAX3JlbHMvLnJlbHNQSwECFAAKAAAACACuWRRdc/ixai4BAADyAQAAEQAAAAAAAAAAAAAAAADvAQAAd29yZC9kb2N1bWVudC54bWxQSwECFAAKAAAAAACuWRRdAAAAAAAAAAAAAAAABQAAAAAAAAAAABAAAABMAwAAd29yZC9QSwUGAAAAAAQABADsAAAAbwMAAAAA";

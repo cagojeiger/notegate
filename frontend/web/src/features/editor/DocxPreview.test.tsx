@@ -50,7 +50,7 @@ describe("DocxPreview", () => {
     render(<DocxPreview url="https://storage.example/document.docx" name="document.docx" onError={vi.fn()} />);
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading DOCX…");
-    const frame = screen.getByTitle("document.docx DOCX pages") as HTMLIFrameElement;
+    const frame = screen.getByTitle("document.docx DOCX document") as HTMLIFrameElement;
     expect(frame).toHaveAttribute("sandbox", "allow-same-origin");
     expect(frame).toHaveAttribute("referrerpolicy", "no-referrer");
 
@@ -73,8 +73,11 @@ describe("DocxPreview", () => {
     expect(parseOptions).toBe(renderOptions);
     expect(renderOptions).toMatchObject({
       className: "ng-docx",
+      breakPages: false,
       experimental: false,
+      ignoreHeight: true,
       ignoreFonts: true,
+      ignoreWidth: true,
       renderAltChunks: false,
       renderChanges: false,
       renderComments: false,
@@ -89,8 +92,13 @@ describe("DocxPreview", () => {
     const layoutStyle = frameDocument.head.querySelector<HTMLStyleElement>(
       "style[data-notegate-docx-layout]"
     );
-    expect(layoutStyle?.textContent).toContain("align-items: flex-start");
-    expect(layoutStyle?.textContent).toContain("margin-inline: auto");
+    expect(layoutStyle?.textContent).toContain("overflow-x: hidden");
+    expect(layoutStyle?.textContent).toContain("max-width: 64rem");
+    expect(layoutStyle?.textContent).toContain("box-shadow: none");
+    expect(layoutStyle?.textContent).toContain("max-width: 100%");
+    expect(frameDocument.querySelector("[data-notegate-docx-flow]")).not.toBeNull();
+    expect(frameDocument.querySelector("[data-notegate-docx-section]")).not.toBeNull();
+    expect(frameDocument.querySelector("[data-notegate-docx-content]")).not.toBeNull();
     const scriptLink = findFrameText(frameDocument, "Script").closest("a")!;
     const dataLink = findFrameText(frameDocument, "Data").closest("a")!;
     const vbscriptLink = findFrameText(frameDocument, "VBScript").closest("a")!;
@@ -174,7 +182,7 @@ describe("DocxPreview", () => {
     );
     await waitFor(() => expect(docxMocks.renderDocument).toHaveBeenCalledTimes(2));
 
-    const frame = screen.getByTitle("current.docx DOCX pages") as HTMLIFrameElement;
+    const frame = screen.getByTitle("current.docx DOCX document") as HTMLIFrameElement;
     await waitFor(() => expect(frame.contentDocument?.body).toHaveTextContent("Website"));
     expect(staleSignal?.aborted).toBe(true);
 
@@ -194,6 +202,10 @@ describe("DocxPreview", () => {
 function renderedNodes(options: Partial<Options>) {
   const wrapper = document.createElement("main");
   wrapper.className = "ng-docx-wrapper";
+  const section = document.createElement("section");
+  section.className = "ng-docx";
+  section.appendChild(document.createElement("article"));
+  wrapper.appendChild(section);
   wrapper.append(
     options.h!({ tagName: "a", href: "javascript:alert(1)", children: ["Script"] }),
     options.h!({ tagName: "a", href: "data:text/html,<script>alert(1)</script>", children: ["Data"] }),
