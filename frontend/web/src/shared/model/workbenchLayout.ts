@@ -11,7 +11,10 @@ export const WORKBENCH_LAYOUT = {
   mobilePrimaryMaxWidth: 320,
   defaultTreeRatio: 0.67,
   minTreeRatio: 0.2,
-  maxTreeRatio: 0.82
+  maxTreeRatio: 0.82,
+  defaultLinkRatio: 0.5,
+  minLinkRatio: 0.2,
+  maxLinkRatio: 0.8
 } as const;
 
 export type WorkbenchPanelMode = "hidden" | "overlay" | "docked";

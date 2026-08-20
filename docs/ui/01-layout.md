@@ -115,6 +115,17 @@ EditorArea
 - mobile은 overlay/sheet다.
 - agent 관리는 Settings에서 한다.
 
+### Links
+
+- 내부 링크는 `Links from this document`와 `Links to this document` 두 영역으로 나눈다.
+- Text 문서에서는 두 영역을 기본으로 모두 열고 각각 독립적으로 스크롤한다.
+- 중간 divider로 두 영역의 높이 비율을 조절하며, 키보드 조절도 지원한다.
+- 한 영역을 접으면 다른 영역이 남은 높이를 모두 사용하고, 다시 열면 이전 비율을 복원한다.
+- 분할 비율은 세션 공통 레이아웃 값으로 유지하며, 문서를 바꾸면 두 영역은 다시 기본으로 열린다.
+- 각 영역은 독립 cursor pagination을 사용하며 스크롤 끝에 가까워지면 다음 페이지를 요청한다.
+- Folder와 File은 incoming 링크 영역만 표시하고 전체 높이를 사용한다.
+- 외부 웹 링크는 이 화면의 현재 범위에 포함하지 않는다.
+
 ## StatusBar
 
 포함:

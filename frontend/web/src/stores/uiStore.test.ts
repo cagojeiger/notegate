@@ -355,5 +355,10 @@ describe("useUiStore", () => {
     expect(useUiStore.getState().treeRatio).toBe(WORKBENCH_LAYOUT.minTreeRatio);
     useUiStore.getState().setTreeRatio(0.95);
     expect(useUiStore.getState().treeRatio).toBe(WORKBENCH_LAYOUT.maxTreeRatio);
+
+    useUiStore.getState().setLinkRatio(0.05);
+    expect(useUiStore.getState().linkRatio).toBe(WORKBENCH_LAYOUT.minLinkRatio);
+    useUiStore.getState().setLinkRatio(0.95);
+    expect(useUiStore.getState().linkRatio).toBe(WORKBENCH_LAYOUT.maxLinkRatio);
   });
 });

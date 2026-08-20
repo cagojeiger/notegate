@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useId } from "react";
 import { RefreshCw } from "lucide-react";
 
-import type { NodeLinkDirection, NodeLinkProjectionStatus } from "../../api/links";
+import type { NodeLinkProjectionStatus } from "../../api/links";
 import type { RestNode } from "../../api/types";
-import { Button, SectionHeader } from "../../shared/ui";
+import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
+import { Button, ResizeSeparator, SectionHeader } from "../../shared/ui";
 import {
   useNodeLinksQuery,
   useNodeLinkStatusQuery,
@@ -14,6 +15,7 @@ import {
   useRefreshNodeLinksAfterProjection
 } from "./useRefreshNodeLinksAfterProjection";
 import { NodeLinkSection } from "./NodeLinkSection";
+import { useNodeLinkSections } from "./useNodeLinkSections";
 
 type NodeLinksPanelProps = {
   node: RestNode;
@@ -23,12 +25,9 @@ type NodeLinksPanelProps = {
 
 export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProps) {
   const indexableText = node.kind === "text" && node.text_storage_format !== "encrypted";
-  const [selectedDirection, setSelectedDirection] = useState<NodeLinkDirection | null>(
-    indexableText ? "outgoing" : "incoming"
-  );
-  const activeDirection = indexableText
-    ? selectedDirection
-    : selectedDirection === "incoming" ? "incoming" : null;
+  const sections = useNodeLinkSections();
+  const outgoingSectionId = useId();
+  const incomingSectionId = useId();
   const statusQuery = useNodeLinkStatusQuery(node, true);
   const outgoingQuery = useNodeLinksQuery(node, "outgoing", indexableText);
   const incomingQuery = useNodeLinksQuery(node, "incoming", true);
@@ -76,20 +75,32 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
         </section>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col divide-y divide-seam border-y border-seam">
+      <div
+        ref={sections.gridRef}
+        data-testid="node-link-sections"
+        className="grid min-h-0 min-w-0 flex-1 content-start border-y border-seam"
+        style={{
+          gridTemplateRows: indexableText
+            ? sections.gridRows
+            : node.kind === "text"
+              ? `auto 1px ${sections.incomingOpen ? "1fr" : "auto"}`
+              : sections.incomingOpen ? "1fr" : "auto"
+        }}
+      >
         {indexableText ? (
           <NodeLinkSection
+            id={outgoingSectionId}
             direction="outgoing"
             title="Links from this document"
             emptyMessage="This document does not link to another item."
-            expanded={activeDirection === "outgoing"}
+            expanded={sections.outgoingOpen}
             links={outgoing}
             loading={outgoingQuery.isLoading}
             error={outgoingQuery.isError && !outgoingQuery.isFetchNextPageError}
             loadMoreError={outgoingQuery.isFetchNextPageError}
             fetchingMore={outgoingQuery.isFetchingNextPage}
             hasMore={outgoingQuery.hasNextPage}
-            onToggle={() => setSelectedDirection((current) => current === "outgoing" ? null : "outgoing")}
+            onToggle={sections.toggleOutgoing}
             onRetry={() => { void outgoingQuery.refetch(); }}
             onLoadMore={() => { void outgoingQuery.fetchNextPage(); }}
             onOpenNode={openLinkedNode}
@@ -103,18 +114,42 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
           </div>
         ) : null}
 
+        {indexableText ? (
+          <div className="relative">
+            {sections.bothOpen ? (
+              <ResizeSeparator
+                orientation="horizontal"
+                label="Resize link sections"
+                value={Math.round(sections.linkRatio * 100)}
+                min={WORKBENCH_LAYOUT.minLinkRatio * 100}
+                max={WORKBENCH_LAYOUT.maxLinkRatio * 100}
+                step={5}
+                valueText={`${Math.round(sections.linkRatio * 100)}% links from this document`}
+                controls={`${outgoingSectionId} ${incomingSectionId}`}
+                onPointerDown={sections.startResize}
+                onValueChange={(value) => sections.setLinkRatio(value / 100)}
+              />
+            ) : (
+              <span className="absolute inset-x-0 top-1/2 h-px bg-seam" aria-hidden="true" />
+            )}
+          </div>
+        ) : node.kind === "text" ? (
+          <span className="bg-seam" aria-hidden="true" />
+        ) : null}
+
         <NodeLinkSection
+          id={incomingSectionId}
           direction="incoming"
           title="Links to this document"
           emptyMessage="No documents link to this item."
-          expanded={activeDirection === "incoming"}
+          expanded={sections.incomingOpen}
           links={incoming}
           loading={incomingQuery.isLoading}
           error={incomingQuery.isError && !incomingQuery.isFetchNextPageError}
           loadMoreError={incomingQuery.isFetchNextPageError}
           fetchingMore={incomingQuery.isFetchingNextPage}
           hasMore={incomingQuery.hasNextPage}
-          onToggle={() => setSelectedDirection((current) => current === "incoming" ? null : "incoming")}
+          onToggle={sections.toggleIncoming}
           onRetry={() => { void incomingQuery.refetch(); }}
           onLoadMore={() => { void incomingQuery.fetchNextPage(); }}
           onOpenNode={openLinkedNode}

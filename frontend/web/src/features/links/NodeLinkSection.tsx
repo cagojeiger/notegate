@@ -5,6 +5,7 @@ import type { NodeLink, NodeLinkDirection } from "../../api/links";
 import { Button } from "../../shared/ui";
 
 type NodeLinkSectionProps = {
+  id?: string;
   direction: NodeLinkDirection;
   title: string;
   emptyMessage: string;
@@ -22,6 +23,7 @@ type NodeLinkSectionProps = {
 };
 
 export function NodeLinkSection({
+  id,
   direction,
   title,
   emptyMessage,
@@ -41,7 +43,7 @@ export function NodeLinkSection({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   return (
-    <section className={expanded ? "flex min-h-0 flex-1 flex-col" : "shrink-0"}>
+    <section id={id} className={expanded ? "flex min-h-0 min-w-0 flex-col" : "min-w-0 shrink-0"}>
       <button
         type="button"
         className="flex min-h-workbench-control w-full shrink-0 items-center gap-2 px-1 py-1.5 text-left outline-none transition hover:bg-[var(--ng-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
