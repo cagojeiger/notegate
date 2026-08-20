@@ -21,7 +21,7 @@ body {
 body {
   overflow-x: hidden;
 }
-.${DOCX_CLASS_NAME}-wrapper {
+[data-notegate-docx-flow] {
   box-sizing: border-box;
   display: block;
   width: 100%;
@@ -29,31 +29,32 @@ body {
   padding: clamp(12px, 2.5vw, 32px);
   background: transparent;
 }
-.${DOCX_CLASS_NAME}-wrapper > section.${DOCX_CLASS_NAME} {
+[data-notegate-docx-section] {
   box-sizing: border-box;
   display: block;
-  width: min(100%, 64rem) !important;
+  width: 100% !important;
+  max-width: 64rem !important;
   min-height: 0 !important;
   margin: 0 auto !important;
   padding: 0 clamp(16px, 4vw, 56px) !important;
   overflow: visible;
   box-shadow: none !important;
 }
-.${DOCX_CLASS_NAME}-wrapper > section.${DOCX_CLASS_NAME}:first-child {
+[data-notegate-docx-section]:first-child {
   padding-top: clamp(24px, 5vw, 64px) !important;
 }
-.${DOCX_CLASS_NAME}-wrapper > section.${DOCX_CLASS_NAME}:last-child {
+[data-notegate-docx-section]:last-child {
   padding-bottom: clamp(24px, 5vw, 64px) !important;
 }
-.${DOCX_CLASS_NAME}-wrapper > section.${DOCX_CLASS_NAME} > article {
+[data-notegate-docx-content] {
   min-width: 0;
   max-width: 100%;
   overflow-x: auto;
 }
-.${DOCX_CLASS_NAME}-wrapper img,
-.${DOCX_CLASS_NAME}-wrapper svg,
-.${DOCX_CLASS_NAME}-wrapper canvas,
-.${DOCX_CLASS_NAME}-wrapper video {
+[data-notegate-docx-flow] img,
+[data-notegate-docx-flow] svg,
+[data-notegate-docx-flow] canvas,
+[data-notegate-docx-flow] video {
   max-width: 100% !important;
   height: auto !important;
 }
@@ -187,6 +188,7 @@ async function loadAndRenderDocx(
   const document = await parseAsync(bytes, options);
   if (signal.aborted) throw new DOMException("DOCX preview canceled", "AbortError");
   const nodes = await renderDocument(document, options);
+  applyContinuousLayoutContract(nodes);
 
   for (const node of nodes) {
     collectObjectUrls(node, resourceUrls);
@@ -203,6 +205,22 @@ async function loadAndRenderDocx(
     bodyNodes: nodes.filter((node) => node.nodeName !== "STYLE"),
     styleNodes: nodes.filter((node) => node.nodeName === "STYLE")
   };
+}
+
+function applyContinuousLayoutContract(nodes: Node[]) {
+  for (const node of nodes) {
+    for (const wrapper of elementsIn(node)) {
+      if (!wrapper.classList.contains(`${DOCX_CLASS_NAME}-wrapper`)) continue;
+      wrapper.setAttribute("data-notegate-docx-flow", "");
+
+      for (const section of Array.from(wrapper.children)) {
+        if (!section.matches(`section.${DOCX_CLASS_NAME}`)) continue;
+        section.setAttribute("data-notegate-docx-section", "");
+        section.querySelector(":scope > article")
+          ?.setAttribute("data-notegate-docx-content", "");
+      }
+    }
+  }
 }
 
 function createRenderOptions(resourceUrls: Set<string>): Partial<Options> {

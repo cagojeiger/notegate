@@ -131,7 +131,7 @@ for (const viewport of [
     await expect(docxFrame.getByText("NoteGate DOCX preview", { exact: true })).toBeVisible();
     await expect(docxFrame.getByText("한글 문서 미리보기", { exact: true })).toBeVisible();
     await expect(docxFrame.getByText("Second page content", { exact: true })).toBeVisible();
-    await expect(docxFrame.locator(".ng-docx-wrapper > section.ng-docx")).toHaveCount(1);
+    await expect(docxFrame.locator("[data-notegate-docx-flow]")).toBeVisible();
     await expectDocxFlowFitsViewport(docxFrame);
   });
 }
@@ -294,16 +294,15 @@ async function expectDocxFlowFitsViewport(
 ) {
   const frameBody = frame.locator("body");
   const layout = await frameBody.evaluate(() => {
-    const documentSection = document.querySelector<HTMLElement>(
-      ".ng-docx-wrapper > section.ng-docx"
-    );
-    const wrapper = document.querySelector<HTMLElement>(".ng-docx-wrapper");
+    const documentSection = document.querySelector<HTMLElement>("[data-notegate-docx-section]");
+    const wrapper = document.querySelector<HTMLElement>("[data-notegate-docx-flow]");
     const scroller = document.scrollingElement;
     if (!documentSection || !wrapper || !scroller) {
       throw new Error("DOCX document or scroll container is missing");
     }
 
     const documentBox = documentSection.getBoundingClientRect();
+    const documentStyle = getComputedStyle(documentSection);
     const wrapperStyle = getComputedStyle(wrapper);
     const availableWidth = scroller.clientWidth
       - Number.parseFloat(wrapperStyle.paddingLeft)
@@ -313,9 +312,9 @@ async function expectDocxFlowFitsViewport(
       documentLeft: documentBox.left,
       documentRight: documentBox.right,
       documentWidth: documentBox.width,
-      expectedWidth: Math.min(availableWidth, 1024),
+      expectedWidth: Math.min(availableWidth, Number.parseFloat(documentStyle.maxWidth)),
       scrollWidth: scroller.scrollWidth,
-      sectionMinHeight: getComputedStyle(documentSection).minHeight
+      sectionMinHeight: documentStyle.minHeight
     };
   });
 

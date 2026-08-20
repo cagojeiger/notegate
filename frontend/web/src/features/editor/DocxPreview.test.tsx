@@ -93,9 +93,12 @@ describe("DocxPreview", () => {
       "style[data-notegate-docx-layout]"
     );
     expect(layoutStyle?.textContent).toContain("overflow-x: hidden");
-    expect(layoutStyle?.textContent).toContain("width: min(100%, 64rem)");
+    expect(layoutStyle?.textContent).toContain("max-width: 64rem");
     expect(layoutStyle?.textContent).toContain("box-shadow: none");
     expect(layoutStyle?.textContent).toContain("max-width: 100%");
+    expect(frameDocument.querySelector("[data-notegate-docx-flow]")).not.toBeNull();
+    expect(frameDocument.querySelector("[data-notegate-docx-section]")).not.toBeNull();
+    expect(frameDocument.querySelector("[data-notegate-docx-content]")).not.toBeNull();
     const scriptLink = findFrameText(frameDocument, "Script").closest("a")!;
     const dataLink = findFrameText(frameDocument, "Data").closest("a")!;
     const vbscriptLink = findFrameText(frameDocument, "VBScript").closest("a")!;
@@ -199,6 +202,10 @@ describe("DocxPreview", () => {
 function renderedNodes(options: Partial<Options>) {
   const wrapper = document.createElement("main");
   wrapper.className = "ng-docx-wrapper";
+  const section = document.createElement("section");
+  section.className = "ng-docx";
+  section.appendChild(document.createElement("article"));
+  wrapper.appendChild(section);
   wrapper.append(
     options.h!({ tagName: "a", href: "javascript:alert(1)", children: ["Script"] }),
     options.h!({ tagName: "a", href: "data:text/html,<script>alert(1)</script>", children: ["Data"] }),
