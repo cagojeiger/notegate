@@ -132,6 +132,7 @@ for (const viewport of [
     await expect(docxFrame.getByText("한글 문서 미리보기", { exact: true })).toBeVisible();
     await expect(docxFrame.getByText("Second page content", { exact: true })).toBeVisible();
     await expect(docxFrame.locator("[data-notegate-docx-flow]")).toBeVisible();
+    await expect(docxFrame.locator("[data-notegate-docx-section]")).toHaveCount(1);
     await expectDocxFlowFitsViewport(docxFrame);
   });
 }
