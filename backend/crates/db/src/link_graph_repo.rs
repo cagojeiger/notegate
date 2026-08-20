@@ -3,12 +3,13 @@ use notegate_core::{Error, Result};
 use notegate_jobs::{ClaimFence, JobQueue};
 use notegate_model::{
     IncomingLinkCursor, LinkReferenceKind, NodeLinkGraphState, NodeLinkGraphStatus,
-    OutgoingLinkCursor,
+    OutgoingLinkCursor, TextStorageFormat,
 };
 use sqlx::{FromRow, PgConnection, PgPool};
 use uuid::Uuid;
 
 use crate::files::queries::{node::derive_path, search::resolve_node_ids_by_paths_with};
+use crate::link_graph_state::NODE_REQUEST_PENDING_PREDICATE;
 use crate::map_sqlx_error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,7 +45,7 @@ pub struct LinkGraphIncomingReference {
 pub struct LinkGraphNodeReadModel {
     pub state: NodeLinkGraphState,
     pub node_exists: bool,
-    pub source_indexable: bool,
+    pub source_storage_format: Option<TextStorageFormat>,
     pub request_pending: bool,
 }
 
@@ -91,12 +92,19 @@ impl LinkGraphRepo {
     ) -> Result<LinkGraphNodeReadModel> {
         let row = self.node_state_row(space_id, source_node_id).await?;
         let node_exists = row.node_exists;
-        let source_indexable = row.source_indexable;
-        let request_pending = row.request_pending();
+        let source_storage_format = row
+            .source_storage_format
+            .as_deref()
+            .map(|value| {
+                TextStorageFormat::parse(value)
+                    .ok_or_else(|| Error::internal(format!("unknown text storage format: {value}")))
+            })
+            .transpose()?;
+        let request_pending = row.request_pending;
         Ok(LinkGraphNodeReadModel {
             state: row.into(),
             node_exists,
-            source_indexable,
+            source_storage_format,
             request_pending,
         })
     }
@@ -106,7 +114,7 @@ impl LinkGraphRepo {
         space_id: Uuid,
         source_node_id: Uuid,
     ) -> Result<NodeLinkGraphStateRow> {
-        sqlx::query_as::<_, NodeLinkGraphStateRow>(
+        sqlx::query_as::<_, NodeLinkGraphStateRow>(sqlx::AssertSqlSafe(format!(
             "SELECT projection.projected_at, \
                     COALESCE(projection.needs_projection, false) AS needs_projection, \
                     (COALESCE(space_state.available_at IS NOT NULL, false) OR EXISTS ( \
@@ -120,7 +128,8 @@ impl LinkGraphRepo {
                     job.status AS active_job_status, job.last_error_code AS active_job_error_code, \
                     job.completed_at AS active_job_completed_at, \
                     node.id IS NOT NULL AS node_exists, \
-                    COALESCE(text.storage_format = 'plain', false) AS source_indexable \
+                    text.storage_format AS source_storage_format, \
+                    COALESCE({NODE_REQUEST_PENDING_PREDICATE}, false) AS request_pending \
              FROM (SELECT $1::uuid AS space_id, $2::uuid AS node_id) requested \
              LEFT JOIN nodes node \
                ON node.space_id = requested.space_id AND node.id = requested.node_id \
@@ -133,8 +142,8 @@ impl LinkGraphRepo {
               AND projection.source_node_id = requested.node_id \
              LEFT JOIN link_graph_space_states space_state \
                ON space_state.space_id = requested.space_id \
-             LEFT JOIN background_jobs job ON job.job_id = projection.active_job_id",
-        )
+             LEFT JOIN background_jobs job ON job.job_id = projection.active_job_id"
+        )))
         .bind(space_id)
         .bind(source_node_id)
         .fetch_one(&self.pool)
@@ -549,20 +558,8 @@ struct NodeLinkGraphStateRow {
     active_job_error_code: Option<String>,
     active_job_completed_at: Option<DateTime<Utc>>,
     node_exists: bool,
-    source_indexable: bool,
-}
-
-impl NodeLinkGraphStateRow {
-    fn request_pending(&self) -> bool {
-        self.needs_projection
-            && ((self.active_job_id.is_none() && self.failed_at.is_none())
-                || matches!(
-                    self.active_job_status.as_deref(),
-                    Some("queued" | "running" | "succeeded")
-                )
-                || (self.active_job_status.as_deref() == Some("dead")
-                    && self.active_request_version != self.request_version))
-    }
+    source_storage_format: Option<String>,
+    request_pending: bool,
 }
 
 impl From<NodeLinkGraphStateRow> for NodeLinkGraphState {

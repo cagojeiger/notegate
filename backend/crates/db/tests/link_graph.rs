@@ -1661,45 +1661,93 @@ async fn node_read_model_combines_node_eligibility_and_request_state()
 
     let missing = graph.node_read_model(space_id, Uuid::new_v4()).await?;
     assert!(!missing.node_exists);
-    assert!(!missing.source_indexable);
+    assert_eq!(missing.source_storage_format, None);
     assert!(!missing.request_pending);
 
     let folder = graph.node_read_model(space_id, root_id).await?;
     assert!(folder.node_exists);
-    assert!(!folder.source_indexable);
+    assert_eq!(folder.source_storage_format, None);
     assert!(!folder.request_pending);
 
     let plain_idle = graph.node_read_model(space_id, plain.id).await?;
     assert!(plain_idle.node_exists);
-    assert!(plain_idle.source_indexable);
+    assert_eq!(
+        plain_idle.source_storage_format,
+        Some(notegate_model::TextStorageFormat::Plain)
+    );
     assert!(!plain_idle.request_pending);
 
     let encrypted = graph.node_read_model(space_id, encrypted.id).await?;
     assert!(encrypted.node_exists);
-    assert!(!encrypted.source_indexable);
+    assert_eq!(
+        encrypted.source_storage_format,
+        Some(notegate_model::TextStorageFormat::Encrypted)
+    );
     assert!(!encrypted.request_pending);
 
     work.request_nodes(space_id, &[plain.id]).await?;
-    let job_id: Uuid = sqlx::query_scalar(
-        "SELECT active_job_id FROM node_link_projections \
+    let queued = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(queued.state.status, NodeLinkGraphStatus::Syncing);
+    assert!(queued.request_pending);
+
+    let queue = JobQueue::new(db.pool.clone());
+    let mut jobs = queue
+        .claim_many(
+            "link-node-read-test",
+            &[LinkGraphProjectNodesJob::KIND.to_owned()],
+            Duration::from_secs(300),
+            1,
+        )
+        .await?;
+    let job = jobs.pop().expect("projection job");
+    let running = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(running.state.status, NodeLinkGraphStatus::Syncing);
+    assert!(running.request_pending);
+
+    assert!(queue.succeed(&job).await?);
+    let succeeded = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(succeeded.state.status, NodeLinkGraphStatus::Failed);
+    assert!(succeeded.request_pending);
+
+    mark_job_dead(&db.pool, job.job_id).await?;
+    let current_dead = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(current_dead.state.status, NodeLinkGraphStatus::Failed);
+    assert!(!current_dead.request_pending);
+
+    sqlx::query(
+        "UPDATE node_link_projections SET request_version = request_version + 1 \
          WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(plain.id)
-    .fetch_one(&db.pool)
-    .await?;
-    sqlx::query(
-        "UPDATE background_jobs \
-         SET status = 'succeeded', completed_at = now(), updated_at = now() \
-         WHERE job_id = $1",
-    )
-    .bind(job_id)
     .execute(&db.pool)
     .await?;
+    let stale_dead = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(stale_dead.state.status, NodeLinkGraphStatus::Pending);
+    assert!(stale_dead.request_pending);
 
-    let unsettled = graph.node_read_model(space_id, plain.id).await?;
-    assert_eq!(unsettled.state.status, NodeLinkGraphStatus::Failed);
-    assert!(unsettled.request_pending);
+    sqlx::query(
+        "UPDATE node_link_projections \
+         SET needs_projection = false, active_job_id = NULL, active_request_version = NULL, \
+             failure_code = 'stored_failure', failed_at = now() \
+         WHERE space_id = $1 AND source_node_id = $2",
+    )
+    .bind(space_id)
+    .bind(plain.id)
+    .execute(&db.pool)
+    .await?;
+    let stored_failure = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(stored_failure.state.status, NodeLinkGraphStatus::Failed);
+    assert!(!stored_failure.request_pending);
+
+    sqlx::query("DELETE FROM node_link_projections WHERE space_id = $1 AND source_node_id = $2")
+        .bind(space_id)
+        .bind(plain.id)
+        .execute(&db.pool)
+        .await?;
+    let no_projection = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(no_projection.state.status, NodeLinkGraphStatus::Idle);
+    assert!(!no_projection.request_pending);
 
     db.cleanup().await;
     Ok(())

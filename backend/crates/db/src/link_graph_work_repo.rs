@@ -7,6 +7,7 @@ use serde_json::Value;
 use sqlx::{FromRow, PgConnection, PgPool};
 use uuid::Uuid;
 
+use crate::link_graph_state::NODE_REQUEST_PENDING_PREDICATE;
 use crate::map_sqlx_error;
 
 pub const LINK_GRAPH_PROJECT_BATCH_MAX: usize = 50;
@@ -957,7 +958,7 @@ async fn lock_space_state_in(connection: &mut PgConnection, space_id: Uuid) -> R
 }
 
 async fn space_pending_in(connection: &mut PgConnection, space_id: Uuid) -> Result<Option<bool>> {
-    sqlx::query_scalar(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT ( \
              EXISTS ( \
                  SELECT 1 FROM link_graph_space_states state \
@@ -967,22 +968,12 @@ async fn space_pending_in(connection: &mut PgConnection, space_id: Uuid) -> Resu
                  SELECT 1 FROM node_link_projections projection \
                  LEFT JOIN background_jobs job ON job.job_id = projection.active_job_id \
                  WHERE projection.space_id = space.id \
-                   AND projection.needs_projection \
-                   AND ( \
-                       (projection.active_job_id IS NULL \
-                        AND projection.failed_at IS NULL) \
-                       OR job.status IN ('queued', 'running', 'succeeded') \
-                       OR ( \
-                           job.status = 'dead' \
-                           AND projection.active_request_version \
-                               IS DISTINCT FROM projection.request_version \
-                       ) \
-                   ) \
+                   AND {NODE_REQUEST_PENDING_PREDICATE} \
              ) \
          ) \
          FROM spaces space \
-         WHERE space.id = $1 AND space.deleted_at IS NULL",
-    )
+         WHERE space.id = $1 AND space.deleted_at IS NULL"
+    )))
     .bind(space_id)
     .fetch_optional(&mut *connection)
     .await
@@ -994,25 +985,16 @@ async fn node_request_pending_in(
     space_id: Uuid,
     node_id: Uuid,
 ) -> Result<bool> {
-    sqlx::query_scalar(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT EXISTS ( \
              SELECT 1 \
              FROM node_link_projections projection \
              LEFT JOIN background_jobs job ON job.job_id = projection.active_job_id \
              WHERE projection.space_id = $1 \
                AND projection.source_node_id = $2 \
-               AND projection.needs_projection \
-               AND ( \
-                   (projection.active_job_id IS NULL AND projection.failed_at IS NULL) \
-                   OR job.status IN ('queued', 'running', 'succeeded') \
-                   OR ( \
-                       job.status = 'dead' \
-                       AND projection.active_request_version \
-                           IS DISTINCT FROM projection.request_version \
-                   ) \
-               ) \
-         )",
-    )
+               AND {NODE_REQUEST_PENDING_PREDICATE} \
+         )"
+    )))
     .bind(space_id)
     .bind(node_id)
     .fetch_one(&mut *connection)

@@ -115,7 +115,7 @@ impl LinkGraphService {
             || permission != Permission::Write
         {
             LinkGraphRequestEligibility::Forbidden
-        } else if !read_model.source_indexable {
+        } else if !source_is_link_indexable(read_model.source_storage_format) {
             LinkGraphRequestEligibility::Unsupported
         } else {
             LinkGraphRequestEligibility::Available
@@ -253,7 +253,7 @@ impl LinkGraphService {
         if text.is_none() {
             return Err(ServiceError::NotFound("text not found".to_owned()));
         }
-        if text.is_some_and(|text| text.storage_format == TextStorageFormat::Encrypted) {
+        if !text.is_some_and(|text| source_is_link_indexable(Some(text.storage_format))) {
             return Err(ServiceError::InvalidInput(
                 "client-encrypted text cannot be link indexed".to_owned(),
             ));
@@ -538,4 +538,8 @@ fn require_dashboard_user(caller: &Caller) -> ServiceResult<()> {
         ));
     }
     Ok(())
+}
+
+fn source_is_link_indexable(storage_format: Option<TextStorageFormat>) -> bool {
+    matches!(storage_format, Some(TextStorageFormat::Plain))
 }

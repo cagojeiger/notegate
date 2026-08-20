@@ -61,6 +61,40 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     assert_eq!(status, StatusCode::OK, "{unsupported}");
     assert_eq!(unsupported["availability"]["reason"], json!("unsupported"));
 
+    let encrypted = state
+        .files
+        .write_text(
+            owner.account_id(),
+            space_id,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root_id,
+                    name: "encrypted.md".to_owned(),
+                },
+                body: WriteTextBody::Encrypted(json!({
+                    "version": 1,
+                    "ciphertext_b64": "opaque"
+                })),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    let encrypted_id = encrypted.node.node.id;
+    let (status, unsupported) = get_json(
+        rest_app(state.clone(), owner.clone()),
+        format!("/v1/spaces/{space_id}/nodes/{encrypted_id}/links"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{unsupported}");
+    assert_eq!(unsupported["availability"]["reason"], json!("unsupported"));
+    let (status, rejected) = empty_request(
+        rest_app(state.clone(), owner.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/nodes/{encrypted_id}/actions/reindex-links"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{rejected}");
+
     let accepted_response = json_response(
         rest_app(state.clone(), owner.clone()),
         "POST",

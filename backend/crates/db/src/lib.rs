@@ -24,6 +24,7 @@ pub mod files;
 pub mod files_repo;
 pub mod key_epoch_repo;
 pub mod link_graph_repo;
+mod link_graph_state;
 pub mod link_graph_work_repo;
 pub mod mcp_invocation_repo;
 pub mod metadata_write_repo;
