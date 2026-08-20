@@ -1,5 +1,5 @@
 import type { ApiClient } from "./client";
-import type { AsyncOperationResponse } from "./types";
+import type { AsyncCommandAck, CommandAvailability } from "./types";
 
 export type QuotaUsage = {
   used: number;
@@ -12,8 +12,10 @@ export type SpaceUsage = {
   items: QuotaUsage;
   text_bytes: QuotaUsage;
   file_bytes: QuotaUsage;
-  reconciliation_pending: boolean;
-  reconciliation_available_at?: string;
+  reconciliation: {
+    status: "idle" | "pending";
+    availability: CommandAvailability;
+  };
 };
 
 export type CurrentUserUsage = {
@@ -25,6 +27,6 @@ export function getCurrentUserUsage(client: ApiClient): Promise<CurrentUserUsage
   return client.get<CurrentUserUsage>("/api/v1/me/usage");
 }
 
-export function requestSpaceUsageCheck(client: ApiClient, spaceId: string): Promise<AsyncOperationResponse> {
-  return client.post<AsyncOperationResponse>(`/api/v1/spaces/${spaceId}/usage/reconcile`);
+export function requestSpaceUsageCheck(client: ApiClient, spaceId: string): Promise<AsyncCommandAck> {
+  return client.post<AsyncCommandAck>(`/api/v1/spaces/${spaceId}/actions/reconcile-usage`);
 }

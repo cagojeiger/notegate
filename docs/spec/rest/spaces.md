@@ -116,7 +116,7 @@ Owner user만 가능하다. Space는 soft delete 후 purge 대상이 된다.
 ## Request usage reconciliation
 
 ```http
-POST /api/v1/spaces/{space_id}/usage/reconcile
+POST /api/v1/spaces/{space_id}/actions/reconcile-usage
 ```
 
-Owner user만 가능하다. 요청은 해당 Space의 reconciliation job을 만들고 `202 Accepted`와 `{"status":"accepted","job_id":"..."}`를 반환한다. `job_id`는 `GET /api/v1/me/jobs/{job_id}`로 상태를 추적할 때 사용한다. 같은 Space의 job이 이미 있으면 새 job을 만들지 않고 `202`와 `{"status":"already_pending","job_id":"기존 job id"}`를 반환한다. 최근 reconciliation 완료 후 1시간 cooldown이면 `409 usage_reconciliation_cooldown`을 반환한다. Client는 `GET /api/v1/me/usage`의 `reconciliation_pending`과 `reconciliation_available_at`을 실행 가능 상태의 기준으로 사용한다. 실제 COUNT/SUM은 background worker가 순차적으로 실행한다.
+Owner user만 가능하다. 요청은 해당 Space의 reconciliation을 접수하고 공통 `AsyncCommandAck`와 `Location: /api/v1/me/usage`를 반환한다. 같은 Space의 작업이 이미 있으면 새 job을 만들지 않고 `202`와 `result=already_pending`을 반환한다. 최근 reconciliation 완료 후 1시간 cooldown이면 `409 usage_reconciliation_cooldown`을 반환한다. Client는 `GET /api/v1/me/usage`의 Space별 `reconciliation.status`와 `reconciliation.availability`를 실행 가능 상태의 기준으로 사용한다. 실제 COUNT/SUM은 background worker가 순차적으로 실행하며 job ID는 command 계약에 노출하지 않는다.

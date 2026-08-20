@@ -288,9 +288,15 @@ export type McpInvocationListResponse = {
 
 export type BackgroundJobStatus = "queued" | "running" | "succeeded" | "dead";
 
-export type AsyncOperationResponse = {
-  status: "accepted" | "already_pending";
-  job_id: string | null;
+export type CommandAvailability = {
+  can_trigger: boolean;
+  reason: "pending" | "cooldown" | "forbidden" | "unsupported" | null;
+  retry_at: string | null;
+};
+
+export type AsyncCommandAck = {
+  result: "accepted" | "already_pending";
+  availability: CommandAvailability;
 };
 
 export type BackgroundJob = {

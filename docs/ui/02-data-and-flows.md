@@ -6,7 +6,7 @@
 |---|---|---|
 | me/session | Auth, Settings | `GET /api/v1/me` |
 | spaces | Space Library, ActivityRail | `GET/POST/PATCH/DELETE /api/v1/spaces` |
-| space usage | Space Library cards/Inspector | `GET /api/v1/me/usage`, `POST /api/v1/spaces/{space_id}/usage/reconcile` |
+| space usage | Space Library cards/Inspector | `GET /api/v1/me/usage`, `POST /api/v1/spaces/{space_id}/actions/reconcile-usage` |
 | nodes | Files, Recent, Editor, Inspector | `/api/v1/spaces/{space_id}/nodes...` |
 | text | EditorArea | `/api/v1/spaces/{space_id}/text/{node_id}` |
 | files | EditorArea | `/api/v1/spaces/{space_id}/files/{node_id}` |

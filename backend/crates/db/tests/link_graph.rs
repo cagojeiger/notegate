@@ -11,10 +11,10 @@ use std::time::Duration;
 
 use common::{TestDb, space_with_root};
 use notegate_db::{
-    FilesRepo, LINK_GRAPH_ACTIVE_JOB_MAX, LinkGraphChangeCollection, LinkGraphProjectNodesJob,
-    LinkGraphProjection, LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphSourceSnapshot,
-    LinkGraphSpaceRequestOutcome, LinkGraphStoredReference, LinkGraphWorkRepo, SpaceRepo,
-    TextMutationKind,
+    FilesRepo, LINK_GRAPH_ACTIVE_JOB_MAX, LinkGraphChangeCollection, LinkGraphNodeRequestOutcome,
+    LinkGraphProjectNodesJob, LinkGraphProjection, LinkGraphProjectionClaim, LinkGraphRepo,
+    LinkGraphSourceSnapshot, LinkGraphSpaceRequestOutcome, LinkGraphStoredReference,
+    LinkGraphWorkRepo, SpaceRepo, TextMutationKind,
 };
 use notegate_jobs::{ClaimedJob, JobQueue, JobSpec};
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
@@ -27,6 +27,18 @@ fn text(content: &str, hash_character: char) -> StoredContent {
         content_sha256: hash_character.to_string().repeat(64),
         byte_len: content.len() as i64,
         line_count: content.lines().count().max(1) as i32,
+    }
+}
+
+fn encrypted_text(hash_character: char) -> StoredContent {
+    StoredContent {
+        body: WriteTextBody::Encrypted(serde_json::json!({
+            "version": 1,
+            "ciphertext_b64": "opaque"
+        })),
+        content_sha256: hash_character.to_string().repeat(64),
+        byte_len: 6,
+        line_count: 1,
     }
 }
 
@@ -1503,7 +1515,10 @@ async fn dead_projection_job_is_recorded_and_manual_sync_reactivates_the_node()
     .await?;
     assert_eq!(job_count, 1);
 
-    work.request_nodes(space_id, &[source.id]).await?;
+    assert_eq!(
+        work.request_node(space_id, source.id).await?,
+        LinkGraphNodeRequestOutcome::Requested
+    );
     let reactivated: (
         i64,
         Uuid,
@@ -1622,6 +1637,123 @@ async fn pending_space_changes_do_not_mask_an_older_text_failure()
 }
 
 #[tokio::test]
+async fn node_read_model_combines_node_eligibility_and_request_state()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "link-node-read").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let graph = LinkGraphRepo::new(db.pool.clone());
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    let (plain, _) = files
+        .insert_text(space_id, root_id, "plain.md", &text("plain", 'a'), account)
+        .await?;
+    let (encrypted, _) = files
+        .insert_text(
+            space_id,
+            root_id,
+            "encrypted.md",
+            &encrypted_text('b'),
+            account,
+        )
+        .await?;
+
+    let missing = graph.node_read_model(space_id, Uuid::new_v4()).await?;
+    assert!(!missing.node_exists);
+    assert_eq!(missing.source_storage_format, None);
+    assert!(!missing.request_pending);
+
+    let folder = graph.node_read_model(space_id, root_id).await?;
+    assert!(folder.node_exists);
+    assert_eq!(folder.source_storage_format, None);
+    assert!(!folder.request_pending);
+
+    let plain_idle = graph.node_read_model(space_id, plain.id).await?;
+    assert!(plain_idle.node_exists);
+    assert_eq!(
+        plain_idle.source_storage_format,
+        Some(notegate_model::TextStorageFormat::Plain)
+    );
+    assert!(!plain_idle.request_pending);
+
+    let encrypted = graph.node_read_model(space_id, encrypted.id).await?;
+    assert!(encrypted.node_exists);
+    assert_eq!(
+        encrypted.source_storage_format,
+        Some(notegate_model::TextStorageFormat::Encrypted)
+    );
+    assert!(!encrypted.request_pending);
+
+    work.request_nodes(space_id, &[plain.id]).await?;
+    let queued = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(queued.state.status, NodeLinkGraphStatus::Syncing);
+    assert!(queued.request_pending);
+
+    let queue = JobQueue::new(db.pool.clone());
+    let mut jobs = queue
+        .claim_many(
+            "link-node-read-test",
+            &[LinkGraphProjectNodesJob::KIND.to_owned()],
+            Duration::from_secs(300),
+            1,
+        )
+        .await?;
+    let job = jobs.pop().expect("projection job");
+    let running = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(running.state.status, NodeLinkGraphStatus::Syncing);
+    assert!(running.request_pending);
+
+    assert!(queue.succeed(&job).await?);
+    let succeeded = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(succeeded.state.status, NodeLinkGraphStatus::Failed);
+    assert!(succeeded.request_pending);
+
+    mark_job_dead(&db.pool, job.job_id).await?;
+    let current_dead = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(current_dead.state.status, NodeLinkGraphStatus::Failed);
+    assert!(!current_dead.request_pending);
+
+    sqlx::query(
+        "UPDATE node_link_projections SET request_version = request_version + 1 \
+         WHERE space_id = $1 AND source_node_id = $2",
+    )
+    .bind(space_id)
+    .bind(plain.id)
+    .execute(&db.pool)
+    .await?;
+    let stale_dead = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(stale_dead.state.status, NodeLinkGraphStatus::Pending);
+    assert!(stale_dead.request_pending);
+
+    sqlx::query(
+        "UPDATE node_link_projections \
+         SET needs_projection = false, active_job_id = NULL, active_request_version = NULL, \
+             failure_code = 'stored_failure', failed_at = now() \
+         WHERE space_id = $1 AND source_node_id = $2",
+    )
+    .bind(space_id)
+    .bind(plain.id)
+    .execute(&db.pool)
+    .await?;
+    let stored_failure = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(stored_failure.state.status, NodeLinkGraphStatus::Failed);
+    assert!(!stored_failure.request_pending);
+
+    sqlx::query("DELETE FROM node_link_projections WHERE space_id = $1 AND source_node_id = $2")
+        .bind(space_id)
+        .bind(plain.id)
+        .execute(&db.pool)
+        .await?;
+    let no_projection = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(no_projection.state.status, NodeLinkGraphStatus::Idle);
+    assert!(!no_projection.request_pending);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn unfinished_projection_keeps_space_relation_state_pending()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
@@ -1708,7 +1840,10 @@ async fn manual_sync_supersedes_an_unsettled_dead_projection_job()
     .await?;
     mark_job_dead(&db.pool, first_job_id).await?;
 
-    work.request_nodes(space_id, &[source.id]).await?;
+    assert_eq!(
+        work.request_node(space_id, source.id).await?,
+        LinkGraphNodeRequestOutcome::Requested
+    );
 
     let (request_version, active_job_id, active_request_version, failure_code): (
         i64,
@@ -1839,6 +1974,61 @@ async fn duplicate_node_requests_coalesce_before_job_dispatch()
     .await?;
     assert_eq!(target_count, 1);
     assert_eq!(payload["sources"].as_array().expect("sources").len(), 1);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn concurrent_manual_node_requests_enqueue_once() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) =
+        space_with_root(&db.pool, "link-concurrent-node-request").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    let (source, _) = files
+        .insert_text(
+            space_id,
+            root_id,
+            "source.md",
+            &text("source", 'c'),
+            account,
+        )
+        .await?;
+
+    let first = work.clone();
+    let second = work.clone();
+    let (first_result, second_result) = tokio::join!(
+        first.request_node(space_id, source.id),
+        second.request_node(space_id, source.id),
+    );
+    let outcomes = [first_result?, second_result?];
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, LinkGraphNodeRequestOutcome::Requested))
+            .count(),
+        1
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, LinkGraphNodeRequestOutcome::AlreadyPending))
+            .count(),
+        1
+    );
+    let job_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM background_jobs \
+         WHERE job_kind = 'link_graph_project_nodes' \
+           AND payload ->> 'space_id' = $1::text \
+           AND status IN ('queued', 'running')",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(job_count, 1);
 
     db.cleanup().await;
     Ok(())
@@ -2557,6 +2747,10 @@ async fn unsettled_succeeded_projection_keeps_reindex_pending()
     assert_eq!(node_state.status, NodeLinkGraphStatus::Failed);
     assert!(node_state.space_pending);
     assert_eq!(work.space_pending(space_id).await?, Some(true));
+    assert_eq!(
+        work.request_node(space_id, source_id).await?,
+        LinkGraphNodeRequestOutcome::AlreadyPending
+    );
     assert_eq!(
         work.request_space(space_id).await?,
         LinkGraphSpaceRequestOutcome::AlreadyPending

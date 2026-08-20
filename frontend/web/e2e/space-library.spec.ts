@@ -215,6 +215,24 @@ for (const viewport of [
   });
 }
 
+test("Space reindex disables immediately and does not submit twice", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const api = await mockSpaceLibraryApi(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open space library" }).click();
+
+  const reindex = page.getByRole("button", { name: "Reindex links in Daily" });
+  await reindex.click();
+  await expect(reindex).toBeDisabled();
+  await expect(reindex).toHaveText("Reindexing…");
+  await reindex.evaluate((button) => {
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+  });
+
+  expect(api.linkReindexRequests()).toBe(1);
+});
+
 test("opening an unpinned Space does not add it to navigation", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockSpaceLibraryApi(page);
@@ -273,14 +291,34 @@ for (const viewport of [
 async function mockSpaceLibraryApi(page: Page) {
   let spaces = initialSpaces.map((item) => ({ ...item }));
   let patchCount = 0;
+  let linkReindexRequests = 0;
+  const pendingLinkIndexes = new Set<string>();
 
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
 
     if (url.pathname === "/api/v1/me") return respond(route, me);
-    if (/^\/api\/v1\/spaces\/[^/]+\/link-index\/status$/.test(url.pathname)) {
-      return respond(route, { pending: false });
+    const linkIndexMatch = url.pathname.match(/^\/api\/v1\/spaces\/([^/]+)\/link-index$/);
+    if (linkIndexMatch) {
+      const pending = pendingLinkIndexes.has(linkIndexMatch[1]);
+      return respond(route, {
+        status: pending ? "pending" : "idle",
+        availability: {
+          can_trigger: !pending,
+          reason: pending ? "pending" : null,
+          retry_at: null
+        }
+      });
+    }
+    const linkReindexMatch = url.pathname.match(/^\/api\/v1\/spaces\/([^/]+)\/actions\/reindex-links$/);
+    if (linkReindexMatch && request.method() === "POST") {
+      linkReindexRequests += 1;
+      pendingLinkIndexes.add(linkReindexMatch[1]);
+      return respond(route, {
+        result: "accepted",
+        availability: { can_trigger: false, reason: "pending", retry_at: null }
+      }, 202);
     }
     if (url.pathname === "/api/v1/me/usage") {
       return respond(route, {
@@ -291,7 +329,10 @@ async function mockSpaceLibraryApi(page: Page) {
           items: { used: index + 1, limit: 100 },
           text_bytes: { used: 1024 * (index + 1), limit: 1024 * 100 },
           file_bytes: { used: 2048 * (index + 1), limit: 2048 * 100 },
-          reconciliation_pending: false
+          reconciliation: {
+            status: "idle",
+            availability: { can_trigger: true, reason: null, retry_at: null }
+          }
         }))
       });
     }
@@ -338,11 +379,18 @@ async function mockSpaceLibraryApi(page: Page) {
     throw new Error(`Unhandled API request: ${request.method()} ${url.pathname}${url.search}`);
   });
 
-  return { patchCount: () => patchCount };
+  return {
+    patchCount: () => patchCount,
+    linkReindexRequests: () => linkReindexRequests
+  };
 }
 
-async function respond(route: Parameters<Parameters<Page["route"]>[1]>[0], body: unknown) {
-  await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+async function respond(
+  route: Parameters<Parameters<Page["route"]>[1]>[0],
+  body: unknown,
+  status = 200
+) {
+  await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
 async function cardNames(grid: ReturnType<Page["getByRole"]>) {

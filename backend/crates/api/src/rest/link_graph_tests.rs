@@ -6,7 +6,7 @@
     clippy::unwrap_in_result
 )]
 
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header::LOCATION};
 use notegate_db::{
     LINK_GRAPH_ACTIVE_JOB_MAX, LinkGraphProjectNodesJob, LinkGraphProjectNodesPayload,
     test_support::TestDb,
@@ -16,7 +16,9 @@ use notegate_model::{Caller, CallerIdentity, Channel, ResolveAttrs};
 use notegate_service::files::{CreateText, WriteTarget, WriteText, WriteTextBody};
 use serde_json::json;
 
-use super::test_support::{caller_and_space, empty_request, get_json, rest_app, state};
+use super::test_support::{
+    caller_and_space, decode_response, empty_request, get_json, json_response, rest_app, state,
+};
 
 #[tokio::test]
 async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
@@ -51,23 +53,82 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
         )
         .await?;
 
-    let (status, accepted) = empty_request(
+    let (status, unsupported) = get_json(
         rest_app(state.clone(), owner.clone()),
-        "POST",
-        format!("/v1/spaces/{space_id}/nodes/{node_id}/links/sync"),
+        format!("/v1/spaces/{space_id}/nodes/{root_id}/links"),
     )
     .await?;
+    assert_eq!(status, StatusCode::OK, "{unsupported}");
+    assert_eq!(unsupported["availability"]["reason"], json!("unsupported"));
+
+    let encrypted = state
+        .files
+        .write_text(
+            owner.account_id(),
+            space_id,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root_id,
+                    name: "encrypted.md".to_owned(),
+                },
+                body: WriteTextBody::Encrypted(json!({
+                    "version": 1,
+                    "ciphertext_b64": "opaque"
+                })),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    let encrypted_id = encrypted.node.node.id;
+    let (status, unsupported) = get_json(
+        rest_app(state.clone(), owner.clone()),
+        format!("/v1/spaces/{space_id}/nodes/{encrypted_id}/links"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{unsupported}");
+    assert_eq!(unsupported["availability"]["reason"], json!("unsupported"));
+    let (status, rejected) = empty_request(
+        rest_app(state.clone(), owner.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/nodes/{encrypted_id}/actions/reindex-links"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{rejected}");
+
+    let accepted_response = json_response(
+        rest_app(state.clone(), owner.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/nodes/{node_id}/actions/reindex-links"),
+        json!(null),
+    )
+    .await?;
+    assert_eq!(
+        accepted_response.headers()[LOCATION],
+        format!("/api/v1/spaces/{space_id}/nodes/{node_id}/links")
+    );
+    let (status, accepted) = decode_response(accepted_response).await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{accepted}");
-    assert_eq!(accepted["status"], json!("accepted"));
-    assert!(accepted["job_id"].is_null());
+    assert_eq!(accepted["result"], json!("accepted"));
+    assert_eq!(accepted["availability"]["reason"], json!("pending"));
+    assert!(accepted.get("job_id").is_none());
+
+    let (status, duplicate) = empty_request(
+        rest_app(state.clone(), owner.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/nodes/{node_id}/actions/reindex-links"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::ACCEPTED, "{duplicate}");
+    assert_eq!(duplicate["result"], json!("already_pending"));
 
     let (status, index_status) = get_json(
         rest_app(state.clone(), owner.clone()),
-        format!("/v1/spaces/{space_id}/link-index/status"),
+        format!("/v1/spaces/{space_id}/link-index"),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{index_status}");
-    assert_eq!(index_status["pending"], json!(true));
+    assert_eq!(index_status["status"], json!("pending"));
+    assert_eq!(index_status["availability"]["reason"], json!("pending"));
     let (stored_job_id, payload, history_visibility, history_owner_account_id): (
         uuid::Uuid,
         serde_json::Value,
@@ -91,6 +152,7 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     assert_eq!(status, StatusCode::OK, "{graph_state}");
     assert_eq!(graph_state["status"], json!("syncing"));
     assert_eq!(graph_state["space_pending"], json!(true));
+    assert_eq!(graph_state["availability"]["reason"], json!("pending"));
 
     let sources = serde_json::from_value::<LinkGraphProjectNodesPayload>(payload)?.sources;
     let mut jobs = JobQueue::new(db.pool.clone())
@@ -118,6 +180,7 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     assert!(graph_state["projected_at"].is_string());
     assert!(graph_state["failure_code"].is_null());
     assert!(graph_state["failed_at"].is_null());
+    assert_eq!(graph_state["availability"]["can_trigger"], json!(true));
     let (status, outgoing) = get_json(
         rest_app(state.clone(), owner.clone()),
         format!("/v1/spaces/{space_id}/nodes/{node_id}/links/outgoing"),
@@ -127,31 +190,44 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     assert_eq!(outgoing["links"][0]["path"], json!("/missing.md"));
     assert!(outgoing["links"][0]["node_id"].is_null());
 
-    let (status, accepted) = empty_request(
+    let accepted_response = json_response(
         rest_app(state.clone(), owner.clone()),
         "POST",
-        format!("/v1/spaces/{space_id}/link-index/reindex"),
+        format!("/v1/spaces/{space_id}/actions/reindex-links"),
+        json!(null),
     )
     .await?;
+    assert_eq!(
+        accepted_response.headers()[LOCATION],
+        format!("/api/v1/spaces/{space_id}/link-index")
+    );
+    let (status, accepted) = decode_response(accepted_response).await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{accepted}");
-    assert_eq!(accepted["status"], json!("accepted"));
-    assert!(accepted["job_id"].is_null());
+    assert_eq!(accepted["result"], json!("accepted"));
+    assert!(accepted.get("job_id").is_none());
 
     let (status, duplicate) = empty_request(
         rest_app(state.clone(), owner.clone()),
         "POST",
-        format!("/v1/spaces/{space_id}/link-index/reindex"),
+        format!("/v1/spaces/{space_id}/actions/reindex-links"),
     )
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{duplicate}");
-    assert_eq!(duplicate["status"], json!("already_pending"));
-    assert!(duplicate["job_id"].is_null());
+    assert_eq!(duplicate["result"], json!("already_pending"));
+    assert!(duplicate.get("job_id").is_none());
 
     let mut api_owner = owner.clone();
     api_owner.channel = Channel::Api;
+    let (status, unavailable) = get_json(
+        rest_app(state.clone(), api_owner.clone()),
+        format!("/v1/spaces/{space_id}/nodes/{node_id}/links"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{unavailable}");
+    assert_eq!(unavailable["availability"]["reason"], json!("forbidden"));
     for path in [
-        format!("/v1/spaces/{space_id}/nodes/{node_id}/links/sync"),
-        format!("/v1/spaces/{space_id}/link-index/reindex"),
+        format!("/v1/spaces/{space_id}/nodes/{node_id}/actions/reindex-links"),
+        format!("/v1/spaces/{space_id}/actions/reindex-links"),
     ] {
         let (status, forbidden) =
             empty_request(rest_app(state.clone(), api_owner.clone()), "POST", path).await?;
@@ -172,8 +248,8 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
         channel: Channel::Browser,
     };
     for path in [
-        format!("/v1/spaces/{space_id}/nodes/{node_id}/links/sync"),
-        format!("/v1/spaces/{space_id}/link-index/reindex"),
+        format!("/v1/spaces/{space_id}/nodes/{node_id}/actions/reindex-links"),
+        format!("/v1/spaces/{space_id}/actions/reindex-links"),
     ] {
         let (status, hidden) =
             empty_request(rest_app(state.clone(), stranger.clone()), "POST", path).await?;
@@ -221,11 +297,11 @@ async fn rest_reindex_stays_pending_when_projection_job_capacity_is_saturated()
     let (status, accepted) = empty_request(
         rest_app(state.clone(), owner.clone()),
         "POST",
-        format!("/v1/spaces/{space_id}/link-index/reindex"),
+        format!("/v1/spaces/{space_id}/actions/reindex-links"),
     )
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{accepted}");
-    assert_eq!(accepted["status"], json!("accepted"));
+    assert_eq!(accepted["result"], json!("accepted"));
 
     let staged_without_job: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \
@@ -240,20 +316,20 @@ async fn rest_reindex_stays_pending_when_projection_job_capacity_is_saturated()
     assert!(staged_without_job);
     let (status, index_status) = get_json(
         rest_app(state.clone(), owner.clone()),
-        format!("/v1/spaces/{space_id}/link-index/status"),
+        format!("/v1/spaces/{space_id}/link-index"),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{index_status}");
-    assert_eq!(index_status["pending"], json!(true));
+    assert_eq!(index_status["status"], json!("pending"));
 
     let (status, duplicate) = empty_request(
         rest_app(state, owner),
         "POST",
-        format!("/v1/spaces/{space_id}/link-index/reindex"),
+        format!("/v1/spaces/{space_id}/actions/reindex-links"),
     )
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{duplicate}");
-    assert_eq!(duplicate["status"], json!("already_pending"));
+    assert_eq!(duplicate["result"], json!("already_pending"));
 
     db.cleanup().await;
     Ok(())

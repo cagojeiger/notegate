@@ -71,7 +71,14 @@ describe("createUsagePollingBackoff", () => {
       ...baseUsage,
       spaces: [
         baseUsage.spaces[0],
-        { ...baseUsage.spaces[0], id: "space-2", reconciliation_pending: true }
+        {
+          ...baseUsage.spaces[0],
+          id: "space-2",
+          reconciliation: {
+            status: "pending",
+            availability: { can_trigger: false, reason: "pending", retry_at: null }
+          }
+        }
       ]
     };
 
@@ -150,7 +157,10 @@ describe("useUsageQuery", () => {
 
   it("switches a backed-off owner to pending polling after a manual check", async () => {
     get.mockResolvedValue(usage());
-    post.mockResolvedValue({ status: "accepted", job_id: "job-1" });
+    post.mockResolvedValue({
+      result: "accepted",
+      availability: { can_trigger: false, reason: "pending", retry_at: null }
+    });
     const queryClient = testQueryClient();
     const view = renderHook(() => ({
       usage: useUsageQuery(),
@@ -170,7 +180,7 @@ describe("useUsageQuery", () => {
       expect(queryClient.getQueryData<CurrentUserUsage>(queryKeys.usage))
         .toEqual(usage({ pending: true }));
     });
-    expect(post).toHaveBeenCalledWith("/api/v1/spaces/space-1/usage/reconcile");
+    expect(post).toHaveBeenCalledWith("/api/v1/spaces/space-1/actions/reconcile-usage");
     expect(usageInterval(queryClient)).toBe(POLLING.usagePendingMs);
 
     get.mockResolvedValue(usage());
@@ -238,7 +248,15 @@ function usage({
       items: { used: itemsUsed, limit: 1_999 },
       text_bytes: { used: 48_120_320, limit: 134_217_728 },
       file_bytes: { used: 80_000_000, limit: 134_217_728 },
-      reconciliation_pending: pending
+      reconciliation: pending
+        ? {
+          status: "pending",
+          availability: { can_trigger: false, reason: "pending", retry_at: null }
+        }
+        : {
+          status: "idle",
+          availability: { can_trigger: true, reason: null, retry_at: null }
+        }
     }]
   };
 }

@@ -3,12 +3,13 @@ use notegate_core::{Error, Result};
 use notegate_jobs::{ClaimFence, JobQueue};
 use notegate_model::{
     IncomingLinkCursor, LinkReferenceKind, NodeLinkGraphState, NodeLinkGraphStatus,
-    OutgoingLinkCursor,
+    OutgoingLinkCursor, TextStorageFormat,
 };
 use sqlx::{FromRow, PgConnection, PgPool};
 use uuid::Uuid;
 
 use crate::files::queries::{node::derive_path, search::resolve_node_ids_by_paths_with};
+use crate::link_graph_state::NODE_REQUEST_PENDING_PREDICATE;
 use crate::map_sqlx_error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +39,14 @@ pub struct LinkGraphIncomingReference {
     pub source_node_id: Uuid,
     pub kind: LinkReferenceKind,
     pub occurrence_count: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkGraphNodeReadModel {
+    pub state: NodeLinkGraphState,
+    pub node_exists: bool,
+    pub source_storage_format: Option<TextStorageFormat>,
+    pub request_pending: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +82,39 @@ impl LinkGraphRepo {
     }
 
     pub async fn state(&self, space_id: Uuid, source_node_id: Uuid) -> Result<NodeLinkGraphState> {
-        let row = sqlx::query_as::<_, NodeLinkGraphStateRow>(
+        Ok(self.node_state_row(space_id, source_node_id).await?.into())
+    }
+
+    pub async fn node_read_model(
+        &self,
+        space_id: Uuid,
+        source_node_id: Uuid,
+    ) -> Result<LinkGraphNodeReadModel> {
+        let row = self.node_state_row(space_id, source_node_id).await?;
+        let node_exists = row.node_exists;
+        let source_storage_format = row
+            .source_storage_format
+            .as_deref()
+            .map(|value| {
+                TextStorageFormat::parse(value)
+                    .ok_or_else(|| Error::internal(format!("unknown text storage format: {value}")))
+            })
+            .transpose()?;
+        let request_pending = row.request_pending;
+        Ok(LinkGraphNodeReadModel {
+            state: row.into(),
+            node_exists,
+            source_storage_format,
+            request_pending,
+        })
+    }
+
+    async fn node_state_row(
+        &self,
+        space_id: Uuid,
+        source_node_id: Uuid,
+    ) -> Result<NodeLinkGraphStateRow> {
+        sqlx::query_as::<_, NodeLinkGraphStateRow>(sqlx::AssertSqlSafe(format!(
             "SELECT projection.projected_at, \
                     COALESCE(projection.needs_projection, false) AS needs_projection, \
                     (COALESCE(space_state.available_at IS NOT NULL, false) OR EXISTS ( \
@@ -85,21 +126,29 @@ impl LinkGraphRepo {
                     projection.active_request_version, projection.failure_code, \
                     projection.failed_at, \
                     job.status AS active_job_status, job.last_error_code AS active_job_error_code, \
-                    job.completed_at AS active_job_completed_at \
+                    job.completed_at AS active_job_completed_at, \
+                    node.id IS NOT NULL AS node_exists, \
+                    text.storage_format AS source_storage_format, \
+                    COALESCE({NODE_REQUEST_PENDING_PREDICATE}, false) AS request_pending \
              FROM (SELECT $1::uuid AS space_id, $2::uuid AS node_id) requested \
+             LEFT JOIN nodes node \
+               ON node.space_id = requested.space_id AND node.id = requested.node_id \
+              AND node.deleted_at IS NULL \
+             LEFT JOIN text_objects text \
+               ON text.space_id = node.space_id AND text.node_id = node.id \
+              AND node.kind = 'text' \
              LEFT JOIN node_link_projections projection \
                ON projection.space_id = requested.space_id \
               AND projection.source_node_id = requested.node_id \
              LEFT JOIN link_graph_space_states space_state \
                ON space_state.space_id = requested.space_id \
-             LEFT JOIN background_jobs job ON job.job_id = projection.active_job_id",
-        )
+             LEFT JOIN background_jobs job ON job.job_id = projection.active_job_id"
+        )))
         .bind(space_id)
         .bind(source_node_id)
         .fetch_one(&self.pool)
         .await
-        .map_err(map_sqlx_error)?;
-        Ok(row.into())
+        .map_err(map_sqlx_error)
     }
 
     pub async fn outgoing(
@@ -508,6 +557,9 @@ struct NodeLinkGraphStateRow {
     active_job_status: Option<String>,
     active_job_error_code: Option<String>,
     active_job_completed_at: Option<DateTime<Utc>>,
+    node_exists: bool,
+    source_storage_format: Option<String>,
+    request_pending: bool,
 }
 
 impl From<NodeLinkGraphStateRow> for NodeLinkGraphState {

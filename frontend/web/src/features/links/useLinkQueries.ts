@@ -89,7 +89,12 @@ export function useSyncNodeLinksMutation() {
           space_pending: current?.space_pending ?? false,
           projected_at: current?.projected_at ?? null,
           failure_code: null,
-          failed_at: null
+          failed_at: null,
+          availability: {
+            can_trigger: false,
+            reason: "pending",
+            retry_at: null
+          }
         })
       );
     },
@@ -115,7 +120,14 @@ export function useReindexSpaceLinksMutation() {
       });
       queryClient.setQueryData<SpaceLinkIndexStatus>(
         queryKeys.spaceLinkIndexStatus(spaceId),
-        { pending: true }
+        {
+          status: "pending",
+          availability: {
+            can_trigger: false,
+            reason: "pending",
+            retry_at: null
+          }
+        }
       );
     },
     onSuccess: (_response, spaceId) => {
@@ -139,7 +151,9 @@ export function useSpaceLinkIndexStatusQuery(spaceId: string | undefined, enable
       return getSpaceLinkIndexStatus(client, spaceId);
     },
     enabled: enabled && Boolean(spaceId),
-    refetchInterval: (query) => query.state.data?.pending ? SYNCING_STATUS_POLL_MS : false
+    refetchInterval: (query) => query.state.data?.status === "pending"
+      ? SYNCING_STATUS_POLL_MS
+      : false
   });
 }
 

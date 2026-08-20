@@ -74,39 +74,27 @@ async fn reconciliation_request_allows_only_one_concurrent_queue()
     assert_eq!(
         outcomes
             .iter()
-            .filter(|outcome| matches!(outcome, UsageReconciliationOutcome::Queued { .. }))
+            .filter(|outcome| matches!(outcome, UsageReconciliationOutcome::Queued))
             .count(),
         1
     );
     assert_eq!(
         outcomes
             .iter()
-            .filter(|outcome| matches!(outcome, UsageReconciliationOutcome::AlreadyQueued { .. }))
+            .filter(|outcome| matches!(outcome, UsageReconciliationOutcome::AlreadyQueued))
             .count(),
         1
     );
-    let queued_job_id = outcomes.iter().find_map(|outcome| match outcome {
-        UsageReconciliationOutcome::Queued { job_id } => Some(*job_id),
-        _ => None,
-    });
-    let pending_job_id = outcomes.iter().find_map(|outcome| match outcome {
-        UsageReconciliationOutcome::AlreadyQueued { job_id } => Some(*job_id),
-        _ => None,
-    });
-    assert_eq!(queued_job_id, pending_job_id);
-
-    let queued: bool = sqlx::query_scalar(
-        "SELECT EXISTS ( \
-             SELECT 1 FROM background_jobs \
+    let queued: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM background_jobs \
              WHERE job_kind = 'space_usage_reconcile' \
                AND payload ->> 'space_id' = $1::text \
-               AND status IN ('queued', 'running') \
-         )",
+               AND status IN ('queued', 'running')",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
-    assert!(queued);
+    assert_eq!(queued, 1);
 
     let snapshot = UsageRepo::new(db.pool.clone())
         .current_user_usage(owner_user_id)

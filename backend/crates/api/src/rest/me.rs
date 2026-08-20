@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use notegate_model::{Caller, ListAuditEvents, ListBackgroundJobs, ListMcpInvocations};
 use notegate_service::usage::{CurrentUserUsage, QuotaUsage};
 use serde::{Deserialize, Serialize};
@@ -26,7 +26,7 @@ use crate::identity::me::{MeOutput, build_me};
 use crate::page::Page;
 use crate::rest::dto::{
     AuditEventListResponse, AuditEventOut, BackgroundJobDetailResponse, BackgroundJobListResponse,
-    BackgroundJobOut, McpInvocationListResponse, McpInvocationOut,
+    BackgroundJobOut, CommandAvailability, McpInvocationListResponse, McpInvocationOut,
 };
 use crate::state::AppState;
 
@@ -68,8 +68,20 @@ pub(crate) struct SpaceUsageOut {
     items: QuotaUsageOut,
     text_bytes: QuotaUsageOut,
     file_bytes: QuotaUsageOut,
-    reconciliation_pending: bool,
-    reconciliation_available_at: DateTime<Utc>,
+    reconciliation: UsageReconciliationStatusOut,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct UsageReconciliationStatusOut {
+    status: UsageReconciliationStatus,
+    availability: CommandAvailability,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum UsageReconciliationStatus {
+    Idle,
+    Pending,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -80,19 +92,35 @@ pub(crate) struct CurrentUserUsageOut {
 
 impl From<CurrentUserUsage> for CurrentUserUsageOut {
     fn from(value: CurrentUserUsage) -> Self {
+        let now = Utc::now();
         Self {
             tier: value.tier.as_str().to_owned(),
             spaces: value
                 .spaces
                 .into_iter()
-                .map(|space| SpaceUsageOut {
-                    id: space.id,
-                    name: space.name,
-                    items: space.items.into(),
-                    text_bytes: space.text_bytes.into(),
-                    file_bytes: space.file_bytes.into(),
-                    reconciliation_pending: space.reconciliation_pending,
-                    reconciliation_available_at: space.reconciliation_available_at,
+                .map(|space| {
+                    let availability = if space.reconciliation_pending {
+                        CommandAvailability::pending()
+                    } else if space.reconciliation_available_at > now {
+                        CommandAvailability::cooldown(space.reconciliation_available_at)
+                    } else {
+                        CommandAvailability::available()
+                    };
+                    SpaceUsageOut {
+                        id: space.id,
+                        name: space.name,
+                        items: space.items.into(),
+                        text_bytes: space.text_bytes.into(),
+                        file_bytes: space.file_bytes.into(),
+                        reconciliation: UsageReconciliationStatusOut {
+                            status: if space.reconciliation_pending {
+                                UsageReconciliationStatus::Pending
+                            } else {
+                                UsageReconciliationStatus::Idle
+                            },
+                            availability,
+                        },
+                    }
                 })
                 .collect(),
         }

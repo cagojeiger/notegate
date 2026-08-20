@@ -15,10 +15,13 @@ describe("usage api", () => {
 
   it("requests a usage check for one space", async () => {
     const client = createMockApiClient();
-    client.post.mockResolvedValue({ status: "accepted", job_id: "job-1" });
+    client.post.mockResolvedValue({
+      result: "accepted",
+      availability: { can_trigger: false, reason: "pending", retry_at: null }
+    });
 
     await requestSpaceUsageCheck(client, "space-1");
 
-    expect(client.post).toHaveBeenCalledWith("/api/v1/spaces/space-1/usage/reconcile");
+    expect(client.post).toHaveBeenCalledWith("/api/v1/spaces/space-1/actions/reconcile-usage");
   });
 });

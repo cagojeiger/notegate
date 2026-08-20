@@ -1,5 +1,5 @@
 import type { ApiClient } from "./client";
-import type { AsyncOperationResponse, Page } from "./types";
+import type { AsyncCommandAck, CommandAvailability, Page } from "./types";
 
 export type NodeLinkProjectionStatus = {
   status: "idle" | "pending" | "syncing" | "failed";
@@ -7,6 +7,7 @@ export type NodeLinkProjectionStatus = {
   projected_at: string | null;
   failure_code: string | null;
   failed_at: string | null;
+  availability: CommandAvailability;
 };
 
 export type NodeLinkDirection = "outgoing" | "incoming";
@@ -24,7 +25,8 @@ export type NodeLinksResponse = {
 };
 
 export type SpaceLinkIndexStatus = {
-  pending: boolean;
+  status: "idle" | "pending";
+  availability: CommandAvailability;
 };
 
 export function getNodeLinkStatus(
@@ -55,18 +57,18 @@ export function requestNodeLinkSync(
   client: ApiClient,
   spaceId: string,
   nodeId: string
-): Promise<AsyncOperationResponse> {
-  return client.post<AsyncOperationResponse>(
-    `/api/v1/spaces/${spaceId}/nodes/${nodeId}/links/sync`
+): Promise<AsyncCommandAck> {
+  return client.post<AsyncCommandAck>(
+    `/api/v1/spaces/${spaceId}/nodes/${nodeId}/actions/reindex-links`
   );
 }
 
 export function requestSpaceLinkReindex(
   client: ApiClient,
   spaceId: string
-): Promise<AsyncOperationResponse> {
-  return client.post<AsyncOperationResponse>(
-    `/api/v1/spaces/${spaceId}/link-index/reindex`
+): Promise<AsyncCommandAck> {
+  return client.post<AsyncCommandAck>(
+    `/api/v1/spaces/${spaceId}/actions/reindex-links`
   );
 }
 
@@ -75,6 +77,6 @@ export function getSpaceLinkIndexStatus(
   spaceId: string
 ): Promise<SpaceLinkIndexStatus> {
   return client.get<SpaceLinkIndexStatus>(
-    `/api/v1/spaces/${spaceId}/link-index/status`
+    `/api/v1/spaces/${spaceId}/link-index`
   );
 }

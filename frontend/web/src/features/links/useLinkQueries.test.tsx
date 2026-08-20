@@ -58,7 +58,10 @@ describe("link queries and mutations", () => {
   it("marks a node pending before requesting its link sync", async () => {
     const node = makeRestNode();
     const queryClient = createTestQueryClient();
-    vi.mocked(requestNodeLinkSync).mockResolvedValue({ status: "accepted", job_id: null });
+    vi.mocked(requestNodeLinkSync).mockResolvedValue({
+      result: "accepted",
+      availability: { can_trigger: false, reason: "pending", retry_at: null }
+    });
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderLinkHook(queryClient, useSyncNodeLinksMutation);
 
@@ -78,7 +81,10 @@ describe("link queries and mutations", () => {
 
   it("resets the Space link family after accepting a full reindex", async () => {
     const queryClient = createTestQueryClient();
-    vi.mocked(requestSpaceLinkReindex).mockResolvedValue({ status: "accepted", job_id: null });
+    vi.mocked(requestSpaceLinkReindex).mockResolvedValue({
+      result: "accepted",
+      availability: { can_trigger: false, reason: "pending", retry_at: null }
+    });
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderLinkHook(queryClient, useReindexSpaceLinksMutation);
@@ -94,7 +100,8 @@ describe("link queries and mutations", () => {
       refetchType: "none"
     });
     expect(queryClient.getQueryData(queryKeys.spaceLinkIndexStatus("space-1"))).toEqual({
-      pending: true
+      status: "pending",
+      availability: { can_trigger: false, reason: "pending", retry_at: null }
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.spaceLinkIndexStatus("space-1"),
@@ -104,7 +111,10 @@ describe("link queries and mutations", () => {
 
   it("loads the authoritative Space link index status", async () => {
     const queryClient = createTestQueryClient();
-    vi.mocked(getSpaceLinkIndexStatus).mockResolvedValue({ pending: true });
+    vi.mocked(getSpaceLinkIndexStatus).mockResolvedValue({
+      status: "pending",
+      availability: { can_trigger: false, reason: "pending", retry_at: null }
+    });
     const { result } = renderLinkHook(
       queryClient,
       () => useSpaceLinkIndexStatusQuery("space-1", true)
@@ -113,7 +123,10 @@ describe("link queries and mutations", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(getSpaceLinkIndexStatus).toHaveBeenCalledWith(expect.anything(), "space-1");
-    expect(result.current.data).toEqual({ pending: true });
+    expect(result.current.data).toEqual({
+      status: "pending",
+      availability: { can_trigger: false, reason: "pending", retry_at: null }
+    });
   });
 
   it("passes the server cursor through paginated link requests", async () => {
@@ -277,11 +290,17 @@ function linkPage(nodeId: string, hasMore: boolean, nextCursor: string | null) {
 }
 
 function linkStatus(status: "idle" | "pending" | "syncing" | "failed", spacePending = false) {
+  const pending = status === "pending" || status === "syncing" || spacePending;
   return {
     status,
     space_pending: spacePending,
     projected_at: null,
     failure_code: status === "failed" ? "job_failed" : null,
-    failed_at: status === "failed" ? "2026-08-19T00:00:00Z" : null
+    failed_at: status === "failed" ? "2026-08-19T00:00:00Z" : null,
+    availability: {
+      can_trigger: !pending,
+      reason: pending ? "pending" as const : null,
+      retry_at: null
+    }
   };
 }

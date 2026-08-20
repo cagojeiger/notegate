@@ -135,7 +135,10 @@ describe("SpaceLibrary", () => {
             items: { used: 12, limit: 100 },
             text_bytes: { used: 2048, limit: 10240 },
             file_bytes: { used: 4096, limit: 20480 },
-            reconciliation_pending: false
+            reconciliation: {
+              status: "idle",
+              availability: { can_trigger: true, reason: null, retry_at: null }
+            }
           }
         ]
       }
@@ -148,7 +151,10 @@ describe("SpaceLibrary", () => {
       variables: undefined
     });
     mocks.useSpaceLinkIndexStatusQuery.mockReturnValue({
-      data: { pending: false },
+      data: {
+        status: "idle",
+        availability: { can_trigger: true, reason: null, retry_at: null }
+      },
       isError: false,
       isLoading: false
     });
@@ -302,7 +308,10 @@ describe("SpaceLibrary", () => {
       permission: "read"
     });
     mocks.useSpaceLinkIndexStatusQuery.mockReturnValue({
-      data: { pending: true },
+      data: {
+        status: "pending",
+        availability: { can_trigger: false, reason: "pending", retry_at: null }
+      },
       isError: true,
       isLoading: false
     });
@@ -319,7 +328,10 @@ describe("SpaceLibrary", () => {
 
   it("disables reindex while the server reports link indexing in progress", () => {
     mocks.useSpaceLinkIndexStatusQuery.mockReturnValue({
-      data: { pending: true },
+      data: {
+        status: "pending",
+        availability: { can_trigger: false, reason: "pending", retry_at: null }
+      },
       isError: false,
       isLoading: false
     });
@@ -328,6 +340,18 @@ describe("SpaceLibrary", () => {
 
     expect(screen.getByRole("button", { name: "Reindex links in Daily" })).toBeDisabled();
     expect(screen.getByText("Link indexing is in progress.")).toBeInTheDocument();
+  });
+
+  it("fails closed while a cached link index status lacks command availability", () => {
+    mocks.useSpaceLinkIndexStatusQuery.mockReturnValue({
+      data: { status: "idle" },
+      isError: false,
+      isLoading: false
+    });
+
+    renderLibrary();
+
+    expect(screen.getByRole("button", { name: "Reindex links in Daily" })).toBeDisabled();
   });
 
   it("disables usage recalculation until the server cooldown expires", () => {
@@ -344,8 +368,14 @@ describe("SpaceLibrary", () => {
           items: { used: 12, limit: 100 },
           text_bytes: { used: 2048, limit: 10240 },
           file_bytes: { used: 4096, limit: 20480 },
-          reconciliation_pending: false,
-          reconciliation_available_at: "2099-01-01T00:00:00Z"
+          reconciliation: {
+            status: "idle",
+            availability: {
+              can_trigger: false,
+              reason: "cooldown",
+              retry_at: "2099-01-01T00:00:00Z"
+            }
+          }
         }]
       }
     });

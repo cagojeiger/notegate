@@ -34,7 +34,11 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
   const incomingQuery = useNodeLinksQuery(node, "incoming", true);
   const syncMutation = useSyncNodeLinksMutation();
   const status = statusQuery.data?.status;
-  const busy = status === "pending" || status === "syncing" || syncMutation.isPending;
+  const requestPending = status === "pending" || status === "syncing" || syncMutation.isPending;
+  const syncUnavailable = statusQuery.isLoading
+    || statusQuery.isError
+    || statusQuery.data?.availability?.can_trigger !== true
+    || syncMutation.isPending;
   const openLinkedNode = (targetNodeId: string) => onOpenNode(targetNodeId, node.id);
 
   useRefreshNodeLinksAfterProjection({
@@ -56,11 +60,11 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
               <Button
                 variant="ghost"
                 size="xs"
-                disabled={busy}
+                disabled={syncUnavailable}
                 onClick={() => syncMutation.mutate(node)}
                 aria-label={`Sync links for ${node.name}`}
               >
-                <RefreshCw size={13} className={busy ? "animate-spin" : undefined} />
+                <RefreshCw size={13} className={requestPending ? "animate-spin" : undefined} />
                 Sync
               </Button>
             ) : undefined}

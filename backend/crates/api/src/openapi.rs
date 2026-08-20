@@ -571,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn openapi_uses_the_shared_async_operation_response() {
+    fn openapi_uses_the_shared_async_command_ack() {
         let doc = ApiDoc::openapi();
         let value = serde_json::to_value(doc).expect("serializes openapi");
 
@@ -580,20 +580,24 @@ mod tests {
             "#/components/schemas/CurrentUserUsageOut"
         );
         for path in [
-            "/api/v1/spaces/{space_id}/usage/reconcile",
-            "/api/v1/spaces/{space_id}/nodes/{node_id}/links/sync",
-            "/api/v1/spaces/{space_id}/link-index/reindex",
+            "/api/v1/spaces/{space_id}/actions/reconcile-usage",
+            "/api/v1/spaces/{space_id}/nodes/{node_id}/actions/reindex-links",
+            "/api/v1/spaces/{space_id}/actions/reindex-links",
         ] {
             assert_eq!(
                 response_ref(&value, path, "post", "202"),
-                "#/components/schemas/AsyncOperationResponse",
+                "#/components/schemas/AsyncCommandAck",
                 "unexpected async response for {path}"
+            );
+            assert!(
+                value["paths"][path]["post"]["responses"]["202"]["headers"]["Location"].is_object(),
+                "missing Location header for {path}"
             );
         }
         assert_eq!(
             response_ref(
                 &value,
-                "/api/v1/spaces/{space_id}/usage/reconcile",
+                "/api/v1/spaces/{space_id}/actions/reconcile-usage",
                 "post",
                 "409"
             ),
@@ -602,7 +606,7 @@ mod tests {
         assert_eq!(
             response_ref(
                 &value,
-                "/api/v1/spaces/{space_id}/usage/reconcile",
+                "/api/v1/spaces/{space_id}/actions/reconcile-usage",
                 "post",
                 "503"
             ),
@@ -913,7 +917,7 @@ mod tests {
             "GET /api/v1/spaces/{space_id}/files/{node_id}/preview-url",
             "GET /api/v1/spaces/{space_id}/file-change-events",
             "GET /api/v1/spaces/{space_id}/file-change-sync",
-            "GET /api/v1/spaces/{space_id}/link-index/status",
+            "GET /api/v1/spaces/{space_id}/link-index",
             "GET /api/v1/spaces/{space_id}/nodes",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}/children",
@@ -935,12 +939,12 @@ mod tests {
             "POST /api/v1/spaces/{space_id}/file-previews:batchResolve",
             "POST /api/v1/spaces/{space_id}/file-uploads/{upload_id}/complete",
             "POST /api/v1/spaces/{space_id}/file-uploads/{upload_id}/parts",
-            "POST /api/v1/spaces/{space_id}/link-index/reindex",
+            "POST /api/v1/spaces/{space_id}/actions/reindex-links",
             "POST /api/v1/spaces/{space_id}/nodes",
-            "POST /api/v1/spaces/{space_id}/nodes/{node_id}/links/sync",
+            "POST /api/v1/spaces/{space_id}/nodes/{node_id}/actions/reindex-links",
             "POST /api/v1/spaces/{space_id}/nodes/{node_id}/move",
             "POST /api/v1/spaces/{space_id}/nodes:batchListChildren",
-            "POST /api/v1/spaces/{space_id}/usage/reconcile",
+            "POST /api/v1/spaces/{space_id}/actions/reconcile-usage",
             "PUT /api/v1/spaces/{space_id}/agents/{agent_id}",
             "PUT /api/v1/spaces/{space_id}/text/{node_id}",
             "PUT /api/v1/spaces/{space_id}/nodes/{node_id}/search-policy",
