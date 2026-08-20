@@ -123,11 +123,6 @@ impl LinkGraphWorkRepo {
         space_pending_in(&mut connection, space_id).await
     }
 
-    pub async fn node_request_pending(&self, space_id: Uuid, node_id: Uuid) -> Result<bool> {
-        let mut connection = self.pool.acquire().await.map_err(map_sqlx_error)?;
-        node_request_pending_in(&mut connection, space_id, node_id).await
-    }
-
     pub async fn request_space(&self, space_id: Uuid) -> Result<LinkGraphSpaceRequestOutcome> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let live: bool = sqlx::query_scalar(

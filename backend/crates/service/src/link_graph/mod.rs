@@ -106,30 +106,24 @@ impl LinkGraphService {
             .permission_for(space_id, caller.account_id())
             .await?
             .ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))?;
-        self.files
-            .find_node(space_id, node_id)
-            .await?
-            .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))?;
-        let text = self.files.text_stats(space_id, node_id).await?;
+        let read_model = self.store.node_read_model(space_id, node_id).await?;
+        if !read_model.node_exists {
+            return Err(ServiceError::NotFound("node not found".to_owned()));
+        }
         let request_eligibility = if caller.account.kind != AccountKind::User
             || caller.channel != Channel::Browser
             || permission != Permission::Write
         {
             LinkGraphRequestEligibility::Forbidden
-        } else if text
-            .as_ref()
-            .is_none_or(|text| text.storage_format == TextStorageFormat::Encrypted)
-        {
+        } else if !read_model.source_indexable {
             LinkGraphRequestEligibility::Unsupported
         } else {
             LinkGraphRequestEligibility::Available
         };
-        let state = self.store.state(space_id, node_id).await?;
-        let request_pending = self.work.node_request_pending(space_id, node_id).await?;
         Ok(NodeLinkGraphView {
-            state,
+            state: read_model.state,
             request_eligibility,
-            request_pending,
+            request_pending: read_model.request_pending,
         })
     }
 

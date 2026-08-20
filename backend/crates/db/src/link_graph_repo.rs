@@ -40,6 +40,14 @@ pub struct LinkGraphIncomingReference {
     pub occurrence_count: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkGraphNodeReadModel {
+    pub state: NodeLinkGraphState,
+    pub node_exists: bool,
+    pub source_indexable: bool,
+    pub request_pending: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkGraphProjection {
     Applied,
@@ -73,7 +81,32 @@ impl LinkGraphRepo {
     }
 
     pub async fn state(&self, space_id: Uuid, source_node_id: Uuid) -> Result<NodeLinkGraphState> {
-        let row = sqlx::query_as::<_, NodeLinkGraphStateRow>(
+        Ok(self.node_state_row(space_id, source_node_id).await?.into())
+    }
+
+    pub async fn node_read_model(
+        &self,
+        space_id: Uuid,
+        source_node_id: Uuid,
+    ) -> Result<LinkGraphNodeReadModel> {
+        let row = self.node_state_row(space_id, source_node_id).await?;
+        let node_exists = row.node_exists;
+        let source_indexable = row.source_indexable;
+        let request_pending = row.request_pending();
+        Ok(LinkGraphNodeReadModel {
+            state: row.into(),
+            node_exists,
+            source_indexable,
+            request_pending,
+        })
+    }
+
+    async fn node_state_row(
+        &self,
+        space_id: Uuid,
+        source_node_id: Uuid,
+    ) -> Result<NodeLinkGraphStateRow> {
+        sqlx::query_as::<_, NodeLinkGraphStateRow>(
             "SELECT projection.projected_at, \
                     COALESCE(projection.needs_projection, false) AS needs_projection, \
                     (COALESCE(space_state.available_at IS NOT NULL, false) OR EXISTS ( \
@@ -85,8 +118,16 @@ impl LinkGraphRepo {
                     projection.active_request_version, projection.failure_code, \
                     projection.failed_at, \
                     job.status AS active_job_status, job.last_error_code AS active_job_error_code, \
-                    job.completed_at AS active_job_completed_at \
+                    job.completed_at AS active_job_completed_at, \
+                    node.id IS NOT NULL AS node_exists, \
+                    COALESCE(text.storage_format = 'plain', false) AS source_indexable \
              FROM (SELECT $1::uuid AS space_id, $2::uuid AS node_id) requested \
+             LEFT JOIN nodes node \
+               ON node.space_id = requested.space_id AND node.id = requested.node_id \
+              AND node.deleted_at IS NULL \
+             LEFT JOIN text_objects text \
+               ON text.space_id = node.space_id AND text.node_id = node.id \
+              AND node.kind = 'text' \
              LEFT JOIN node_link_projections projection \
                ON projection.space_id = requested.space_id \
               AND projection.source_node_id = requested.node_id \
@@ -98,8 +139,7 @@ impl LinkGraphRepo {
         .bind(source_node_id)
         .fetch_one(&self.pool)
         .await
-        .map_err(map_sqlx_error)?;
-        Ok(row.into())
+        .map_err(map_sqlx_error)
     }
 
     pub async fn outgoing(
@@ -508,6 +548,21 @@ struct NodeLinkGraphStateRow {
     active_job_status: Option<String>,
     active_job_error_code: Option<String>,
     active_job_completed_at: Option<DateTime<Utc>>,
+    node_exists: bool,
+    source_indexable: bool,
+}
+
+impl NodeLinkGraphStateRow {
+    fn request_pending(&self) -> bool {
+        self.needs_projection
+            && ((self.active_job_id.is_none() && self.failed_at.is_none())
+                || matches!(
+                    self.active_job_status.as_deref(),
+                    Some("queued" | "running" | "succeeded")
+                )
+                || (self.active_job_status.as_deref() == Some("dead")
+                    && self.active_request_version != self.request_version))
+    }
 }
 
 impl From<NodeLinkGraphStateRow> for NodeLinkGraphState {

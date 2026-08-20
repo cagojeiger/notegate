@@ -30,6 +30,18 @@ fn text(content: &str, hash_character: char) -> StoredContent {
     }
 }
 
+fn encrypted_text(hash_character: char) -> StoredContent {
+    StoredContent {
+        body: WriteTextBody::Encrypted(serde_json::json!({
+            "version": 1,
+            "ciphertext_b64": "opaque"
+        })),
+        content_sha256: hash_character.to_string().repeat(64),
+        byte_len: 6,
+        line_count: 1,
+    }
+}
+
 async fn projection_claim(
     pool: &sqlx::PgPool,
     work: &LinkGraphWorkRepo,
@@ -1619,6 +1631,75 @@ async fn pending_space_changes_do_not_mask_an_older_text_failure()
     let idle_root = graph.state(space_id, root_id).await?;
     assert_eq!(idle_root.status, NodeLinkGraphStatus::Idle);
     assert!(!idle_root.space_pending);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn node_read_model_combines_node_eligibility_and_request_state()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "link-node-read").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let graph = LinkGraphRepo::new(db.pool.clone());
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    let (plain, _) = files
+        .insert_text(space_id, root_id, "plain.md", &text("plain", 'a'), account)
+        .await?;
+    let (encrypted, _) = files
+        .insert_text(
+            space_id,
+            root_id,
+            "encrypted.md",
+            &encrypted_text('b'),
+            account,
+        )
+        .await?;
+
+    let missing = graph.node_read_model(space_id, Uuid::new_v4()).await?;
+    assert!(!missing.node_exists);
+    assert!(!missing.source_indexable);
+    assert!(!missing.request_pending);
+
+    let folder = graph.node_read_model(space_id, root_id).await?;
+    assert!(folder.node_exists);
+    assert!(!folder.source_indexable);
+    assert!(!folder.request_pending);
+
+    let plain_idle = graph.node_read_model(space_id, plain.id).await?;
+    assert!(plain_idle.node_exists);
+    assert!(plain_idle.source_indexable);
+    assert!(!plain_idle.request_pending);
+
+    let encrypted = graph.node_read_model(space_id, encrypted.id).await?;
+    assert!(encrypted.node_exists);
+    assert!(!encrypted.source_indexable);
+    assert!(!encrypted.request_pending);
+
+    work.request_nodes(space_id, &[plain.id]).await?;
+    let job_id: Uuid = sqlx::query_scalar(
+        "SELECT active_job_id FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
+    )
+    .bind(space_id)
+    .bind(plain.id)
+    .fetch_one(&db.pool)
+    .await?;
+    sqlx::query(
+        "UPDATE background_jobs \
+         SET status = 'succeeded', completed_at = now(), updated_at = now() \
+         WHERE job_id = $1",
+    )
+    .bind(job_id)
+    .execute(&db.pool)
+    .await?;
+
+    let unsettled = graph.node_read_model(space_id, plain.id).await?;
+    assert_eq!(unsettled.state.status, NodeLinkGraphStatus::Failed);
+    assert!(unsettled.request_pending);
 
     db.cleanup().await;
     Ok(())
