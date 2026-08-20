@@ -121,6 +121,7 @@ describe("RecentSection", () => {
     }
     for (const metadata of view.container.querySelectorAll("[data-node-row] .text-faint")) {
       expect(metadata.parentElement).toHaveClass("space-y-0.5");
+      expect(metadata).toHaveClass("truncate");
     }
   });
 });

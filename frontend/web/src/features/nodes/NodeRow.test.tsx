@@ -26,6 +26,7 @@ describe("NodeRow", () => {
     );
 
     expect(screen.getByRole("button", { name: "report.pdf" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("report.pdf")).toHaveClass("truncate");
     expect(view.container.querySelector("[data-active-indicator]")).not.toBeInTheDocument();
     expect(view.container.querySelector("[data-node-row]")).toHaveClass("bg-[var(--ng-active-surface)]");
   });
@@ -84,7 +85,10 @@ describe("NodeRow", () => {
     expect(view.container.querySelector("[data-node-row]")).toHaveClass("py-0.5");
     expect(view.container.querySelector("[data-node-disclosure-space]")).not.toBeInTheDocument();
     const metadata = screen.getByText("/report.pdf · 2026-08-05");
-    expect(metadata).toHaveClass("text-[10px]", "leading-[14px]");
+    expect(screen.getByText("report.pdf")).toHaveClass("truncate");
+    expect(screen.getByText("report.pdf")).toHaveAttribute("title", "report.pdf");
+    expect(metadata).toHaveClass("truncate", "text-xs", "leading-4");
+    expect(metadata).toHaveAttribute("title", "/report.pdf · 2026-08-05");
     expect(metadata.parentElement).toHaveClass("space-y-0.5");
   });
 

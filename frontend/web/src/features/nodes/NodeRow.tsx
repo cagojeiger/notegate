@@ -118,8 +118,8 @@ export function NodeRow({
           ) : null}
         </span>
         <span className={`min-w-0 flex-1 ${meta ? "space-y-0.5" : ""}`}>
-          <span className="block truncate">{node.name}</span>
-          {meta ? <span className="block truncate text-[10px] leading-[14px] text-faint">{meta}</span> : null}
+          <span className="block truncate" title={meta ? node.name : undefined}>{node.name}</span>
+          {meta ? <span className="block truncate text-xs leading-4 text-faint" title={meta}>{meta}</span> : null}
         </span>
       </button>
       {node.effective_write_locked ? (

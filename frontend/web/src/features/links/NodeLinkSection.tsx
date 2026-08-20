@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, type RefObject } from "react";
-import { AlertTriangle, ArrowLeft, ArrowRight, ChevronRight, FileText, Image } from "lucide-react";
+import { AlertTriangle, ArrowLeftToLine, ArrowRightFromLine, ChevronRight, FileText, Image } from "lucide-react";
 
 import type { NodeLink, NodeLinkDirection } from "../../api/links";
 import { Button } from "../../shared/ui";
@@ -7,7 +7,6 @@ import { Button } from "../../shared/ui";
 type NodeLinkSectionProps = {
   id?: string;
   direction: NodeLinkDirection;
-  title: string;
   emptyMessage: string;
   expanded: boolean;
   links: NodeLink[];
@@ -25,7 +24,6 @@ type NodeLinkSectionProps = {
 export function NodeLinkSection({
   id,
   direction,
-  title,
   emptyMessage,
   expanded,
   links,
@@ -41,22 +39,28 @@ export function NodeLinkSection({
 }: NodeLinkSectionProps) {
   const panelId = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const DirectionIcon = direction === "outgoing" ? ArrowRightFromLine : ArrowLeftToLine;
+  const title = direction === "outgoing" ? "Outgoing" : "Incoming";
+  const accessibleTitle = direction === "outgoing"
+    ? "Links from this document"
+    : "Links to this document";
 
   return (
     <section id={id} className={expanded ? "flex min-h-0 min-w-0 flex-col" : "min-w-0 shrink-0"}>
       <button
         type="button"
         className="flex min-h-workbench-control w-full shrink-0 items-center gap-2 px-1 py-1.5 text-left outline-none transition hover:bg-[var(--ng-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+        aria-label={`${accessibleTitle}, ${links.length} links loaded${hasMore ? ", more available" : ""}`}
         aria-expanded={expanded}
         aria-controls={panelId}
         onClick={onToggle}
       >
-        <span className="min-w-0 flex-1 text-xs font-semibold text-text">{title}</span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs font-semibold text-text">
+          <DirectionIcon size={13} className="shrink-0 text-primary" aria-hidden="true" />
+          <span>{title}</span>
+        </span>
         <span className="text-xs tabular-nums text-muted">
           <span aria-hidden="true">{links.length}{hasMore ? "+" : ""}</span>
-          <span className="sr-only">
-            {links.length} links loaded{hasMore ? ", more available" : ""}
-          </span>
         </span>
         <ChevronRight
           size={14}
@@ -68,7 +72,7 @@ export function NodeLinkSection({
         ref={scrollRef}
         id={panelId}
         role="region"
-        aria-label={title}
+        aria-label={accessibleTitle}
         tabIndex={0}
         hidden={!expanded}
         className="min-h-0 flex-1 overflow-y-auto"
@@ -87,7 +91,7 @@ export function NodeLinkSection({
           <ul className="divide-y divide-seam">
             {links.map((link) => (
               <li key={`${link.kind}:${link.path}`}>
-                <LinkRow direction={direction} link={link} onOpenNode={onOpenNode} />
+                <LinkRow link={link} onOpenNode={onOpenNode} />
               </li>
             ))}
           </ul>
@@ -149,25 +153,28 @@ function AutoPageSentinel({
 }
 
 function LinkRow({
-  direction,
   link,
   onOpenNode
 }: {
-  direction: NodeLinkDirection;
   link: NodeLink;
   onOpenNode: (nodeId: string) => void;
 }) {
+  const Icon = link.kind === "image" ? Image : FileText;
+  const name = linkName(link.path);
   const content = (
     <>
       {link.node_id ? (
-        <DirectionalNodeIcon direction={direction} kind={link.kind} />
+        <Icon size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
       ) : (
-        <span className="relative size-4 shrink-0 text-danger" aria-hidden="true">
+        <span className="relative mt-0.5 size-4 shrink-0 text-danger" aria-hidden="true">
           <FileText size={14} className="absolute left-0 top-0" />
           <AlertTriangle size={9} className="absolute -bottom-0.5 -right-0.5" />
         </span>
       )}
-      <span className="min-w-0 flex-1 break-words text-left">{link.path}</span>
+      <span className="min-w-0 flex-1 space-y-0.5 text-left">
+        <span className="block break-words text-text">{name}</span>
+        <span className="block [overflow-wrap:anywhere] text-xs leading-4 text-faint">{link.path}</span>
+      </span>
       {link.occurrence_count > 1 ? (
         <span className="shrink-0 text-xs tabular-nums text-muted">×{link.occurrence_count}</span>
       ) : null}
@@ -191,22 +198,7 @@ function LinkRow({
   );
 }
 
-function DirectionalNodeIcon({
-  direction,
-  kind
-}: {
-  direction: NodeLinkDirection;
-  kind: NodeLink["kind"];
-}) {
-  const BaseIcon = kind === "image" ? Image : FileText;
-  const DirectionIcon = direction === "outgoing" ? ArrowRight : ArrowLeft;
-  const directionPosition = direction === "outgoing" ? "-bottom-0.5 -right-1" : "-bottom-0.5 -left-1";
-  const basePosition = direction === "outgoing" ? "left-0" : "right-0";
-
-  return (
-    <span className="relative size-4 shrink-0" aria-hidden="true">
-      <BaseIcon size={14} className={`absolute top-0 ${basePosition}`} />
-      <DirectionIcon size={9} className={`absolute text-primary ${directionPosition}`} strokeWidth={2.75} />
-    </span>
-  );
+function linkName(path: string): string {
+  const separator = path.lastIndexOf("/");
+  return path.slice(separator + 1) || path;
 }

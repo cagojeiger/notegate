@@ -85,10 +85,17 @@ describe("NodeLinksPanel", () => {
     renderPanel({ onOpenNode });
 
     expect(screen.getByText("Indexed 2026-08-18")).toBeInTheDocument();
+    expect(screen.getByText("Outgoing")).toBeInTheDocument();
+    expect(screen.getByText("Incoming")).toBeInTheDocument();
     expect(screen.getByText("×2")).toBeInTheDocument();
     expect(screen.getByText("Broken")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Open /docs/target.md" }));
+    const target = screen.getByRole("button", { name: "Open /docs/target.md" });
+    expect(within(target).getByText("target.md")).toBeInTheDocument();
+    expect(within(target).getByText("/docs/target.md")).toHaveClass("[overflow-wrap:anywhere]");
+    expect(target.querySelectorAll("svg")).toHaveLength(1);
+
+    await user.click(target);
     await user.click(screen.getByRole("button", { name: "Open /docs/source.md" }));
 
     expect(onOpenNode).toHaveBeenNthCalledWith(1, "target-1", "node-1");
@@ -334,7 +341,7 @@ describe("NodeLinksPanel", () => {
     ));
     renderPanel();
 
-    const outgoingSection = screen.getByText("Links from this document").closest("section");
+    const outgoingSection = screen.getByText("Outgoing").closest("section");
     expect(outgoingSection).not.toBeNull();
     expect(within(outgoingSection!).getByText("2+")).toBeInTheDocument();
     expect(within(outgoingSection!).queryByText("2")).not.toBeInTheDocument();
@@ -345,8 +352,8 @@ describe("NodeLinksPanel", () => {
     renderPanel({ node: folder });
 
     expect(screen.queryByText("Index status")).not.toBeInTheDocument();
-    expect(screen.queryByText("Links from this document")).not.toBeInTheDocument();
-    expect(screen.getByText("Links to this document")).toBeInTheDocument();
+    expect(screen.queryByText("Outgoing")).not.toBeInTheDocument();
+    expect(screen.getByText("Incoming")).toBeInTheDocument();
     expect(mocks.useNodeLinkStatusQuery).toHaveBeenCalledWith(folder, true);
   });
 
@@ -361,7 +368,7 @@ describe("NodeLinksPanel", () => {
     expect(
       screen.getByText("Links from client-encrypted text cannot be indexed.")
     ).toBeInTheDocument();
-    expect(screen.getByText("Links to this document")).toBeInTheDocument();
+    expect(screen.getByText("Incoming")).toBeInTheDocument();
     expect(mocks.useNodeLinksQuery).toHaveBeenCalledWith(encrypted, "outgoing", false);
     expect(mocks.useNodeLinksQuery).toHaveBeenCalledWith(encrypted, "incoming", true);
   });
