@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { RefreshCw } from "lucide-react";
+import { ArrowRightFromLine, RefreshCw } from "lucide-react";
 
 import type { NodeLinkProjectionStatus } from "../../api/links";
 import type { RestNode } from "../../api/types";
@@ -91,7 +91,6 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
           <NodeLinkSection
             id={outgoingSectionId}
             direction="outgoing"
-            title="Links from this document"
             emptyMessage="This document does not link to another item."
             expanded={sections.outgoingOpen}
             links={outgoing}
@@ -107,7 +106,10 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
           />
         ) : node.kind === "text" ? (
           <div className="shrink-0 px-1 py-2">
-            <p className="text-xs font-semibold text-text">Links from this document</p>
+            <p className="flex items-center gap-1.5 text-xs font-semibold text-text">
+              <ArrowRightFromLine size={13} className="shrink-0 text-primary" aria-hidden="true" />
+              Outgoing
+            </p>
             <p className="mt-1 text-xs text-muted">
               Links from client-encrypted text cannot be indexed.
             </p>
@@ -140,7 +142,6 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
         <NodeLinkSection
           id={incomingSectionId}
           direction="incoming"
-          title="Links to this document"
           emptyMessage="No documents link to this item."
           expanded={sections.incomingOpen}
           links={incoming}
