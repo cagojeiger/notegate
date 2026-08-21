@@ -38,8 +38,6 @@ use crate::state::AppState;
         crate::public_v2::text::patch,
         crate::public_v2::text::append,
         crate::public_v2::text::edit,
-        crate::public_v2::search::find,
-        crate::public_v2::search::grep,
         crate::public_v2::files::begin,
         crate::public_v2::files::parts,
         crate::public_v2::files::complete,
@@ -53,7 +51,6 @@ use crate::state::AppState;
         (name = "spaces", description = "Spaces connected to the Agent and their effective permissions"),
         (name = "nodes", description = "Folder, text, and file tree metadata and mutations"),
         (name = "text", description = "Bounded plain-text reads and optimistic-concurrency mutations"),
-        (name = "search", description = "Bounded name, path, and plain-text search with opaque cursors"),
         (name = "files", description = "Single and multipart transfer through S3-compatible presigned URLs"),
     ),
     external_docs(
@@ -212,7 +209,7 @@ fn operations_mut(item: &mut PathItem) -> impl Iterator<Item = &mut Operation> {
 
 fn error_response() -> Response {
     let mut response = Response::new(
-        "Common JSON error. Inspect `error` for a stable code. Typical codes include invalid_input, forbidden, not_found, method_not_allowed, request_timeout, conflict, payload_too_large, node_write_locked, subtree_write_locked, search_busy, rate_limited, object_storage_unavailable, and internal_error. Retryable responses can include a Retry-After header.",
+        "Common JSON error. Inspect `error` for a stable code. Typical codes include invalid_input, forbidden, not_found, method_not_allowed, request_timeout, conflict, payload_too_large, node_write_locked, subtree_write_locked, rate_limited, object_storage_unavailable, and internal_error. Retryable responses can include a Retry-After header.",
     );
     response.content.insert(
         "application/json".to_owned(),
@@ -275,8 +272,6 @@ mod tests {
             ),
             ("/api/v2/spaces/{space_id}/text/{node_id}/append", &["post"]),
             ("/api/v2/spaces/{space_id}/text/{node_id}/edit", &["post"]),
-            ("/api/v2/spaces/{space_id}/search/find", &["post"]),
-            ("/api/v2/spaces/{space_id}/search/grep", &["post"]),
             ("/api/v2/spaces/{space_id}/file-uploads", &["post"]),
             (
                 "/api/v2/spaces/{space_id}/file-uploads/{upload_id}/parts",
@@ -412,14 +407,6 @@ mod tests {
             "https://github.com/cagojeiger/notegate"
         );
         assert_eq!(
-            schemas["FindBody"]["properties"]["match"]["default"],
-            "contains"
-        );
-        assert_eq!(
-            schemas["GrepBody"]["properties"]["lines"]["default"],
-            "none"
-        );
-        assert_eq!(
             schemas["PatchEditBody"]["properties"]["mode"]["default"],
             "unique"
         );
@@ -444,16 +431,6 @@ mod tests {
                 serde_json::json!(["none", "client"]),
             ),
             ("CreateNodeKind", serde_json::json!(["folder", "text"])),
-            (
-                "SearchNodeKind",
-                serde_json::json!(["folder", "text", "file"]),
-            ),
-            (
-                "FindMatch",
-                serde_json::json!(["contains", "regex", "glob"]),
-            ),
-            ("GrepMatch", serde_json::json!(["literal", "regex"])),
-            ("GrepLines", serde_json::json!(["none", "first", "all"])),
             (
                 "PatchMatchMode",
                 serde_json::json!(["unique", "first", "all"]),

@@ -103,16 +103,16 @@ async fn connected_write_agent_can_use_v2_resource_flow() -> Result<(), Box<dyn 
     assert_eq!(status, StatusCode::OK, "{read}");
     assert_eq!(read["text"]["content"], "first line\nneedle\n");
 
-    let (status, found) = json_request(
-        app(state.clone(), caller.clone()),
-        "POST",
-        format!("/spaces/{space_id}/search/grep"),
-        json!({"q": "needle", "lines": "all"}),
-    )
-    .await?;
-    assert_eq!(status, StatusCode::OK, "{found}");
-    assert_eq!(found["items"][0]["id"], node_id);
-    assert_eq!(found["items"][0]["match_lines"], json!([2]));
+    for operation in ["find", "grep"] {
+        let (status, body) = json_request(
+            app(state.clone(), caller.clone()),
+            "POST",
+            format!("/spaces/{space_id}/search/{operation}"),
+            json!({"q": "needle"}),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
 
     let (status, deleted) = empty_request(
         app(state, caller),

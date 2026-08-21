@@ -49,10 +49,8 @@ Agent가 보내는 `account_id`나 `user_id`는 없다. 서버가 API key에서 
 |---|---:|---:|
 | Space 목록 | 50 | 100 |
 | 직계 자식, Tree | 100 | 200 |
-| Find | 50 | 100 |
-| Grep | 20 | 100 |
 
-페이지 응답에서 `has_more=true`이면 `next_cursor`가 존재한다. 다음 호출은 cursor 이외의 scope, query, match mode, include/exclude 값을 바꾸지 않는다.
+페이지 응답에서 `has_more=true`이면 `next_cursor`가 존재한다. 다음 호출은 cursor 이외의 scope와 filter 값을 바꾸지 않는다.
 
 ## 공개 경로
 
@@ -134,34 +132,6 @@ curl --fail-with-body --silent --show-error \
 
 줄 번호는 1부터 시작하고 `start_line`과 `end_line`은 모두 포함한다.
 
-### Search
-
-| Method | Path | 설명 |
-|---|---|---|
-| `POST` | `/api/v2/spaces/{space_id}/search/find` | 이름 또는 경로 검색 |
-| `POST` | `/api/v2/spaces/{space_id}/search/grep` | 평문 본문 검색 |
-
-Search는 include/exclude glob, pagination, process-wide admission limit을 사용한다. 용량이 가득 차면 `429 search_busy`와 `Retry-After`를 반환한다.
-
-| 작업 | `kind` | `match` | `lines` | 기본 path |
-|---|---|---|---|---|
-| Find | 선택: `folder`, `text`, `file` | `contains`(기본), `regex`, `glob` | 해당 없음 | `/` |
-| Grep | 해당 없음 | `literal`(기본), `regex` | `none`(기본), `first`, `all` | `/` |
-
-`include`와 `exclude`는 canonical relative path에 적용하는 glob 배열이다. 검색 query는 한 줄이며 최대 256자다. 패턴 배열은 각각 최대 32개, 패턴 하나는 최대 256자다.
-
-```json
-{
-  "q": "TODO",
-  "path": "/docs",
-  "match": "literal",
-  "lines": "first",
-  "include": ["**/*.md"],
-  "exclude": ["archive/**"],
-  "limit": 20
-}
-```
-
 ### File transfer
 
 | Method | Path | 설명 |
@@ -215,7 +185,7 @@ Client는 전송 성공 후 반드시 complete를 호출한다. 중단할 때는
 | 409 | `conflict` | hash/parent 불일치, 중복 또는 상태 충돌 |
 | 413 | `payload_too_large` | 요청 본문 크기 상한 초과 |
 | 423 | `node_write_locked`, `subtree_write_locked` | 직접·상속 write lock에 의해 변경 차단 |
-| 429 | `search_busy`, `rate_limited` | 검색 또는 HTTP 처리 용량 초과 |
+| 429 | `rate_limited` | HTTP 처리 용량 초과 |
 | 500 | `internal_error` | 공개하지 않는 내부 처리 실패 |
 | 503 | `object_storage_unavailable`, `usage_recalculation_in_progress` | 일시적인 의존성 또는 유지보수 상태 |
 

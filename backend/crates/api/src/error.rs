@@ -93,15 +93,6 @@ impl ApiError {
         )
     }
 
-    pub fn search_busy(operation: &'static str) -> Self {
-        Self {
-            status: StatusCode::TOO_MANY_REQUESTS,
-            code: "search_busy",
-            message: format!("{operation} capacity is busy; retry shortly"),
-            retry_after_seconds: Some(1),
-        }
-    }
-
     pub fn object_storage_unavailable() -> Self {
         Self::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -299,20 +290,6 @@ mod tests {
                 .get(RETRY_AFTER)
                 .and_then(|value| value.to_str().ok()),
             Some("5")
-        );
-    }
-
-    #[test]
-    fn search_busy_is_retryable_after_one_second() {
-        let response = ApiError::search_busy("grep").into_response();
-
-        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
-        assert_eq!(
-            response
-                .headers()
-                .get(RETRY_AFTER)
-                .and_then(|value| value.to_str().ok()),
-            Some("1")
         );
     }
 }
