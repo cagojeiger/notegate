@@ -9,12 +9,14 @@ use rmcp::model::ErrorCode;
 use rmcp::{ErrorData, Json};
 use serde_json::{Value, json};
 
-use super::resolve::{actionable_input_error, caller, node_summary, resolve_target, search_error};
+use super::resolve::{actionable_input_error, caller, resolve_target, search_error};
 use super::support::page_json;
+use crate::internal_search::SearchClientError;
 use crate::mcp::contract::McpAction;
 use crate::state::AppState;
 
 const SEARCH_BUSY_ERROR_CODE: ErrorCode = ErrorCode(-32002);
+const SEARCH_UNAVAILABLE_ERROR_CODE: ErrorCode = ErrorCode(-32001);
 
 #[allow(clippy::too_many_arguments)]
 pub async fn find(
@@ -29,10 +31,6 @@ pub async fn find(
     limit: Option<i64>,
     cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
-    let _permit = state
-        .search_admission
-        .enter_find()
-        .map_err(search_busy_error)?;
     let caller = caller(parts)?;
     let (resolved, scope_path) = resolve_target(state, caller, &target).await?;
     let scope_path = Some(scope_path);
@@ -60,14 +58,13 @@ pub async fn find(
             },
         )
         .await
-        .map_err(search_error)?;
+        .map_err(search_client_error)?;
 
-    let items: Vec<Value> = page.items.iter().map(node_summary).collect();
-    let returned = items.len();
+    let returned = page.items.len();
 
     Ok(Json(json!({
         "space": resolved.name(),
-        "items": items,
+        "items": page.items,
         "page": page_json(
             page.limit,
             returned,
@@ -90,11 +87,6 @@ pub async fn grep(
     limit: Option<i64>,
     cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
-    let _permit = state
-        .search_admission
-        .enter_grep()
-        .await
-        .map_err(search_busy_error)?;
     let caller = caller(parts)?;
     let (resolved, scope_path) = resolve_target(state, caller, &target).await?;
     let scope_path = Some(scope_path);
@@ -119,26 +111,13 @@ pub async fn grep(
             },
         )
         .await
-        .map_err(search_error)?;
+        .map_err(search_client_error)?;
 
-    let items: Vec<Value> = page
-        .items
-        .iter()
-        .map(|hit| {
-            let mut value = node_summary(&hit.node);
-            if !hit.match_lines.is_empty()
-                && let Some(object) = value.as_object_mut()
-            {
-                object.insert("match_lines".to_owned(), json!(hit.match_lines));
-            }
-            value
-        })
-        .collect();
-    let returned = items.len();
+    let returned = page.items.len();
 
     Ok(Json(json!({
         "space": space,
-        "items": items,
+        "items": page.items,
         "page": page_json(
             page.limit,
             returned,
@@ -146,6 +125,23 @@ pub async fn grep(
             page.next_cursor.as_deref(),
         ),
     })))
+}
+
+fn search_client_error(error: SearchClientError) -> ErrorData {
+    match error {
+        SearchClientError::Search(error) => search_error(error),
+        SearchClientError::Capacity(capacity) => search_busy_error(capacity),
+        SearchClientError::Unavailable => ErrorData::new(
+            SEARCH_UNAVAILABLE_ERROR_CODE,
+            "search service is unavailable; retry shortly",
+            Some(json!({
+                "kind": "search_unavailable",
+                "code": "search_unavailable",
+                "retryable": true,
+                "retry_after_ms": 1_000,
+            })),
+        ),
+    }
 }
 
 fn search_busy_error(capacity: SearchCapacity) -> ErrorData {
@@ -227,7 +223,9 @@ mod tests {
     use super::{
         FindMatchMode, GrepLineMode, GrepMatchMode, NodeKind, parse_find_match_mode,
         parse_grep_line_mode, parse_grep_match_mode, parse_kind, search_busy_error,
+        search_client_error,
     };
+    use crate::internal_search::SearchClientError;
     use notegate_search::SearchCapacity;
 
     fn assert_invalid_input(error: ErrorData, expected_message: &str) {
@@ -330,6 +328,21 @@ mod tests {
         assert_eq!(data["kind"], "search_busy");
         assert_eq!(data["code"], "search_busy");
         assert_eq!(data["operation"], "grep");
+        assert_eq!(data["retryable"], true);
+        assert_eq!(data["retry_after_ms"], 1_000);
+    }
+
+    #[test]
+    fn unavailable_search_transport_is_retryable() {
+        let error = search_client_error(SearchClientError::Unavailable);
+
+        assert_eq!(error.code, super::SEARCH_UNAVAILABLE_ERROR_CODE);
+        assert_eq!(
+            error.message,
+            "search service is unavailable; retry shortly"
+        );
+        let data = error.data.expect("search unavailable carries metadata");
+        assert_eq!(data["kind"], "search_unavailable");
         assert_eq!(data["retryable"], true);
         assert_eq!(data["retry_after_ms"], 1_000);
     }

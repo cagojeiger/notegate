@@ -4,6 +4,38 @@ Search는 MCP의 path-first command다. Browser V1과 Public V2 REST는 search e
 
 Runtime의 `find`/`grep` 구현은 `notegate-search` crate가 소유한다. 일반 file-tree 조회인 `tree`는 `FilesService`에 남긴다.
 
+## Execution boundary
+
+Public API/MCP state는 검색 엔진, admission 또는 복호화 body cache를 소유하지 않는다. `find`와
+`grep`은 private HTTP client를 통해 `SearchRuntime`으로 전달되고, runtime이 `SearchService`,
+`SearchAdmission`, body cache와 search telemetry를 함께 소유한다.
+
+```text
+MCP search
+  -> SearchClient
+  -> signed private HTTP
+  -> SearchRuntime
+       -> admission
+       -> SearchService
+       -> PostgreSQL
+```
+
+기본 `all`과 local `api` mode도 public listener와 search listener를 다른 socket으로 띄운다.
+`search` mode는 private search listener만 띄우므로 같은 image를 별도 search pod로 배포할 수 있다.
+API pod에 `search_service_url`을 지정하면 local search listener를 만들지 않고 해당 내부 service를
+호출한다. Public listener에는 private search route를 등록하지 않는다.
+
+API `/ready`는 원격 search service를 동기적으로 probe하지 않는다. 검색 장애 때문에 읽기·쓰기까지
+같이 service endpoint에서 제거되는 연쇄 장애를 피하기 위한 의도적인 부분 가용성 계약이다. Search
+pod는 자신의 `/ready`로 DB/schema 준비 상태를 알리고, API는 연결 실패를 retryable
+`search_unavailable`로 반환한다. 운영에서는 이 오류율과 search pod readiness를 함께 경보한다.
+
+Private request signature는 timestamp, HTTP method, path와 정확한 body bytes를 묶는다. 허용 clock
+skew는 60초다. Response도 request timestamp, status, path와 body를 묶어 서명한다. 양쪽 key는
+LOOKUP root에서 session key와 다른 purpose label로 파생한다. 이 서명은 service authentication과
+integrity 경계이고, pod 간 transport confidentiality와 `/metrics` 접근 제한은 TLS 또는 cluster
+network policy가 담당한다.
+
 검색은 항상 folder scope의 subtree를 대상으로 한다. Scope를 생략하면 Space root `/`를 scope로 사용한다.
 
 ## Authorization

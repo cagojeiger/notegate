@@ -217,6 +217,8 @@ fn state_with_pool(
 ) -> Result<AppState, Box<dyn std::error::Error>> {
     let config = Arc::new(notegate_core::Config {
         bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9191),
+        search_bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9192),
+        search_service_url: None,
         process_mode: notegate_core::ProcessMode::All,
         database_url: "postgres://notegate:notegate@localhost/notegate".to_owned(),
         db_max_connections: 1,

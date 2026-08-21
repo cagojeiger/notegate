@@ -121,8 +121,8 @@ background_job_attempts
 ## 실행 규칙
 
 - Worker는 자신에게 등록된 `job_kind`만 선점한다. 처리할 수 없는 kind 때문에 polling loop가 계속 깨어나면 안 된다.
-- `NOTEGATE_PROCESS_MODE`는 `all`, `api`, `worker` 중 하나다. 기본값 `all`은 기존 단일 process 배포를 유지한다.
-- `api` mode는 데이터·control HTTP와 metadata write-behind만 실행한다. `worker` mode는 queue runtime, reconciliation runtime과 control HTTP만 실행한다.
+- `NOTEGATE_PROCESS_MODE`는 `all`, `api`, `worker`, `search` 중 하나다. 기본값 `all`은 기존 단일 process 배포를 유지하되 search는 별도 private listener를 사용한다.
+- `api` mode는 데이터·control HTTP와 metadata write-behind만 실행한다. `worker` mode는 queue runtime, reconciliation runtime과 control HTTP만 실행한다. `search` mode는 background job을 실행하지 않는다.
 - Process mode는 실행 책임만 분리한다. 모든 mode는 같은 binary와 전체 `Config` 계약을 사용한다.
 - 기본 동시 실행 수는 process당 4이고 최대 64다.
 - `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`로 process별 동시 실행 수를 설정한다.

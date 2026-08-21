@@ -30,6 +30,7 @@ use crate::auth::metadata::{
 use crate::auth::oauth::{callback, login, logout, success, success_script};
 use crate::auth::{require_browser_session, require_public_api_key, set_private_no_store};
 use crate::error::ApiError;
+use crate::internal_search::SearchServerState;
 use crate::mcp::server::{agent_mcp_v2_handler, user_mcp_handler};
 use crate::observability::{self, HttpRequestMetrics, MetricsHandle};
 use crate::state::AppState;
@@ -53,6 +54,13 @@ pub fn worker_app(state: AppState) -> Router {
     let metrics = state.metrics.clone();
     let metrics_enabled = metrics.is_some();
     let router = control_plane_routes(metrics).with_state(state);
+    apply_common_layers(router, metrics_enabled)
+}
+
+/// Health, readiness, metrics, and authenticated private search routes only.
+pub fn search_app(state: SearchServerState) -> Router {
+    let metrics_enabled = state.metrics_enabled();
+    let router = crate::internal_search::routes(metrics_enabled).with_state(state);
     apply_common_layers(router, metrics_enabled)
 }
 

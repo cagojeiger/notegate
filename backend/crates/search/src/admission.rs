@@ -11,7 +11,7 @@ pub enum SearchCapacity {
     Grep,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SearchAdmission {
     find: Arc<Semaphore>,
     grep_requests: Arc<Semaphore>,
@@ -35,6 +35,11 @@ impl SearchAdmission {
             grep_requests: Arc::new(Semaphore::new(grep_requests)),
             grep_executions: Arc::new(Semaphore::new(grep_executions)),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(find: usize, grep_requests: usize, grep_executions: usize) -> Self {
+        Self::new(find, grep_requests, grep_executions)
     }
 
     pub fn enter_find(&self) -> Result<OwnedSemaphorePermit, SearchCapacity> {

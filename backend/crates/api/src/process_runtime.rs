@@ -74,6 +74,24 @@ impl ProcessRuntime {
         })
     }
 
+    pub(crate) fn search_only(
+        metrics: Option<observability::MetricsHandle>,
+        shutdown: CancellationToken,
+    ) -> Self {
+        let mut auxiliary_tasks = TaskSet::default();
+        auxiliary_tasks.push(
+            "metrics upkeep worker",
+            observability::spawn_upkeep(metrics, shutdown.clone()),
+        );
+        Self {
+            shutdown,
+            metadata_shutdown: CancellationToken::new(),
+            background_jobs: None,
+            critical_tasks: TaskSet::default(),
+            auxiliary_tasks,
+        }
+    }
+
     pub(crate) async fn wait_for_critical_exit(&mut self) -> anyhow::Error {
         loop {
             tokio::select! {

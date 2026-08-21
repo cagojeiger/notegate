@@ -21,6 +21,7 @@ mod error;
 mod find;
 mod grep;
 mod matcher;
+mod runtime;
 mod telemetry;
 mod view;
 
@@ -30,6 +31,7 @@ use telemetry::SearchTelemetry;
 
 pub use admission::{GrepPermit, SearchAdmission, SearchCapacity};
 pub use error::{SearchError, SearchResult};
+pub use runtime::{SearchRunError, SearchRunResult, SearchRuntime};
 
 /// Process-local snapshot of the decrypted search body cache.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -71,6 +73,11 @@ impl SearchService {
 
     pub fn body_cache_stats(&self) -> SearchBodyCacheStats {
         self.body_cache.stats()
+    }
+
+    pub fn record_body_cache_metrics(&self) {
+        self.telemetry
+            .record_body_cache_metrics(self.body_cache_stats());
     }
 
     async fn resolve_scope_folder(

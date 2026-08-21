@@ -1,8 +1,14 @@
 # Observability
 
-NoteGate exposes process-local Prometheus metrics on the application listener when
-`NOTEGATE_METRICS_ENABLED=true`. Metrics are disabled by default. When disabled,
+NoteGate exposes process-local Prometheus metrics on each active process control plane when
+`NOTEGATE_METRICS_ENABLED=true`. Public/worker processes use their application listener;
+`search` mode uses the private search listener. Metrics are disabled by default. When disabled,
 `/metrics` is not registered and the HTTP middleware skips metric recording.
+
+Combined `all`/local `api` mode intentionally exposes one process-local scrape endpoint on the
+public listener. Search operation and cache metrics are recorded in the shared process recorder and
+appear there; the private listener does not register a duplicate `/metrics`. A standalone `search`
+process exposes its scrape endpoint on the private listener instead.
 
 `/metrics` is a control-plane route. It has the control-plane timeout and is excluded
 from the data-plane body limit and rate limit. It is not an authenticated user API;
@@ -48,8 +54,9 @@ notegate_search_body_cache_capacity_bytes
 notegate_search_body_cache_entries
 ```
 
-These gauges are read only when `/metrics` is scraped; application requests do not
-update them. DB pool utilization can be derived from `in_use / max_connections`.
+DB pool gauges are read when `/metrics` is scraped. Search cache gauges are initialized by the
+owning SearchRuntime, refreshed after search execution, and refreshed again on its `/metrics`
+scrape. DB pool utilization can be derived from `in_use / max_connections`.
 Cache utilization can be derived from `size_bytes / capacity_bytes`. Cache size and
 entry count are process-local Moka estimates and may briefly lag concurrent cache
 maintenance. A disabled cache reports zero capacity, size, and entries.

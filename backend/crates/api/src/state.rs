@@ -8,7 +8,7 @@ use notegate_db::{
     AccountRepo, AgentRepo, ApiKeyRepo, AuditEventRepo, BackgroundJobRepo, BrowserSessionRepo,
     ConnectionRepo, FilesRepo, LinkGraphRepo, McpInvocationRepo, PgPool, SpaceRepo, UsageRepo,
 };
-use notegate_search::{SearchAdmission, SearchService};
+use notegate_search::SearchRuntime;
 use notegate_service::accounts::AccountService;
 use notegate_service::agents::AgentService;
 use notegate_service::connections::ConnectionService;
@@ -19,6 +19,7 @@ use notegate_service::usage::UsageService;
 use tokio_util::sync::CancellationToken;
 
 use crate::identity::CallerResolver;
+use crate::internal_search::SearchClient;
 use crate::object_storage::ObjectStorage;
 use crate::observability::MetricsHandle;
 
@@ -37,8 +38,6 @@ pub type Connections = ConnectionService;
 pub type Agents = AgentService;
 /// File-tree command service over the db-backed [`FilesRepo`].
 pub type Files = FilesService;
-/// Search service over the db-backed [`FilesRepo`].
-pub type Search = SearchService;
 /// Derived Markdown-link graph projection service.
 pub type LinkGraph = LinkGraphService;
 /// User-facing account and Space usage service.
@@ -59,9 +58,8 @@ pub struct AppState {
     pub connections: Connections,
     pub agents: Agents,
     pub files: Files,
-    pub search: Search,
+    pub(crate) search: SearchClient,
     pub link_graph: LinkGraph,
-    pub(crate) search_admission: SearchAdmission,
     pub(crate) docx_validation_admission: DocxValidationAdmission,
     pub usage: Usage,
     /// Account lookup for resolving attribution refs in REST output.
@@ -74,6 +72,7 @@ pub struct AppState {
 }
 
 impl AppState {
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: PgPool,
@@ -83,6 +82,43 @@ impl AppState {
         resolver: Arc<dyn CallerResolver>,
         http: reqwest::Client,
         pii_crypto: PiiCrypto,
+    ) -> Self {
+        Self::build(db, config, jwt, oidc, resolver, http, pii_crypto, None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_search_client(
+        db: PgPool,
+        config: Arc<Config>,
+        jwt: Arc<JwtAuthority>,
+        oidc: Arc<OidcProvider>,
+        resolver: Arc<dyn CallerResolver>,
+        http: reqwest::Client,
+        pii_crypto: PiiCrypto,
+        search: SearchClient,
+    ) -> Self {
+        Self::build(
+            db,
+            config,
+            jwt,
+            oidc,
+            resolver,
+            http,
+            pii_crypto,
+            Some(search),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        db: PgPool,
+        config: Arc<Config>,
+        jwt: Arc<JwtAuthority>,
+        oidc: Arc<OidcProvider>,
+        resolver: Arc<dyn CallerResolver>,
+        http: reqwest::Client,
+        pii_crypto: PiiCrypto,
+        search: Option<SearchClient>,
     ) -> Self {
         let object_storage = ObjectStorage::new(&config.s3);
         let spaces = SpaceService::new(SpaceRepo::new(db.clone()));
@@ -116,8 +152,13 @@ impl AppState {
             files_repo.clone(),
             notegate_db::LinkGraphWorkRepo::new(db.clone()),
         );
-        let search = SearchService::with_body_cache_config(files_repo, config.search_body_cache)
-            .with_metrics_enabled(config.metrics_enabled);
+        let search = search.unwrap_or_else(|| {
+            SearchClient::local(SearchRuntime::new(
+                files_repo,
+                config.search_body_cache,
+                config.metrics_enabled,
+            ))
+        });
         let usage = UsageService::new(UsageRepo::new(db.clone()), config.limits);
         let browser_sessions = BrowserSessionRepo::with_lookup_key(
             db.clone(),
@@ -140,7 +181,6 @@ impl AppState {
             files,
             search,
             link_graph,
-            search_admission: SearchAdmission::default(),
             docx_validation_admission: DocxValidationAdmission::default(),
             usage,
             accounts: account_repo,

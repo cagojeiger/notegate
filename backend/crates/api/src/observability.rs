@@ -11,7 +11,6 @@ use axum::routing::get;
 use metrics::{Gauge, Unit};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use notegate_jobs::JobQueue;
-use notegate_search::SearchBodyCacheStats;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::field::{Field, Visit};
@@ -491,11 +490,11 @@ async fn scrape(
     State(state): State<AppState>,
     Extension(metrics): Extension<MetricsHandle>,
 ) -> Response {
-    record_resource_metrics(ResourceMetricsSnapshot::capture(&state));
+    record_database_metrics(&state.db, state.config.db_max_connections);
     scrape_response(&metrics)
 }
 
-fn scrape_response(metrics: &MetricsHandle) -> Response {
+pub(crate) fn scrape_response(metrics: &MetricsHandle) -> Response {
     metrics.0.run_upkeep();
     (
         [(header::CONTENT_TYPE, PROMETHEUS_CONTENT_TYPE)],
@@ -509,23 +508,25 @@ struct ResourceMetricsSnapshot {
     db_connections_in_use: u32,
     db_connections_idle: u32,
     db_max_connections: u32,
-    body_cache: SearchBodyCacheStats,
 }
 
 impl ResourceMetricsSnapshot {
-    fn capture(state: &AppState) -> Self {
-        let db_connections = state.db.size();
-        let db_connections_idle = u32::try_from(state.db.num_idle())
+    fn capture(pool: &notegate_db::PgPool, db_max_connections: u32) -> Self {
+        let db_connections = pool.size();
+        let db_connections_idle = u32::try_from(pool.num_idle())
             .unwrap_or(u32::MAX)
             .min(db_connections);
 
         Self {
             db_connections_in_use: db_connections.saturating_sub(db_connections_idle),
             db_connections_idle,
-            db_max_connections: state.config.db_max_connections,
-            body_cache: state.search.body_cache_stats(),
+            db_max_connections,
         }
     }
+}
+
+pub(crate) fn record_database_metrics(pool: &notegate_db::PgPool, db_max_connections: u32) {
+    record_resource_metrics(ResourceMetricsSnapshot::capture(pool, db_max_connections));
 }
 
 fn record_resource_metrics(snapshot: ResourceMetricsSnapshot) {
@@ -540,10 +541,6 @@ fn record_resource_metrics(snapshot: ResourceMetricsSnapshot) {
     )
     .set(f64::from(snapshot.db_connections_idle));
     metrics::gauge!("notegate_db_pool_max_connections").set(f64::from(snapshot.db_max_connections));
-    metrics::gauge!("notegate_search_body_cache_size").set(snapshot.body_cache.size_bytes as f64);
-    metrics::gauge!("notegate_search_body_cache_capacity")
-        .set(snapshot.body_cache.capacity_bytes as f64);
-    metrics::gauge!("notegate_search_body_cache_entries").set(snapshot.body_cache.entries as f64);
 }
 
 pub(crate) struct HttpRequestMetrics {
@@ -726,12 +723,10 @@ mod tests {
                 db_connections_in_use: 3,
                 db_connections_idle: 7,
                 db_max_connections: 20,
-                body_cache: SearchBodyCacheStats {
-                    entries: 4,
-                    size_bytes: 64,
-                    capacity_bytes: 128,
-                },
             });
+            metrics::gauge!("notegate_search_body_cache_size").set(64.0);
+            metrics::gauge!("notegate_search_body_cache_capacity").set(128.0);
+            metrics::gauge!("notegate_search_body_cache_entries").set(4.0);
             metrics::counter!(
                 "notegate_search_operations",
                 "operation" => "grep",
