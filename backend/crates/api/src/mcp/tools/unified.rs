@@ -36,12 +36,53 @@ enum WriteEditEntrySchema {
     Line(files::LineEditInput),
 }
 
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[schemars(rename_all = "snake_case", inline)]
+enum ReadOperationSchema {
+    Spaces,
+    Ls,
+    Tree,
+    Stat,
+    Read,
+    Changes,
+}
+
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[schemars(rename_all = "snake_case", inline)]
+enum SearchOperationSchema {
+    Find,
+    Grep,
+}
+
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[schemars(rename_all = "snake_case", inline)]
+enum WriteOperationSchema {
+    Write,
+    Append,
+    Patch,
+    Edit,
+}
+
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[schemars(rename_all = "snake_case", inline)]
+enum ManageOperationSchema {
+    Mkdir,
+    Mv,
+    Cp,
+    Rm,
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {
     /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
     pub purpose: String,
     /// Operation: spaces/ls/tree/stat/read/changes.
+    #[schemars(with = "ReadOperationSchema")]
     pub op: String,
     /// Single target in `<space>:/absolute/path` form. `op=changes` requires the Space root `<space>:/`.
     #[serde(default)]
@@ -85,6 +126,7 @@ pub struct SearchInput {
     )]
     pub purpose: String,
     /// Operation: find/grep.
+    #[schemars(with = "SearchOperationSchema")]
     pub op: String,
     /// Scope target in `<space>:/absolute/path` form. The space name segment is exact and case-sensitive.
     pub target: String,
@@ -123,6 +165,7 @@ pub struct WriteInput {
     )]
     pub purpose: String,
     /// Operation: write/append/patch/edit.
+    #[schemars(with = "WriteOperationSchema")]
     pub op: String,
     /// Text target in `<space>:/absolute/path` form.
     pub target: String,
@@ -154,6 +197,7 @@ pub struct ManageInput {
     )]
     pub purpose: String,
     /// Operation: mkdir/mv/cp/rm.
+    #[schemars(with = "ManageOperationSchema")]
     pub op: String,
     /// Single target in `<space>:/absolute/path` form for mkdir/rm. The Space root is allowed only for mkdir with parents=true.
     #[serde(default)]

@@ -220,7 +220,7 @@ fn canonical_tool(tool: &str) -> &'static str {
     metric_tool_name(tool)
 }
 
-fn canonical_op<'a>(tool: &str, op: Option<&'a str>) -> Option<&'a str> {
+pub(super) fn canonical_op<'a>(tool: &str, op: Option<&'a str>) -> Option<&'a str> {
     match (KnownMcpTool::parse(tool), op?) {
         (
             Some(KnownMcpTool::Read),
