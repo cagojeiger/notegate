@@ -1,14 +1,13 @@
-use chrono::{DateTime, Utc};
 use notegate_core::WriteLockScope;
-use notegate_model::files::NodeView;
-use notegate_model::{NodeKind, TextAtRestEncryption, TextStorageFormat};
+use notegate_model::NodeKind;
 use notegate_search::{
     FindMatchMode, FindPage, FindRequest, GrepLineMode, GrepMatchMode, GrepPage, GrepRequest,
     SearchCapacity, SearchError,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use uuid::Uuid;
+
+use crate::path_node_summary::PathNodeSummary;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -18,7 +17,7 @@ pub(super) struct FindCommand {
     pub q: String,
     pub path: Option<String>,
     pub kind: Option<NodeKind>,
-    pub match_mode: FindMatchModeWire,
+    pub match_mode: FindMatchMode,
     #[serde(default)]
     pub include: Vec<String>,
     #[serde(default)]
@@ -35,7 +34,7 @@ impl FindCommand {
             q: request.q,
             path: request.path,
             kind: request.kind,
-            match_mode: request.match_mode.into(),
+            match_mode: request.match_mode,
             include: request.include,
             exclude: request.exclude,
             limit: request.limit,
@@ -48,7 +47,7 @@ impl FindCommand {
             q: self.q,
             path: self.path,
             kind: self.kind,
-            match_mode: self.match_mode.into(),
+            match_mode: self.match_mode,
             include: self.include,
             exclude: self.exclude,
             limit: self.limit,
@@ -64,8 +63,8 @@ pub(super) struct GrepCommand {
     pub space_id: Uuid,
     pub q: String,
     pub path: Option<String>,
-    pub match_mode: GrepMatchModeWire,
-    pub line_mode: GrepLineModeWire,
+    pub match_mode: GrepMatchMode,
+    pub line_mode: GrepLineMode,
     #[serde(default)]
     pub include: Vec<String>,
     #[serde(default)]
@@ -81,8 +80,8 @@ impl GrepCommand {
             space_id,
             q: request.q,
             path: request.path,
-            match_mode: request.match_mode.into(),
-            line_mode: request.line_mode.into(),
+            match_mode: request.match_mode,
+            line_mode: request.line_mode,
             include: request.include,
             exclude: request.exclude,
             limit: request.limit,
@@ -94,8 +93,8 @@ impl GrepCommand {
         GrepRequest {
             q: self.q,
             path: self.path,
-            match_mode: self.match_mode.into(),
-            line_mode: self.line_mode.into(),
+            match_mode: self.match_mode,
+            line_mode: self.line_mode,
             include: self.include,
             exclude: self.exclude,
             limit: self.limit,
@@ -104,90 +103,9 @@ impl GrepCommand {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum FindMatchModeWire {
-    Contains,
-    Regex,
-    Glob,
-}
-
-impl From<FindMatchMode> for FindMatchModeWire {
-    fn from(value: FindMatchMode) -> Self {
-        match value {
-            FindMatchMode::Contains => Self::Contains,
-            FindMatchMode::Regex => Self::Regex,
-            FindMatchMode::Glob => Self::Glob,
-        }
-    }
-}
-
-impl From<FindMatchModeWire> for FindMatchMode {
-    fn from(value: FindMatchModeWire) -> Self {
-        match value {
-            FindMatchModeWire::Contains => Self::Contains,
-            FindMatchModeWire::Regex => Self::Regex,
-            FindMatchModeWire::Glob => Self::Glob,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum GrepMatchModeWire {
-    Literal,
-    Regex,
-}
-
-impl From<GrepMatchMode> for GrepMatchModeWire {
-    fn from(value: GrepMatchMode) -> Self {
-        match value {
-            GrepMatchMode::Literal => Self::Literal,
-            GrepMatchMode::Regex => Self::Regex,
-        }
-    }
-}
-
-impl From<GrepMatchModeWire> for GrepMatchMode {
-    fn from(value: GrepMatchModeWire) -> Self {
-        match value {
-            GrepMatchModeWire::Literal => Self::Literal,
-            GrepMatchModeWire::Regex => Self::Regex,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum GrepLineModeWire {
-    None,
-    First,
-    All,
-}
-
-impl From<GrepLineMode> for GrepLineModeWire {
-    fn from(value: GrepLineMode) -> Self {
-        match value {
-            GrepLineMode::None => Self::None,
-            GrepLineMode::First => Self::First,
-            GrepLineMode::All => Self::All,
-        }
-    }
-}
-
-impl From<GrepLineModeWire> for GrepLineMode {
-    fn from(value: GrepLineModeWire) -> Self {
-        match value {
-            GrepLineModeWire::None => Self::None,
-            GrepLineModeWire::First => Self::First,
-            GrepLineModeWire::All => Self::All,
-        }
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct FindOutput {
-    pub items: Vec<SearchNodeSummary>,
+    pub items: Vec<PathNodeSummary>,
     pub limit: i64,
     pub has_more: bool,
     pub next_cursor: Option<String>,
@@ -196,11 +114,7 @@ pub(crate) struct FindOutput {
 impl From<FindPage> for FindOutput {
     fn from(page: FindPage) -> Self {
         Self {
-            items: page
-                .items
-                .into_iter()
-                .map(SearchNodeSummary::from)
-                .collect(),
+            items: page.items.into_iter().map(PathNodeSummary::from).collect(),
             limit: page.limit,
             has_more: page.has_more,
             next_cursor: page.next_cursor,
@@ -237,99 +151,9 @@ impl From<GrepPage> for GrepOutput {
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct GrepSummary {
     #[serde(flatten)]
-    pub node: SearchNodeSummary,
+    pub node: PathNodeSummary,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub match_lines: Vec<i32>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct SearchNodeSummary {
-    pub path: String,
-    pub name: String,
-    pub kind: NodeKind,
-    pub has_children: bool,
-    pub sort_order: i32,
-    pub search_enabled: bool,
-    pub write_locked: bool,
-    pub effective_write_locked: bool,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content_sha256: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub byte_len: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line_count: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub text_storage_format: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub text_at_rest_encryption: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub media_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub encryption_mode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub original_filename: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub encryption_metadata: Option<Value>,
-}
-
-impl From<NodeView> for SearchNodeSummary {
-    fn from(view: NodeView) -> Self {
-        let NodeView {
-            node,
-            path,
-            has_children,
-            text,
-            file,
-            write_lock_sources,
-        } = view;
-        let mut summary = Self {
-            path,
-            name: node.name,
-            kind: node.kind,
-            has_children,
-            sort_order: node.sort_order,
-            search_enabled: node.search_enabled,
-            write_locked: node.write_locked,
-            effective_write_locked: !write_lock_sources.is_empty(),
-            created_at: node.created_at,
-            updated_at: node.updated_at,
-            content_sha256: None,
-            byte_len: None,
-            line_count: None,
-            text_storage_format: None,
-            text_at_rest_encryption: None,
-            media_type: None,
-            encryption_mode: None,
-            original_filename: None,
-            encryption_metadata: None,
-        };
-        if let Some(text) = text {
-            summary.content_sha256 = Some(text.content_sha256);
-            summary.byte_len = Some(text.byte_len);
-            summary.line_count = Some(text.line_count);
-            summary.text_storage_format = Some(storage_format_name(text.storage_format));
-            summary.text_at_rest_encryption =
-                Some(at_rest_encryption_name(text.at_rest_encryption));
-        }
-        if let Some(file) = file {
-            summary.byte_len = Some(file.byte_len);
-            summary.media_type = Some(file.media_type);
-            summary.encryption_mode = Some(file.encryption_mode.as_str().to_owned());
-            summary.original_filename = file.original_filename;
-            summary.encryption_metadata = file.encryption_metadata;
-        }
-        summary
-    }
-}
-
-fn storage_format_name(value: TextStorageFormat) -> String {
-    value.as_str().to_owned()
-}
-
-fn at_rest_encryption_name(value: TextAtRestEncryption) -> String {
-    value.as_str().to_owned()
 }
 
 #[derive(Debug, Serialize, Deserialize)]

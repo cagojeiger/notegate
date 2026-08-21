@@ -76,6 +76,9 @@ impl SearchService {
     }
 
     pub fn record_body_cache_metrics(&self) {
+        if !self.telemetry.is_enabled() {
+            return;
+        }
         self.telemetry
             .record_body_cache_metrics(self.body_cache_stats());
     }

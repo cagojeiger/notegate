@@ -28,15 +28,18 @@ mod object_upload_flow;
 mod observability;
 mod openapi;
 mod page;
+mod path_node_summary;
 mod periodic_worker;
 mod process_runtime;
 mod public_v2;
 mod reconciliations;
 mod rest;
 mod routes;
+mod search_topology;
 mod state;
 mod usage_bootstrap;
 
+use search_topology::{SearchClientTarget, SearchMetricsOwner, SearchTopology};
 use state::AppState;
 
 #[tokio::main]
@@ -90,26 +93,22 @@ async fn main() -> anyhow::Result<()> {
     let config = std::sync::Arc::new(config);
     let application_shutdown_token = CancellationToken::new();
     let internal_signing_key = pii_crypto.internal_search_signing_key();
-    let hosts_local_search = process_mode.serves_search()
-        && (process_mode == notegate_core::ProcessMode::Search
-            || config.search_service_url.is_none());
-    let search_listener_metrics = if process_mode == notegate_core::ProcessMode::Search {
+    let topology = SearchTopology::plan(process_mode, config.search_service_url.as_deref());
+    let search_listener_metrics = if topology.metrics_owner == SearchMetricsOwner::SearchListener {
         metrics.clone()
     } else {
         None
     };
-    let search_state = hosts_local_search.then(|| {
+    let search_runtime = topology.search_listener.then(|| {
         let store = notegate_db::FilesRepo::with_limits_and_crypto(
             pool.clone(),
             config.limits,
             pii_crypto.clone(),
         )
         .with_metrics_enabled(config.metrics_enabled);
-        let runtime = notegate_search::SearchRuntime::new(
-            store,
-            config.search_body_cache,
-            config.metrics_enabled,
-        );
+        notegate_search::SearchRuntime::new(store, config.search_body_cache, config.metrics_enabled)
+    });
+    let search_state = search_runtime.clone().map(|runtime| {
         internal_search::SearchServerState::new(
             pool.clone(),
             config.db_max_connections,
@@ -118,20 +117,27 @@ async fn main() -> anyhow::Result<()> {
             search_listener_metrics,
         )
     });
+    let public_search_metrics_runtime =
+        if topology.metrics_owner == SearchMetricsOwner::PublicListener {
+            search_runtime.clone()
+        } else {
+            None
+        };
 
-    let state = if process_mode.runs_api() || process_mode.runs_worker() {
+    let state = if topology.public_listener {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
             .build()?;
-        let search = if process_mode.runs_api() {
-            let search_base_url = config
-                .search_service_url
-                .clone()
-                .unwrap_or_else(|| internal_search::loopback_base_url(search_bind_addr));
-            internal_search::SearchClient::http(&search_base_url, internal_signing_key)?
-        } else {
-            internal_search::SearchClient::disabled()
+        let search = match topology.client {
+            SearchClientTarget::LocalListener => internal_search::SearchClient::http(
+                &internal_search::loopback_base_url(search_bind_addr),
+                internal_signing_key,
+            )?,
+            SearchClientTarget::RemoteService(base_url) => {
+                internal_search::SearchClient::http(base_url, internal_signing_key)?
+            }
+            SearchClientTarget::Disabled => internal_search::SearchClient::disabled(),
         };
         let jwks_url = format!("{}/keys", config.authgate_url);
         // The db-backed identity resolver resolves users and API-key owners.
@@ -164,6 +170,7 @@ async fn main() -> anyhow::Result<()> {
                 search,
             )
             .with_metrics(metrics.clone())
+            .with_search_metrics_runtime(public_search_metrics_runtime)
             .with_shutdown_token(application_shutdown_token.clone()),
         )
     } else {

@@ -6,8 +6,8 @@ use notegate_core::SearchBodyCacheConfig;
 use notegate_db::FilesRepo;
 
 use crate::{
-    FindPage, FindRequest, GrepPage, GrepRequest, SearchAdmission, SearchBodyCacheStats,
-    SearchCapacity, SearchError, SearchService,
+    FindPage, FindRequest, GrepPage, GrepRequest, SearchAdmission, SearchCapacity, SearchError,
+    SearchService,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -62,14 +62,11 @@ impl SearchRuntime {
         request: FindRequest,
     ) -> SearchRunResult<FindPage> {
         let _permit = self.inner.admission.enter_find()?;
-        let result = self
-            .inner
+        self.inner
             .service
             .find(caller_account_id, space_id, request)
             .await
-            .map_err(SearchRunError::Search);
-        self.record_body_cache_metrics();
-        result
+            .map_err(SearchRunError::Search)
     }
 
     pub async fn grep(
@@ -87,10 +84,6 @@ impl SearchRuntime {
             .map_err(SearchRunError::Search);
         self.record_body_cache_metrics();
         result
-    }
-
-    pub fn body_cache_stats(&self) -> SearchBodyCacheStats {
-        self.inner.service.body_cache_stats()
     }
 
     pub fn record_body_cache_metrics(&self) {

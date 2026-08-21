@@ -74,6 +74,10 @@ impl SearchTelemetry {
         Self { enabled }
     }
 
+    pub(super) const fn is_enabled(self) -> bool {
+        self.enabled
+    }
+
     pub(super) fn operation(
         self,
         operation: SearchOperation,

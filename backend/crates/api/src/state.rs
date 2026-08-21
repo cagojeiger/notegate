@@ -68,6 +68,7 @@ pub struct AppState {
     pub(crate) metadata_writes: MetadataWriteBuffer,
     pub(crate) mcp_invocations: McpInvocationRepo,
     pub(crate) metrics: Option<MetricsHandle>,
+    pub(crate) search_metrics_runtime: Option<SearchRuntime>,
     pub(crate) shutdown: CancellationToken,
 }
 
@@ -188,12 +189,18 @@ impl AppState {
             metadata_writes: MetadataWriteBuffer::default(),
             mcp_invocations,
             metrics: None,
+            search_metrics_runtime: None,
             shutdown: CancellationToken::new(),
         }
     }
 
     pub(crate) fn with_metrics(mut self, metrics: Option<MetricsHandle>) -> Self {
         self.metrics = metrics;
+        self
+    }
+
+    pub(crate) fn with_search_metrics_runtime(mut self, runtime: Option<SearchRuntime>) -> Self {
+        self.search_metrics_runtime = runtime;
         self
     }
 

@@ -491,6 +491,9 @@ async fn scrape(
     Extension(metrics): Extension<MetricsHandle>,
 ) -> Response {
     record_database_metrics(&state.db, state.config.db_max_connections);
+    if let Some(runtime) = &state.search_metrics_runtime {
+        runtime.record_body_cache_metrics();
+    }
     scrape_response(&metrics)
 }
 
