@@ -6,15 +6,11 @@ use std::sync::Arc;
 use notegate_core::limits;
 use notegate_model::search::{GrepHit, SearchTextCandidate};
 
-use crate::error::ServiceResult;
-use crate::files::policy::FileCommand;
-use crate::pagination::clamp_limit;
-
 use super::matcher::{ContentMatcher, PathFilters};
 use super::telemetry::{CacheResult, SearchOperation, SearchStage};
 use super::{
-    GrepLineMode, GrepPage, GrepRequest, SearchService, decode_search_cursor, encode_search_cursor,
-    search_fingerprint, text_node_view, validate_query,
+    GrepLineMode, GrepPage, GrepRequest, SearchError, SearchResult, SearchService,
+    decode_search_cursor, encode_search_cursor, search_fingerprint, text_node_view, validate_query,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -122,7 +118,7 @@ impl SearchService {
         caller_account_id: uuid::Uuid,
         space_id: uuid::Uuid,
         request: GrepRequest,
-    ) -> ServiceResult<GrepPage> {
+    ) -> SearchResult<GrepPage> {
         let operation = SearchOperation::Grep;
         let timer = self
             .telemetry
@@ -132,7 +128,7 @@ impl SearchService {
                 .stage(
                     operation,
                     SearchStage::Authorize,
-                    self.authorize(space_id, caller_account_id, FileCommand::Grep),
+                    self.authorize(space_id, caller_account_id),
                 )
                 .await?;
             let q = validate_query(&request.q)?.to_owned();
@@ -172,12 +168,7 @@ impl SearchService {
                         )?;
                         let matcher = ContentMatcher::new(&q, request.match_mode)?;
                         let path_filters = PathFilters::new(&request.include, &request.exclude)?;
-                        Ok::<_, crate::error::ServiceError>((
-                            fingerprint,
-                            after_sort_path,
-                            matcher,
-                            path_filters,
-                        ))
+                        Ok::<_, SearchError>((fingerprint, after_sort_path, matcher, path_filters))
                     })?;
             let candidates = self
                 .telemetry
@@ -290,7 +281,7 @@ impl SearchService {
                                 .await;
                             bodies.insert(node_id, body);
                         }
-                        Ok::<_, crate::error::ServiceError>(loaded_bytes)
+                        Ok::<_, SearchError>(loaded_bytes)
                     })
                     .await?
             };
@@ -327,7 +318,7 @@ impl SearchService {
                     if !items.is_empty() {
                         let node_ids: Vec<_> = items.iter().map(|item| item.node.node.id).collect();
                         let mut write_lock_sources =
-                            crate::files::write_lock_sources_many(&self.store, space_id, &node_ids)
+                            super::view::write_lock_sources_many(&self.store, space_id, &node_ids)
                                 .await?;
                         for item in &mut items {
                             item.node.write_lock_sources = write_lock_sources
@@ -335,7 +326,7 @@ impl SearchService {
                                 .unwrap_or_default();
                         }
                     }
-                    Ok::<_, crate::error::ServiceError>(())
+                    Ok::<_, SearchError>(())
                 })
                 .await?;
             self.telemetry.record_workload(
@@ -356,6 +347,14 @@ impl SearchService {
         .await;
         timer.finish(&result);
         result
+    }
+}
+
+fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {
+    match limit {
+        None => default,
+        Some(value) if value < 1 => 1,
+        Some(value) => value.min(max),
     }
 }
 

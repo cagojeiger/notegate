@@ -17,6 +17,7 @@ use uuid::Uuid;
 use notegate_core::WriteLockScope;
 use notegate_core::validation::{normalize_path, validate_space_name};
 use notegate_model::Caller;
+use notegate_search::SearchError;
 use notegate_service::ServiceError;
 use notegate_service::files::parse_target;
 use notegate_service::spaces::SpaceView;
@@ -214,6 +215,24 @@ pub fn service_error(error: ServiceError) -> ErrorData {
             ErrorData::internal_error("internal server error", error_meta("internal_error"))
         }
     }
+}
+
+/// Map a search-layer error through the same public MCP error contract as service failures.
+pub fn search_error(error: SearchError) -> ErrorData {
+    let error = match error {
+        SearchError::NotFound(message) => ServiceError::NotFound(message),
+        SearchError::InvalidInput(message) => ServiceError::InvalidInput(message),
+        SearchError::Forbidden(message) => ServiceError::Forbidden(message),
+        SearchError::Conflict(message) => ServiceError::Conflict(message),
+        SearchError::WriteLocked { scope } => ServiceError::WriteLocked { scope },
+        SearchError::UsageRecalculationInProgress {
+            retry_after_seconds,
+        } => ServiceError::UsageRecalculationInProgress {
+            retry_after_seconds,
+        },
+        SearchError::Internal(message) => ServiceError::Internal(message),
+    };
+    service_error(error)
 }
 
 fn write_locked_error(scope: WriteLockScope) -> ErrorData {
@@ -566,6 +585,56 @@ mod tests {
         let internal_data = internal.data.expect("internal_error carries data");
         assert_eq!(internal_data["kind"], "internal_error");
         assert_eq!(internal_data["code"], "internal_error");
+    }
+
+    #[test]
+    fn search_errors_preserve_the_service_error_contract() {
+        let cases = [
+            (
+                SearchError::NotFound("missing".to_owned()),
+                ServiceError::NotFound("missing".to_owned()),
+            ),
+            (
+                SearchError::InvalidInput("bad".to_owned()),
+                ServiceError::InvalidInput("bad".to_owned()),
+            ),
+            (
+                SearchError::Forbidden("no".to_owned()),
+                ServiceError::Forbidden("no".to_owned()),
+            ),
+            (
+                SearchError::Conflict("stale".to_owned()),
+                ServiceError::Conflict("stale".to_owned()),
+            ),
+            (
+                SearchError::WriteLocked {
+                    scope: WriteLockScope::TargetOrAncestor,
+                },
+                ServiceError::WriteLocked {
+                    scope: WriteLockScope::TargetOrAncestor,
+                },
+            ),
+            (
+                SearchError::UsageRecalculationInProgress {
+                    retry_after_seconds: 5,
+                },
+                ServiceError::UsageRecalculationInProgress {
+                    retry_after_seconds: 5,
+                },
+            ),
+            (
+                SearchError::Internal("detail".to_owned()),
+                ServiceError::Internal("detail".to_owned()),
+            ),
+        ];
+
+        for (search, service) in cases {
+            let actual = search_error(search);
+            let expected = service_error(service);
+            assert_eq!(actual.code, expected.code);
+            assert_eq!(actual.message, expected.message);
+            assert_eq!(actual.data, expected.data);
+        }
     }
 
     #[test]

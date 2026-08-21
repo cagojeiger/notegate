@@ -17,7 +17,6 @@ pub mod identity;
 pub mod link_graph;
 pub mod mcp_invocations;
 mod pagination;
-pub mod search;
 pub mod spaces;
 pub mod usage;
 

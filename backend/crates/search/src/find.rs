@@ -4,15 +4,11 @@ use notegate_core::limits;
 use notegate_model::search::SearchNodeCandidate;
 use notegate_model::{Node, NodeKind};
 
-use crate::error::ServiceResult;
-use crate::files::policy::FileCommand;
-use crate::pagination::clamp_limit;
-
 use super::matcher::{NameMatcher, PathFilters};
 use super::telemetry::{SearchOperation, SearchStage};
 use super::{
-    FindPage, FindRequest, SearchService, decode_search_cursor, encode_search_cursor,
-    search_fingerprint, validate_query,
+    FindPage, FindRequest, SearchError, SearchResult, SearchService, decode_search_cursor,
+    encode_search_cursor, search_fingerprint, validate_query,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -61,7 +57,7 @@ impl SearchService {
         caller_account_id: uuid::Uuid,
         space_id: uuid::Uuid,
         request: FindRequest,
-    ) -> ServiceResult<FindPage> {
+    ) -> SearchResult<FindPage> {
         let operation = SearchOperation::Find;
         let timer = self
             .telemetry
@@ -71,7 +67,7 @@ impl SearchService {
                 .stage(
                     operation,
                     SearchStage::Authorize,
-                    self.authorize(space_id, caller_account_id, FileCommand::Find),
+                    self.authorize(space_id, caller_account_id),
                 )
                 .await?;
             let q = validate_query(&request.q)?.to_owned();
@@ -114,12 +110,7 @@ impl SearchService {
                         )?;
                         let matcher = NameMatcher::new(&q, request.match_mode)?;
                         let path_filters = PathFilters::new(&request.include, &request.exclude)?;
-                        Ok::<_, crate::error::ServiceError>((
-                            fingerprint,
-                            after_sort_path,
-                            matcher,
-                            path_filters,
-                        ))
+                        Ok::<_, SearchError>((fingerprint, after_sort_path, matcher, path_filters))
                     })?;
             let candidates = self
                 .telemetry
@@ -179,6 +170,14 @@ impl SearchService {
         .await;
         timer.finish(&result);
         result
+    }
+}
+
+fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {
+    match limit {
+        None => default,
+        Some(value) if value < 1 => 1,
+        Some(value) => value.min(max),
     }
 }
 

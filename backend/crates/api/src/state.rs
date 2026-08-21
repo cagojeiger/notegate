@@ -8,12 +8,12 @@ use notegate_db::{
     AccountRepo, AgentRepo, ApiKeyRepo, AuditEventRepo, BackgroundJobRepo, BrowserSessionRepo,
     ConnectionRepo, FilesRepo, LinkGraphRepo, McpInvocationRepo, PgPool, SpaceRepo, UsageRepo,
 };
+use notegate_search::{SearchAdmission, SearchService};
 use notegate_service::accounts::AccountService;
 use notegate_service::agents::AgentService;
 use notegate_service::connections::ConnectionService;
 use notegate_service::files::FilesService;
 use notegate_service::link_graph::LinkGraphService;
-use notegate_service::search::SearchService;
 use notegate_service::spaces::SpaceService;
 use notegate_service::usage::UsageService;
 use tokio_util::sync::CancellationToken;
@@ -22,7 +22,7 @@ use crate::identity::CallerResolver;
 use crate::object_storage::ObjectStorage;
 use crate::observability::MetricsHandle;
 
-use crate::admission::{DocxValidationAdmission, SearchAdmission};
+use crate::admission::DocxValidationAdmission;
 use crate::auth::jwt::JwtAuthority;
 use crate::auth::oidc::OidcProvider;
 use crate::metadata_write_behind::MetadataWriteBuffer;

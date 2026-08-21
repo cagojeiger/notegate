@@ -4,7 +4,7 @@ use notegate_core::limits;
 use notegate_model::search::{FindMatchMode, GrepLineMode, GrepMatchMode};
 use regex::{Regex, RegexBuilder};
 
-use crate::error::{ServiceError, ServiceResult};
+use crate::{SearchError, SearchResult};
 
 pub(super) enum NameMatcher {
     Contains(String),
@@ -13,7 +13,7 @@ pub(super) enum NameMatcher {
 }
 
 impl NameMatcher {
-    pub(super) fn new(q: &str, mode: FindMatchMode) -> ServiceResult<Self> {
+    pub(super) fn new(q: &str, mode: FindMatchMode) -> SearchResult<Self> {
         match mode {
             FindMatchMode::Contains => Ok(Self::Contains(q.to_lowercase())),
             FindMatchMode::Regex => Ok(Self::Regex(compile_regex(q)?)),
@@ -34,7 +34,7 @@ pub(super) struct ContentMatcher {
 }
 
 impl ContentMatcher {
-    pub(super) fn new(q: &str, mode: GrepMatchMode) -> ServiceResult<Self> {
+    pub(super) fn new(q: &str, mode: GrepMatchMode) -> SearchResult<Self> {
         let regex = match mode {
             GrepMatchMode::Literal => compile_regex(&regex::escape(q))?,
             GrepMatchMode::Regex => compile_regex(q)?,
@@ -75,18 +75,18 @@ pub(super) struct PathFilters {
 }
 
 impl PathFilters {
-    pub(super) fn new(include: &[String], exclude: &[String]) -> ServiceResult<Self> {
+    pub(super) fn new(include: &[String], exclude: &[String]) -> SearchResult<Self> {
         validate_glob_patterns("include", include)?;
         validate_glob_patterns("exclude", exclude)?;
         Ok(Self {
             include: include
                 .iter()
                 .map(|pattern| compile_glob(pattern))
-                .collect::<ServiceResult<_>>()?,
+                .collect::<SearchResult<_>>()?,
             exclude: exclude
                 .iter()
                 .map(|pattern| compile_glob(pattern))
-                .collect::<ServiceResult<_>>()?,
+                .collect::<SearchResult<_>>()?,
         })
     }
 
@@ -96,16 +96,16 @@ impl PathFilters {
     }
 }
 
-fn validate_glob_patterns(label: &str, patterns: &[String]) -> ServiceResult<()> {
+fn validate_glob_patterns(label: &str, patterns: &[String]) -> SearchResult<()> {
     if patterns.len() > limits::SEARCH_GLOB_PATTERNS_MAX {
-        return Err(ServiceError::InvalidInput(format!(
+        return Err(SearchError::InvalidInput(format!(
             "{label} must contain at most {} glob patterns",
             limits::SEARCH_GLOB_PATTERNS_MAX
         )));
     }
     for pattern in patterns {
         if pattern.chars().count() > limits::SEARCH_GLOB_PATTERN_MAX_CHARS {
-            return Err(ServiceError::InvalidInput(format!(
+            return Err(SearchError::InvalidInput(format!(
                 "{label} glob patterns must be at most {} characters",
                 limits::SEARCH_GLOB_PATTERN_MAX_CHARS
             )));
@@ -114,14 +114,14 @@ fn validate_glob_patterns(label: &str, patterns: &[String]) -> ServiceResult<()>
     Ok(())
 }
 
-fn compile_regex(pattern: &str) -> ServiceResult<Regex> {
+fn compile_regex(pattern: &str) -> SearchResult<Regex> {
     RegexBuilder::new(pattern)
         .case_insensitive(true)
         .build()
-        .map_err(|error| ServiceError::InvalidInput(format!("invalid regex pattern: {error}")))
+        .map_err(|error| SearchError::InvalidInput(format!("invalid regex pattern: {error}")))
 }
 
-fn compile_glob(pattern: &str) -> ServiceResult<Regex> {
+fn compile_glob(pattern: &str) -> SearchResult<Regex> {
     let mut out = String::from("^");
     for ch in pattern.chars() {
         match ch {

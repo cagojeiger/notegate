@@ -22,6 +22,7 @@ use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_model::files::{ObjectUploadMode, ObjectUploadRegistration};
 use notegate_model::{FileEncryptionMode, NodeKind};
+use notegate_search::{FindMatchMode, FindRequest, SearchService};
 use notegate_service::ServiceError;
 use notegate_service::files::{
     AppendText, BatchChildrenRequest, BatchChildrenResult, BeginObjectUpload, ChildrenCursor,
@@ -29,7 +30,6 @@ use notegate_service::files::{
     ListFileChangeEvents, ListNodesRequest, MoveNode, NodeListSort, PatchMode, PatchText, ReadText,
     ReadTextBody, SyncFileChanges, WriteTarget, WriteText, WriteTextBody,
 };
-use notegate_service::search::{FindMatchMode, FindRequest, SearchService};
 use serde_json::json;
 use uuid::Uuid;
 

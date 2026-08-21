@@ -11,7 +11,7 @@ use axum::routing::get;
 use metrics::{Gauge, Unit};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use notegate_jobs::JobQueue;
-use notegate_service::search::SearchBodyCacheStats;
+use notegate_search::SearchBodyCacheStats;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::field::{Field, Visit};

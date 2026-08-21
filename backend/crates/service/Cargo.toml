@@ -9,7 +9,7 @@ license.workspace = true
 # Exposes the cursor default test signing key + test-only repo constructors via the
 # db edge. Default-off; the integration tests enable it via the dev-dependency
 # self-edge below.
-test-util = ["notegate-db/test-util"]
+test-util = ["notegate-core/test-util", "notegate-db/test-util"]
 
 [dependencies]
 notegate-core.workspace = true
@@ -39,6 +39,7 @@ futures-util.workspace = true
 
 [dev-dependencies]
 notegate-db = { workspace = true, features = ["test-util"] }
+notegate-search.workspace = true
 notegate-service = { path = ".", features = ["test-util"] }
 metrics-exporter-prometheus.workspace = true
 sqlx.workspace = true

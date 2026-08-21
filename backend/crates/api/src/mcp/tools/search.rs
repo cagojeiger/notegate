@@ -2,16 +2,15 @@
 
 use axum::http::request::Parts;
 use notegate_model::NodeKind;
-use notegate_service::search::{
-    FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest,
+use notegate_search::{
+    FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchCapacity,
 };
 use rmcp::model::ErrorCode;
 use rmcp::{ErrorData, Json};
 use serde_json::{Value, json};
 
-use super::resolve::{actionable_input_error, caller, node_summary, resolve_target, service_error};
+use super::resolve::{actionable_input_error, caller, node_summary, resolve_target, search_error};
 use super::support::page_json;
-use crate::admission::SearchCapacity;
 use crate::mcp::contract::McpAction;
 use crate::state::AppState;
 
@@ -61,7 +60,7 @@ pub async fn find(
             },
         )
         .await
-        .map_err(service_error)?;
+        .map_err(search_error)?;
 
     let items: Vec<Value> = page.items.iter().map(node_summary).collect();
     let returned = items.len();
@@ -120,7 +119,7 @@ pub async fn grep(
             },
         )
         .await
-        .map_err(service_error)?;
+        .map_err(search_error)?;
 
     let items: Vec<Value> = page
         .items
@@ -229,7 +228,7 @@ mod tests {
         FindMatchMode, GrepLineMode, GrepMatchMode, NodeKind, parse_find_match_mode,
         parse_grep_line_mode, parse_grep_match_mode, parse_kind, search_busy_error,
     };
-    use crate::admission::SearchCapacity;
+    use notegate_search::SearchCapacity;
 
     fn assert_invalid_input(error: ErrorData, expected_message: &str) {
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);

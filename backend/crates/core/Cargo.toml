@@ -11,16 +11,21 @@ license.workspace = true
 test-util = []
 
 [dependencies]
+base64.workspace = true
 sha2.workspace = true
 hmac.workspace = true
 hkdf.workspace = true
 aes-gcm.workspace = true
 config.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 secrecy.workspace = true
 thiserror.workspace = true
 url.workspace = true
 validator.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
 
 [lints]
 workspace = true

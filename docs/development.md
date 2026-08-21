@@ -7,6 +7,7 @@ notegate/
 ├─ backend/crates/
 │  ├─ api/                     # Axum server, REST/MCP/auth, static web
 │  ├─ jobs/                    # PostgreSQL job queue와 worker runtime
+│  ├─ search/                  # find/grep 실행, matcher, body cache와 search telemetry
 │  ├─ service/                 # business logic과 command semantics
 │  ├─ db/                      # sqlx pool, repository, migration
 │  ├─ model/                   # shared domain type

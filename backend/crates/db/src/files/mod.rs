@@ -1,6 +1,6 @@
 //! File-tree persistence internals: row types, error mapping, read queries, and
 //! mutating commands. The public [`crate::FilesRepo`] composes these to implement
-//! concrete persistence methods consumed by `notegate-service`.
+//! concrete persistence methods consumed by `notegate-service` and `notegate-search`.
 
 pub mod commands;
 pub mod error;

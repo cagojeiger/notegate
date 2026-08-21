@@ -39,6 +39,7 @@ api/auth/*      transport 인증과 credential extraction
 api/rest/*      Web V1 request/response와 DTO mapping
 api/public_v2   공개 계약용 request/response와 DTO mapping
 api/mcp/*       tool schema, space/path resolve, DTO mapping
+search/*        find/grep pipeline, matcher, body cache, search telemetry
 service/*       authorization, limits, lifecycle invariant
 repo/db         transaction, SQL, DB constraint mapping
 model           shared domain types

@@ -1,34 +1,35 @@
 //! Space search: `find` (node name metadata) and `grep` (content).
 //!
-//! The service owns authorization, limit clamping, opaque cursors, and search
+//! The crate owns authorization, limit clamping, opaque cursors, and search
 //! result shaping. The two query implementations live in the [`find`] and [`grep`]
 //! submodules; shared types, the permission gate, and query validation live here.
 
-use notegate_core::{SearchBodyCacheConfig, limits};
+use notegate_core::{SearchBodyCacheConfig, cursor, limits};
 use notegate_db::FilesRepo;
-use notegate_model::files::{ChildrenCursor, NodeView, TextStats};
+use notegate_model::files::{NodeView, TextStats};
 use notegate_model::search::SearchTextCandidate;
 pub use notegate_model::search::{
     FindMatchMode, FindPage, FindRequest, GrepLineMode, GrepMatchMode, GrepPage, GrepRequest,
-    SearchCursor, TreeCursor, TreeFrame, TreePage, TreeRequest,
+    SearchCursor,
 };
 use notegate_model::{Node, NodeKind, Permission, TextStorageFormat};
 use uuid::Uuid;
 
-use crate::cursor;
-use crate::error::{ServiceError, ServiceResult};
-use crate::files::policy::{self, FileCommand};
-
+mod admission;
 mod body_cache;
+mod error;
 mod find;
 mod grep;
 mod matcher;
 mod telemetry;
-mod tree;
+mod view;
 
 use body_cache::SearchBodyCache;
 use matcher::{ContentMatcher, NameMatcher, PathFilters};
 use telemetry::SearchTelemetry;
+
+pub use admission::{GrepPermit, SearchAdmission, SearchCapacity};
+pub use error::{SearchError, SearchResult};
 
 /// Process-local snapshot of the decrypted search body cache.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -76,18 +77,18 @@ impl SearchService {
         &self,
         space_id: Uuid,
         path: Option<&str>,
-    ) -> ServiceResult<(Uuid, String)> {
+    ) -> SearchResult<(Uuid, String)> {
         let normalized = match path {
-            Some(path) => crate::files::validation::normalize_path(path)?,
+            Some(path) => notegate_core::validation::normalize_path(path)?,
             None => "/".to_owned(),
         };
         let (node_id, kind, path) = self
             .store
             .resolve_search_scope(space_id, &normalized)
             .await?
-            .ok_or_else(|| ServiceError::NotFound("scope path not found".to_owned()))?;
+            .ok_or_else(|| SearchError::NotFound("scope path not found".to_owned()))?;
         if kind != NodeKind::Folder {
-            return Err(ServiceError::InvalidInput(
+            return Err(SearchError::InvalidInput(
                 "search scope must be a folder".to_owned(),
             ));
         }
@@ -98,24 +99,17 @@ impl SearchService {
         &self,
         space_id: Uuid,
         rows: Vec<(Node, String)>,
-    ) -> ServiceResult<Vec<NodeView>> {
-        crate::files::hydrate_node_views(&self.store, space_id, rows).await
+    ) -> SearchResult<Vec<NodeView>> {
+        view::hydrate_node_views(&self.store, space_id, rows).await
     }
 
-    /// Resolve the caller's permission (none ⇒ `404`) and gate by command
-    /// (insufficient permission ⇒ `403`). Mirrors the file service's authorization.
-    async fn authorize(
-        &self,
-        space_id: Uuid,
-        account_id: Uuid,
-        command: FileCommand,
-    ) -> ServiceResult<Permission> {
+    /// Resolve the caller's read permission while hiding inaccessible spaces as `404`.
+    async fn authorize(&self, space_id: Uuid, account_id: Uuid) -> SearchResult<Permission> {
         let permission = self
             .store
             .permission_for(space_id, account_id)
             .await?
-            .ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))?;
-        policy::require(permission, command)?;
+            .ok_or_else(|| SearchError::NotFound("space not found".to_owned()))?;
         Ok(permission)
     }
 }
@@ -139,20 +133,20 @@ fn text_node_view(candidate: &SearchTextCandidate) -> NodeView {
 
 /// Reject empty, multi-line, or very long search strings before they can become
 /// broad or expensive search scans.
-fn validate_query(q: &str) -> ServiceResult<&str> {
+fn validate_query(q: &str) -> SearchResult<&str> {
     let trimmed = q.trim();
     if trimmed.is_empty() {
-        return Err(ServiceError::InvalidInput(
+        return Err(SearchError::InvalidInput(
             "search query cannot be empty".to_owned(),
         ));
     }
     if trimmed.contains(['\n', '\r']) {
-        return Err(ServiceError::InvalidInput(
+        return Err(SearchError::InvalidInput(
             "search query must be a single line".to_owned(),
         ));
     }
     if trimmed.chars().count() > limits::SEARCH_QUERY_MAX_CHARS {
-        return Err(ServiceError::InvalidInput(format!(
+        return Err(SearchError::InvalidInput(format!(
             "search query must be at most {} characters",
             limits::SEARCH_QUERY_MAX_CHARS
         )));
@@ -166,7 +160,7 @@ pub fn validate_find_input(
     match_mode: FindMatchMode,
     include: &[String],
     exclude: &[String],
-) -> ServiceResult<()> {
+) -> SearchResult<()> {
     let q = validate_query(q)?;
     NameMatcher::new(q, match_mode)?;
     PathFilters::new(include, exclude)?;
@@ -179,27 +173,11 @@ pub fn validate_grep_input(
     match_mode: GrepMatchMode,
     include: &[String],
     exclude: &[String],
-) -> ServiceResult<()> {
+) -> SearchResult<()> {
     let q = validate_query(q)?;
     ContentMatcher::new(q, match_mode)?;
     PathFilters::new(include, exclude)?;
     Ok(())
-}
-
-fn child_cursor(node: &Node) -> ChildrenCursor {
-    ChildrenCursor {
-        sort_order: node.sort_order,
-        name: node.name.clone(),
-        id: node.id,
-    }
-}
-
-fn join_path(parent: &str, name: &str) -> String {
-    if parent == "/" {
-        format!("/{name}")
-    } else {
-        format!("{parent}/{name}")
-    }
 }
 
 fn search_fingerprint(parts: &[String]) -> String {
@@ -217,7 +195,7 @@ fn decode_search_cursor(
     command: &str,
     fingerprint: &str,
     scope_node_id: Uuid,
-) -> ServiceResult<Option<String>> {
+) -> SearchResult<Option<String>> {
     match raw {
         None => Ok(None),
         Some(raw) => {
@@ -227,7 +205,7 @@ fn decode_search_cursor(
                 || cursor.fingerprint != fingerprint
                 || cursor.scope_node_id != scope_node_id
             {
-                return Err(ServiceError::InvalidInput(
+                return Err(SearchError::InvalidInput(
                     "search cursor does not match this query".to_owned(),
                 ));
             }
@@ -241,7 +219,7 @@ fn encode_search_cursor(
     fingerprint: String,
     scope_node_id: Uuid,
     after_sort_path: Option<String>,
-) -> ServiceResult<Option<String>> {
+) -> SearchResult<Option<String>> {
     if after_sort_path.is_none() {
         return Ok(None);
     }
@@ -254,7 +232,7 @@ fn encode_search_cursor(
     };
     cursor::encode(&cursor)
         .map(Some)
-        .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))
+        .map_err(|_error| SearchError::Internal("failed to encode cursor".to_owned()))
 }
 
 #[cfg(test)]
@@ -268,7 +246,7 @@ mod tests {
     )]
     use super::matcher::{ContentMatcher, NameMatcher, PathFilters, logical_lines};
     use super::*;
-    use crate::cursor;
+    use notegate_core::cursor;
 
     #[test]
     fn search_cursor_helpers_round_trip_position_and_omit_empty_cursor() {
@@ -302,7 +280,7 @@ mod tests {
         let scope_node_id = Uuid::new_v4();
         assert!(matches!(
             decode_search_cursor(Some("!!!not-base64!!!"), "find", "query", scope_node_id),
-            Err(ServiceError::InvalidInput(_))
+            Err(SearchError::InvalidInput(_))
         ));
 
         for cursor in [
@@ -338,7 +316,7 @@ mod tests {
             let encoded = cursor::encode(&cursor).unwrap();
             assert!(matches!(
                 decode_search_cursor(Some(&encoded), "find", "query", scope_node_id),
-                Err(ServiceError::InvalidInput(message))
+                Err(SearchError::InvalidInput(message))
                     if message == "search cursor does not match this query"
             ));
         }
@@ -360,16 +338,16 @@ mod tests {
     fn invalid_queries_are_rejected() {
         assert!(matches!(
             validate_query("   "),
-            Err(ServiceError::InvalidInput(_))
+            Err(SearchError::InvalidInput(_))
         ));
         assert!(matches!(
             validate_query("alpha\nbeta"),
-            Err(ServiceError::InvalidInput(_))
+            Err(SearchError::InvalidInput(_))
         ));
         let too_long = "x".repeat(limits::SEARCH_QUERY_MAX_CHARS + 1);
         assert!(matches!(
             validate_query(&too_long),
-            Err(ServiceError::InvalidInput(_))
+            Err(SearchError::InvalidInput(_))
         ));
         assert_eq!(validate_query("  note  ").unwrap(), "note");
     }
@@ -379,13 +357,13 @@ mod tests {
         let too_many = vec!["*.md".to_owned(); limits::SEARCH_GLOB_PATTERNS_MAX + 1];
         assert!(matches!(
             PathFilters::new(&too_many, &[]),
-            Err(ServiceError::InvalidInput(_))
+            Err(SearchError::InvalidInput(_))
         ));
 
         let too_long = vec!["x".repeat(limits::SEARCH_GLOB_PATTERN_MAX_CHARS + 1)];
         assert!(matches!(
             PathFilters::new(&[], &too_long),
-            Err(ServiceError::InvalidInput(_))
+            Err(SearchError::InvalidInput(_))
         ));
     }
 
@@ -416,12 +394,12 @@ mod tests {
     fn invalid_regex_patterns_are_rejected() {
         assert!(matches!(
             NameMatcher::new("(", FindMatchMode::Regex),
-            Err(ServiceError::InvalidInput(message))
+            Err(SearchError::InvalidInput(message))
                 if message.starts_with("invalid regex pattern:")
         ));
         assert!(matches!(
             ContentMatcher::new("[", GrepMatchMode::Regex),
-            Err(ServiceError::InvalidInput(message))
+            Err(SearchError::InvalidInput(message))
                 if message.starts_with("invalid regex pattern:")
         ));
     }
@@ -590,7 +568,7 @@ mod tests {
     }
 
     /// Run with:
-    /// `cargo test --release -p notegate-service --lib benchmark_matcher_8_mib -- --ignored --nocapture`
+    /// `cargo test --release -p notegate-search --lib benchmark_matcher_8_mib -- --ignored --nocapture`
     #[test]
     #[ignore = "local 8 MiB matcher benchmark"]
     fn benchmark_matcher_8_mib() {

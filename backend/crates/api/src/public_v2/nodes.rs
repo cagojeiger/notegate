@@ -6,10 +6,9 @@ use chrono::{DateTime, Utc};
 use notegate_core::validation::normalize_path;
 use notegate_model::Caller;
 use notegate_service::files::{
-    ChildrenRequest, CopyNode, CreateFolder, CreateText, DeleteNode, MoveNode, WriteTarget,
-    WriteText, WriteTextBody,
+    ChildrenRequest, CopyNode, CreateFolder, CreateText, DeleteNode, MoveNode, TreeRequest,
+    WriteTarget, WriteText, WriteTextBody,
 };
-use notegate_service::search::TreeRequest;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -181,7 +180,7 @@ pub(crate) async fn tree(
     let path = normalize_path(query.path.as_deref().unwrap_or("/"))
         .map_err(|error| ApiError::invalid_field(error.to_string()))?;
     let page = state
-        .search
+        .files
         .tree(
             caller.account_id(),
             space_id,

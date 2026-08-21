@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::time::{Duration, Instant};
 
-use crate::error::{ServiceError, ServiceResult};
+use crate::{SearchError, SearchResult};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum SearchOperation {
@@ -184,7 +184,7 @@ pub(super) struct SearchOperationTimer {
 }
 
 impl SearchOperationTimer {
-    pub(super) fn finish<T>(self, result: &ServiceResult<T>) {
+    pub(super) fn finish<T>(self, result: &SearchResult<T>) {
         let Some(started) = self.started else {
             return;
         };
@@ -217,18 +217,18 @@ fn record_stage(operation: SearchOperation, stage: SearchStage, elapsed: Duratio
     .record(elapsed.as_secs_f64());
 }
 
-fn outcome_label<T>(result: &ServiceResult<T>) -> &'static str {
+fn outcome_label<T>(result: &SearchResult<T>) -> &'static str {
     match result {
         Ok(_) => "success",
-        Err(ServiceError::InvalidInput(_)) => "invalid",
-        Err(ServiceError::NotFound(_)) => "not_found",
-        Err(ServiceError::Forbidden(_)) => "forbidden",
+        Err(SearchError::InvalidInput(_)) => "invalid",
+        Err(SearchError::NotFound(_)) => "not_found",
+        Err(SearchError::Forbidden(_)) => "forbidden",
         Err(
-            ServiceError::Conflict(_)
-            | ServiceError::WriteLocked { .. }
-            | ServiceError::UsageRecalculationInProgress { .. },
+            SearchError::Conflict(_)
+            | SearchError::WriteLocked { .. }
+            | SearchError::UsageRecalculationInProgress { .. },
         ) => "conflict",
-        Err(ServiceError::Internal(_)) => "internal",
+        Err(SearchError::Internal(_)) => "internal",
     }
 }
 
@@ -256,15 +256,15 @@ mod tests {
 
     #[test]
     fn outcome_labels_are_bounded() {
-        assert_eq!(outcome_label(&Ok::<(), ServiceError>(())), "success");
+        assert_eq!(outcome_label(&Ok::<(), SearchError>(())), "success");
         assert_eq!(
-            outcome_label(&Err::<(), _>(ServiceError::InvalidInput(
+            outcome_label(&Err::<(), _>(SearchError::InvalidInput(
                 "ignored".to_owned()
             ))),
             "invalid"
         );
         assert_eq!(
-            outcome_label(&Err::<(), _>(ServiceError::Internal("ignored".to_owned()))),
+            outcome_label(&Err::<(), _>(SearchError::Internal("ignored".to_owned()))),
             "internal"
         );
     }
@@ -279,7 +279,7 @@ mod tests {
             telemetry.match_reduce(SearchOperation::Find, "glob", None, || ());
             telemetry.record_workload(SearchOperation::Grep, 4, 2, 64, 32);
             telemetry.record_cache(CacheResult::Coalesced, 1);
-            timer.finish(&Ok::<(), ServiceError>(()));
+            timer.finish(&Ok::<(), SearchError>(()));
         });
 
         let body = handle.render();
@@ -317,7 +317,7 @@ mod tests {
             telemetry.match_reduce(SearchOperation::Find, "contains", None, || ());
             telemetry.record_workload(SearchOperation::Find, 4, 2, 0, 0);
             telemetry.record_cache(CacheResult::Hit, 1);
-            timer.finish(&Ok::<(), ServiceError>(()));
+            timer.finish(&Ok::<(), SearchError>(()));
         });
 
         assert!(handle.render().is_empty());
