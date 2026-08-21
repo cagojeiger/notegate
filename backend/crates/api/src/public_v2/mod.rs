@@ -1,7 +1,6 @@
 mod dto;
 pub(crate) mod files;
 pub(crate) mod nodes;
-pub(crate) mod search;
 pub(crate) mod spaces;
 #[cfg(test)]
 mod tests;
@@ -22,7 +21,6 @@ pub fn routes() -> Router<AppState> {
         .merge(spaces::routes())
         .merge(nodes::routes())
         .merge(text::routes())
-        .merge(search::routes())
         .merge(files::routes())
 }
 
