@@ -1,3 +1,4 @@
+use super::super::{ManageOperationSchema, WriteOperationSchema};
 use super::*;
 
 use std::future::Future;
@@ -13,31 +14,11 @@ enum WriteSequenceCommandSchema {
 
 #[allow(dead_code)]
 #[derive(JsonSchema)]
-#[schemars(rename_all = "snake_case", inline)]
-enum SequenceWriteOperationSchema {
-    Write,
-    Append,
-    Patch,
-    Edit,
-}
-
-#[allow(dead_code)]
-#[derive(JsonSchema)]
-#[schemars(rename_all = "snake_case", inline)]
-enum SequenceManageOperationSchema {
-    Mkdir,
-    Mv,
-    Cp,
-    Rm,
-}
-
-#[allow(dead_code)]
-#[derive(JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(inline)]
 struct SequenceWriteCommandSchema {
     /// Write operation: write/append/patch/edit.
-    op: SequenceWriteOperationSchema,
+    op: WriteOperationSchema,
     /// Text target in `<space>:/absolute/path` form.
     target: String,
     /// Text content for write/append.
@@ -61,7 +42,7 @@ struct SequenceWriteCommandSchema {
 #[schemars(inline)]
 struct SequenceManageCommandSchema {
     /// Manage operation: mkdir/mv/cp/rm.
-    op: SequenceManageOperationSchema,
+    op: ManageOperationSchema,
     /// Target for mkdir/rm.
     target: Option<String>,
     /// Source target for mv/cp.

@@ -1,3 +1,4 @@
+use super::super::{ReadOperationSchema, SearchOperationSchema};
 use super::*;
 
 use std::future::Future;
@@ -17,31 +18,11 @@ enum ReadSequenceCommandSchema {
 
 #[allow(dead_code)]
 #[derive(JsonSchema)]
-#[schemars(rename_all = "snake_case", inline)]
-enum SequenceReadOperationSchema {
-    Spaces,
-    Ls,
-    Tree,
-    Stat,
-    Read,
-    Changes,
-}
-
-#[allow(dead_code)]
-#[derive(JsonSchema)]
-#[schemars(rename_all = "snake_case", inline)]
-enum SequenceSearchOperationSchema {
-    Find,
-    Grep,
-}
-
-#[allow(dead_code)]
-#[derive(JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(inline)]
 struct SequenceReadCommandSchema {
     /// Read operation: spaces/ls/tree/stat/read/changes.
-    op: SequenceReadOperationSchema,
+    op: ReadOperationSchema,
     /// Target in `<space>:/absolute/path` form when required by the operation.
     target: Option<String>,
     /// Optional exact, case-sensitive space name filter for spaces.
@@ -70,7 +51,7 @@ struct SequenceReadCommandSchema {
 #[schemars(inline)]
 struct SequenceSearchCommandSchema {
     /// Search operation: find/grep.
-    op: SequenceSearchOperationSchema,
+    op: SearchOperationSchema,
     /// Scope target in `<space>:/absolute/path` form.
     target: String,
     /// Search query.

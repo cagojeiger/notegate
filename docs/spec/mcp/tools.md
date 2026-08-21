@@ -5,7 +5,7 @@
 - `me`, `file_download`, `run_read_sequence`, `run_write_sequence`를 제외한 tool은 `op`로 세부 동작을 선택한다.
 - 하나의 MCP 호출은 `me`를 제외하고 최상위 `purpose`를 정확히 하나 받는다. 앞뒤 공백 없는 1..200자이며 secret, 본문, 검색 결과를 넣지 않는다.
 - sequence의 `commands[]`는 별도 MCP 호출이 아니라 내부 command다. 최상위 호출의 `purpose`를 상속하므로 개별 `purpose`를 넣지 않는다.
-- operation 하나는 직접 tool을 호출한다. 입력이 미리 정해지고 목적이 같은 read/search 2..20개는 `run_read_sequence`, write/manage 2..20개는 `run_write_sequence`를 사용한다. 뒤 입력에 앞 응답의 cursor, sha256, 발견된 target 등이 필요하면 직접 tool을 단계별로 호출한다.
+- operation 하나는 직접 tool을 호출한다. 입력이 미리 정해지고 목적이 같은 read/search 또는 write/manage command 묶음에는 sequence를 쓸 수 있으며, 두 sequence 모두 1..20개를 허용한다. command 하나만 필요하면 직접 tool을 권장한다. 뒤 입력에 앞 응답의 cursor, sha256, 발견된 target 등이 필요하면 직접 tool을 단계별로 호출한다.
 - 단일 대상은 `target: "space:/absolute/path"`를 사용한다.
 - 이동/복사는 `source`와 `destination`을 사용한다.
 - 검색어는 `q`, 본문은 `content`, 수정 목록은 `edits`를 사용한다.

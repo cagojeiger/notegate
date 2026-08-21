@@ -43,7 +43,7 @@ use crate::mcp::invocation;
 use crate::mcp::tools;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires exactly one top-level `purpose`; sequence commands inherit it and must not contain `purpose`. Use `me` to inspect the caller and running server version. Use a direct tool for one operation. Use `run_read_sequence` for 2-20 independent read/search commands and `run_write_sequence` for 2-20 ordered write/manage commands whose inputs are known in advance and share one purpose; use separate calls when a later input depends on an earlier result such as a cursor, sha256, or discovered target. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, and `manage` for mkdir/mv/cp/rm. Use `file_download` to prepare a GET and `file_upload` for the upload lifecycle. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For any recoverable input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_upload or file_download response's `next_action`. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires exactly one top-level `purpose`; sequence commands inherit it and must not contain `purpose`. Use `me` to inspect the caller and running server version. Use a direct tool for one operation. Both sequence tools accept 1-20 commands; prefer a direct tool for one operation. Use `run_read_sequence` for independent read/search commands and `run_write_sequence` for ordered write/manage commands whose inputs are known in advance and share one purpose; use separate calls when a later input depends on an earlier result such as a cursor, sha256, or discovered target. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, and `manage` for mkdir/mv/cp/rm. Use `file_download` to prepare a GET and `file_upload` for the upload lifecycle. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For any recoverable input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_upload or file_download response's `next_action`. MCP cannot create, delete, or rename spaces.";
 const MCP_TOOL_LIST_TTL_MS: u64 = 5 * 60 * 1_000;
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
@@ -1023,6 +1023,53 @@ mod tests {
     }
 
     #[test]
+    fn every_advertised_operation_is_auditable_and_has_input_redaction() {
+        for tool in McpServer::tool_router().list_all() {
+            let Some(operation_schema) = tool
+                .input_schema
+                .get("properties")
+                .and_then(Value::as_object)
+                .and_then(|properties| properties.get("op"))
+            else {
+                continue;
+            };
+
+            let operations = operation_schema
+                .get("enum")
+                .and_then(Value::as_array)
+                .expect("tools with an op field must advertise their operation enum");
+            assert!(
+                !operations.is_empty(),
+                "tool `{}` operation enum must not be empty",
+                tool.name
+            );
+
+            for operation in operations {
+                let op = operation
+                    .as_str()
+                    .expect("operation enum entry is a string");
+                assert_eq!(
+                    crate::mcp::invocation::canonical_op(tool.name.as_ref(), Some(op)),
+                    Some(op),
+                    "tool `{}` operation `{op}` must be recorded canonically",
+                    tool.name
+                );
+
+                let redacted = crate::mcp::invocation_redaction::redact_input(
+                    tool.name.as_ref(),
+                    &json!({"purpose": "verify audit policy", "op": op}),
+                );
+                assert_eq!(
+                    redacted["op"].as_str(),
+                    Some(op),
+                    "tool `{}` operation `{op}` must have an input redaction policy",
+                    tool.name
+                );
+            }
+        }
+    }
+
+    #[test]
     fn tool_annotations_match_read_and_write_boundaries() {
         let tools = McpServer::tool_router()
             .list_all()
@@ -1055,8 +1102,10 @@ mod tests {
         assert!(MCP_SERVER_INSTRUCTIONS.contains("space"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("except `me`"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("exactly one top-level `purpose`"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("run_read_sequence` for 2-20 independent"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("run_write_sequence` for 2-20 ordered"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("Both sequence tools accept 1-20 commands"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("prefer a direct tool for one operation"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("run_read_sequence` for independent"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("run_write_sequence` for ordered"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("later input depends"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("read"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("page.next_cursor"));
