@@ -44,7 +44,7 @@ account actor_account_id affected_parent_ids agent appended baseline_call byte_l
 can_create_space can_manage_agents capabilities code collect_response_header completed \
 content_blocks_omitted content_length content_returned content_sha256 copied counts created_at data \
 created_paths default_search_enabled default_text_encryption_enabled deleted depth description \
-direction edited edits_applied effective_write_locked end_line error errors errors_field event_id events executed \
+direction edited edits edits_applied effective_write_locked end_line error errors errors_field event_id events executed \
 expected_count expires_in_seconds failed features field fields files has_children has_more \
 id includes_descendants index input item_kind items kind limit line_count matches \
 max_concurrency media_type method mode name next_action next_start_line node node_id nodes ok op \

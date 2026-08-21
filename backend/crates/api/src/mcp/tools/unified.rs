@@ -207,7 +207,7 @@ pub struct FileUploadInput {
 
 #[allow(dead_code)]
 #[derive(JsonSchema)]
-#[schemars(rename_all = "snake_case")]
+#[schemars(rename_all = "snake_case", inline)]
 enum FileUploadOperationSchema {
     BeginUpload,
     PrepareParts,

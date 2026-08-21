@@ -1055,7 +1055,8 @@ mod tests {
         assert!(MCP_SERVER_INSTRUCTIONS.contains("space"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("except `me`"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("exactly one top-level `purpose`"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("2-20 commands"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("run_read_sequence` for 2-20 independent"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("run_write_sequence` for 2-20 ordered"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("later input depends"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("read"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("page.next_cursor"));
