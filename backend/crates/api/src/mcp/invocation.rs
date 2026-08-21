@@ -294,10 +294,19 @@ mod tests {
     fn sequence_error_code_reads_failed_sequence_results() {
         let application_error = serde_json::json!({
             "ok": false,
-            "error": {
-                "code": -32602,
-                "data": {"code": "invalid_input"}
-            }
+            "completed": 0,
+            "failed": 1,
+            "skipped": 0,
+            "results": [{
+                "index": 0,
+                "tool": "read",
+                "op": "read",
+                "ok": false,
+                "error": {
+                    "code": -32602,
+                    "data": {"code": "invalid_input"}
+                }
+            }]
         });
         assert_eq!(
             sequence_error_code(&application_error).as_deref(),

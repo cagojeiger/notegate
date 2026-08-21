@@ -226,7 +226,7 @@ impl McpServer {
 
     #[tool(
         name = "run_read_sequence",
-        description = "Run 2-20 independent read/search commands with one shared purpose. Commands are flat objects without purpose or args. The server preflights every command, executes at most 4 concurrently, and returns all outcomes in input order.",
+        description = "Run 1-20 independent read/search commands with one shared purpose. Commands are flat objects without purpose or args. The server preflights every command, executes at most 4 concurrently, and returns all outcomes in input order.",
         annotations(title = "Run NoteGate Read Sequence", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -240,7 +240,7 @@ impl McpServer {
 
     #[tool(
         name = "run_write_sequence",
-        description = "Run 2-20 ordered write/manage commands with one shared purpose. Commands are flat objects without purpose or args. The server preflights every command, executes mutations one at a time in input order, stops at the first runtime failure, and does not roll back completed mutations.",
+        description = "Run 1-20 ordered write/manage commands with one shared purpose. Commands are flat objects without purpose or args. The server preflights every command, executes mutations one at a time in input order, stops at the first runtime failure, and does not roll back completed mutations.",
         annotations(title = "Run NoteGate Write Sequence", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
         output_schema = object_output_schema()
     )]
