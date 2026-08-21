@@ -2,19 +2,19 @@
 
 ## 공통 규칙
 
-- `me`와 `run_sequence`를 제외한 모든 tool은 `op`로 세부 동작을 선택한다.
+- `me`, `file_download`, `run_read_sequence`, `run_write_sequence`를 제외한 tool은 `op`로 세부 동작을 선택한다.
 - 하나의 MCP 호출은 `me`를 제외하고 최상위 `purpose`를 정확히 하나 받는다. 앞뒤 공백 없는 1..200자이며 secret, 본문, 검색 결과를 넣지 않는다.
-- `run_sequence.commands[]`는 별도 MCP 호출이 아니라 내부 command다. 최상위 호출의 `purpose`를 상속하므로 개별 `purpose`를 넣지 않는다.
-- operation 하나는 직접 tool을 호출한다. 입력이 미리 정해지고 목적이 같은 operation 2..20개는 `run_sequence`를 우선한다. 뒤 입력에 앞 응답의 cursor, sha256, 발견된 target 등이 필요하면 직접 tool을 단계별로 호출한다.
+- sequence의 `commands[]`는 별도 MCP 호출이 아니라 내부 command다. 최상위 호출의 `purpose`를 상속하므로 개별 `purpose`를 넣지 않는다.
+- operation 하나는 직접 tool을 호출한다. 입력이 미리 정해지고 목적이 같은 read/search 2..20개는 `run_read_sequence`, write/manage 2..20개는 `run_write_sequence`를 사용한다. 뒤 입력에 앞 응답의 cursor, sha256, 발견된 target 등이 필요하면 직접 tool을 단계별로 호출한다.
 - 단일 대상은 `target: "space:/absolute/path"`를 사용한다.
 - 이동/복사는 `source`와 `destination`을 사용한다.
 - 검색어는 `q`, 본문은 `content`, 수정 목록은 `edits`를 사용한다.
 - 모든 paginated read/search는 `limit`, opaque `cursor`, 응답의 `page.next_cursor`를 사용한다. `changes`만 `direction=older|newer`로 진행 방향을 선택한다.
 - 동시성 guard는 `expected_sha256`, 조건부 읽기는 `if_none_match_sha256`를 사용한다.
-- MCP JSON payload는 encrypted Text와 binary File bytes를 운반하지 않는다. File bytes는 `file_transfer`가 발급한 presigned URL로 직접 전송한다.
+- MCP JSON payload는 encrypted Text와 binary File bytes를 운반하지 않는다. File bytes는 `file_upload` 또는 `file_download`가 발급한 presigned URL로 직접 전송한다.
 - MCP는 space create/delete/rename을 제공하지 않는다.
-- `run_sequence`의 완료된 mutation은 rollback하지 않는다. `file_transfer`는 sequence에 포함할 수 없다.
-- 모든 입력은 알 수 없는 필드를 거부한다. `run_sequence.commands[]`는 `tool`별 branch가 해당 직접 tool의 op와 필드만 노출한다.
+- `run_write_sequence`의 완료된 mutation은 rollback하지 않는다. File tool은 sequence에 포함할 수 없다.
+- 모든 입력은 알 수 없는 필드를 거부한다. sequence의 `commands[]`는 `tool`별 branch가 해당 직접 tool의 op와 필드만 노출한다.
 - `target`의 Space name은 exact match이며 대소문자를 구분한다. Space name을 모르면 `read op=spaces`로 목록을 먼저 조회한다.
 - Space name exact match가 실패하면 server는 case-insensitive 후보를 error `data.suggestions`에 넣을 수 있지만, 자동으로 다른 Space로 resolve하지 않는다.
 - Space reconciliation 중 해당 Space의 read tool은 정상 동작하고 mutation tool은 `data.kind=usage_recalculation_in_progress`, `retryable=true`, `retry_after_seconds`를 포함한 JSON-RPC server error를 반환한다. 관리자 전체 재계산도 Space 단위로 순차 진행되므로 같은 규칙이 Space별로 적용된다. 상세 계약은 `../usage-and-quotas.md`를 따른다.
@@ -44,7 +44,7 @@ type ToolCallSpec = { tool: string; input: object }
 
 공개 tool schema의 필수 입력이 빠지면 server는 tool handler 실행 전에 `code=required_fields_missing`과 `next_action.kind=add_fields`를 반환한다. 통합 tool의 `op`별 선택 필드가 빠지면 `code=required_field_missing`과 같은 action을 반환한다. `fields[].description`이 있으면 그 설명에 맞는 값을 구성해 같은 tool을 다시 호출한다.
 
-`run_sequence`에서 한 command가 실패하면 `error: {code, message, data}`에 동일한 error data를 넣는다. 따라서 직접 호출과 sequence 내부 호출의 복구 분기가 같다.
+sequence에서 한 command가 실패하면 해당 `results[]` 항목의 `error: {code, message, data}`에 동일한 error data를 넣는다. 따라서 직접 호출과 sequence 내부 호출의 복구 분기가 같다.
 
 ## `me`
 
@@ -90,7 +90,7 @@ type ReadInput = {
 
 `changes`는 operation filter 없이 Folder/Text/File의 create, content update, move, copy, delete, write-lock 변경을 모두 반환한다. move/delete의 subtree 경계를 놓치지 않도록 target은 `<space>:/` Space root만 허용한다.
 
-MCP는 Node metadata 수정 command를 제공하지 않는다. `changes.events[].metadata`는 변경 event의 구조적 payload이고 `file_transfer.encryption_metadata`는 client-side encryption 계약이며, 둘 다 Node metadata 수정 기능이 아니다.
+MCP는 Node metadata 수정 command를 제공하지 않는다. `changes.events[].metadata`는 변경 event의 구조적 payload이고 `file_upload.encryption_metadata`는 client-side encryption 계약이며, 둘 다 Node metadata 수정 기능이 아니다.
 
 호출 이력에는 `tools/call.params.arguments`에서 allowlist와 redaction을 적용한 snapshot만 저장한다. Changes target처럼 허용된 필드는 `input`에서 확인할 수 있고, 검증된 Space 이름은 목록용 `space_name` summary에 함께 남긴다.
 
@@ -155,7 +155,7 @@ type SearchInput = {
 - `grep lines=none`은 line 정보를 반환하지 않는다. `first`는 첫 matching line number, `all`은 모든 matching line number를 반환한다. snippet은 반환하지 않는다.
 - File, client-side encrypted Text, metadata는 `grep` 대상이 아니다. 서버 관리 방식으로 at-rest 암호화된 plain Text는 복호화 후 검색한다.
 - process 동시성 상한을 넘으면 `data.code=search_busy`, `operation=find|grep`,
-  `retryable=true`, `retry_after_ms=1000`을 반환한다. `run_sequence`의 search command도
+  `retryable=true`, `retry_after_ms=1000`을 반환한다. `run_read_sequence`의 search command도
   같은 제한을 사용한다.
 
 필수 필드:
@@ -246,14 +246,27 @@ cp:    purpose, op, source, destination
 rm:    purpose, op, target
 ```
 
-## `file_transfer`
+## `file_download`
 
-로컬 caller와 S3 호환 저장소 사이의 직접 File 전송을 준비한다. Caller는 응답의 presigned URL을 전송에만 사용하고 로그나 문서에 지속 저장하지 않는다. API key는 transfer 응답에 포함되지 않는다.
+한 File target의 5분짜리 presigned GET URL을 반환한다.
 
 ```ts
-type FileTransferInput = {
+type FileDownloadInput = {
   purpose: string
-  op: "begin_upload" | "prepare_parts" | "complete_upload" | "abort_upload" | "prepare_download"
+  target: string
+}
+```
+
+File bytes는 MCP payload를 통과하지 않는다. Caller는 `next_action.kind=http_download`의 `transfer_field`를 따라 로컬에서 다운로드하고 URL이나 header를 로그·문서에 저장하지 않는다.
+
+## `file_upload`
+
+S3 호환 저장소로 직접 업로드하는 lifecycle을 제공한다.
+
+```ts
+type FileUploadInput = {
+  purpose: string
+  op: "begin_upload" | "prepare_parts" | "complete_upload" | "abort_upload"
   target?: string
   byte_len?: number
   media_type?: string
@@ -266,99 +279,75 @@ type FileTransferInput = {
 }
 ```
 
-- `begin_upload`: 새 File target과 byte length를 검증하고 upload handle을 만든다. Single upload에는 PUT URL을, multipart에는 `part_size`와 `part_count`를 반환한다.
-- `prepare_parts`: 제한된 수의 multipart part 번호를 받아 임시 PUT URL과 `max_concurrency`를 반환한다. Caller는 실패한 part만 새 URL로 다시 시도한다. 호출할 때마다 무활동 정리 시각을 갱신한다.
-- `complete_upload`: single object 또는 모든 multipart ETag를 검증하고 File node를 연결한다.
+- `begin_upload`: target과 byte length를 검증하고 upload handle을 만든다.
+- `prepare_parts`: 최대 16개 multipart part URL과 `max_concurrency`를 반환한다.
+- `complete_upload`: object 또는 multipart ETag를 검증하고 File node를 연결한다.
 - `abort_upload`: 완료되지 않은 upload를 비동기 정리 대상으로 전환한다.
-- `prepare_download`: File target의 임시 GET URL을 반환한다.
-
-필수 필드:
 
 ```text
-begin_upload:     purpose, op, target, byte_len
-prepare_parts:    purpose, op, upload_id, part_numbers
-complete_upload:  purpose, op, upload_id (+ multipart는 completed_parts)
-abort_upload:     purpose, op, upload_id
-prepare_download: purpose, op, target
+begin_upload:    purpose, op, target, byte_len
+prepare_parts:   purpose, op, upload_id, part_numbers
+complete_upload: purpose, op, upload_id (+ multipart는 completed_parts)
+abort_upload:    purpose, op, upload_id
 ```
 
-File bytes는 MCP request/response에 포함하지 않는다. Single/multipart PUT의 성공 응답 ETag는 로컬 caller가 수집해 multipart complete에 전달한다. `file_transfer`는 외부 전송 사이에 caller 작업이 필요하므로 `run_sequence` 안에서 실행할 수 없다.
+모든 성공 응답은 `next_action`을 포함한다. Multipart PUT은 응답의 `max_concurrency` 이하로 병렬 전송하고 각 ETag를 수집해 `complete_upload.completed_parts`로 전달한다. 완료되지 않은 upload의 정리와 URL lifetime은 [`performance-limits.md`](../performance-limits.md), write-lock 규칙은 [`files-commands.md`](../files-commands.md#write-lock)를 따른다.
 
-모든 성공 응답은 `next_action`을 포함한다. `kind=call_tool`은 `tool`과 `input`을 다음 MCP 호출에 사용하며, 이 input에는 현재 호출과 같은 `purpose`가 포함된다. `kind=http_upload|http_upload_parts|http_download`는 지정된 `transfer_field` 또는 `transfers_field`의 URL과 header로 로컬 HTTP 전송을 수행한다. `kind=done`은 추가 단계가 없다는 뜻이다. Multipart PUT은 응답의 `max_concurrency` 이하로 병렬 전송하고 `collect_response_header=etag`에 따라 각 응답 ETag를 수집한다. 실패한 part는 `repeat`에 따라 새 URL을 준비해 다시 전송하고, 모든 part가 끝나면 `then`에 따라 `{part_number, etag}`를 `complete_upload.completed_parts`로 전달한다.
+File tool은 외부 HTTP 전송 사이에 caller 작업이 필요하므로 sequence에 포함할 수 없다.
 
-완료되지 않은 upload의 비동기 정리와 presigned URL lifetime은 [`performance-limits.md`](../performance-limits.md)의 Object upload 상한을 따른다. Upload handle의 write-lock 예약과 완료 규칙은 [`files-commands.md`](../files-commands.md#write-lock)를 따른다.
+## Sequence tools
 
-Write command가 잠금으로 거부되면 MCP error `data`는 `kind=write_locked`, `retryable=false`와 다음 code 중 하나를 포함한다.
+두 sequence 모두 최상위 `purpose`와 1..20개의 flat command를 받는다. 모든 command를 먼저 검증하며 하나라도 잘못되면 아무 command도 실행하지 않고 `executed=false`, 빈 `results`, command별 `errors[]`와 `next_action.kind=apply_error_actions`를 error data에 반환한다.
 
-- `node_write_locked`: target 또는 조상에 직접 잠금이 있다. `read op=stat`의 `write_lock_sources`로 source를 확인한다.
-- `subtree_write_locked`: rename/move/delete 대상 subtree 안에 직접 잠금이 있다.
+### `run_read_sequence`
 
-잠금 변경은 MCP tool이 제공하지 않으며 Space owner가 Dashboard에서 수행한다.
-
-## `run_sequence`
-
-여러 NoteGate command를 순서대로 실행한다. 단일 command는 `read`, `search`, `write`, `manage`를 직접 호출한다.
+`read`와 `search` command만 받는다. 최대 4개를 병렬 실행하고 모든 성공·실패 결과를 입력 index 순서로 반환한다.
 
 ```ts
-type RunSequenceInput = {
+type RunReadSequenceInput = {
   purpose: string
-  commands: SequenceCommand[] // 1..20
-}
-
-type SequenceCommand =
-  | ({ tool: "read" } & Omit<ReadInput, "purpose">)
-  | ({ tool: "search" } & Omit<SearchInput, "purpose">)
-  | ({ tool: "write" } & Omit<WriteInput, "purpose">)
-  | ({ tool: "manage" } & Omit<ManageInput, "purpose">)
-```
-
-```json
-{
-  "purpose": "Read two known notes",
-  "commands": [
-    { "tool": "read", "op": "read", "target": "daily:/one.md" },
-    { "tool": "read", "op": "read", "target": "daily:/two.md" }
-  ]
+  commands: Array<
+    | ({ tool: "read" } & Omit<ReadInput, "purpose">)
+    | ({ tool: "search" } & Omit<SearchInput, "purpose">)
+  >
 }
 ```
 
-Semantics:
+### `run_write_sequence`
 
-- 공개 JSON Schema는 `tool`로 구분되는 네 command branch를 제공한다. 각 branch는 해당 직접 tool의 op와 필드만 노출한다.
-- 실행 전에 모든 command의 구조, 필수 필드, operation, target 형식과 요청만으로 판단 가능한 본문 제한 및 구조화 `write` 문법을 preflight한다. 하나라도 잘못되면 아무 command도 실행하지 않고 error `data`에 `ok=false`, `phase=preflight`, `executed=false`, `completed=0`, `failed_index=null`, 빈 `results`, command별 `errors[]`와 `next_action`을 반환한다. 최상위 `next_action.kind=apply_error_actions`는 각 `errors[].next_action`을 적용하라는 뜻이다.
-- command는 `tool`, `op`, operation 필드를 직접 담는 flat object다. 개별 command에 `purpose`를 반복하거나 `args`로 감싸지 않는다.
-- 최상위 `purpose` 하나를 사용하며 개별 command에는 `purpose`를 넣지 않는다.
-- 각 command는 `read`/`search`/`write`/`manage`와 같은 validation, permission, service transaction을 사용한다.
-- 각 command의 필수 필드는 해당 tool의 필수 필드를 따른다.
-- 각 command는 해당 `tool` branch의 스키마를 사용한다. 런타임 preflight는 여러 오류를 한 번에 수집하기 위해 raw command를 받은 뒤 같은 직접 tool 입력으로 변환한다.
-- 독립적인 `read`/`search`는 최대 4개까지 병렬 실행한다. 앞선 mutation과 target 범위가 겹치지 않는 뒤쪽 `read`/`search`도 병렬화하며, exact path/subtree/Space 범위가 겹치면 순서를 보존한다.
-- 검증된 command는 접근 범위와 실행 등급으로 분류한 뒤 명시적인 의존성 그래프를 만든다. 그래프 간선은 정합성 순서만 나타내며 검색 동시 실행 제한은 별도로 적용한다.
-- `mv`, `cp`, `rm`, `mkdir(parents=true)`는 전체 하위 구조에 미치는 범위를 실행 전에 확정할 수 없으므로 structural barrier다. 모든 앞선 command가 끝난 뒤 단독 실행하며 모든 뒤 command는 barrier 완료를 기다린다.
-- `write`/`manage` mutation끼리는 fail-fast 순서를 보존하기 위해 순차 실행한다.
-- 결과는 실제 완료 시점과 관계없이 입력 index 순서로 반환한다.
-- 응답은 입력 순서상 첫 실패를 보고하고 이후 의존 command는 실행하지 않는다. 이미 시작된 독립 `read`/`search`는 완료될 수 있으나 실패 뒤 결과에는 포함하지 않는다.
-- 이미 성공한 command는 rollback하지 않는다.
-- `run_sequence` 안에서 `run_sequence`를 다시 호출할 수 없다.
-- 결과는 성공한 command의 결과와 실패 위치를 반환한다.
+`write`와 `manage` command만 받는다. 입력 순서대로 한 번에 하나씩 실행하며 첫 runtime 실패에서 중단한다. 완료된 mutation은 rollback하지 않고 실행하지 않은 command 수를 `skipped`로 반환한다.
+
+```ts
+type RunWriteSequenceInput = {
+  purpose: string
+  commands: Array<
+    | ({ tool: "write" } & Omit<WriteInput, "purpose">)
+    | ({ tool: "manage" } & Omit<ManageInput, "purpose">)
+  >
+}
+```
+
+공통 runtime 응답은 다음 형태다.
 
 ```json
 {
   "ok": false,
-  "phase": "runtime",
-  "executed": true,
-  "completed": 2,
-  "failed_index": 2,
+  "completed": 1,
+  "failed": 1,
+  "skipped": 2,
   "results": [
-    { "index": 0, "tool": "manage", "op": "mkdir", "ok": true, "result": {} },
-    { "index": 1, "tool": "write", "op": "write", "ok": true, "result": {} }
-  ],
-  "error": {
-    "code": -32602,
-    "message": "...",
-    "data": { "kind": "invalid_input", "code": "invalid_input" }
-  },
-  "next_action": null
+    { "index": 0, "tool": "write", "op": "write", "ok": true, "result": {} },
+    {
+      "index": 1,
+      "tool": "manage",
+      "op": "rm",
+      "ok": false,
+      "error": { "code": -32602, "message": "...", "data": { "code": "invalid_input" } }
+    }
+  ]
 }
 ```
 
-Preflight와 runtime 실패는 `ok`, `phase`, `executed`, `completed`, `failed_index`, `results`, `next_action`을 공통 상태 필드로 사용한다. MCP transport는 유지하므로 preflight 실패는 JSON-RPC error `data`에, 실행을 시작한 뒤의 실패는 정상 tool result의 `ok=false` payload에 담긴다. Runtime의 최상위 `next_action`과 `error.data.next_action` 필드 경로는 모두 실패한 `commands[index]` 기준으로 보정된다. 성공 payload는 `phase=complete`, `executed=true`를 사용한다.
+개별 command는 직접 tool과 같은 validation, permission, write-lock, service transaction을 사용한다. command 내부에는 `purpose`나 `args`를 넣지 않는다. sequence tool이나 File tool을 중첩할 수 없다.
+
+Write command가 잠금으로 거부되면 MCP error `data`는 `kind=write_locked`, `retryable=false`와 `node_write_locked` 또는 `subtree_write_locked` code를 포함한다. 잠금 변경은 MCP가 제공하지 않으며 Space owner가 Dashboard에서 수행한다.

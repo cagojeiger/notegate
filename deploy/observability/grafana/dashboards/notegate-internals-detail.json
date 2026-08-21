@@ -1656,7 +1656,7 @@
         "type": "query"
       },
       {
-        "allValue": "me|read|search|write|manage|file_transfer|run_sequence",
+        "allValue": "me|read|search|write|manage|file_download|file_upload|run_read_sequence|run_write_sequence",
         "current": {
           "selected": false,
           "text": "All",
@@ -1696,16 +1696,26 @@
           },
           {
             "selected": false,
-            "text": "file_transfer",
-            "value": "file_transfer"
+            "text": "file_download",
+            "value": "file_download"
           },
           {
             "selected": false,
-            "text": "run_sequence",
-            "value": "run_sequence"
+            "text": "file_upload",
+            "value": "file_upload"
+          },
+          {
+            "selected": false,
+            "text": "run_read_sequence",
+            "value": "run_read_sequence"
+          },
+          {
+            "selected": false,
+            "text": "run_write_sequence",
+            "value": "run_write_sequence"
           }
         ],
-        "query": "me,read,search,write,manage,file_transfer,run_sequence",
+        "query": "me,read,search,write,manage,file_download,file_upload,run_read_sequence,run_write_sequence",
         "skipUrlSync": false,
         "type": "custom"
       }

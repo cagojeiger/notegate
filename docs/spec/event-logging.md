@@ -58,7 +58,7 @@ file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 
 `input`과 `response`는 실제 실행/응답 객체와 분리된 저장 전용 복사본이다. Tool/op별 allowlist는 purpose, target/path, 구조적 flag/count/hash처럼 분석에 필요한 값만 유지한다. Text `content`, patch/edit 문자열과 `diff`, grep 일치 줄, 검색어, 모든 cursor, 원본 파일명과 암호화 metadata, multipart ETag, presigned URL/header, PII와 자유 형식 오류 문구는 `{"_redacted":true,"category":"..."}` marker로 대체한다. 알려지지 않은 field의 이름과 값은 저장하지 않고 `_omitted_field_count`만 남긴다. 각 snapshot은 redaction 후 256 KiB를 넘으면 전체를 크기 marker로 대체한다.
 
-`response`는 protocol `ErrorData` 또는 MCP `structured_content`에서 만들며 RMCP가 같은 JSON을 복제하는 wire `content[].text`와 `_meta`는 저장하지 않는다. `run_sequence`는 하나의 MCP 호출로 한 행을 만들고 commands/results에 재귀 redaction을 적용하며 내부 command별 행은 만들지 않는다. Response snapshot이 없는 행은 `response=NULL`이고 모든 행은 90일 retention을 따른다. MCP 조회 tool은 없으며 user browser의 History > MCP에서 자기 소유 범위만 조회한다.
+`response`는 protocol `ErrorData` 또는 MCP `structured_content`에서 만들며 RMCP가 같은 JSON을 복제하는 wire `content[].text`와 `_meta`는 저장하지 않는다. Sequence tool은 하나의 MCP 호출로 한 행을 만들고 commands/results에 재귀 redaction을 적용하며 내부 command별 행은 만들지 않는다. Response snapshot이 없는 행은 `response=NULL`이고 모든 행은 90일 retention을 따른다. MCP 조회 tool은 없으며 user browser의 History > MCP에서 자기 소유 범위만 조회한다.
 
 ## Audit event sources
 

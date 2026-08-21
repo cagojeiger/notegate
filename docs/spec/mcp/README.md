@@ -1,6 +1,6 @@
 # MCP tools
 
-MCP는 User·Agent client용 target-first path API다. Tool은 파일 시스템 명령처럼 동작하되, Space lifecycle은 다루지 않는다. 여러 명령을 순서대로 실행할 때는 `run_sequence`를 사용한다.
+MCP는 User·Agent client용 target-first path API다. Tool은 파일 시스템 명령처럼 동작하되, Space lifecycle은 다루지 않는다. 독립 조회는 `run_read_sequence`, 순차 mutation은 `run_write_sequence`로 묶을 수 있다.
 
 ```text
 target = space:/absolute/path
@@ -8,7 +8,7 @@ target = space:/absolute/path
 
 Space name은 Unicode를 허용하지만 `target` 파싱을 위해 `:`는 사용할 수 없다. `target`의 Space name은 exact match이며 대소문자를 구분한다.
 
-노출되는 tool은 다음 7개다.
+노출되는 tool은 다음 9개다.
 
 ```text
 me      caller identity/server version 확인
@@ -16,16 +16,18 @@ read    spaces/ls/tree/stat/read/changes
 search  find/grep
 write   write/append/patch/edit
 manage  mkdir/mv/cp/rm
-file_transfer  begin_upload/prepare_parts/complete_upload/abort_upload/prepare_download
-run_sequence  ordered command sequence 실행
+file_download  presigned GET 준비
+file_upload    begin_upload/prepare_parts/complete_upload/abort_upload
+run_read_sequence   bounded concurrent read/search
+run_write_sequence  ordered fail-fast write/manage
 ```
 
 - `me`는 입력이 없다.
 - 나머지 tool은 앞뒤 공백 없는 1..200자의 `purpose`가 필수다.
-- `run_sequence`는 sequence 전체에 하나의 `purpose`를 지정한다.
+- sequence tool은 sequence 전체에 하나의 `purpose`를 지정한다.
 - 인증된 호출의 실행 이력은 민감한 원문을 저장하지 않는 별도 snapshot으로 기록한다.
 
-수집 경계, redaction, `run_sequence` 집계와 보존 기간은 [`event-logging.md`](../event-logging.md#mcp-invocation-history)를 따른다.
+수집 경계, redaction, sequence 집계와 보존 기간은 [`event-logging.md`](../event-logging.md#mcp-invocation-history)를 따른다.
 
 ## 버전 확인
 

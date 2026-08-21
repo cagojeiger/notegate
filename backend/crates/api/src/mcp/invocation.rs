@@ -11,6 +11,7 @@ use rmcp::model::{CallToolResponse, CallToolResult};
 use serde_json::Value;
 
 use super::invocation_redaction::{redact_input, redact_response};
+use super::tool_identity::KnownMcpTool;
 use super::tools::resolve::invalid_input_error;
 use crate::observability::record_mcp_tool_metrics;
 use crate::state::AppState;
@@ -26,14 +27,15 @@ pub(crate) async fn execute_call(
 ) -> Result<CallToolResponse, ErrorData> {
     let raw_op = input.get("op").and_then(Value::as_str);
     let op = canonical_op(tool, raw_op);
-    let raw_purpose = if tool == "me" {
+    let known_tool = KnownMcpTool::parse(tool);
+    let raw_purpose = if known_tool == Some(KnownMcpTool::Me) {
         None
     } else {
         input.get("purpose").and_then(Value::as_str)
     };
     let purpose_validation = raw_purpose.map(validate_purpose).transpose();
     let purpose = raw_purpose.filter(|_| purpose_validation.is_ok());
-    let space_name = if tool == "read" && op == Some("changes") {
+    let space_name = if known_tool == Some(KnownMcpTool::Read) && op == Some("changes") {
         invocation_space_name(input.get("target").and_then(Value::as_str))
     } else {
         None
@@ -160,10 +162,14 @@ fn call_error_code(tool: &str, result: &Result<CallToolResponse, ErrorData>) -> 
         Ok(CallToolResponse::Complete(result)) if result.is_error == Some(true) => {
             Some(tool_result_error_code(result))
         }
-        Ok(CallToolResponse::Complete(result)) if tool == "run_sequence" => result
-            .structured_content
-            .as_ref()
-            .and_then(sequence_error_code),
+        Ok(CallToolResponse::Complete(result))
+            if KnownMcpTool::parse(tool).is_some_and(KnownMcpTool::is_sequence) =>
+        {
+            result
+                .structured_content
+                .as_ref()
+                .and_then(sequence_error_code)
+        }
         Ok(_) => None,
     }
 }
@@ -187,28 +193,27 @@ fn sequence_error_code(result: &Value) -> Option<String> {
     }
 
     result
-        .pointer("/error/data/code")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .or_else(|| {
-            result
-                .pointer("/error/code")
-                .and_then(Value::as_i64)
-                .map(|code| code.to_string())
+        .get("results")
+        .and_then(Value::as_array)
+        .and_then(|results| {
+            results
+                .iter()
+                .find(|item| item.get("ok").and_then(Value::as_bool) == Some(false))
+        })
+        .and_then(|item| {
+            item.pointer("/error/data/code")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .or_else(|| {
+                    item.pointer("/error/code")
+                        .and_then(Value::as_i64)
+                        .map(|code| code.to_string())
+                })
         })
 }
 
 fn metric_tool_name(tool: &str) -> &'static str {
-    match tool {
-        "me" => "me",
-        "read" => "read",
-        "search" => "search",
-        "write" => "write",
-        "manage" => "manage",
-        "file_transfer" => "file_transfer",
-        "run_sequence" => "run_sequence",
-        _ => "unknown",
-    }
+    KnownMcpTool::parse(tool).map_or("unknown", KnownMcpTool::as_str)
 }
 
 fn canonical_tool(tool: &str) -> &'static str {
@@ -216,15 +221,17 @@ fn canonical_tool(tool: &str) -> &'static str {
 }
 
 fn canonical_op<'a>(tool: &str, op: Option<&'a str>) -> Option<&'a str> {
-    match (tool, op?) {
-        ("read", op @ ("spaces" | "ls" | "tree" | "stat" | "read" | "changes"))
-        | ("search", op @ ("find" | "grep"))
-        | ("write", op @ ("write" | "append" | "patch" | "edit"))
-        | ("manage", op @ ("mkdir" | "mv" | "cp" | "rm"))
+    match (KnownMcpTool::parse(tool), op?) {
+        (
+            Some(KnownMcpTool::Read),
+            op @ ("spaces" | "ls" | "tree" | "stat" | "read" | "changes"),
+        )
+        | (Some(KnownMcpTool::Search), op @ ("find" | "grep"))
+        | (Some(KnownMcpTool::Write), op @ ("write" | "append" | "patch" | "edit"))
+        | (Some(KnownMcpTool::Manage), op @ ("mkdir" | "mv" | "cp" | "rm"))
         | (
-            "file_transfer",
-            op @ ("begin_upload" | "prepare_parts" | "complete_upload" | "abort_upload"
-            | "prepare_download"),
+            Some(KnownMcpTool::FileUpload),
+            op @ ("begin_upload" | "prepare_parts" | "complete_upload" | "abort_upload"),
         ) => Some(op),
         _ => None,
     }
@@ -351,19 +358,25 @@ mod tests {
         let sequence = execute_call(
             &state,
             Some(&caller),
-            "run_sequence",
+            "run_read_sequence",
             &sequence_input,
             async {
                 Ok(CallToolResult::structured(serde_json::json!({
                     "ok": false,
                     "completed": 0,
-                    "failed_index": 0,
-                    "results": [],
-                    "error": {
-                        "code": -32602,
-                        "message": "invalid input",
-                        "data": {"code": "invalid_input"}
-                    }
+                    "failed": 1,
+                    "skipped": 0,
+                    "results": [{
+                        "index": 0,
+                        "tool": "read",
+                        "op": "read",
+                        "ok": false,
+                        "error": {
+                            "code": -32602,
+                            "message": "invalid input",
+                            "data": {"code": "invalid_input"}
+                        }
+                    }]
                 }))
                 .into())
             },
@@ -418,7 +431,7 @@ mod tests {
         assert_eq!(rows[2].4["kind"], "error");
         assert_eq!(rows[2].5, "error");
         assert_eq!(rows[2].6.as_deref(), Some("invalid_input"));
-        assert_eq!(rows[3].0, "run_sequence");
+        assert_eq!(rows[3].0, "run_read_sequence");
         assert_eq!(rows[3].2.as_deref(), Some("run a failing sequence"));
         assert_eq!(rows[3].3, sequence_input);
         assert_eq!(rows[3].4["result"]["ok"], false);
@@ -448,30 +461,24 @@ mod tests {
             "original_filename": "SECRET_ORIGINAL_FILENAME.pdf",
             "encryption_metadata": {"wrapped_key": "SECRET_ENCRYPTION_METADATA"}
         });
-        execute_call(
-            &state,
-            Some(&caller),
-            "file_transfer",
-            &upload_input,
-            async {
-                Ok(CallToolResult::structured(serde_json::json!({
-                    "upload_id": "upload-1",
-                    "target": "Research:/report.pdf",
-                    "transfer": {
-                        "method": "PUT",
-                        "url": "SECRET_UPLOAD_URL",
-                        "headers": {"authorization": "SECRET_UPLOAD_HEADER"},
-                        "expires_in_seconds": 300
-                    },
-                    "next_action": {
-                        "kind": "http_upload",
-                        "instruction": "SECRET_UPLOAD_INSTRUCTION",
-                        "transfer_field": "transfer"
-                    }
-                }))
-                .into())
-            },
-        )
+        execute_call(&state, Some(&caller), "file_upload", &upload_input, async {
+            Ok(CallToolResult::structured(serde_json::json!({
+                "upload_id": "upload-1",
+                "target": "Research:/report.pdf",
+                "transfer": {
+                    "method": "PUT",
+                    "url": "SECRET_UPLOAD_URL",
+                    "headers": {"authorization": "SECRET_UPLOAD_HEADER"},
+                    "expires_in_seconds": 300
+                },
+                "next_action": {
+                    "kind": "http_upload",
+                    "instruction": "SECRET_UPLOAD_INSTRUCTION",
+                    "transfer_field": "transfer"
+                }
+            }))
+            .into())
+        })
         .await?;
 
         let me_input = serde_json::json!({
@@ -493,28 +500,24 @@ mod tests {
         })
         .await?;
 
-        let sequence_input = serde_json::json!({
-            "purpose": "run a sequence with sensitive nested data",
+        let read_sequence_input = serde_json::json!({
+            "purpose": "read sensitive nested data",
             "commands": [
                 {"tool": "search", "op": "grep", "target": "Research:/", "q": "SECRET_SEQUENCE_QUERY"},
-                {"tool": "read", "op": "read", "target": "Research:/secret.md"},
-                {"tool": "write", "op": "patch", "target": "Research:/note.md", "edits": [{
-                    "old_text": "SECRET_SEQUENCE_OLD",
-                    "new_text": "SECRET_SEQUENCE_NEW",
-                    "mode": "unique"
-                }]}
+                {"tool": "read", "op": "read", "target": "Research:/secret.md"}
             ]
         });
         execute_call(
             &state,
             Some(&caller),
-            "run_sequence",
-            &sequence_input,
+            "run_read_sequence",
+            &read_sequence_input,
             async {
                 Ok(CallToolResult::structured(serde_json::json!({
-                    "ok": false,
+                    "ok": true,
                     "completed": 2,
-                    "failed_index": 2,
+                    "failed": 0,
+                    "skipped": 0,
                     "results": [
                         {
                             "index": 0,
@@ -542,25 +545,61 @@ mod tests {
                                 "content_sha256": "hash"
                             }
                         }
-                    ],
-                    "error": {
-                        "code": -32602,
-                        "message": "SECRET_SEQUENCE_ERROR",
-                        "data": {
-                            "code": "invalid_input",
-                            "recoverable": true,
-                            "next_action": {
-                                "kind": "retry",
-                                "hint": "SECRET_SEQUENCE_HINT",
-                                "input": {
-                                    "tool": "search",
-                                    "op": "grep",
-                                    "target": "Research:/",
-                                    "q": "SECRET_SEQUENCE_RETRY_QUERY"
+                    ]
+                }))
+                .into())
+            },
+        )
+        .await?;
+
+        let write_sequence_input = serde_json::json!({
+            "purpose": "attempt a sensitive patch",
+            "commands": [
+                {"tool": "write", "op": "patch", "target": "Research:/note.md", "edits": [{
+                    "old_text": "SECRET_SEQUENCE_OLD",
+                    "new_text": "SECRET_SEQUENCE_NEW",
+                    "mode": "unique"
+                }]}
+            ]
+        });
+        execute_call(
+            &state,
+            Some(&caller),
+            "run_write_sequence",
+            &write_sequence_input,
+            async {
+                Ok(CallToolResult::structured(serde_json::json!({
+                    "ok": false,
+                    "completed": 0,
+                    "failed": 1,
+                    "skipped": 0,
+                    "results": [{
+                        "index": 0,
+                        "tool": "write",
+                        "op": "patch",
+                        "ok": false,
+                        "error": {
+                            "code": -32602,
+                            "message": "SECRET_SEQUENCE_ERROR",
+                            "data": {
+                                "code": "invalid_input",
+                                "recoverable": true,
+                                "next_action": {
+                                    "kind": "retry",
+                                    "hint": "SECRET_SEQUENCE_HINT",
+                                    "input": {
+                                        "tool": "write",
+                                        "op": "patch",
+                                        "target": "Research:/note.md",
+                                        "edits": [{
+                                            "old_text": "SECRET_SEQUENCE_RETRY_OLD",
+                                            "new_text": "SECRET_SEQUENCE_RETRY_NEW"
+                                        }]
+                                    }
                                 }
                             }
                         }
-                    }
+                    }]
                 }))
                 .into())
             },
@@ -584,7 +623,7 @@ mod tests {
         .bind(caller.account_id())
         .fetch_all(&state.db)
         .await?;
-        assert_eq!(rows.len(), 3);
+        assert_eq!(rows.len(), 4);
 
         let persisted = serde_json::to_string(&rows)?;
         for secret in [
@@ -604,12 +643,13 @@ mod tests {
             "SECRET_SEQUENCE_CONTENT",
             "SECRET_SEQUENCE_ERROR",
             "SECRET_SEQUENCE_HINT",
-            "SECRET_SEQUENCE_RETRY_QUERY",
+            "SECRET_SEQUENCE_RETRY_OLD",
+            "SECRET_SEQUENCE_RETRY_NEW",
         ] {
             assert!(!persisted.contains(secret), "persisted secret: {secret}");
         }
 
-        assert_eq!(rows[0].0, "file_transfer");
+        assert_eq!(rows[0].0, "file_upload");
         assert_eq!(rows[0].1.as_deref(), Some("begin_upload"));
         assert_eq!(
             rows[0].2["original_filename"]["category"],
@@ -634,12 +674,8 @@ mod tests {
         assert_eq!(rows[1].3["result"]["user"]["email"]["category"], "pii");
         assert_eq!(rows[1].4, "success");
 
-        assert_eq!(rows[2].0, "run_sequence");
+        assert_eq!(rows[2].0, "run_read_sequence");
         assert_eq!(rows[2].2["commands"][0]["q"]["category"], "search_query");
-        assert_eq!(
-            rows[2].2["commands"][2]["edits"][0]["old_text"]["category"],
-            "document_content"
-        );
         assert_eq!(
             rows[2].3["result"]["results"][0]["result"]["items"][0]["match_lines"]["category"],
             "document_content"
@@ -648,12 +684,21 @@ mod tests {
             rows[2].3["result"]["results"][1]["result"]["content"]["category"],
             "document_content"
         );
+        assert_eq!(rows[2].4, "success");
+        assert_eq!(rows[2].5, None);
+
+        assert_eq!(rows[3].0, "run_write_sequence");
         assert_eq!(
-            rows[2].3["result"]["error"]["data"]["next_action"]["input"]["q"]["category"],
-            "search_query"
+            rows[3].2["commands"][0]["edits"][0]["old_text"]["category"],
+            "document_content"
         );
-        assert_eq!(rows[2].4, "error");
-        assert_eq!(rows[2].5.as_deref(), Some("invalid_input"));
+        assert_eq!(
+            rows[3].3["result"]["results"][0]["error"]["data"]["next_action"]["input"]["edits"][0]
+                ["old_text"]["category"],
+            "document_content"
+        );
+        assert_eq!(rows[3].4, "error");
+        assert_eq!(rows[3].5.as_deref(), Some("invalid_input"));
 
         db.cleanup().await;
         Ok(())

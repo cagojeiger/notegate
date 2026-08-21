@@ -11,7 +11,7 @@ use super::resolve::{
     caller, invalid_input_error, node_summary, required_input, resolve_target, service_error,
     split_parent_name,
 };
-use super::unified::FileTransferInput;
+use super::unified::{FileDownloadInput, FileUploadInput};
 use crate::mcp::contract::{McpAction, ToolCallSpec, ToolCallStep};
 use crate::object_storage::{AGENT_TRANSFER_URL_TTL, CompletedUploadPart, ObjectStorageError};
 use crate::object_upload_flow::{
@@ -21,27 +21,35 @@ use crate::object_upload_flow::{
 };
 use crate::state::AppState;
 
-pub async fn call(
+pub async fn upload(
     state: &AppState,
     parts: &Parts,
-    input: FileTransferInput,
+    input: FileUploadInput,
 ) -> Result<Json<Value>, ErrorData> {
     match input.op.as_str() {
         "begin_upload" => begin_upload(state, parts, input).await,
         "prepare_parts" => prepare_parts(state, parts, input).await,
         "complete_upload" => complete_upload(state, parts, input).await,
         "abort_upload" => abort_upload(state, parts, input).await,
-        "prepare_download" => prepare_download(state, parts, input).await,
         _ => Err(invalid_input_error(
-            "invalid op for file_transfer; allowed values are: begin_upload, prepare_parts, complete_upload, abort_upload, prepare_download",
+            "invalid op for file_upload; allowed values are: begin_upload, prepare_parts, complete_upload, abort_upload",
         )),
     }
+}
+
+pub async fn download(
+    state: &AppState,
+    parts: &Parts,
+    input: FileDownloadInput,
+) -> Result<Json<Value>, ErrorData> {
+    let FileDownloadInput { target, .. } = input;
+    prepare_download(state, parts, target).await
 }
 
 async fn begin_upload(
     state: &AppState,
     parts: &Parts,
-    input: FileTransferInput,
+    input: FileUploadInput,
 ) -> Result<Json<Value>, ErrorData> {
     let purpose = input.purpose.clone();
     let caller = caller(parts)?;
@@ -113,7 +121,7 @@ fn build_begin_upload_response(
                     "part_count": part_count,
                 },
                 "next_action": McpAction::CallTool {
-                    call: ToolCallSpec::new("file_transfer", json!({
+                    call: ToolCallSpec::new("file_upload", json!({
                         "purpose": purpose,
                         "op": "prepare_parts",
                         "upload_id": upload_id,
@@ -138,7 +146,7 @@ fn build_begin_upload_response(
             "next_action": McpAction::HttpUpload {
                 transfer_field: "transfer".to_owned(),
                 instruction: "PUT the local file using transfer.method, transfer.url, every transfer.headers entry, and the exact transfer.content_length.".to_owned(),
-                then: ToolCallSpec::new("file_transfer", json!({
+                then: ToolCallSpec::new("file_upload", json!({
                         "purpose": purpose,
                         "op": "complete_upload",
                         "upload_id": upload_id,
@@ -151,7 +159,7 @@ fn build_begin_upload_response(
 async fn prepare_parts(
     state: &AppState,
     parts: &Parts,
-    input: FileTransferInput,
+    input: FileUploadInput,
 ) -> Result<Json<Value>, ErrorData> {
     let purpose = input.purpose.clone();
     let caller = caller(parts)?;
@@ -205,7 +213,7 @@ fn build_prepare_parts_response(
             max_concurrency: PART_UPLOAD_CONCURRENCY_MAX,
             instruction: "PUT at most 4 parts concurrently using each URL, headers, and exact content_length. Collect every response ETag, retry only failed parts with fresh URLs, request URLs for any remaining parts, then complete with all part_number/etag pairs.".to_owned(),
             repeat: ToolCallStep {
-                call: ToolCallSpec::new("file_transfer", json!({
+                call: ToolCallSpec::new("file_upload", json!({
                     "purpose": purpose,
                     "op": "prepare_parts",
                     "upload_id": upload_id,
@@ -214,7 +222,7 @@ fn build_prepare_parts_response(
                 requires: Some("add the needed part_numbers to input".to_owned()),
             },
             then: ToolCallStep {
-                call: ToolCallSpec::new("file_transfer", json!({
+                call: ToolCallSpec::new("file_upload", json!({
                     "purpose": purpose,
                     "op": "complete_upload",
                     "upload_id": upload_id,
@@ -229,7 +237,7 @@ fn build_prepare_parts_response(
 async fn complete_upload(
     state: &AppState,
     parts: &Parts,
-    input: FileTransferInput,
+    input: FileUploadInput,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
     let upload_id = upload_id(&input)?;
@@ -261,7 +269,7 @@ async fn complete_upload(
 async fn abort_upload(
     state: &AppState,
     parts: &Parts,
-    input: FileTransferInput,
+    input: FileUploadInput,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
     let upload_id = upload_id(&input)?;
@@ -302,10 +310,9 @@ async fn require_upload_space_visible(
 async fn prepare_download(
     state: &AppState,
     parts: &Parts,
-    input: FileTransferInput,
+    target: String,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let target = required(input.target, "target", "prepare_download")?;
     let (resolved, path) = resolve_target(state, caller, &target).await?;
     let node = state
         .files
@@ -342,7 +349,7 @@ async fn prepare_download(
     })))
 }
 
-fn upload_id(input: &FileTransferInput) -> Result<Uuid, ErrorData> {
+fn upload_id(input: &FileUploadInput) -> Result<Uuid, ErrorData> {
     let raw = input
         .upload_id
         .as_deref()
@@ -539,7 +546,7 @@ mod tests {
             response
                 .pointer("/next_action/tool")
                 .and_then(Value::as_str),
-            Some("file_transfer")
+            Some("file_upload")
         );
         assert_eq!(
             response

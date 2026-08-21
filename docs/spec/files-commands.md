@@ -76,7 +76,7 @@ edit   line 기반 insert/replace/delete 적용
 
 ## File commands
 
-File은 binary/object content node다. MCP `file_transfer`는 presigned URL을 발급하고 실제 bytes는 로컬 caller와 S3 호환 저장소 사이에서 직접 전송한다. Node metadata는 시스템이 관리하며 외부 caller에게 읽기 전용이다.
+File은 binary/object content node다. MCP `file_upload`/`file_download`는 presigned URL을 발급하고 실제 bytes는 로컬 caller와 S3 호환 저장소 사이에서 직접 전송한다. Node metadata는 시스템이 관리하며 외부 caller에게 읽기 전용이다.
 
 - File은 `nodes.kind='file'`이다.
 - File은 Text content operation과 grep 대상이 아니다.
