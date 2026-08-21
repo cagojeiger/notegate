@@ -33,7 +33,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use crate::mcp::tools::transfers;
-use crate::mcp::tools::unified::{CompletedPartInput, FileTransferInput};
+use crate::mcp::tools::unified::{CompletedPartInput, FileDownloadInput, FileUploadInput};
 use crate::metadata_write_behind::flush_for_test;
 
 use crate::rest::test_support::{
@@ -102,8 +102,8 @@ struct BegunUpload {
     headers: BTreeMap<String, String>,
 }
 
-fn transfer_continuation(op: &str, upload_id: String) -> FileTransferInput {
-    FileTransferInput {
+fn transfer_continuation(op: &str, upload_id: String) -> FileUploadInput {
+    FileUploadInput {
         purpose: "continue test file transfer".to_owned(),
         op: op.to_owned(),
         target: None,
@@ -1836,10 +1836,10 @@ async fn mcp_single_upload_guides_put_completion_and_abort()
     let (mut request_parts, _) = Request::new(()).into_parts();
     request_parts.extensions.insert(caller);
 
-    let begun = transfers::call(
+    let begun = transfers::upload(
         &state,
         &request_parts,
-        FileTransferInput {
+        FileUploadInput {
             purpose: "test guided single upload".to_owned(),
             op: "begin_upload".to_owned(),
             target: Some("rest-test:/guided-single.bin".to_owned()),
@@ -1858,10 +1858,10 @@ async fn mcp_single_upload_guides_put_completion_and_abort()
     assert_eq!(begun["next_action"]["kind"], "http_upload");
     let upload_id: Uuid = serde_json::from_value(begun["upload_id"].clone())?;
 
-    let aborted = transfers::call(
+    let aborted = transfers::upload(
         &state,
         &request_parts,
-        FileTransferInput {
+        FileUploadInput {
             purpose: "test guided single upload abort".to_owned(),
             op: "abort_upload".to_owned(),
             target: None,
@@ -1901,10 +1901,10 @@ async fn mcp_upload_continuations_follow_current_user_pin_but_not_agent_pin()
     let (mut user_parts, _) = Request::new(()).into_parts();
     user_parts.extensions.insert(user_caller);
 
-    let begun = transfers::call(
+    let begun = transfers::upload(
         &state,
         &user_parts,
-        FileTransferInput {
+        FileUploadInput {
             purpose: "test upload visibility after pin removal".to_owned(),
             op: "begin_upload".to_owned(),
             target: Some("rest-test:/pin-revoked.bin".to_owned()),
@@ -1926,7 +1926,7 @@ async fn mcp_upload_continuations_follow_current_user_pin_but_not_agent_pin()
         .await?;
 
     for op in ["prepare_parts", "complete_upload", "abort_upload"] {
-        let error = match transfers::call(
+        let error = match transfers::upload(
             &state,
             &user_parts,
             transfer_continuation(op, upload_id.clone()),
@@ -1974,10 +1974,10 @@ async fn mcp_upload_continuations_follow_current_user_pin_but_not_agent_pin()
     let (mut agent_parts, _) = Request::new(()).into_parts();
     agent_parts.extensions.insert(agent_caller);
 
-    let begun = transfers::call(
+    let begun = transfers::upload(
         &state,
         &agent_parts,
-        FileTransferInput {
+        FileUploadInput {
             purpose: "test agent upload visibility".to_owned(),
             op: "begin_upload".to_owned(),
             target: Some("rest-test:/agent-unpinned.bin".to_owned()),
@@ -1997,7 +1997,7 @@ async fn mcp_upload_continuations_follow_current_user_pin_but_not_agent_pin()
         .as_str()
         .ok_or("agent upload id")?
         .to_owned();
-    let aborted = transfers::call(
+    let aborted = transfers::upload(
         &state,
         &agent_parts,
         transfer_continuation("abort_upload", upload_id),
@@ -2028,10 +2028,10 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
     request_parts.extensions.insert(caller.clone());
     let byte_len = SINGLE_PUT_MAX_BYTES as i64 + 1;
 
-    let begun = transfers::call(
+    let begun = transfers::upload(
         &state,
         &request_parts,
-        FileTransferInput {
+        FileUploadInput {
             purpose: "test multipart upload".to_owned(),
             op: "begin_upload".to_owned(),
             target: Some("rest-test:/large.bin".to_owned()),
@@ -2052,10 +2052,10 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
     assert_eq!(begun["next_action"]["kind"], "call_tool");
     let upload_id = begun["upload_id"].as_str().ok_or("upload id")?.to_owned();
 
-    let prepared = transfers::call(
+    let prepared = transfers::upload(
         &state,
         &request_parts,
-        FileTransferInput {
+        FileUploadInput {
             purpose: "test multipart part preparation".to_owned(),
             op: "prepare_parts".to_owned(),
             target: None,
@@ -2080,10 +2080,10 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
     );
     let completed_parts = vec![first?, second?];
 
-    let completed = transfers::call(
+    let completed = transfers::upload(
         &state,
         &request_parts,
-        FileTransferInput {
+        FileUploadInput {
             purpose: "test multipart upload completion".to_owned(),
             op: "complete_upload".to_owned(),
             target: None,
@@ -2100,10 +2100,10 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
     .await?
     .0;
     assert_eq!(completed["next_action"]["kind"], "done");
-    let prepare_after_completion = transfers::call(
+    let prepare_after_completion = transfers::upload(
         &state,
         &request_parts,
-        FileTransferInput {
+        FileUploadInput {
             purpose: "test completed upload rejection".to_owned(),
             op: "prepare_parts".to_owned(),
             target: None,
@@ -2134,21 +2134,12 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
         .node
         .id;
 
-    let download = transfers::call(
+    let download = transfers::download(
         &state,
         &request_parts,
-        FileTransferInput {
+        FileDownloadInput {
             purpose: "test presigned download".to_owned(),
-            op: "prepare_download".to_owned(),
-            target: Some("rest-test:/large.bin".to_owned()),
-            byte_len: None,
-            media_type: None,
-            original_filename: None,
-            encryption_mode: None,
-            encryption_metadata: None,
-            upload_id: None,
-            part_numbers: None,
-            completed_parts: None,
+            target: "rest-test:/large.bin".to_owned(),
         },
     )
     .await?

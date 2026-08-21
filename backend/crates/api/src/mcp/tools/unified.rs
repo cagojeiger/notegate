@@ -1,4 +1,4 @@
-//! Unified MCP tools: read/search/write/manage/run_sequence.
+//! Unified MCP tools: read/search/write/manage and bounded sequences.
 
 use axum::http::request::Parts;
 use notegate_core::validation::validate_space_name;
@@ -23,7 +23,9 @@ use crate::state::AppState;
 
 mod sequence;
 
-pub use sequence::{RunSequenceInput, run_sequence};
+pub use sequence::{
+    RunReadSequenceInput, RunWriteSequenceInput, run_read_sequence, run_write_sequence,
+};
 
 /// Public schema for `write.edits`; runtime parsing remains selected by the top-level write op.
 #[allow(dead_code)]
@@ -172,12 +174,13 @@ pub struct ManageInput {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct FileTransferInput {
+pub struct FileUploadInput {
     /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
     pub purpose: String,
-    /// Operation: begin_upload/prepare_parts/complete_upload/abort_upload/prepare_download.
+    /// Operation: begin_upload/prepare_parts/complete_upload/abort_upload.
+    #[schemars(with = "FileUploadOperationSchema")]
     pub op: String,
-    /// Path-first target for begin_upload and prepare_download.
+    /// Path-first target for begin_upload.
     #[serde(default)]
     pub target: Option<String>,
     /// Local file byte length for begin_upload.
@@ -200,6 +203,29 @@ pub struct FileTransferInput {
     /// Multipart ETags captured from successful PUT responses.
     #[serde(default)]
     pub completed_parts: Option<Vec<CompletedPartInput>>,
+}
+
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[schemars(rename_all = "snake_case", inline)]
+enum FileUploadOperationSchema {
+    BeginUpload,
+    PrepareParts,
+    CompleteUpload,
+    AbortUpload,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FileDownloadInput {
+    /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
+    #[allow(
+        dead_code,
+        reason = "validated and recorded at the shared tools/call boundary"
+    )]
+    pub purpose: String,
+    /// Path-first File target in `<space>:/absolute/path` form.
+    pub target: String,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -663,7 +689,7 @@ fn invalid_op(tool: &'static str, allowed: &[&str]) -> ErrorData {
 mod tests {
     use serde_json::json;
 
-    use super::{FileTransferInput, ManageInput, WriteInput};
+    use super::{FileUploadInput, ManageInput, WriteInput};
 
     #[test]
     fn mutation_tools_reject_node_metadata_fields() {
@@ -686,7 +712,7 @@ mod tests {
             .is_err()
         );
         assert!(
-            serde_json::from_value::<FileTransferInput>(json!({
+            serde_json::from_value::<FileUploadInput>(json!({
                 "purpose": "verify metadata boundary",
                 "op": "complete_upload",
                 "upload_id": "upload-id",

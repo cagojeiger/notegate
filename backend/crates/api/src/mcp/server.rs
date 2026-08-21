@@ -43,7 +43,7 @@ use crate::mcp::invocation;
 use crate::mcp::tools;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires exactly one top-level `purpose`; `run_sequence` commands inherit it and must not contain `purpose`. Use `me` to inspect the caller and running server version. Use a direct tool for one operation. Prefer `run_sequence` for 2-20 commands whose inputs are known in advance and share one purpose; use separate calls when a later input depends on an earlier result such as a cursor, sha256, or discovered target. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, and `file_transfer` for direct local file upload/download. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For any recoverable input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires exactly one top-level `purpose`; sequence commands inherit it and must not contain `purpose`. Use `me` to inspect the caller and running server version. Use a direct tool for one operation. Use `run_read_sequence` for 2-20 independent read/search commands and `run_write_sequence` for 2-20 ordered write/manage commands whose inputs are known in advance and share one purpose; use separate calls when a later input depends on an earlier result such as a cursor, sha256, or discovered target. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, and `manage` for mkdir/mv/cp/rm. Use `file_download` to prepare a GET and `file_upload` for the upload lifecycle. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For any recoverable input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_upload or file_download response's `next_action`. MCP cannot create, delete, or rename spaces.";
 const MCP_TOOL_LIST_TTL_MS: u64 = 5 * 60 * 1_000;
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
@@ -169,7 +169,7 @@ impl McpServer {
     #[tool(
         name = "write",
         description = "Create or modify plain text content. Use op=write/append/patch/edit. Does not move or delete nodes.",
-        annotations(title = "Write NoteGate", read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false),
+        annotations(title = "Write NoteGate", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
         output_schema = object_output_schema()
     )]
     pub async fn write_tool(
@@ -195,32 +195,61 @@ impl McpServer {
     }
 
     #[tool(
-        name = "file_transfer",
-        description = "Prepare direct local file transfers without sending bytes through MCP. Follow the structured next_action in every successful response. begin_upload returns one PUT or multipart geometry; for multipart, request up to 16 one-based part URLs, upload at most 4 parts concurrently using each exact content_length, collect response ETags, then complete_upload. prepare_download returns one GET. URLs expire after 5 minutes; do not print or persist them.",
-        annotations(title = "Transfer NoteGate Files", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = true),
+        name = "file_download",
+        description = "Prepare one direct local File download without sending bytes through MCP. Returns a GET URL that expires after 5 minutes. Follow the structured next_action and do not print or persist the URL.",
+        annotations(title = "Download NoteGate File", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true),
         output_schema = object_output_schema()
     )]
-    pub async fn file_transfer_tool(
+    pub async fn file_download_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::unified::FileTransferInput>,
+        params: Parameters<tools::unified::FileDownloadInput>,
     ) -> Result<Json<Value>, ErrorData> {
         let Parameters(input) = params;
-        tools::transfers::call(&self.state, &parts, input).await
+        tools::transfers::download(&self.state, &parts, input).await
     }
 
     #[tool(
-        name = "run_sequence",
-        description = "Preferred batch tool for 2-20 commands whose inputs are known in advance. Commands inherit the one top-level purpose and use tool-discriminated flat objects without purpose or args. The server preflights every command, runs safe reads/searches concurrently, preserves dependency and mutation order, and runs mv, cp, rm, and mkdir with parents=true alone. Runtime reports the first failure in input order; already-started independent reads/searches may finish, and completed mutations are not rolled back.",
-        annotations(title = "Run NoteGate Sequence", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
+        name = "file_upload",
+        description = "Prepare and complete one direct local File upload without sending bytes through MCP. Follow each structured next_action. begin_upload returns one PUT or multipart geometry; for multipart, request up to 16 one-based part URLs, upload at most 4 parts concurrently using each exact content_length, collect response ETags, then complete_upload. URLs expire after 5 minutes; do not print or persist them.",
+        annotations(title = "Upload NoteGate File", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = true),
         output_schema = object_output_schema()
     )]
-    pub async fn run_sequence_tool(
+    pub async fn file_upload_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::unified::RunSequenceInput>,
+        params: Parameters<tools::unified::FileUploadInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::unified::run_sequence(&self.state, &parts, params).await
+        let Parameters(input) = params;
+        tools::transfers::upload(&self.state, &parts, input).await
+    }
+
+    #[tool(
+        name = "run_read_sequence",
+        description = "Run 1-20 independent read/search commands with one shared purpose. Commands are flat objects without purpose or args. The server preflights every command, executes at most 4 concurrently, and returns all outcomes in input order.",
+        annotations(title = "Run NoteGate Read Sequence", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
+        output_schema = object_output_schema()
+    )]
+    pub async fn run_read_sequence_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::unified::RunReadSequenceInput>,
+    ) -> Result<Json<Value>, ErrorData> {
+        tools::unified::run_read_sequence(&self.state, &parts, params).await
+    }
+
+    #[tool(
+        name = "run_write_sequence",
+        description = "Run 1-20 ordered write/manage commands with one shared purpose. Commands are flat objects without purpose or args. The server preflights every command, executes mutations one at a time in input order, stops at the first runtime failure, and does not roll back completed mutations.",
+        annotations(title = "Run NoteGate Write Sequence", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
+        output_schema = object_output_schema()
+    )]
+    pub async fn run_write_sequence_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::unified::RunWriteSequenceInput>,
+    ) -> Result<Json<Value>, ErrorData> {
+        tools::unified::run_write_sequence(&self.state, &parts, params).await
     }
 }
 
@@ -444,6 +473,7 @@ mod tests {
         clippy::unwrap_in_result
     )]
     use super::*;
+    use crate::mcp::tool_identity::KnownMcpTool;
     use notegate_db::SpaceRepo;
     use rmcp::model::{CallToolResult, ClientInfo, ContentBlock, ServerNotification};
     use rmcp::service::SubscriptionEnd;
@@ -804,32 +834,57 @@ mod tests {
                 "purpose op",
             ),
             (
-                "file_transfer",
+                "file_upload",
                 "purpose op target byte_len media_type original_filename encryption_mode encryption_metadata upload_id part_numbers completed_parts",
                 "purpose op",
             ),
-            ("run_sequence", "purpose commands", "purpose commands"),
+            ("file_download", "purpose target", "purpose target"),
+            ("run_read_sequence", "purpose commands", "purpose commands"),
+            ("run_write_sequence", "purpose commands", "purpose commands"),
         ] {
             assert_input_properties(&tools, tool_name, properties);
             assert_required_properties(&tools, tool_name, required);
         }
 
         let common_purpose_description = "Reason for this MCP invocation. Required once at the top level; maximum 200 characters.";
-        for tool_name in ["read", "search", "write", "manage", "file_transfer"] {
+        for tool_name in [
+            "read",
+            "search",
+            "write",
+            "manage",
+            "file_download",
+            "file_upload",
+        ] {
             assert_eq!(
                 tools[tool_name].input_schema["properties"]["purpose"]["description"],
                 common_purpose_description,
                 "tool `{tool_name}` must expose the shared invocation-purpose contract"
             );
         }
+        for tool_name in ["run_read_sequence", "run_write_sequence"] {
+            assert_eq!(
+                tools[tool_name].input_schema["properties"]["purpose"]["description"],
+                "Reason for this MCP invocation. Required once at the top level; commands inherit it and must not include purpose; maximum 200 characters."
+            );
+            assert!(
+                tools[tool_name].input_schema["properties"]["commands"]["description"]
+                    .as_str()
+                    .is_some_and(|description| description.contains("Each includes tool and op"))
+            );
+        }
         assert_eq!(
-            tools["run_sequence"].input_schema["properties"]["purpose"]["description"],
-            "Reason for this MCP invocation. Required once at the top level; commands inherit it and must not include purpose; maximum 200 characters."
+            tools["file_upload"].input_schema["properties"]["op"]["enum"],
+            json!([
+                "begin_upload",
+                "prepare_parts",
+                "complete_upload",
+                "abort_upload"
+            ])
         );
-        assert_eq!(
-            tools["run_sequence"].input_schema["properties"]["commands"]["description"],
-            "Ordered flat command objects. Each includes tool and op, omits purpose and args; 1..20."
-        );
+        let download_schema = &tools["file_download"].input_schema;
+        assert_eq!(download_schema["additionalProperties"], false);
+        assert!(download_schema["properties"].get("op").is_none());
+        assert!(download_schema["properties"].get("upload_id").is_none());
 
         let me_properties = tools
             .get("me")
@@ -858,118 +913,76 @@ mod tests {
             .expect("write edits schema exists");
         assert_write_edit_schema(write_edits);
 
-        let sequence_commands = tools
-            .get("run_sequence")
-            .and_then(|tool| tool.input_schema.get("properties"))
-            .and_then(|properties| properties.get("commands"))
-            .expect("sequence commands schema exists");
-        assert_eq!(sequence_commands["minItems"], 1);
-        assert_eq!(sequence_commands["maxItems"], 20);
-        let sequence_command = sequence_commands
-            .get("items")
-            .expect("sequence command item schema exists");
-        assert!(sequence_command.get("$ref").is_none());
-        let sequence_variants = sequence_command
-            .get("oneOf")
-            .and_then(Value::as_array)
-            .expect("sequence command exposes tool-discriminated variants");
-        assert_eq!(sequence_variants.len(), 4);
-        let sequence_variants = sequence_variants
-            .iter()
-            .map(|variant| {
-                let properties = variant
-                    .get("properties")
-                    .and_then(Value::as_object)
-                    .expect("sequence variant properties exist");
-                assert!(!properties.contains_key("purpose"));
-                assert!(!properties.contains_key("args"));
-                assert_eq!(variant["additionalProperties"], false);
-                let tool = properties["tool"]["const"]
-                    .as_str()
-                    .expect("sequence variant fixes one tool");
-                (tool, variant)
-            })
-            .collect::<BTreeMap<_, _>>();
-        assert_eq!(
-            sequence_variants.keys().copied().collect::<BTreeSet<_>>(),
-            BTreeSet::from(["manage", "read", "search", "write"])
-        );
-        for (tool, operations) in [
-            (
-                "read",
-                json!(["spaces", "ls", "tree", "stat", "read", "changes"]),
-            ),
-            ("search", json!(["find", "grep"])),
-            ("write", json!(["write", "append", "patch", "edit"])),
-            ("manage", json!(["mkdir", "mv", "cp", "rm"])),
+        for (sequence_name, expected_tools) in [
+            ("run_read_sequence", BTreeSet::from(["read", "search"])),
+            ("run_write_sequence", BTreeSet::from(["manage", "write"])),
         ] {
+            let sequence_commands = tools[sequence_name].input_schema["properties"]
+                .get("commands")
+                .expect("sequence commands schema exists");
+            assert_eq!(sequence_commands["minItems"], 1);
+            assert_eq!(sequence_commands["maxItems"], 20);
+            let variants = sequence_commands["items"]["oneOf"]
+                .as_array()
+                .expect("tool-discriminated variants");
+            let variants = variants
+                .iter()
+                .map(|variant| {
+                    let properties = variant["properties"]
+                        .as_object()
+                        .expect("sequence variant properties");
+                    assert!(!properties.contains_key("purpose"));
+                    assert!(!properties.contains_key("args"));
+                    assert_eq!(variant["additionalProperties"], false);
+                    (
+                        properties["tool"]["const"].as_str().expect("fixed tool"),
+                        variant,
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
             assert_eq!(
-                sequence_variants[tool]["properties"]["op"]["enum"], operations,
-                "sequence variant must expose only operations for {tool}"
+                variants.keys().copied().collect::<BTreeSet<_>>(),
+                expected_tools
             );
+            for (tool, variant) in variants {
+                let direct_fields = tools[tool].input_schema["properties"]
+                    .as_object()
+                    .expect("direct fields")
+                    .keys()
+                    .filter(|field| field.as_str() != "purpose")
+                    .map(String::as_str)
+                    .collect::<BTreeSet<_>>();
+                let sequence_fields = variant["properties"]
+                    .as_object()
+                    .expect("sequence fields")
+                    .keys()
+                    .filter(|field| field.as_str() != "tool")
+                    .map(String::as_str)
+                    .collect::<BTreeSet<_>>();
+                assert_eq!(sequence_fields, direct_fields);
+            }
         }
-        for tool in ["read", "search", "write", "manage"] {
-            let direct_fields = tools[tool].input_schema["properties"]
-                .as_object()
-                .expect("direct tool properties exist")
-                .keys()
-                .filter(|field| field.as_str() != "purpose")
-                .map(String::as_str)
-                .collect::<BTreeSet<_>>();
-            let sequence_fields = sequence_variants[tool]["properties"]
-                .as_object()
-                .expect("sequence variant properties exist")
-                .keys()
-                .filter(|field| field.as_str() != "tool")
-                .map(String::as_str)
-                .collect::<BTreeSet<_>>();
-            assert_eq!(
-                sequence_fields, direct_fields,
-                "sequence variant must reuse the direct {tool} field vocabulary"
-            );
-        }
-        assert!(sequence_variants["read"]["properties"].get("q").is_none());
-        assert!(
-            sequence_variants["search"]["properties"]
-                .get("content")
-                .is_none()
-        );
-        assert!(
-            sequence_variants["write"]["properties"]
-                .get("source")
-                .is_none()
-        );
-        assert!(
-            sequence_variants["manage"]["properties"]
-                .get("cursor")
-                .is_none()
-        );
-        assert_eq!(
-            sequence_variants["write"]["properties"]["create"]["type"],
-            "boolean"
-        );
-        assert_eq!(
-            sequence_variants["manage"]["properties"]["recursive"]["type"],
-            "boolean"
-        );
-        let sequence_edits = sequence_variants["write"]
-            .pointer("/properties/edits")
-            .expect("sequence write edits schema exists");
-        assert_write_edit_schema(sequence_edits);
 
-        let sequence = tools.get("run_sequence").expect("run_sequence tool exists");
-        let description = sequence
+        let read_sequence = tools
+            .get("run_read_sequence")
+            .expect("read sequence tool exists");
+        let read_sequence_description = read_sequence
             .description
             .as_deref()
-            .expect("run_sequence description exists");
-        assert!(description.contains("Preferred batch tool"));
-        assert!(description.contains("inherit the one top-level purpose"));
-        assert!(description.contains("tool-discriminated flat objects"));
-        assert!(description.contains("without purpose or args"));
-        assert!(description.contains("preflights every command"));
-        assert!(description.contains("runs mv, cp, rm"));
-        assert!(description.contains("first failure in input order"));
-        assert!(description.contains("already-started independent reads/searches may finish"));
+            .expect("read sequence description");
+        assert!(read_sequence_description.contains("at most 4 concurrently"));
+        assert!(read_sequence_description.contains("input order"));
+
+        let write_sequence = tools
+            .get("run_write_sequence")
+            .expect("write sequence tool exists");
+        let write_sequence_description = write_sequence
+            .description
+            .as_deref()
+            .expect("write sequence description");
+        assert!(write_sequence_description.contains("one at a time"));
+        assert!(write_sequence_description.contains("first runtime failure"));
+        assert!(write_sequence_description.contains("does not roll back"));
 
         let read = tools.get("read").expect("read tool exists");
         let description = read
@@ -1010,22 +1023,31 @@ mod tests {
     }
 
     #[test]
-    fn me_tool_annotations_match_its_read_only_behavior() {
-        let me = McpServer::tool_router()
+    fn tool_annotations_match_read_and_write_boundaries() {
+        let tools = McpServer::tool_router()
             .list_all()
             .into_iter()
-            .find(|tool| tool.name == "me")
-            .expect("me tool exists");
-        let annotations = me.annotations.as_ref().expect("me annotations exist");
+            .map(|tool| (tool.name.to_string(), tool))
+            .collect::<BTreeMap<_, _>>();
 
-        assert_eq!(
-            annotations.title.as_deref(),
-            Some("Inspect NoteGate Identity")
-        );
-        assert_eq!(annotations.read_only_hint, Some(true));
-        assert_eq!(annotations.destructive_hint, Some(false));
-        assert_eq!(annotations.idempotent_hint, Some(true));
-        assert_eq!(annotations.open_world_hint, Some(false));
+        for (name, read_only, destructive) in [
+            ("me", true, false),
+            ("read", true, false),
+            ("search", true, false),
+            ("file_download", true, false),
+            ("run_read_sequence", true, false),
+            ("write", false, true),
+            ("manage", false, true),
+            ("file_upload", false, true),
+            ("run_write_sequence", false, true),
+        ] {
+            let annotations = tools[name]
+                .annotations
+                .as_ref()
+                .expect("tool annotations exist");
+            assert_eq!(annotations.read_only_hint, Some(read_only), "{name}");
+            assert_eq!(annotations.destructive_hint, Some(destructive), "{name}");
+        }
     }
 
     #[test]
@@ -1033,7 +1055,8 @@ mod tests {
         assert!(MCP_SERVER_INSTRUCTIONS.contains("space"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("except `me`"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("exactly one top-level `purpose`"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("2-20 commands"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("run_read_sequence` for 2-20 independent"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("run_write_sequence` for 2-20 ordered"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("later input depends"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("read"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("page.next_cursor"));
@@ -1043,22 +1066,26 @@ mod tests {
         assert!(MCP_SERVER_INSTRUCTIONS.contains("search"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("write"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("manage"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("file_transfer"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("file_download"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("file_upload"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("next_action"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("run_sequence"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("run_read_sequence"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("run_write_sequence"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("cannot create"));
 
-        let file_transfer = McpServer::tool_router()
+        let file_tools = McpServer::tool_router()
             .list_all()
             .into_iter()
-            .find(|tool| tool.name == "file_transfer")
-            .expect("file_transfer tool exists");
-        assert!(
-            file_transfer
-                .description
-                .as_deref()
-                .is_some_and(|description| description.contains("next_action"))
-        );
+            .filter(|tool| matches!(tool.name.as_ref(), "file_download" | "file_upload"))
+            .collect::<Vec<_>>();
+        assert_eq!(file_tools.len(), 2);
+        for tool in file_tools {
+            assert!(
+                tool.description
+                    .as_deref()
+                    .is_some_and(|description| description.contains("next_action"))
+            );
+        }
 
         let read = McpServer::tool_router()
             .list_all()
@@ -1075,15 +1102,10 @@ mod tests {
     }
 
     fn expected_tool_names() -> BTreeSet<&'static str> {
-        BTreeSet::from([
-            "me",
-            "read",
-            "search",
-            "write",
-            "manage",
-            "file_transfer",
-            "run_sequence",
-        ])
+        KnownMcpTool::ALL
+            .into_iter()
+            .map(KnownMcpTool::as_str)
+            .collect()
     }
 
     fn assert_input_properties(
@@ -1138,20 +1160,15 @@ mod tests {
                         "new_text": "after",
                         "mode": "latest"
                     }]
-                },
-                {
-                    "tool": "read",
-                    "op": "changes",
-                    "target": "rest-test:/",
-                    "direction": "newer"
                 }
             ]
         }))?;
 
-        let error = match tools::unified::run_sequence(&state, &parts, Parameters(input)).await {
-            Ok(_) => panic!("missing changes cursor must fail preflight"),
-            Err(error) => error,
-        };
+        let error =
+            match tools::unified::run_write_sequence(&state, &parts, Parameters(input)).await {
+                Ok(_) => panic!("invalid patch must fail preflight"),
+                Err(error) => error,
+            };
         assert_eq!(
             error
                 .data
@@ -1164,9 +1181,8 @@ mod tests {
             .as_ref()
             .and_then(|data| data["errors"].as_array())
             .expect("preflight errors");
-        assert_eq!(errors.len(), 2);
+        assert_eq!(errors.len(), 1);
         assert_eq!(errors[0]["index"], 1);
-        assert_eq!(errors[1]["index"], 2);
         let stat =
             tools::files::stat(&state, &parts, "rest-test:/should-not-exist.md".to_owned()).await;
         assert!(stat.is_err(), "the earlier write must not have run");
@@ -1209,10 +1225,11 @@ mod tests {
             ]
         }))?;
 
-        let error = match tools::unified::run_sequence(&state, &parts, Parameters(input)).await {
-            Ok(_) => panic!("invalid JSON must fail sequence preflight"),
-            Err(error) => error,
-        };
+        let error =
+            match tools::unified::run_write_sequence(&state, &parts, Parameters(input)).await {
+                Ok(_) => panic!("invalid JSON must fail sequence preflight"),
+                Err(error) => error,
+            };
         let data = error.data.as_ref().expect("structured preflight data");
         assert_eq!(data["code"], "sequence_preflight_failed");
         assert_eq!(data["executed"], false);
@@ -1270,11 +1287,11 @@ mod tests {
                 ]
             }))?;
 
-            let error = match tools::unified::run_sequence(&state, &parts, Parameters(input)).await
-            {
-                Ok(_) => panic!("root manage target must fail sequence preflight"),
-                Err(error) => error,
-            };
+            let error =
+                match tools::unified::run_write_sequence(&state, &parts, Parameters(input)).await {
+                    Ok(_) => panic!("root manage target must fail sequence preflight"),
+                    Err(error) => error,
+                };
             let data = error.data.as_ref().expect("structured preflight data");
             assert_eq!(data["code"], "sequence_preflight_failed");
             assert_eq!(data["executed"], false);
@@ -1289,7 +1306,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sequence_parent_stat_observes_a_created_child()
+    async fn write_sequence_stops_after_the_first_runtime_failure()
     -> Result<(), Box<dyn std::error::Error>> {
         let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
             return Ok(());
@@ -1302,29 +1319,47 @@ mod tests {
             .await?;
         let mut parts = axum::http::Request::new(()).into_parts().0;
         parts.extensions.insert(caller);
-        tools::files::mkdir(&state, &parts, "rest-test:/parent".to_owned(), false).await?;
         let input = serde_json::from_value(serde_json::json!({
-            "purpose": "create a child before reading parent metadata",
+            "purpose": "stop mutations after a runtime failure",
             "commands": [
                 {
                     "tool": "write",
                     "op": "write",
-                    "target": "rest-test:/parent/child.md",
-                    "content": "child",
+                    "target": "rest-test:/completed.md",
+                    "content": "completed",
                     "create": true
                 },
                 {
-                    "tool": "read",
-                    "op": "stat",
-                    "target": "rest-test:/parent"
+                    "tool": "manage",
+                    "op": "rm",
+                    "target": "rest-test:/missing.md"
+                },
+                {
+                    "tool": "write",
+                    "op": "write",
+                    "target": "rest-test:/skipped.md",
+                    "content": "must not be written",
+                    "create": true
                 }
             ]
         }))?;
 
-        let Json(result) = tools::unified::run_sequence(&state, &parts, Parameters(input)).await?;
-        assert_eq!(result["ok"], true);
-        assert_eq!(result["completed"], 2);
-        assert_eq!(result["results"][1]["result"]["node"]["has_children"], true);
+        let Json(result) =
+            tools::unified::run_write_sequence(&state, &parts, Parameters(input)).await?;
+        assert_eq!(result["ok"], false);
+        assert_eq!(result["completed"], 1);
+        assert_eq!(result["failed"], 1);
+        assert_eq!(result["skipped"], 1);
+        assert!(
+            tools::files::stat(&state, &parts, "rest-test:/completed.md".to_owned())
+                .await
+                .is_ok()
+        );
+        assert!(
+            tools::files::stat(&state, &parts, "rest-test:/skipped.md".to_owned())
+                .await
+                .is_err()
+        );
 
         db.cleanup().await;
         Ok(())

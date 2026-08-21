@@ -78,6 +78,6 @@ OAuth 계열 인증은 user로 처리한다. Browser login은 opaque browser ses
 - Node는 folder/text/file 공통 시스템 관리 `metadata` JSON object를 가진다. 외부 caller에게는 읽기 전용이다.
 - Text는 plain UTF-8 content 또는 client-side encrypted payload다. `system_max` Space는 plain Text를 서버 관리 방식으로 at-rest 암호화할 수 있다. grep/patch는 plain Text만 대상으로 하며 서버 관리 암호화는 서버에서 투명하게 복호화한다.
 - Markdown Text의 leading YAML frontmatter는 Text content 안의 표시용 convention이며 Node `metadata`로 해석하거나 동기화하지 않는다.
-- File은 object/binary content다. REST와 MCP `file_transfer`는 S3 호환 presigned URL을 제공하며, File bytes는 API JSON payload를 통과하지 않는다.
+- File은 object/binary content다. REST와 MCP `file_upload`/`file_download`는 S3 호환 presigned URL을 제공하며, File bytes는 API JSON payload를 통과하지 않는다.
 - Agent connection permission은 `read` 또는 `write`다. `write`는 `read`를 포함한다.
 - User/agent action attribution은 account id로 기록한다.

@@ -220,7 +220,7 @@ fn write_locked_error(scope: WriteLockScope) -> ErrorData {
     let (scope_name, hint) = match scope {
         WriteLockScope::TargetOrAncestor => (
             "target_or_ancestor",
-            "Use read op=stat on the target to inspect write_lock_sources. Only the space owner can unlock it in the Dashboard. If file_transfer begin_upload was rejected, unlock the target and call begin_upload again; no upload handle was created.",
+            "Use read op=stat on the target to inspect write_lock_sources. Only the space owner can unlock it in the Dashboard. If file_upload begin_upload was rejected, unlock the target and call begin_upload again; no upload handle was created.",
         ),
         WriteLockScope::Descendant => (
             "descendant",

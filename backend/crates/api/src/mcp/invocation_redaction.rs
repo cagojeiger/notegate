@@ -8,6 +8,8 @@ use rmcp::ErrorData;
 use rmcp::model::{CallToolResponse, CallToolResult};
 use serde_json::{Map, Value, json};
 
+use super::tool_identity::KnownMcpTool;
+
 const PURPOSE_MAX_CHARS: usize = 200;
 const SAFE_STRING_MAX_CHARS: usize = 2_048;
 const SAFE_INPUT_ARRAY_MAX_ITEMS: usize = 100;
@@ -42,15 +44,15 @@ account actor_account_id affected_parent_ids agent appended baseline_call byte_l
 can_create_space can_manage_agents capabilities code collect_response_header completed \
 content_blocks_omitted content_length content_returned content_sha256 copied counts created_at data \
 created_paths default_search_enabled default_text_encryption_enabled deleted depth description \
-direction edited edits_applied effective_write_locked end_line error errors errors_field event_id events executed \
-expected_count expires_in_seconds failed_index features field fields files has_children has_more \
+direction edited edits edits_applied effective_write_locked end_line error errors errors_field event_id events executed \
+expected_count expires_in_seconds failed features field fields files has_children has_more \
 id includes_descendants index input item_kind items kind limit line_count matches \
 max_concurrency media_type method mode name next_action next_start_line node node_id nodes ok op \
-operation order page parent_node_id_after parent_node_id_before parent_scope_known part_count phase \
+operation order page parent_node_id_after parent_node_id_before parent_scope_known part_count \
 part_number part_numbers part_size parts patched path path_changed permission previous_sha256 \
 purge_after purpose recoverable repeat requires resource result results resync_required \
 retry_after_ms retry_after_seconds retryable returned returned_lines scope search_enabled \
-server_version sort_order source_path space spaces start_line status subtree_changed suggestions \
+server_version skipped sort_order source_path space spaces start_line status subtree_changed suggestions \
 target text_at_rest_encryption text_encryption text_storage_format texts then tool transfer \
 transfer_field transfers_field truncated unchanged updated_at upload_id user when encryption_mode \
 write_lock_changed write_lock_sources write_locked";
@@ -127,7 +129,9 @@ fn redact_tool_input(
         return redaction_marker("unrecognized_input_shape", input);
     };
 
-    if tool == "me" {
+    let known_tool = KnownMcpTool::parse(tool);
+
+    if known_tool == Some(KnownMcpTool::Me) {
         return select_input_fields(
             input,
             EMPTY,
@@ -138,7 +142,7 @@ fn redact_tool_input(
         );
     }
 
-    if tool == "run_sequence" {
+    if known_tool.is_some_and(KnownMcpTool::is_sequence) {
         return select_input_fields(
             input,
             EMPTY,
@@ -146,6 +150,17 @@ fn redact_tool_input(
             include_purpose,
             include_tool,
             InputSpecial::Commands,
+        );
+    }
+
+    if known_tool == Some(KnownMcpTool::FileDownload) {
+        return select_input_fields(
+            input,
+            "target",
+            NO_SENSITIVE,
+            include_purpose,
+            include_tool,
+            InputSpecial::None,
         );
     }
 
@@ -218,21 +233,20 @@ fn input_policy(tool: &str, op: &str) -> Option<(FieldSet, SensitiveFields, Inpu
             InputSpecial::None,
         ),
         ("manage", "rm") => ("op target recursive", NO_SENSITIVE, InputSpecial::None),
-        ("file_transfer", "begin_upload") => (
+        ("file_upload", "begin_upload") => (
             "op target byte_len media_type encryption_mode",
             UPLOAD_METADATA,
             InputSpecial::None,
         ),
-        ("file_transfer", "prepare_parts") => (
+        ("file_upload", "prepare_parts") => (
             "op upload_id part_numbers",
             NO_SENSITIVE,
             InputSpecial::None,
         ),
-        ("file_transfer", "complete_upload") => {
+        ("file_upload", "complete_upload") => {
             ("op upload_id", NO_SENSITIVE, InputSpecial::CompletedParts)
         }
-        ("file_transfer", "abort_upload") => ("op upload_id", NO_SENSITIVE, InputSpecial::None),
-        ("file_transfer", "prepare_download") => ("op target", NO_SENSITIVE, InputSpecial::None),
+        ("file_upload", "abort_upload") => ("op upload_id", NO_SENSITIVE, InputSpecial::None),
         _ => return None,
     };
     Some(policy)
@@ -252,10 +266,7 @@ fn classify_unknown_input(
 }
 
 fn known_op_tool(tool: &str) -> bool {
-    matches!(
-        tool,
-        "read" | "search" | "write" | "manage" | "file_transfer"
-    )
+    KnownMcpTool::parse(tool).is_some_and(KnownMcpTool::accepts_op)
 }
 
 fn field_set_contains(fields: FieldSet, key: &str) -> bool {
@@ -499,13 +510,13 @@ fn response_fields(tool: &str, op: Option<&str>) -> Option<FieldSet> {
         ("manage", Some("mv")) => Some("space node"),
         ("manage", Some("cp")) => Some("space source_path node copied counts"),
         ("manage", Some("rm")) => Some("space path deleted purge_after"),
-        ("file_transfer", Some("begin_upload")) => Some("upload_id target transfer next_action"),
-        ("file_transfer", Some("prepare_parts")) => Some("upload_id parts next_action"),
-        ("file_transfer", Some("complete_upload")) => Some("upload_id node next_action"),
-        ("file_transfer", Some("abort_upload")) => Some("upload_id status next_action"),
-        ("file_transfer", Some("prepare_download")) => Some("target transfer node next_action"),
-        ("run_sequence", _) => {
-            Some("ok phase executed completed failed_index results error next_action")
+        ("file_download", None) => Some("target transfer node next_action"),
+        ("file_upload", Some("begin_upload")) => Some("upload_id target transfer next_action"),
+        ("file_upload", Some("prepare_parts")) => Some("upload_id parts next_action"),
+        ("file_upload", Some("complete_upload")) => Some("upload_id node next_action"),
+        ("file_upload", Some("abort_upload")) => Some("upload_id status next_action"),
+        ("run_read_sequence" | "run_write_sequence", _) => {
+            Some("ok completed failed skipped results")
         }
         _ => None,
     }
@@ -602,10 +613,14 @@ fn redact_purpose(value: &Value) -> Value {
 }
 
 fn redact_known_tool(value: &Value) -> Value {
-    match value.as_str() {
-        Some(tool @ ("read" | "search" | "write" | "manage")) => Value::String(tool.to_owned()),
-        _ => redaction_marker("unrecognized_command_tool", value),
-    }
+    value
+        .as_str()
+        .and_then(KnownMcpTool::parse)
+        .filter(|tool| tool.is_sequence_command())
+        .map_or_else(
+            || redaction_marker("unrecognized_command_tool", value),
+            |tool| Value::String(tool.as_str().to_owned()),
+        )
 }
 
 fn safe_input_value(value: &Value) -> Value {
@@ -727,19 +742,25 @@ mod tests {
 
     #[test]
     fn sequence_inputs_delegate_to_child_tool_policies() {
-        let input = json!({
+        let read_input = json!({
+            "purpose": "find note updates",
+            "commands": [
+                {"tool": "search", "op": "grep", "target": "daily:/", "q": "SECRET_QUERY"}
+            ]
+        });
+        let write_input = json!({
             "purpose": "apply note updates",
             "commands": [
-                {"tool": "search", "op": "grep", "target": "daily:/", "q": "SECRET_QUERY"},
                 {"tool": "write", "op": "write", "target": "daily:/note.md", "content": "SECRET_BODY"}
             ]
         });
 
-        let redacted = redact_input("run_sequence", &input);
-        let text = serialized(&redacted);
+        let read = redact_input("run_read_sequence", &read_input);
+        let write = redact_input("run_write_sequence", &write_input);
+        let text = format!("{}{}", serialized(&read), serialized(&write));
 
-        assert_eq!(redacted["commands"][0]["tool"], "search");
-        assert_eq!(redacted["commands"][1]["target"], "daily:/note.md");
+        assert_eq!(read["commands"][0]["tool"], "search");
+        assert_eq!(write["commands"][0]["target"], "daily:/note.md");
         assert!(!text.contains("SECRET_QUERY"));
         assert!(!text.contains("SECRET_BODY"));
     }
@@ -806,10 +827,9 @@ mod tests {
         });
         let sequence_result = Ok(CallToolResult::structured(json!({
             "ok": true,
-            "phase": "complete",
-            "executed": true,
             "completed": 1,
-            "failed_index": null,
+            "failed": 0,
+            "skipped": 0,
             "results": [{
                 "index": 0,
                 "tool": "search",
@@ -828,7 +848,7 @@ mod tests {
         .into());
 
         let direct = redact_response("search", &grep_input, &grep_result);
-        let sequence = redact_response("run_sequence", &sequence_input, &sequence_result);
+        let sequence = redact_response("run_read_sequence", &sequence_input, &sequence_result);
         let direct_text = serialized(&direct);
         let sequence_text = serialized(&sequence);
 
@@ -840,8 +860,8 @@ mod tests {
             sequence["result"]["results"][0]["result"]["items"][0]["match_lines"]["category"],
             "document_content"
         );
-        assert_eq!(sequence["result"]["phase"], "complete");
-        assert_eq!(sequence["result"]["executed"], true);
+        assert_eq!(sequence["result"]["failed"], 0);
+        assert_eq!(sequence["result"]["skipped"], 0);
         assert!(!direct_text.contains("SECRET_MATCH_LINE"));
         assert!(!sequence_text.contains("SECRET_SEQUENCE_MATCH_LINE"));
     }
@@ -869,7 +889,7 @@ mod tests {
             "node": {"path": "/report.pdf", "name": "report.pdf", "kind": "file"},
             "next_action": {"kind": "http_download", "instruction": "SECRET_INSTRUCTION", "transfer_field": "transfer"}
         })).into());
-        let transfer_input = json!({"purpose": "download report", "op": "prepare_download", "target": "daily:/report.pdf"});
+        let transfer_input = json!({"purpose": "download report", "target": "daily:/report.pdf"});
         let identity = Ok(CallToolResult::structured(json!({
             "account": {"id": "id", "kind": "user", "display_name": "SECRET_NAME"},
             "user": {"email": "SECRET_EMAIL"},
@@ -878,10 +898,10 @@ mod tests {
         }))
         .into());
 
-        let upload = redact_input("file_transfer", &upload_input);
+        let upload = redact_input("file_upload", &upload_input);
         let upload_text = serialized(&upload);
         let transfer_text = serialized(&redact_response(
-            "file_transfer",
+            "file_download",
             &transfer_input,
             &transfer,
         ));
@@ -928,41 +948,49 @@ mod tests {
         });
         let result = Ok(CallToolResult::structured(json!({
             "ok": false,
-            "phase": "runtime",
-            "executed": true,
             "completed": 0,
-            "failed_index": 0,
-            "results": [],
-            "error": {
-                "code": -32602,
-                "message": "SECRET_SEQUENCE_ERROR",
-                "data": {
-                    "code": "invalid_input",
-                    "recoverable": true,
-                    "next_action": {
-                        "kind": "retry",
-                        "hint": "SECRET_SEQUENCE_HINT",
-                        "input": {"q": "SECRET_SEQUENCE_QUERY", "target": "daily:/"}
+            "failed": 1,
+            "skipped": 0,
+            "results": [{
+                "index": 0,
+                "tool": "search",
+                "op": "grep",
+                "ok": false,
+                "error": {
+                    "code": -32602,
+                    "message": "SECRET_SEQUENCE_ERROR",
+                    "data": {
+                        "code": "invalid_input",
+                        "recoverable": true,
+                        "next_action": {
+                            "kind": "retry",
+                            "hint": "SECRET_SEQUENCE_HINT",
+                            "input": {
+                                "tool": "search",
+                                "op": "grep",
+                                "q": "SECRET_SEQUENCE_QUERY",
+                                "target": "daily:/"
+                            }
+                        }
                     }
                 }
-            },
-            "next_action": {
-                "kind": "retry",
-                "hint": "SECRET_SEQUENCE_HINT",
-                "input": {"q": "SECRET_SEQUENCE_QUERY", "target": "daily:/"}
-            }
+            }]
         }))
         .into());
 
-        let redacted = redact_response("run_sequence", &input, &result);
+        let redacted = redact_response("run_read_sequence", &input, &result);
         let text = serialized(&redacted);
 
-        assert_eq!(redacted["result"]["error"]["data"]["code"], "invalid_input");
-        assert_eq!(redacted["result"]["error"]["data"]["recoverable"], true);
-        assert_eq!(redacted["result"]["phase"], "runtime");
-        assert_eq!(redacted["result"]["executed"], true);
         assert_eq!(
-            redacted["result"]["error"]["data"]["next_action"]["input"]["q"]["category"],
+            redacted["result"]["results"][0]["error"]["data"]["code"],
+            "invalid_input"
+        );
+        assert_eq!(
+            redacted["result"]["results"][0]["error"]["data"]["recoverable"],
+            true
+        );
+        assert_eq!(
+            redacted["result"]["results"][0]["error"]["data"]["next_action"]["input"]["q"]["category"],
             "search_query"
         );
         for secret in [
@@ -986,10 +1014,10 @@ mod tests {
                 "kind": "invalid_input",
                 "code": "sequence_preflight_failed",
                 "ok": false,
-                "phase": "preflight",
                 "executed": false,
                 "completed": 0,
-                "failed_index": null,
+                "failed": 0,
+                "skipped": 0,
                 "results": [],
                 "next_action": {
                     "kind": "apply_error_actions",
@@ -1009,14 +1037,14 @@ mod tests {
             })),
         ));
 
-        let redacted = redact_response("run_sequence", &input, &result);
+        let redacted = redact_response("run_read_sequence", &input, &result);
         let text = serialized(&redacted);
 
         assert_eq!(redacted["error"]["data"]["executed"], false);
         assert_eq!(redacted["error"]["data"]["ok"], false);
-        assert_eq!(redacted["error"]["data"]["phase"], "preflight");
         assert_eq!(redacted["error"]["data"]["completed"], 0);
-        assert!(redacted["error"]["data"]["failed_index"].is_null());
+        assert_eq!(redacted["error"]["data"]["failed"], 0);
+        assert_eq!(redacted["error"]["data"]["skipped"], 0);
         assert_eq!(
             redacted["error"]["data"]["next_action"]["kind"],
             "apply_error_actions"
@@ -1039,56 +1067,64 @@ mod tests {
     }
 
     #[test]
-    fn sequence_responses_redact_child_read_content_and_patch_diff() {
-        let input = json!({
-            "purpose": "read and patch notes",
-            "commands": [
-                {"tool": "read", "op": "read", "target": "daily:/one.md"},
-                {"tool": "write", "op": "patch", "target": "daily:/two.md", "edits": []}
-            ]
+    fn sequence_responses_redact_read_content_and_write_diff() {
+        let read_input = json!({
+            "purpose": "read notes",
+            "commands": [{"tool": "read", "op": "read", "target": "daily:/one.md"}]
         });
-        let result = Ok(CallToolResult::structured(json!({
+        let read_result = Ok(CallToolResult::structured(json!({
             "ok": true,
-            "completed": 2,
-            "failed_index": null,
-            "results": [
-                {
-                    "index": 0,
-                    "tool": "read",
-                    "op": "read",
-                    "ok": true,
-                    "result": {
-                        "space": "daily",
-                        "path": "/one.md",
-                        "content": "SECRET_SEQUENCE_CONTENT",
-                        "content_sha256": "hash"
-                    }
-                },
-                {
-                    "index": 1,
-                    "tool": "write",
-                    "op": "patch",
-                    "ok": true,
-                    "result": {
-                        "space": "daily",
-                        "path": "/two.md",
-                        "diff": "SECRET_SEQUENCE_DIFF",
-                        "content_sha256": "hash"
-                    }
+            "completed": 1,
+            "failed": 0,
+            "skipped": 0,
+            "results": [{
+                "index": 0,
+                "tool": "read",
+                "op": "read",
+                "ok": true,
+                "result": {
+                    "space": "daily",
+                    "path": "/one.md",
+                    "content": "SECRET_SEQUENCE_CONTENT",
+                    "content_sha256": "hash"
                 }
-            ]
+            }]
+        }))
+        .into());
+        let write_input = json!({
+            "purpose": "patch notes",
+            "commands": [{"tool": "write", "op": "patch", "target": "daily:/two.md", "edits": []}]
+        });
+        let write_result = Ok(CallToolResult::structured(json!({
+            "ok": true,
+            "completed": 1,
+            "failed": 0,
+            "skipped": 0,
+            "results": [{
+                "index": 0,
+                "tool": "write",
+                "op": "patch",
+                "ok": true,
+                "result": {
+                    "space": "daily",
+                    "path": "/two.md",
+                    "diff": "SECRET_SEQUENCE_DIFF",
+                    "content_sha256": "hash"
+                }
+            }]
         }))
         .into());
 
-        let redacted = redact_response("run_sequence", &input, &result);
-        let text = serialized(&redacted);
+        let read = redact_response("run_read_sequence", &read_input, &read_result);
+        let write = redact_response("run_write_sequence", &write_input, &write_result);
+        let text = format!("{}{}", serialized(&read), serialized(&write));
 
         assert_eq!(
-            redacted["result"]["results"][0]["result"]["content"]["category"],
+            read["result"]["results"][0]["result"]["content"]["category"],
             "document_content"
         );
         assert_eq!(
-            redacted["result"]["results"][1]["result"]["diff"]["category"],
+            write["result"]["results"][0]["result"]["diff"]["category"],
             "document_content"
         );
         assert!(!text.contains("SECRET_SEQUENCE_CONTENT"));
@@ -1100,7 +1136,7 @@ mod tests {
         let sequence = json!({
             "purpose": "test nested commands",
             "commands": [{
-                "tool": "run_sequence",
+                "tool": "run_read_sequence",
                 "commands": [{"tool": "write", "content": "SECRET_NESTED_CONTENT"}]
             }]
         });
@@ -1109,7 +1145,7 @@ mod tests {
             "unexpected": "SECRET_ME_ARGUMENT"
         });
 
-        let sequence_text = serialized(&redact_input("run_sequence", &sequence));
+        let sequence_text = serialized(&redact_input("run_read_sequence", &sequence));
         let me_text = serialized(&redact_input("me", &me));
 
         assert!(!sequence_text.contains("SECRET_NESTED_CONTENT"));
