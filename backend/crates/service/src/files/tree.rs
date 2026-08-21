@@ -1,18 +1,17 @@
 //! `tree`: deterministic DFS over node summaries.
 
 use notegate_core::limits;
-use notegate_model::NodeKind;
+use notegate_model::files::ChildrenCursor;
+use notegate_model::search::{TreeCursor, TreeFrame, TreePage, TreeRequest};
+use notegate_model::{Node, NodeKind};
 
 use crate::error::{ServiceError, ServiceResult};
 use crate::files::policy::FileCommand;
 use crate::pagination::clamp_limit;
 
-use super::{
-    SearchService, TreeCursor, TreeFrame, TreePage, TreeRequest, child_cursor, join_path,
-    search_fingerprint,
-};
+use super::{FilesService, hydrate_node_views, join_path};
 
-impl SearchService {
+impl FilesService {
     /// List a subtree as path-first node summaries. Requires read permission.
     pub async fn tree(
         &self,
@@ -23,7 +22,7 @@ impl SearchService {
         self.authorize(space_id, caller_account_id, FileCommand::Ls)
             .await?;
         let (scope_node_id, _) = self
-            .resolve_scope_folder(space_id, request.path.as_deref())
+            .resolve_tree_scope(space_id, request.path.as_deref())
             .await?;
         let depth = clamp_tree_depth(request.depth);
         let limit = clamp_limit(
@@ -116,12 +115,34 @@ impl SearchService {
         };
 
         Ok(TreePage {
-            items: self.node_views(space_id, items).await?,
+            items: hydrate_node_views(&self.store, space_id, items).await?,
             depth,
             limit,
             has_more,
             next_cursor,
         })
+    }
+
+    async fn resolve_tree_scope(
+        &self,
+        space_id: uuid::Uuid,
+        path: Option<&str>,
+    ) -> ServiceResult<(uuid::Uuid, String)> {
+        let normalized = match path {
+            Some(path) => super::validation::normalize_path(path)?,
+            None => "/".to_owned(),
+        };
+        let (node_id, kind, path) = self
+            .store
+            .resolve_search_scope(space_id, &normalized)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("scope path not found".to_owned()))?;
+        if kind != NodeKind::Folder {
+            return Err(ServiceError::InvalidInput(
+                "search scope must be a folder".to_owned(),
+            ));
+        }
+        Ok((node_id, path))
     }
 
     fn decode_tree_cursor(
@@ -168,6 +189,24 @@ impl SearchService {
         .map(Some)
         .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))
     }
+}
+
+fn child_cursor(node: &Node) -> ChildrenCursor {
+    ChildrenCursor {
+        sort_order: node.sort_order,
+        name: node.name.clone(),
+        id: node.id,
+    }
+}
+
+fn search_fingerprint(parts: &[String]) -> String {
+    let mut fingerprint = String::new();
+    for part in parts {
+        fingerprint.push_str(&part.len().to_string());
+        fingerprint.push(':');
+        fingerprint.push_str(part);
+    }
+    fingerprint
 }
 
 fn clamp_tree_depth(depth: Option<i64>) -> i64 {

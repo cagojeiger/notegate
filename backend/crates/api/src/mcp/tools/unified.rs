@@ -2,12 +2,12 @@
 
 use axum::http::request::Parts;
 use notegate_core::validation::validate_space_name;
+use notegate_search::{validate_find_input, validate_grep_input};
 use notegate_service::ServiceError;
 use notegate_service::files::{
     Target, content, parse_target, validate_structured_text,
     validation::{validate_basename, validate_text_content},
 };
-use notegate_service::search::{validate_find_input, validate_grep_input};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
@@ -15,7 +15,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::resolve::{
-    actionable_input_error, invalid_input_error, required_input, service_error, split_parent_name,
+    actionable_input_error, invalid_input_error, required_input, search_error, service_error,
+    split_parent_name,
 };
 use super::{events, files, search, spaces};
 use crate::mcp::contract::McpAction;
@@ -420,7 +421,7 @@ fn validate_search_operation(input: &SearchInput) -> Result<(), ErrorData> {
                 input.include.as_deref().unwrap_or_default(),
                 input.exclude.as_deref().unwrap_or_default(),
             )
-            .map_err(service_error)?;
+            .map_err(search_error)?;
             Ok(())
         }
         "grep" => {
@@ -433,7 +434,7 @@ fn validate_search_operation(input: &SearchInput) -> Result<(), ErrorData> {
                 input.include.as_deref().unwrap_or_default(),
                 input.exclude.as_deref().unwrap_or_default(),
             )
-            .map_err(service_error)?;
+            .map_err(search_error)?;
             Ok(())
         }
         _ => Err(invalid_op("search", &["find", "grep"])),

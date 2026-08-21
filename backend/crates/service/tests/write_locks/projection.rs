@@ -1,8 +1,8 @@
 use notegate_db::FilesRepo;
+use notegate_search::{GrepLineMode, GrepMatchMode, GrepRequest, SearchService};
 use notegate_service::files::{
     ChildrenRequest, CopyNode, ReadText, WriteTarget, WriteText, WriteTextBody,
 };
-use notegate_service::search::{GrepLineMode, GrepMatchMode, GrepRequest, SearchService};
 
 use crate::write_lock_support::{Fixture, TestResult, assert_write_locked};
 

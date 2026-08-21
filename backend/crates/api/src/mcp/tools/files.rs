@@ -6,9 +6,8 @@ use notegate_service::ServiceError;
 use notegate_service::files::{
     AppendText, ChildrenRequest, CopyNode, CreateFolder, DeleteNode, Edit as ServiceEdit, EditText,
     LineEdit, MoveNode, NodeView, PatchError, PatchMode, PatchText, ReadText, ReadTextBody,
-    WriteTarget, WriteText, WriteTextBody,
+    TreeRequest, WriteTarget, WriteText, WriteTextBody,
 };
-use notegate_service::search::TreeRequest;
 use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -113,7 +112,7 @@ pub async fn list(
     }
 
     let page = state
-        .search
+        .files
         .tree(
             account_id,
             space_id,

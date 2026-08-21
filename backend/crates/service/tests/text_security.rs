@@ -14,13 +14,13 @@ use notegate_db::{AgentRepo, ConnectionRepo, FilesRepo, SpaceRepo};
 use notegate_model::{
     AccountKind, ConnectAgent, CreateAgent, Permission, TextAtRestEncryption, UpdateSpace,
 };
+use notegate_search::{GrepLineMode, GrepMatchMode, GrepRequest, SearchService};
 use notegate_service::ServiceError;
 use notegate_service::connections::ConnectionService;
 use notegate_service::files::{
     CreateText, FilesService, ReadText, ReadTextBody, UpdateNodeSearchPolicy, UpdateTextEncryption,
     WriteTarget, WriteText, WriteTextBody,
 };
-use notegate_service::search::{GrepLineMode, GrepMatchMode, GrepRequest, SearchService};
 
 #[tokio::test]
 async fn text_encryption_toggle_rewrites_existing_content_immediately()

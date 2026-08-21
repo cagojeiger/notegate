@@ -14,6 +14,7 @@ mod format;
 mod mutate;
 mod preview;
 mod read;
+mod tree;
 mod view;
 
 pub use format::validate_structured_text;
@@ -27,6 +28,7 @@ pub use notegate_model::files::{
     TextStats, TextView, UpdateNode, UpdateNodeSearchPolicy, UpdateNodeWriteLock,
     UpdateTextEncryption, WriteLockSource, WriteTarget, WriteText, WriteTextBody,
 };
+pub use notegate_model::search::{TreePage, TreeRequest};
 pub use notegate_model::{
     AccountKind, FileChangeEvent, FileChangeEventCursor, FileChangeEventIdCursor,
     FileChangeEventPage, FileChangeSyncPage, ListFileChangeEvents, ListFileChangeEventsById,
@@ -38,7 +40,7 @@ pub use preview::{BatchPreviewCandidate, MAX_BATCH_PREVIEW_PATH_BYTES, MAX_BATCH
 pub use read::MAX_BATCH_CHILDREN_PARENTS;
 pub use target::{Target, parse_target};
 pub use validation::FilesValidationError;
-pub(crate) use view::{hydrate_node_views, write_lock_sources_many};
+pub(crate) use view::hydrate_node_views;
 
 use notegate_db::FilesRepo;
 use notegate_model::{Caller, Channel, Node, NodeKind, Permission, TextObject};

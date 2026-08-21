@@ -2533,6 +2533,7 @@ dependencies = [
  "notegate-jobs",
  "notegate-model",
  "notegate-reconciliation",
+ "notegate-search",
  "notegate-service",
  "openidconnect",
  "reqwest 0.13.4",
@@ -2564,14 +2565,17 @@ name = "notegate-core"
 version = "0.1.75"
 dependencies = [
  "aes-gcm",
+ "base64 0.23.1",
  "config",
  "hkdf 0.13.0",
  "hmac 0.13.0",
  "secrecy",
  "serde",
+ "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.20",
  "url",
+ "uuid",
  "validator",
 ]
 
@@ -2640,6 +2644,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "notegate-search"
+version = "0.1.75"
+dependencies = [
+ "chrono",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "moka",
+ "notegate-core",
+ "notegate-db",
+ "notegate-model",
+ "regex",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "notegate-service"
 version = "0.1.75"
 dependencies = [
@@ -2654,6 +2676,7 @@ dependencies = [
  "notegate-db",
  "notegate-jobs",
  "notegate-model",
+ "notegate-search",
  "notegate-service",
  "percent-encoding",
  "pulldown-cmark",

@@ -1,6 +1,6 @@
 //! Nodes + text-object persistence (the file tree) and search.
 //!
-//! Exposes concrete persistence methods consumed by `notegate-service`.
+//! Exposes concrete persistence methods consumed by `notegate-service` and `notegate-search`.
 //! All queries use runtime-checked `query_as::<_, Row>()` / `query()` — never the
 //! `query!` macro — so a schema reset never breaks compilation. Every mutation
 //! runs in one transaction and sets attribution (created_by/updated_by/

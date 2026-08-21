@@ -21,14 +21,13 @@ use common::{TestDb, insert_user_account, setup_space};
 use notegate_core::{SearchBodyCacheConfig, limits};
 use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_model::{AccountKind, UpdateSpace};
-use notegate_service::ServiceError;
-use notegate_service::files::{
-    CreateFolder, CreateText, FilesService, UpdateNodeSearchPolicy, WriteTarget, WriteText,
-    WriteTextBody,
+use notegate_search::{
+    FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchError,
+    SearchService,
 };
-use notegate_service::search::{
-    FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
-    TreeRequest,
+use notegate_service::files::{
+    CreateFolder, CreateText, FilesService, TreeRequest, UpdateNodeSearchPolicy, WriteTarget,
+    WriteText, WriteTextBody,
 };
 use uuid::Uuid;
 
@@ -311,7 +310,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
             },
         )
         .await?;
-    let result_paths = |page: &notegate_service::search::FindPage| {
+    let result_paths = |page: &notegate_search::FindPage| {
         page.items
             .iter()
             .map(|view| (view.node.id, view.path.clone()))
@@ -518,7 +517,7 @@ needle
         .unwrap_err();
     assert_eq!(
         text_scope,
-        ServiceError::InvalidInput("search scope must be a folder".to_owned())
+        SearchError::InvalidInput("search scope must be a folder".to_owned())
     );
 
     let missing = search
@@ -540,7 +539,7 @@ needle
         .unwrap_err();
     assert_eq!(
         missing,
-        ServiceError::NotFound("scope path not found".to_owned())
+        SearchError::NotFound("scope path not found".to_owned())
     );
 
     db.cleanup().await;
@@ -788,7 +787,7 @@ async fn grep_reuses_cached_encrypted_body_until_content_sha_changes()
         .grep(owner, ws, request("replacement marker"))
         .await
         .expect_err("changed content SHA must miss the old cached body");
-    assert!(matches!(error, ServiceError::Internal(_)));
+    assert!(matches!(error, SearchError::Internal(_)));
 
     db.cleanup().await;
     Ok(())
@@ -842,7 +841,7 @@ async fn grep_body_cache_can_be_disabled() -> Result<(), Box<dyn std::error::Err
         .grep(owner, ws, request())
         .await
         .expect_err("disabled body cache must reload and decrypt the body");
-    assert!(matches!(error, ServiceError::Internal(_)));
+    assert!(matches!(error, SearchError::Internal(_)));
 
     db.cleanup().await;
     Ok(())
@@ -1086,7 +1085,7 @@ async fn tree_returns_depth_limited_subtree() -> Result<(), Box<dyn std::error::
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let (ws_repo, files, search) = services(&db);
+    let (ws_repo, files, _search) = services(&db);
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
     let (ws, root) = setup_space(&ws_repo, owner, "personal").await;
 
@@ -1095,7 +1094,7 @@ async fn tree_returns_depth_limited_subtree() -> Result<(), Box<dyn std::error::
     let _c = write_doc(&files, owner, ws, b, "c.md", "nested\n").await;
     let _z = write_doc(&files, owner, ws, root, "z.md", "sibling\n").await;
 
-    let depth_one = search
+    let depth_one = files
         .tree(
             owner,
             ws,
@@ -1115,7 +1114,7 @@ async fn tree_returns_depth_limited_subtree() -> Result<(), Box<dyn std::error::
     assert_eq!(depth_one_paths, vec!["/a", "/z.md"]);
     assert!(!depth_one.has_more);
 
-    let depth_two = search
+    let depth_two = files
         .tree(
             owner,
             ws,
@@ -1134,7 +1133,7 @@ async fn tree_returns_depth_limited_subtree() -> Result<(), Box<dyn std::error::
         .collect();
     assert_eq!(depth_two_paths, vec!["/a", "/a/b", "/z.md"]);
 
-    let scoped = search
+    let scoped = files
         .tree(
             owner,
             ws,
@@ -1437,7 +1436,7 @@ async fn garbage_cursor_is_rejected() -> Result<(), Box<dyn std::error::Error>> 
     assert!(
         matches!(
             find_err,
-            ServiceError::InvalidInput(ref message) if message == "invalid cursor"
+            SearchError::InvalidInput(ref message) if message == "invalid cursor"
         ),
         "find rejects a garbage cursor as invalid input, got {find_err:?}"
     );
@@ -1462,7 +1461,7 @@ async fn garbage_cursor_is_rejected() -> Result<(), Box<dyn std::error::Error>> 
     assert!(
         matches!(
             grep_err,
-            ServiceError::InvalidInput(ref message) if message == "invalid cursor"
+            SearchError::InvalidInput(ref message) if message == "invalid cursor"
         ),
         "grep rejects a garbage cursor as invalid input, got {grep_err:?}"
     );
@@ -1517,7 +1516,7 @@ async fn cursor_rejects_colliding_filter_arrays_for_find_and_grep()
         .unwrap_err();
     assert!(matches!(
         find_err,
-        ServiceError::InvalidInput(ref message)
+        SearchError::InvalidInput(ref message)
             if message == "search cursor does not match this query"
     ));
 
@@ -1546,7 +1545,7 @@ async fn cursor_rejects_colliding_filter_arrays_for_find_and_grep()
         .unwrap_err();
     assert!(matches!(
         grep_err,
-        ServiceError::InvalidInput(ref message)
+        SearchError::InvalidInput(ref message)
             if message == "search cursor does not match this query"
     ));
 

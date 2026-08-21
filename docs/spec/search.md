@@ -2,6 +2,8 @@
 
 Search는 MCP의 path-first command다. Browser V1과 Public V2 REST는 search endpoint를 제공하지 않는다.
 
+Runtime의 `find`/`grep` 구현은 `notegate-search` crate가 소유한다. 일반 file-tree 조회인 `tree`는 `FilesService`에 남긴다.
+
 검색은 항상 folder scope의 subtree를 대상으로 한다. Scope를 생략하면 Space root `/`를 scope로 사용한다.
 
 ## Authorization

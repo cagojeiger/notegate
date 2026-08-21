@@ -4,6 +4,7 @@
 //! implementation, so every other crate can depend on it without heavy dependencies.
 
 pub mod config;
+pub mod cursor;
 pub mod error;
 pub mod limits;
 pub mod security;
