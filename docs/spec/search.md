@@ -49,6 +49,36 @@ API는 `x-request-id`를 내부 Search 요청에 전달하고 Search 응답도 �
 context carrier는 향후 W3C `traceparent`/`tracestate` 전파를 추가하는 경계이며, 검색 명령 본문이나
 권한 계약에는 관측성 필드를 넣지 않는다.
 
+### Runtime contract
+
+Private Search HTTP는 독립 제품 API가 아니라 같은 NoteGate release의 process role 사이 계약이다.
+이번 release의 `/internal/v1`을 계약 기준선으로 삼으며 이전 private contract와의 호환은 제공하지 않는다.
+Public MCP/REST 입력은 계속 unknown field를 거부하지만, HMAC 인증된 private find/grep command는 이후
+release가 추가한 unknown field를 Search process가 무시한다. 필수 필드 누락과 기존 필드의 잘못된 type은
+계속 거부한다. API client도 Search response에 추가된 unknown field를 무시한다.
+
+`/internal/v1`에서 기존 필드의 삭제, rename, type/의미 변경과 기존 enum 의미 변경은 허용하지 않는다.
+호환되지 않는 의미 변경은 새 version path가 필요하다. 배포는 새 Search role을 먼저 전환하고, readiness를
+확인한 뒤 새 API role이 새 선택 필드를 전송하는 expand-activate 순서를 따른다.
+
+서명된 private response의 HTTP status와 error kind는 다음 계약을 따른다. API client는 status와 body가
+모순되거나 `200 OK`가 아닌 성공 status를 받으면 해당 body를 신뢰하지 않고 `search_unavailable`로
+처리한다. Canonical status가 아닌 과거 status는 허용하지 않는다.
+
+| Private error kind | HTTP status | Public error code |
+| --- | ---: | --- |
+| `invalid_input` | `400` | `invalid_input` |
+| `forbidden` | `403` | `forbidden` |
+| `not_found` | `404` | `not_found` |
+| `conflict` | `409` | `conflict` |
+| `write_locked` + `scope` | `423` | `node_write_locked` / `subtree_write_locked` |
+| `search_busy` | `429` | `search_busy` |
+| `usage_recalculation_in_progress` | `503` | `usage_recalculation_in_progress` |
+| `internal_error` | `500` | `internal_error` |
+
+MCP의 dependency/maintenance 임시 실패는 공통 JSON-RPC server code `-32001`, process capacity 거부는
+`-32002`를 사용한다. 구체적인 분기는 숫자만이 아니라 `data.code`로 수행한다.
+
 검색은 항상 folder scope의 subtree를 대상으로 한다. Scope를 생략하면 Space root `/`를 scope로 사용한다.
 
 ## Authorization

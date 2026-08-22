@@ -228,42 +228,24 @@ where
 {
     match result {
         Ok(output) => signed_json(state, path, timestamp, StatusCode::OK, &output),
-        Err(SearchRunError::Capacity(capacity)) => signed_json(
-            state,
-            path,
-            timestamp,
-            StatusCode::TOO_MANY_REQUESTS,
-            &ErrorOutput {
-                error: InternalSearchError::busy(capacity),
-            },
-        ),
-        Err(SearchRunError::Search(error)) => {
-            let status = search_error_status(&error);
-            if let notegate_search::SearchError::Internal(detail) = &error {
-                tracing::error!(event = "internal_search.execution_failed", %detail);
-            }
+        Err(SearchRunError::Capacity(capacity)) => {
+            let error = InternalSearchError::busy(capacity);
             signed_json(
                 state,
                 path,
                 timestamp,
-                status,
-                &ErrorOutput {
-                    error: InternalSearchError::from_search(error),
-                },
+                error.status(),
+                &ErrorOutput { error },
             )
         }
-    }
-}
-
-fn search_error_status(error: &notegate_search::SearchError) -> StatusCode {
-    match error {
-        notegate_search::SearchError::InvalidInput(_) => StatusCode::BAD_REQUEST,
-        notegate_search::SearchError::NotFound(_) => StatusCode::NOT_FOUND,
-        notegate_search::SearchError::Forbidden(_) => StatusCode::FORBIDDEN,
-        notegate_search::SearchError::Conflict(_)
-        | notegate_search::SearchError::WriteLocked { .. }
-        | notegate_search::SearchError::UsageRecalculationInProgress { .. } => StatusCode::CONFLICT,
-        notegate_search::SearchError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        Err(SearchRunError::Search(error)) => {
+            if let notegate_search::SearchError::Internal(detail) = &error {
+                tracing::error!(event = "internal_search.execution_failed", %detail);
+            }
+            let error = InternalSearchError::from_search(error);
+            let status = error.status();
+            signed_json(state, path, timestamp, status, &ErrorOutput { error })
+        }
     }
 }
 

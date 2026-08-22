@@ -157,6 +157,9 @@ type SearchInput = {
 - process 동시성 상한을 넘으면 `data.code=search_busy`, `operation=find|grep`,
   `retryable=true`, `retry_after_ms=1000`을 반환한다. `run_read_sequence`의 search command도
   같은 제한을 사용한다.
+- 별도 Search role의 연결, 서명 또는 private response 계약 검증에 실패하면
+  `data.code=search_unavailable`, `retryable=true`, `retry_after_ms=1000`을 반환한다. JSON-RPC
+  server code `-32001`은 다른 임시 dependency 오류도 공유하므로 caller는 `data.code`로 분기한다.
 
 필수 필드:
 
