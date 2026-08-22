@@ -5,18 +5,14 @@ use notegate_model::NodeKind;
 use notegate_search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchCapacity,
 };
-use rmcp::model::ErrorCode;
 use rmcp::{ErrorData, Json};
 use serde_json::{Value, json};
 
 use super::resolve::{actionable_input_error, caller, resolve_target, search_error};
 use super::support::page_json;
 use crate::internal_search::{RequestContext, SearchClientError};
-use crate::mcp::contract::McpAction;
+use crate::mcp::contract::{CAPACITY_BUSY_ERROR_CODE, McpAction, TEMPORARY_UNAVAILABLE_ERROR_CODE};
 use crate::state::AppState;
-
-const SEARCH_BUSY_ERROR_CODE: ErrorCode = ErrorCode(-32002);
-const SEARCH_UNAVAILABLE_ERROR_CODE: ErrorCode = ErrorCode(-32001);
 
 #[allow(clippy::too_many_arguments)]
 pub async fn find(
@@ -136,7 +132,7 @@ fn search_client_error(error: SearchClientError) -> ErrorData {
         SearchClientError::Search(error) => search_error(error),
         SearchClientError::Capacity(capacity) => search_busy_error(capacity),
         SearchClientError::Unavailable => ErrorData::new(
-            SEARCH_UNAVAILABLE_ERROR_CODE,
+            TEMPORARY_UNAVAILABLE_ERROR_CODE,
             "search service is unavailable; retry shortly",
             Some(json!({
                 "kind": "search_unavailable",
@@ -154,7 +150,7 @@ fn search_busy_error(capacity: SearchCapacity) -> ErrorData {
         SearchCapacity::Grep => "grep",
     };
     ErrorData::new(
-        SEARCH_BUSY_ERROR_CODE,
+        CAPACITY_BUSY_ERROR_CODE,
         format!("{operation} capacity is busy; retry shortly"),
         Some(json!({
             "kind": "search_busy",
@@ -230,6 +226,7 @@ mod tests {
         search_client_error,
     };
     use crate::internal_search::SearchClientError;
+    use crate::mcp::contract::{CAPACITY_BUSY_ERROR_CODE, TEMPORARY_UNAVAILABLE_ERROR_CODE};
     use notegate_search::SearchCapacity;
 
     fn assert_invalid_input(error: ErrorData, expected_message: &str) {
@@ -326,7 +323,7 @@ mod tests {
     fn search_busy_error_is_retryable_and_names_the_operation() {
         let error = search_busy_error(SearchCapacity::Grep);
 
-        assert_eq!(error.code, super::SEARCH_BUSY_ERROR_CODE);
+        assert_eq!(error.code, CAPACITY_BUSY_ERROR_CODE);
         assert_eq!(error.message, "grep capacity is busy; retry shortly");
         let data = error.data.expect("search busy error carries metadata");
         assert_eq!(data["kind"], "search_busy");
@@ -340,7 +337,7 @@ mod tests {
     fn unavailable_search_transport_is_retryable() {
         let error = search_client_error(SearchClientError::Unavailable);
 
-        assert_eq!(error.code, super::SEARCH_UNAVAILABLE_ERROR_CODE);
+        assert_eq!(error.code, TEMPORARY_UNAVAILABLE_ERROR_CODE);
         assert_eq!(
             error.message,
             "search service is unavailable; retry shortly"

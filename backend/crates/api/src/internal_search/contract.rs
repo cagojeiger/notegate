@@ -1,3 +1,4 @@
+use axum::http::StatusCode;
 use notegate_core::WriteLockScope;
 use notegate_model::NodeKind;
 use notegate_search::{
@@ -10,7 +11,6 @@ use uuid::Uuid;
 use crate::path_node_summary::PathNodeSummary;
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct FindCommand {
     pub caller_account_id: Uuid,
     pub space_id: Uuid,
@@ -57,7 +57,6 @@ impl FindCommand {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct GrepCommand {
     pub caller_account_id: Uuid,
     pub space_id: Uuid,
@@ -198,6 +197,49 @@ impl InternalSearchError {
             operation: capacity.into(),
         }
     }
+
+    /// Stable machine-readable code exposed by the public REST/MCP contracts.
+    pub(super) const fn code(&self) -> &'static str {
+        match self {
+            Self::NotFound { .. } => "not_found",
+            Self::InvalidInput { .. } => "invalid_input",
+            Self::Forbidden { .. } => "forbidden",
+            Self::Conflict { .. } => "conflict",
+            Self::WriteLocked { scope } => match scope {
+                WriteLockScopeWire::TargetOrAncestor => "node_write_locked",
+                WriteLockScopeWire::Descendant => "subtree_write_locked",
+            },
+            Self::UsageRecalculationInProgress { .. } => "usage_recalculation_in_progress",
+            Self::Busy { .. } => "search_busy",
+            Self::Internal => "internal_error",
+        }
+    }
+
+    /// Canonical HTTP status for this private wire error.
+    pub(super) const fn status(&self) -> StatusCode {
+        match self {
+            Self::NotFound { .. } => StatusCode::NOT_FOUND,
+            Self::InvalidInput { .. } => StatusCode::BAD_REQUEST,
+            Self::Forbidden { .. } => StatusCode::FORBIDDEN,
+            Self::Conflict { .. } => StatusCode::CONFLICT,
+            Self::WriteLocked { .. } => StatusCode::LOCKED,
+            Self::UsageRecalculationInProgress { .. } => StatusCode::SERVICE_UNAVAILABLE,
+            Self::Busy { .. } => StatusCode::TOO_MANY_REQUESTS,
+            Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    /// Accept the one pre-contract status used by the previous release while
+    /// rolling API and Search pods can temporarily run different versions.
+    pub(super) fn accepts_status(&self, status: StatusCode) -> bool {
+        if self.status() == status {
+            return true;
+        }
+        matches!(
+            self,
+            Self::WriteLocked { .. } | Self::UsageRecalculationInProgress { .. }
+        ) && status == StatusCode::CONFLICT
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -247,5 +289,132 @@ impl From<WriteLockScopeWire> for WriteLockScope {
             WriteLockScopeWire::TargetOrAncestor => Self::TargetOrAncestor,
             WriteLockScopeWire::Descendant => Self::Descendant,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    fn ids() -> (Uuid, Uuid) {
+        (Uuid::new_v4(), Uuid::new_v4())
+    }
+
+    #[test]
+    fn commands_ignore_future_optional_fields_but_keep_required_fields_strict() {
+        let (caller_account_id, space_id) = ids();
+        let find = json!({
+            "caller_account_id": caller_account_id,
+            "space_id": space_id,
+            "q": "README",
+            "path": "/docs",
+            "kind": null,
+            "match_mode": "contains",
+            "include": [],
+            "exclude": [],
+            "limit": 20,
+            "cursor": null,
+            "future_optional_field": true,
+        });
+        let grep = json!({
+            "caller_account_id": caller_account_id,
+            "space_id": space_id,
+            "q": "needle",
+            "path": null,
+            "match_mode": "literal",
+            "line_mode": "none",
+            "include": [],
+            "exclude": [],
+            "limit": 20,
+            "cursor": null,
+            "future_optional_field": {"value": 1},
+        });
+
+        assert!(serde_json::from_value::<FindCommand>(find.clone()).is_ok());
+        assert!(serde_json::from_value::<GrepCommand>(grep).is_ok());
+
+        let mut missing_required = find;
+        assert!(
+            missing_required
+                .as_object_mut()
+                .is_some_and(|command| command.remove("q").is_some())
+        );
+        assert!(serde_json::from_value::<FindCommand>(missing_required).is_err());
+    }
+
+    #[test]
+    fn outputs_ignore_fields_added_by_a_newer_search_process() -> serde_json::Result<()> {
+        let output = json!({
+            "items": [],
+            "limit": 20,
+            "has_more": false,
+            "next_cursor": null,
+            "execution_ms": 4,
+        });
+
+        let parsed: FindOutput = serde_json::from_value(output)?;
+        assert!(parsed.items.is_empty());
+        assert_eq!(parsed.limit, 20);
+
+        let serialized = serde_json::to_value(parsed)?;
+        assert_eq!(serialized.get("execution_ms"), None::<&Value>);
+        Ok(())
+    }
+
+    #[test]
+    fn private_errors_share_public_codes_and_canonical_statuses() {
+        let cases = [
+            (
+                InternalSearchError::InvalidInput {
+                    message: "bad".to_owned(),
+                },
+                "invalid_input",
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                InternalSearchError::WriteLocked {
+                    scope: WriteLockScopeWire::Descendant,
+                },
+                "subtree_write_locked",
+                StatusCode::LOCKED,
+            ),
+            (
+                InternalSearchError::UsageRecalculationInProgress {
+                    retry_after_seconds: 5,
+                },
+                "usage_recalculation_in_progress",
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (
+                InternalSearchError::busy(SearchCapacity::Grep),
+                "search_busy",
+                StatusCode::TOO_MANY_REQUESTS,
+            ),
+        ];
+
+        for (error, code, status) in cases {
+            assert_eq!(error.code(), code);
+            assert_eq!(error.status(), status);
+            assert!(error.accepts_status(status));
+        }
+    }
+
+    #[test]
+    fn client_accepts_only_the_documented_legacy_conflict_status() {
+        let locked = InternalSearchError::WriteLocked {
+            scope: WriteLockScopeWire::TargetOrAncestor,
+        };
+        let recalculating = InternalSearchError::UsageRecalculationInProgress {
+            retry_after_seconds: 5,
+        };
+        let invalid = InternalSearchError::InvalidInput {
+            message: "bad".to_owned(),
+        };
+
+        assert!(locked.accepts_status(StatusCode::CONFLICT));
+        assert!(recalculating.accepts_status(StatusCode::CONFLICT));
+        assert!(!invalid.accepts_status(StatusCode::CONFLICT));
     }
 }

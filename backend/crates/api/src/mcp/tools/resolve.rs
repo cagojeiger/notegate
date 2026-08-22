@@ -23,12 +23,12 @@ use notegate_service::files::parse_target;
 use notegate_service::spaces::SpaceView;
 
 use crate::error::write_lock_code;
-use crate::mcp::contract::{McpAction, McpErrorData, RequiredField};
+use crate::mcp::contract::{
+    McpAction, McpErrorData, RequiredField, TEMPORARY_UNAVAILABLE_ERROR_CODE,
+};
 use crate::state::AppState;
 
 const SPACE_SUGGESTION_LIMIT: i64 = 5;
-const TEMPORARY_UNAVAILABLE_ERROR_CODE: rmcp::model::ErrorCode = rmcp::model::ErrorCode(-32001);
-
 /// The request-scoped authenticated caller, inserted by the MCP auth wrapper.
 pub fn caller(parts: &Parts) -> Result<&Caller, ErrorData> {
     parts

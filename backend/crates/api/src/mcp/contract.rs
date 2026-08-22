@@ -1,8 +1,14 @@
 //! Shared structured contracts for MCP recovery instructions and errors.
 
 use rmcp::ErrorData;
+use rmcp::model::ErrorCode;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
+
+/// Retryable dependency/maintenance failure shared by MCP tools.
+pub const TEMPORARY_UNAVAILABLE_ERROR_CODE: ErrorCode = ErrorCode(-32001);
+/// Process-local capacity rejection shared by MCP tools.
+pub const CAPACITY_BUSY_ERROR_CODE: ErrorCode = ErrorCode(-32002);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ToolCallSpec {

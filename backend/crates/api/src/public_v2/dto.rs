@@ -294,7 +294,7 @@ impl From<&NodeView> for NodeOut {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-/// Compact node representation used by tree, children, and search responses.
+/// Compact node representation used by tree and children responses.
 pub struct NodeSummaryOut {
     pub id: Uuid,
     pub parent_id: Option<Uuid>,

@@ -215,11 +215,27 @@ impl InternalSearchHttpClient {
             return Err(SearchClientError::Unavailable);
         }
 
-        if status.is_success() {
+        if status == reqwest::StatusCode::OK {
             serde_json::from_slice(&body).map_err(|_error| SearchClientError::Unavailable)
+        } else if status.is_success() {
+            tracing::warn!(
+                event = "internal_search.protocol_error",
+                %status,
+                reason = "unexpected_success_status",
+            );
+            Err(SearchClientError::Unavailable)
         } else {
             let output: ErrorOutput =
                 serde_json::from_slice(&body).map_err(|_error| SearchClientError::Unavailable)?;
+            if !output.error.accepts_status(status) {
+                tracing::warn!(
+                    event = "internal_search.protocol_error",
+                    %status,
+                    error_code = output.error.code(),
+                    reason = "status_error_mismatch",
+                );
+                return Err(SearchClientError::Unavailable);
+            }
             Err(map_wire_error(output.error))
         }
     }
@@ -392,7 +408,7 @@ mod tests {
         ));
 
         let error = send_error(
-            StatusCode::CONFLICT,
+            StatusCode::LOCKED,
             InternalSearchError::WriteLocked {
                 scope: WriteLockScopeWire::Descendant,
             },
@@ -458,7 +474,7 @@ mod tests {
         ));
 
         let error = send_error(
-            StatusCode::CONFLICT,
+            StatusCode::SERVICE_UNAVAILABLE,
             InternalSearchError::UsageRecalculationInProgress {
                 retry_after_seconds: 7,
             },
@@ -480,6 +496,64 @@ mod tests {
             error,
             SearchClientError::Search(SearchError::Internal(message))
                 if message == "internal search service error"
+        ));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn previous_release_conflict_status_remains_rolling_compatible()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let locked = send_error(
+            StatusCode::CONFLICT,
+            InternalSearchError::WriteLocked {
+                scope: WriteLockScopeWire::TargetOrAncestor,
+            },
+        )
+        .await?;
+        assert!(matches!(
+            locked,
+            SearchClientError::Search(SearchError::WriteLocked {
+                scope: notegate_core::WriteLockScope::TargetOrAncestor
+            })
+        ));
+
+        let recalculating = send_error(
+            StatusCode::CONFLICT,
+            InternalSearchError::UsageRecalculationInProgress {
+                retry_after_seconds: 7,
+            },
+        )
+        .await?;
+        assert!(matches!(
+            recalculating,
+            SearchClientError::Search(SearchError::UsageRecalculationInProgress {
+                retry_after_seconds: 7
+            })
+        ));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn contradictory_status_and_error_kind_are_unavailable()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let error = send_error(
+            StatusCode::FORBIDDEN,
+            InternalSearchError::InvalidInput {
+                message: "bad query".to_owned(),
+            },
+        )
+        .await?;
+
+        assert!(matches!(error, SearchClientError::Unavailable));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn success_contract_accepts_only_ok() -> Result<(), Box<dyn std::error::Error>> {
+        let response = StubResponse::signed(StatusCode::CREATED, br#"{"ok":true}"#.to_vec());
+        assert!(matches!(
+            send(response).await?,
+            SearchClientError::Unavailable
         ));
         Ok(())
     }

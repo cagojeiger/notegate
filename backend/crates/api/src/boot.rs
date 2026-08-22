@@ -181,7 +181,8 @@ pub(crate) async fn run() -> anyhow::Result<()> {
         None
     };
 
-    let mut http_runtime = HttpRuntime::new();
+    let mut main_http_runtime = HttpRuntime::new();
+    let mut search_http_runtime = HttpRuntime::new();
     if plan.main_listener {
         let router = match &state {
             Some(state) => routes::app(state.clone()),
@@ -198,7 +199,7 @@ pub(crate) async fn run() -> anyhow::Result<()> {
             addr = %bind_addr,
             process_mode = process_mode.as_str(),
         );
-        http_runtime.spawn("public HTTP server", listener, router);
+        main_http_runtime.spawn("public HTTP server", listener, router);
     }
     if let Some(search_state) = search_state {
         let listener = TcpListener::bind(search_bind_addr).await?;
@@ -208,7 +209,7 @@ pub(crate) async fn run() -> anyhow::Result<()> {
             addr = %search_bind_addr,
             process_mode = process_mode.as_str(),
         );
-        http_runtime.spawn(
+        search_http_runtime.spawn(
             "internal search HTTP server",
             listener,
             routes::search_app(search_state),
@@ -266,7 +267,8 @@ pub(crate) async fn run() -> anyhow::Result<()> {
     }
 
     let stop_reason = tokio::select! {
-        error = http_runtime.wait_for_exit() => StopReason::Http(error),
+        error = main_http_runtime.wait_for_exit() => StopReason::Http(error),
+        error = search_http_runtime.wait_for_exit() => StopReason::Http(error),
         () = signals.wait() => StopReason::Signal,
         error = process_runtime.wait_for_critical_exit() => {
             tracing::error!(event = "process_runtime.critical_task_exited", %error);
@@ -275,9 +277,8 @@ pub(crate) async fn run() -> anyhow::Result<()> {
     };
 
     info!(event = "server.shutting_down");
-    http_runtime.begin_shutdown();
     process_runtime.begin_shutdown();
-    let http_result = http_runtime.join().await;
+    let http_result = shutdown_http_runtimes(main_http_runtime, search_http_runtime).await;
 
     let server_result = match stop_reason {
         StopReason::Http(error) => {
@@ -354,6 +355,22 @@ impl HttpRuntime {
         Ok(())
     }
 }
+
+async fn shutdown_http_runtimes(
+    main_runtime: HttpRuntime,
+    search_runtime: HttpRuntime,
+) -> anyhow::Result<()> {
+    // Search is a dependency of accepted main-listener requests, so keep it
+    // available until those requests have drained.
+    main_runtime.begin_shutdown();
+    let main_result = main_runtime.join().await;
+    search_runtime.begin_shutdown();
+    let search_result = search_runtime.join().await;
+    main_result.and(search_result)
+}
+
+#[cfg(test)]
+mod tests;
 
 struct ShutdownSignals {
     #[cfg(unix)]

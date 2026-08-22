@@ -385,7 +385,7 @@ fn storage_error(error: ObjectStorageError) -> ErrorData {
             Some(json!({"kind": "invalid_input", "code": "invalid_multipart"})),
         ),
         ObjectStorageError::Unavailable => ErrorData::new(
-            rmcp::model::ErrorCode(-32001),
+            crate::mcp::contract::TEMPORARY_UNAVAILABLE_ERROR_CODE,
             "object storage is temporarily unavailable",
             Some(json!({
                 "kind": "temporary_unavailable",
