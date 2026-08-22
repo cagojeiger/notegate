@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import type { NodeSummary, Space } from "../../api/types";
 import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
 import { ResizeSeparator } from "../../shared/ui";
@@ -16,7 +18,7 @@ export function PrimarySidebarSections({
   onOpenNode,
   onNodeContextMenu,
   onMoveNodeToFolder,
-  onCollapseTree,
+  treeHeaderActions,
   onTreeNavigationChange,
   canWriteActiveSpace
 }: {
@@ -30,12 +32,12 @@ export function PrimarySidebarSections({
   onOpenNode: (node: NodeSummary) => void;
   onNodeContextMenu: NodeContextHandler;
   onMoveNodeToFolder: (node: NodeSummary, folder: NodeSummary) => void;
-  onCollapseTree: () => void;
+  treeHeaderActions: ReactNode;
   onTreeNavigationChange: TreeKeyboardNavigationRegistrar;
 }) {
   const sections = usePrimarySidebarSections();
   return (
-    <div ref={sections.gridRef} className="grid min-h-0 min-w-0 flex-1 content-start" style={{ gridTemplateRows: sections.gridRows }}>
+    <div id="browse-sidebar-panel" role="tabpanel" aria-labelledby="browse-sidebar-panel-tab" ref={sections.gridRef} className="grid min-h-0 min-w-0 flex-1 content-start" style={{ gridTemplateRows: sections.gridRows }}>
       <TreeSection
         activeSpace={activeSpace}
         openedNodeId={openedNodeId}
@@ -43,7 +45,7 @@ export function PrimarySidebarSections({
         expandedFolderIds={expandedFolderIds}
         open={sections.treeSectionOpen}
         onToggle={sections.toggleTreeSection}
-        onCollapseTree={onCollapseTree}
+        headerActions={treeHeaderActions}
         onTreeNavigationChange={onTreeNavigationChange}
         onToggleFolder={onToggleFolder}
         onInspectNode={onInspectNode}

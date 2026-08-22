@@ -14,7 +14,7 @@ export function treeSectionElement(activeSpace: Space, overrides: Partial<Compon
       expandedFolderIds={new Set()}
       open
       onToggle={vi.fn()}
-      onCollapseTree={vi.fn()}
+      headerActions={null}
       onToggleFolder={vi.fn()}
       onInspectNode={vi.fn()}
       onOpenNode={vi.fn()}

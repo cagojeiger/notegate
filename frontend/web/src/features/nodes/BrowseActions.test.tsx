@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Space } from "../../api/types";
-import { SpaceHeader } from "./SpaceHeader";
+import { BrowseActions } from "./BrowseActions";
 
 vi.mock("./useNodeQueries", () => ({
   useRefreshSpace: () => vi.fn()
@@ -24,13 +24,13 @@ const activeSpace: Space = {
   updated_at: "2026-08-11T00:00:00Z"
 };
 
-describe("SpaceHeader", () => {
+describe("BrowseActions", () => {
   it("opens the create menu and starts audio recording", async () => {
     const user = userEvent.setup();
     const onRecordAudio = vi.fn();
 
     render(
-      <SpaceHeader
+      <BrowseActions
         activeSpace={activeSpace}
         canWriteActiveSpace
         canManageActiveSpace
@@ -38,6 +38,7 @@ describe("SpaceHeader", () => {
         onCreateText={vi.fn()}
         onRecordAudio={onRecordAudio}
         onFileSelected={vi.fn()}
+        onCollapseTree={vi.fn()}
         onRenameSpace={vi.fn()}
         onDeleteSpace={vi.fn()}
       />
@@ -48,5 +49,30 @@ describe("SpaceHeader", () => {
 
     expect(onRecordAudio).toHaveBeenCalledOnce();
     expect(screen.queryByRole("button", { name: "Record audio" })).not.toBeInTheDocument();
+  });
+
+  it("keeps folder collapse visible without space management permission", async () => {
+    const user = userEvent.setup();
+    const onCollapseTree = vi.fn();
+
+    render(
+      <BrowseActions
+        activeSpace={activeSpace}
+        canWriteActiveSpace
+        canManageActiveSpace={false}
+        onCreateFolder={vi.fn()}
+        onCreateText={vi.fn()}
+        onRecordAudio={vi.fn()}
+        onFileSelected={vi.fn()}
+        onCollapseTree={onCollapseTree}
+        onRenameSpace={vi.fn()}
+        onDeleteSpace={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Collapse all folders" }));
+
+    expect(onCollapseTree).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Manage space" })).toBeDisabled();
   });
 });
