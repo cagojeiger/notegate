@@ -1,11 +1,16 @@
 import { useState } from "react";
 
 import type { NodeSummary, Space } from "../../api/types";
+import { Tabs } from "../../shared/ui";
+import { BrowseActions } from "./BrowseActions";
 import { NodeContextMenu } from "./NodeContextMenu";
-import { SpaceHeader } from "./SpaceHeader";
 import { PrimarySidebarSections } from "./PrimarySidebarSections";
 import type { NodeContextHandler } from "./types";
 import { useSidebarKeyboardNavigation } from "./useSidebarKeyboardNavigation";
+
+const browseTabs: Array<{ id: "browse"; label: string; controls: string }> = [
+  { id: "browse", label: "Browse", controls: "browse-sidebar-panel" }
+];
 
 export function PrimarySidebar({
   activeSpace,
@@ -71,7 +76,9 @@ export function PrimarySidebar({
 
   return (
     <aside ref={asideRef} onKeyDown={onSidebarKeyDown} className="flex h-full w-full min-h-0 flex-col border-r border-seam bg-panel font-ui">
-      <SpaceHeader activeSpace={activeSpace} canWriteActiveSpace={canWriteActiveSpace} canManageActiveSpace={canManageActiveSpace} onCreateFolder={onCreateFolder} onCreateText={onCreateText} onRecordAudio={onRecordAudio} onFileSelected={onFileSelected} onRenameSpace={onRenameSpace} onDeleteSpace={onDeleteSpace} />
+      <div className="flex h-workbench-header shrink-0 items-end border-b border-seam px-2">
+        <Tabs items={browseTabs} value="browse" onChange={() => {}} label="Primary sidebar sections" variant="header" />
+      </div>
       {activeSpace ? (
         <PrimarySidebarSections
           activeSpace={activeSpace}
@@ -83,12 +90,25 @@ export function PrimarySidebar({
           onOpenNode={onOpenNode}
           onNodeContextMenu={onNodeContextMenu}
           onMoveNodeToFolder={onMoveNodeToFolder}
-          onCollapseTree={onCollapseTree}
+          treeHeaderActions={(
+            <BrowseActions
+              activeSpace={activeSpace}
+              canWriteActiveSpace={canWriteActiveSpace}
+              canManageActiveSpace={canManageActiveSpace}
+              onCreateFolder={onCreateFolder}
+              onCreateText={onCreateText}
+              onRecordAudio={onRecordAudio}
+              onFileSelected={onFileSelected}
+              onCollapseTree={onCollapseTree}
+              onRenameSpace={onRenameSpace}
+              onDeleteSpace={onDeleteSpace}
+            />
+          )}
           onTreeNavigationChange={registerTreeNavigation}
           canWriteActiveSpace={canWriteActiveSpace}
         />
       ) : (
-        <div className="p-4 text-sm text-muted">Create a space to start.</div>
+        <div id="browse-sidebar-panel" role="tabpanel" aria-labelledby="browse-sidebar-panel-tab" className="p-4 text-sm text-muted">Create a space to start.</div>
       )}
       {menu ? (
         <NodeContextMenu

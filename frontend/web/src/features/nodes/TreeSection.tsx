@@ -1,5 +1,4 @@
-import { ChevronsDownUp } from "lucide-react";
-import type { DragEvent, RefObject } from "react";
+import type { DragEvent, ReactNode, RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { NodeSummary, Space } from "../../api/types";
@@ -33,7 +32,7 @@ export function TreeSection({
   expandedFolderIds,
   open,
   onToggle,
-  onCollapseTree,
+  headerActions,
   onToggleFolder,
   onInspectNode,
   onOpenNode,
@@ -44,7 +43,7 @@ export function TreeSection({
 }: TreeProps & {
   open: boolean;
   onToggle: () => void;
-  onCollapseTree: () => void;
+  headerActions: ReactNode;
   onTreeNavigationChange: TreeKeyboardNavigationRegistrar;
 }) {
   return (
@@ -53,7 +52,7 @@ export function TreeSection({
         label="Files"
         open={open}
         onToggle={onToggle}
-        action={{ label: "Collapse all folders", icon: <ChevronsDownUp size={13} />, onClick: onCollapseTree }}
+        trailing={headerActions}
       />
       {open ? (
         <VirtualizedTree

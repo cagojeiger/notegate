@@ -12,7 +12,16 @@ export function RecentSection({ activeSpace, openedNodeId, inspectedNodeId, dens
   const scrollRef = useRef<HTMLDivElement>(null);
   return (
     <section className="flex min-h-0 min-w-0 flex-col px-2 py-1 font-ui">
-      <SidebarSectionHeader label="Recent" open={open} onToggle={onToggle} action={{ label: "Toggle recent density", icon: <List size={13} />, onClick: onToggleDensity }} />
+      <SidebarSectionHeader
+        label="Recent"
+        open={open}
+        onToggle={onToggle}
+        trailing={(
+          <button onClick={onToggleDensity} aria-label="Toggle recent density" title="Toggle recent density" className="grid size-workbench-control shrink-0 place-items-center rounded-workbench text-muted hover:bg-surface hover:text-text md:size-6">
+            <List size={13} />
+          </button>
+        )}
+      />
       {open ? (
         <div ref={scrollRef} data-recent-list className="min-h-0 flex-1 overflow-y-auto">
           <RecentList activeSpace={activeSpace} openedNodeId={openedNodeId} inspectedNodeId={inspectedNodeId} density={density} scrollRef={scrollRef} onOpenNode={onOpenNode} onInspectNode={onInspectNode} onNodeContextMenu={onNodeContextMenu} />
