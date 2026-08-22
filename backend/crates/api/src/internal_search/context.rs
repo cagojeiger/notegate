@@ -1,29 +1,25 @@
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
-use axum::http::{HeaderMap, HeaderValue, request::Parts};
+#[cfg(test)]
+use axum::http::HeaderMap;
+use axum::http::{HeaderValue, request::Parts};
 
+#[cfg(test)]
 use notegate_core::limits;
 
 pub(crate) const REQUEST_ID_HEADER: &str = "x-request-id";
 pub(super) const SEARCH_RESPONSE_HEADROOM: Duration = Duration::from_secs(1);
 
-/// Absolute request budget established by the public data-plane boundary.
+/// Monotonic request budget established by the public data-plane boundary.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RequestDeadline {
     instant: Instant,
-    unix_ms: i64,
 }
 
 impl RequestDeadline {
     pub(crate) fn after(duration: Duration) -> Self {
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_millis();
-        let duration_ms = duration.as_millis();
         Self {
             instant: Instant::now() + duration,
-            unix_ms: i64::try_from(now_ms.saturating_add(duration_ms)).unwrap_or(i64::MAX),
         }
     }
 
@@ -33,12 +29,10 @@ impl RequestDeadline {
             .filter(|value| !value.is_zero())
     }
 
-    fn search_deadline_unix_ms(self) -> Option<i64> {
-        self.remaining()?.checked_sub(SEARCH_RESPONSE_HEADROOM)?;
-        Some(
-            self.unix_ms
-                .saturating_sub(i64::try_from(SEARCH_RESPONSE_HEADROOM.as_millis()).ok()?),
-        )
+    fn search_timeout(self) -> Option<Duration> {
+        self.remaining()?
+            .checked_sub(SEARCH_RESPONSE_HEADROOM)
+            .filter(|value| !value.is_zero())
     }
 }
 
@@ -53,6 +47,7 @@ pub(crate) struct RequestContext {
 }
 
 impl RequestContext {
+    #[cfg(test)]
     pub(crate) fn from_headers(headers: &HeaderMap) -> Self {
         Self {
             request_id: headers.get(REQUEST_ID_HEADER).cloned(),
@@ -62,17 +57,11 @@ impl RequestContext {
         }
     }
 
-    pub(crate) fn from_parts(parts: &Parts) -> Self {
-        Self {
+    pub(crate) fn from_parts(parts: &Parts) -> Option<Self> {
+        Some(Self {
             request_id: parts.headers.get(REQUEST_ID_HEADER).cloned(),
-            deadline: parts
-                .extensions
-                .get::<RequestDeadline>()
-                .copied()
-                .unwrap_or_else(|| {
-                    RequestDeadline::after(Duration::from_secs(limits::HTTP_REQUEST_TIMEOUT_SECS))
-                }),
-        }
+            deadline: parts.extensions.get::<RequestDeadline>().copied()?,
+        })
     }
 
     pub(crate) fn request_id(&self) -> Option<&HeaderValue> {
@@ -83,8 +72,8 @@ impl RequestContext {
         self.deadline.remaining()
     }
 
-    pub(crate) fn search_deadline_unix_ms(&self) -> Option<i64> {
-        self.deadline.search_deadline_unix_ms()
+    pub(crate) fn search_timeout(&self) -> Option<Duration> {
+        self.deadline.search_timeout()
     }
 
     #[cfg(test)]
@@ -96,6 +85,7 @@ impl RequestContext {
     }
 }
 
+#[cfg(test)]
 impl Default for RequestContext {
     fn default() -> Self {
         Self::from_headers(&HeaderMap::new())
@@ -104,6 +94,8 @@ impl Default for RequestContext {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
 
     #[test]
@@ -128,19 +120,18 @@ mod tests {
             .insert(RequestDeadline::after(Duration::from_secs(10)));
         let (parts, _) = request.into_parts();
 
-        let context = RequestContext::from_parts(&parts);
+        let context = RequestContext::from_parts(&parts).expect("request carries a deadline");
 
         assert!(
             context
                 .remaining()
                 .is_some_and(|value| value <= Duration::from_secs(10))
         );
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_millis();
-        let deadline_ms = context.search_deadline_unix_ms().unwrap_or_default();
-        assert!(i128::from(deadline_ms) > i128::try_from(now_ms).unwrap_or(i128::MAX));
+        assert!(
+            context
+                .search_timeout()
+                .is_some_and(|value| value <= Duration::from_secs(9))
+        );
     }
 
     #[test]
@@ -151,6 +142,13 @@ mod tests {
         };
 
         assert!(context.remaining().is_none());
-        assert!(context.search_deadline_unix_ms().is_none());
+        assert!(context.search_timeout().is_none());
+    }
+
+    #[test]
+    fn missing_ingress_deadline_fails_closed() {
+        let (parts, _) = axum::http::Request::new(()).into_parts();
+
+        assert!(RequestContext::from_parts(&parts).is_none());
     }
 }

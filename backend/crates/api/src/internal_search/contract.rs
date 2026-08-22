@@ -12,7 +12,7 @@ use crate::path_node_summary::PathNodeSummary;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct InternalSearchRequest<T> {
-    pub(super) deadline_unix_ms: i64,
+    pub(super) timeout_ms: u64,
     pub(super) command: T,
 }
 
@@ -342,10 +342,10 @@ mod tests {
     }
 
     #[test]
-    fn request_envelope_requires_a_deadline_and_command() {
+    fn request_envelope_requires_a_timeout_and_command() {
         let (caller_account_id, space_id) = ids();
         let input = json!({
-            "deadline_unix_ms": 1_000,
+            "timeout_ms": 1_000,
             "command": {
                 "caller_account_id": caller_account_id,
                 "space_id": space_id,
@@ -364,14 +364,14 @@ mod tests {
         assert!(
             serde_json::from_value::<InternalSearchRequest<FindCommand>>(input.clone()).is_ok()
         );
-        let mut missing_deadline = input;
+        let mut missing_timeout = input;
         assert!(
-            missing_deadline
+            missing_timeout
                 .as_object_mut()
-                .is_some_and(|request| request.remove("deadline_unix_ms").is_some())
+                .is_some_and(|request| request.remove("timeout_ms").is_some())
         );
         assert!(
-            serde_json::from_value::<InternalSearchRequest<FindCommand>>(missing_deadline).is_err()
+            serde_json::from_value::<InternalSearchRequest<FindCommand>>(missing_timeout).is_err()
         );
     }
 

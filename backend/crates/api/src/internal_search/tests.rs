@@ -1,4 +1,5 @@
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, request::Parts};
@@ -15,7 +16,7 @@ use super::auth::{
     InternalSearchAuth, REQUEST_SIGNATURE_HEADER, RESPONSE_SIGNATURE_HEADER, TIMESTAMP_HEADER,
 };
 use super::loopback_base_url;
-use super::{FIND_PATH, SearchClient, SearchServerState};
+use super::{FIND_PATH, RequestDeadline, SearchClient, SearchServerState};
 
 #[test]
 fn unspecified_search_bind_addresses_become_loopback_client_urls() {
@@ -119,7 +120,7 @@ async fn search_app_rejects_unauthorized_search_and_exposes_only_control_plane()
     assert_eq!(rejected_tamper.status(), StatusCode::NOT_FOUND);
 
     let expired_body = serde_json::to_vec(&serde_json::json!({
-        "deadline_unix_ms": 0,
+        "timeout_ms": 0,
         "command": {
             "caller_account_id": uuid::Uuid::nil(),
             "space_id": uuid::Uuid::nil(),
@@ -209,6 +210,9 @@ async fn http_search_preserves_local_mcp_find_and_grep_results()
 
     let (mut parts, _) = Request::new(()).into_parts();
     parts.extensions.insert(caller.clone());
+    parts
+        .extensions
+        .insert(RequestDeadline::after(Duration::from_secs(30)));
     let (local_find, local_grep) = mcp_find_and_grep(&api_state, &parts).await?;
 
     let signing_key = api_state.security.internal_search_signing_key();

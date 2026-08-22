@@ -28,7 +28,7 @@ pub async fn find(
     cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let context = RequestContext::from_parts(parts);
+    let context = request_context(parts)?;
     let (resolved, scope_path) = resolve_target(state, caller, &target).await?;
     let scope_path = Some(scope_path);
 
@@ -86,7 +86,7 @@ pub async fn grep(
     cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let context = RequestContext::from_parts(parts);
+    let context = request_context(parts)?;
     let (resolved, scope_path) = resolve_target(state, caller, &target).await?;
     let scope_path = Some(scope_path);
     let space = resolved.name().to_owned();
@@ -151,6 +151,13 @@ fn search_client_error(error: SearchClientError) -> ErrorData {
             })),
         ),
     }
+}
+
+fn request_context(parts: &Parts) -> Result<RequestContext, ErrorData> {
+    RequestContext::from_parts(parts).ok_or_else(|| {
+        tracing::error!(event = "internal_search.request_deadline_missing");
+        search_client_error(SearchClientError::Unavailable)
+    })
 }
 
 fn search_busy_error(capacity: SearchCapacity) -> ErrorData {
@@ -231,8 +238,8 @@ mod tests {
 
     use super::{
         FindMatchMode, GrepLineMode, GrepMatchMode, NodeKind, parse_find_match_mode,
-        parse_grep_line_mode, parse_grep_match_mode, parse_kind, search_busy_error,
-        search_client_error,
+        parse_grep_line_mode, parse_grep_match_mode, parse_kind, request_context,
+        search_busy_error, search_client_error,
     };
     use crate::internal_search::SearchClientError;
     use crate::mcp::contract::{CAPACITY_BUSY_ERROR_CODE, TEMPORARY_UNAVAILABLE_ERROR_CODE};
@@ -371,5 +378,17 @@ mod tests {
         assert_eq!(data["code"], "deadline_exceeded");
         assert_eq!(data["retryable"], true);
         assert!(data.get("retry_after_ms").is_none());
+    }
+
+    #[test]
+    fn missing_ingress_deadline_fails_as_search_unavailable() {
+        let (parts, _) = axum::http::Request::new(()).into_parts();
+
+        let error = request_context(&parts).expect_err("deadline extension is required");
+
+        assert_eq!(error.code, TEMPORARY_UNAVAILABLE_ERROR_CODE);
+        let data = error.data.expect("missing deadline error carries metadata");
+        assert_eq!(data["code"], "search_unavailable");
+        assert_eq!(data["retryable"], true);
     }
 }

@@ -156,11 +156,15 @@ impl InternalSearchHttpClient {
         I: Serialize + ?Sized,
         O: DeserializeOwned,
     {
-        let deadline_unix_ms = context
-            .search_deadline_unix_ms()
+        let search_timeout = context
+            .search_timeout()
+            .ok_or(SearchClientError::DeadlineExceeded)?;
+        let timeout_ms = u64::try_from(search_timeout.as_millis())
+            .ok()
+            .filter(|value| *value > 0)
             .ok_or(SearchClientError::DeadlineExceeded)?;
         let body = serde_json::to_vec(&InternalSearchRequest {
-            deadline_unix_ms,
+            timeout_ms,
             command: input,
         })
         .map_err(|_error| SearchClientError::Unavailable)?;
@@ -368,8 +372,8 @@ mod tests {
             serde_json::from_slice(&request_body).expect("client sends JSON request envelope");
         assert!(
             request_json
-                .get("deadline_unix_ms")
-                .and_then(Value::as_i64)
+                .get("timeout_ms")
+                .and_then(Value::as_u64)
                 .is_some_and(|value| value > 0)
         );
         if let Some(expected_command) = &response.expected_command {

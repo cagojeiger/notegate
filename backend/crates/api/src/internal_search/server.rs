@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
 use axum::extract::State;
@@ -135,7 +135,7 @@ async fn find(State(state): State<SearchServerState>, request: Request<Body>) ->
     let caller_account_id = command.caller_account_id;
     let space_id = command.space_id;
     match run_before_deadline(
-        input.deadline_unix_ms,
+        input.timeout_ms,
         state
             .runtime
             .find(caller_account_id, space_id, command.into_request()),
@@ -143,7 +143,7 @@ async fn find(State(state): State<SearchServerState>, request: Request<Body>) ->
     .await
     {
         Ok(result) => search_response(&state, FIND_PATH, timestamp, result.map(FindOutput::from)),
-        Err(DeadlineExceeded) => deadline_response(&state, FIND_PATH, timestamp),
+        Err(deadline) => deadline_response(&state, FIND_PATH, timestamp, "find", deadline),
     }
 }
 
@@ -157,7 +157,7 @@ async fn grep(State(state): State<SearchServerState>, request: Request<Body>) ->
     let caller_account_id = command.caller_account_id;
     let space_id = command.space_id;
     match run_before_deadline(
-        input.deadline_unix_ms,
+        input.timeout_ms,
         state
             .runtime
             .grep(caller_account_id, space_id, command.into_request()),
@@ -165,42 +165,58 @@ async fn grep(State(state): State<SearchServerState>, request: Request<Body>) ->
     .await
     {
         Ok(result) => search_response(&state, GREP_PATH, timestamp, result.map(GrepOutput::from)),
-        Err(DeadlineExceeded) => deadline_response(&state, GREP_PATH, timestamp),
+        Err(deadline) => deadline_response(&state, GREP_PATH, timestamp, "grep", deadline),
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct DeadlineExceeded;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeadlineExceeded {
+    BeforeExecution,
+    DuringExecution,
+}
 
-async fn run_before_deadline<F, T>(deadline_unix_ms: i64, future: F) -> Result<T, DeadlineExceeded>
+impl DeadlineExceeded {
+    const fn phase(self) -> &'static str {
+        match self {
+            Self::BeforeExecution => "before_execution",
+            Self::DuringExecution => "during_execution",
+        }
+    }
+}
+
+async fn run_before_deadline<F, T>(timeout_ms: u64, future: F) -> Result<T, DeadlineExceeded>
 where
     F: Future<Output = T>,
 {
-    let timeout = deadline_timeout(deadline_unix_ms).ok_or(DeadlineExceeded)?;
+    let timeout = execution_timeout(timeout_ms).ok_or(DeadlineExceeded::BeforeExecution)?;
     tokio::time::timeout(timeout, future)
         .await
-        .map_err(|_elapsed| DeadlineExceeded)
+        .map_err(|_elapsed| DeadlineExceeded::DuringExecution)
 }
 
-fn deadline_timeout(deadline_unix_ms: i64) -> Option<Duration> {
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|value| i64::try_from(value.as_millis()).ok())?;
-    deadline_timeout_at(deadline_unix_ms, now_ms)
-}
-
-fn deadline_timeout_at(deadline_unix_ms: i64, now_unix_ms: i64) -> Option<Duration> {
-    let remaining_ms = deadline_unix_ms.checked_sub(now_unix_ms)?;
-    let remaining_ms = u64::try_from(remaining_ms)
-        .ok()
-        .filter(|value| *value > 0)?;
+fn execution_timeout(timeout_ms: u64) -> Option<Duration> {
+    if timeout_ms == 0 {
+        return None;
+    }
     let max_execution = Duration::from_secs(notegate_core::limits::HTTP_REQUEST_TIMEOUT_SECS)
         .saturating_sub(SEARCH_RESPONSE_HEADROOM);
-    Some(Duration::from_millis(remaining_ms).min(max_execution))
+    Some(Duration::from_millis(timeout_ms).min(max_execution))
 }
 
-fn deadline_response(state: &SearchServerState, path: &str, timestamp: i64) -> Response {
+fn deadline_response(
+    state: &SearchServerState,
+    path: &str,
+    timestamp: i64,
+    operation: &'static str,
+    deadline: DeadlineExceeded,
+) -> Response {
+    let phase = deadline.phase();
+    observability::record_search_deadline(operation, phase);
+    tracing::warn!(
+        event = "internal_search.deadline_exceeded",
+        operation,
+        phase
+    );
     let error = InternalSearchError::DeadlineExceeded;
     signed_json(
         state,
@@ -354,15 +370,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deadline_budget_rejects_expired_values_and_caps_future_values() {
-        assert_eq!(deadline_timeout_at(1_000, 1_000), None);
-        assert_eq!(deadline_timeout_at(999, 1_000), None);
+    fn timeout_budget_rejects_zero_and_caps_large_values() {
+        assert_eq!(execution_timeout(0), None);
+        assert_eq!(execution_timeout(1_500), Some(Duration::from_millis(1_500)));
         assert_eq!(
-            deadline_timeout_at(2_500, 1_000),
-            Some(Duration::from_millis(1_500))
-        );
-        assert_eq!(
-            deadline_timeout_at(i64::MAX, 1_000),
+            execution_timeout(u64::MAX),
             Some(
                 Duration::from_secs(notegate_core::limits::HTTP_REQUEST_TIMEOUT_SECS)
                     .saturating_sub(SEARCH_RESPONSE_HEADROOM)
@@ -372,14 +384,15 @@ mod tests {
 
     #[tokio::test]
     async fn execution_is_cancelled_when_its_deadline_expires() {
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_millis();
-        let deadline_ms = i64::try_from(now_ms).unwrap_or_default().saturating_add(10);
+        let result = run_before_deadline(10, pending::<()>()).await;
 
-        let result = run_before_deadline(deadline_ms, pending::<()>()).await;
+        assert_eq!(result, Err(DeadlineExceeded::DuringExecution));
+    }
 
-        assert!(matches!(result, Err(DeadlineExceeded)));
+    #[tokio::test]
+    async fn zero_timeout_is_rejected_before_polling_work() {
+        let result = run_before_deadline(0, pending::<()>()).await;
+
+        assert_eq!(result, Err(DeadlineExceeded::BeforeExecution));
     }
 }
