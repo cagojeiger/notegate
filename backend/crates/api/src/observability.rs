@@ -138,6 +138,10 @@ fn describe_metrics() {
         "notegate_search_operations",
         "Completed find and grep operations by bounded mode and outcome"
     );
+    metrics::describe_counter!(
+        "notegate_search_deadline_exceeded",
+        "Search requests rejected or cancelled by deadline, by bounded operation and phase"
+    );
     metrics::describe_histogram!(
         "notegate_search_operation_duration",
         Unit::Seconds,
@@ -304,6 +308,15 @@ pub(crate) fn record_mcp_tool_metrics(
         "outcome" => outcome
     )
     .record(duration.as_secs_f64());
+}
+
+pub(crate) fn record_search_deadline(operation: &'static str, phase: &'static str) {
+    metrics::counter!(
+        "notegate_search_deadline_exceeded",
+        "operation" => operation,
+        "phase" => phase,
+    )
+    .increment(1);
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -817,6 +830,7 @@ mod tests {
             metrics::counter!("notegate_search_body_load_bytes", "operation" => "grep")
                 .increment(32);
             metrics::counter!("notegate_search_cache_lookups", "result" => "hit").increment(3);
+            record_search_deadline("grep", "during_execution");
             metrics::counter!(
                 "notegate_mcp_tool_calls",
                 "tool" => "search",
@@ -903,6 +917,9 @@ mod tests {
         assert!(body.contains("notegate_search_scanned_bytes_total{operation=\"grep\"} 64"));
         assert!(body.contains("notegate_search_body_load_bytes_total{operation=\"grep\"} 32"));
         assert!(body.contains("notegate_search_cache_lookups_total{result=\"hit\"} 3"));
+        assert!(body.contains(
+            "notegate_search_deadline_exceeded_total{operation=\"grep\",phase=\"during_execution\"} 1"
+        ));
         assert!(
             body.contains("notegate_mcp_tool_calls_total{tool=\"search\",outcome=\"success\"} 1")
         );

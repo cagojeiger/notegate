@@ -11,6 +11,12 @@ use uuid::Uuid;
 use crate::path_node_summary::PathNodeSummary;
 
 #[derive(Debug, Serialize, Deserialize)]
+pub(super) struct InternalSearchRequest<T> {
+    pub(super) timeout_ms: u64,
+    pub(super) command: T,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub(super) struct FindCommand {
     pub caller_account_id: Uuid,
     pub space_id: Uuid,
@@ -170,6 +176,7 @@ pub(super) enum InternalSearchError {
     WriteLocked { scope: WriteLockScopeWire },
     UsageRecalculationInProgress { retry_after_seconds: u64 },
     Busy { operation: SearchOperationWire },
+    DeadlineExceeded,
     Internal,
 }
 
@@ -211,6 +218,7 @@ impl InternalSearchError {
             },
             Self::UsageRecalculationInProgress { .. } => "usage_recalculation_in_progress",
             Self::Busy { .. } => "search_busy",
+            Self::DeadlineExceeded => "deadline_exceeded",
             Self::Internal => "internal_error",
         }
     }
@@ -225,6 +233,7 @@ impl InternalSearchError {
             Self::WriteLocked { .. } => StatusCode::LOCKED,
             Self::UsageRecalculationInProgress { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::Busy { .. } => StatusCode::TOO_MANY_REQUESTS,
+            Self::DeadlineExceeded => StatusCode::GATEWAY_TIMEOUT,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -333,6 +342,40 @@ mod tests {
     }
 
     #[test]
+    fn request_envelope_requires_a_timeout_and_command() {
+        let (caller_account_id, space_id) = ids();
+        let input = json!({
+            "timeout_ms": 1_000,
+            "command": {
+                "caller_account_id": caller_account_id,
+                "space_id": space_id,
+                "q": "README",
+                "path": null,
+                "kind": null,
+                "match_mode": "contains",
+                "include": [],
+                "exclude": [],
+                "limit": 20,
+                "cursor": null,
+            },
+            "future_optional_field": true,
+        });
+
+        assert!(
+            serde_json::from_value::<InternalSearchRequest<FindCommand>>(input.clone()).is_ok()
+        );
+        let mut missing_timeout = input;
+        assert!(
+            missing_timeout
+                .as_object_mut()
+                .is_some_and(|request| request.remove("timeout_ms").is_some())
+        );
+        assert!(
+            serde_json::from_value::<InternalSearchRequest<FindCommand>>(missing_timeout).is_err()
+        );
+    }
+
+    #[test]
     fn outputs_ignore_fields_added_by_a_newer_search_process() -> serde_json::Result<()> {
         let output = json!({
             "items": [],
@@ -379,6 +422,11 @@ mod tests {
                 InternalSearchError::busy(SearchCapacity::Grep),
                 "search_busy",
                 StatusCode::TOO_MANY_REQUESTS,
+            ),
+            (
+                InternalSearchError::DeadlineExceeded,
+                "deadline_exceeded",
+                StatusCode::GATEWAY_TIMEOUT,
             ),
         ];
 

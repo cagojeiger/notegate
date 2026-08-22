@@ -49,6 +49,18 @@ API는 `x-request-id`를 내부 Search 요청에 전달하고 Search 응답도 �
 context carrier는 향후 W3C `traceparent`/`tracestate` 전파를 추가하는 경계이며, 검색 명령 본문이나
 권한 계약에는 관측성 필드를 넣지 않는다.
 
+Data-plane ingress는 외부 요청의 30초 deadline을 한 번 정하고, API는 서명된 private request
+envelope에 응답 여유 1초를 제외한 남은 실행 시간 `timeout_ms`를 전달한다. API와 Search는 각자
+monotonic clock으로 남은 시간을 측정하므로 split pod의 wall-clock 차이에 의존하지 않는다. API에서
+1초 이하만 남았거나 Search가 `timeout_ms=0`을 받으면 검색을 시작하지 않는다. 실행 중 timeout을
+넘겨도 작업을 취소하고 서명된 `504 deadline_exceeded`를 반환한다. 외부 caller가 지나치게 큰 값을
+보내더라도 Search 실행은 29초로 제한된다. ingress deadline extension이 누락된 내부 호출은 새로운
+시간을 만들지 않고 `search_unavailable`로 fail-closed 처리한다.
+
+Search deadline은 `notegate_search_deadline_exceeded_total{operation,phase}` counter와
+`internal_search.deadline_exceeded` warning log로 기록한다. Label은 `operation=find|grep`,
+`phase=before_execution|during_execution`으로 제한한다.
+
 ### Runtime contract
 
 Private Search HTTP는 독립 제품 API가 아니라 같은 NoteGate release의 process role 사이 계약이다.
@@ -74,6 +86,7 @@ release가 추가한 unknown field를 Search process가 무시한다. 필수 필
 | `write_locked` + `scope` | `423` | `node_write_locked` / `subtree_write_locked` |
 | `search_busy` | `429` | `search_busy` |
 | `usage_recalculation_in_progress` | `503` | `usage_recalculation_in_progress` |
+| `deadline_exceeded` | `504` | `deadline_exceeded` |
 | `internal_error` | `500` | `internal_error` |
 
 MCP의 dependency/maintenance 임시 실패는 공통 JSON-RPC server code `-32001`, process capacity 거부는

@@ -7,7 +7,7 @@ mod contract;
 mod server;
 
 pub(crate) use client::{SearchClient, SearchClientError};
-pub(crate) use context::RequestContext;
+pub(crate) use context::{RequestContext, RequestDeadline};
 pub(crate) use server::{SearchServerState, routes};
 
 pub(crate) const FIND_PATH: &str = "/internal/v1/search/find";

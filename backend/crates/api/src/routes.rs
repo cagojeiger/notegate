@@ -30,7 +30,7 @@ use crate::auth::metadata::{
 use crate::auth::oauth::{callback, login, logout, success, success_script};
 use crate::auth::{require_browser_session, require_public_api_key, set_private_no_store};
 use crate::error::ApiError;
-use crate::internal_search::SearchServerState;
+use crate::internal_search::{RequestDeadline, SearchServerState};
 use crate::mcp::server::{agent_mcp_v2_handler, user_mcp_handler};
 use crate::observability::{self, HttpRequestMetrics};
 use crate::state::{AppState, ControlPlaneState};
@@ -286,17 +286,33 @@ fn apply_data_plane_limits<S>(router: Router<S>, limits: DataPlaneLimits) -> Rou
 where
     S: Clone + Send + Sync + 'static,
 {
-    router.layer(
-        ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(limits.request_body_max_bytes))
-            .layer(TimeoutLayer::with_status_code(
-                StatusCode::REQUEST_TIMEOUT,
-                limits.request_timeout,
-            ))
-            .layer(GovernorLayer::new(rate_limit_config(
-                limits.rate_limits.ingress,
-            ))),
-    )
+    router
+        .layer(
+            ServiceBuilder::new()
+                .layer(RequestBodyLimitLayer::new(limits.request_body_max_bytes))
+                .layer(TimeoutLayer::with_status_code(
+                    StatusCode::REQUEST_TIMEOUT,
+                    limits.request_timeout,
+                ))
+                .layer(GovernorLayer::new(rate_limit_config(
+                    limits.rate_limits.ingress,
+                ))),
+        )
+        .layer(from_fn_with_state(
+            limits.request_timeout,
+            set_request_deadline,
+        ))
+}
+
+async fn set_request_deadline(
+    State(timeout): State<Duration>,
+    mut request: Request<Body>,
+    next: Next,
+) -> Response {
+    request
+        .extensions_mut()
+        .insert(RequestDeadline::after(timeout));
+    next.run(request).await
 }
 
 fn apply_rate_limit<S>(router: Router<S>, limit: HttpRateLimitConfig) -> Router<S>
@@ -749,6 +765,24 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn data_plane_limits_attach_a_request_deadline() {
+        let app = apply_data_plane_limits(
+            Router::new().route(
+                "/",
+                get(|Extension(_deadline): Extension<RequestDeadline>| async { "ok" }),
+            ),
+            DataPlaneLimits::default(),
+        );
+
+        let response = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]

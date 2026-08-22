@@ -14,6 +14,7 @@ use super::auth::{
 use super::context::{REQUEST_ID_HEADER, RequestContext};
 use super::contract::{
     ErrorOutput, FindCommand, FindOutput, GrepCommand, GrepOutput, InternalSearchError,
+    InternalSearchRequest,
 };
 use super::{FIND_PATH, GREP_PATH};
 
@@ -25,6 +26,8 @@ pub(crate) enum SearchClientError {
     Search(#[from] SearchError),
     #[error("{0:?} search capacity is busy")]
     Capacity(SearchCapacity),
+    #[error("search request deadline exceeded")]
+    DeadlineExceeded,
     #[error("internal search service is unavailable")]
     Unavailable,
 }
@@ -153,7 +156,18 @@ impl InternalSearchHttpClient {
         I: Serialize + ?Sized,
         O: DeserializeOwned,
     {
-        let body = serde_json::to_vec(input).map_err(|_error| SearchClientError::Unavailable)?;
+        let search_timeout = context
+            .search_timeout()
+            .ok_or(SearchClientError::DeadlineExceeded)?;
+        let timeout_ms = u64::try_from(search_timeout.as_millis())
+            .ok()
+            .filter(|value| *value > 0)
+            .ok_or(SearchClientError::DeadlineExceeded)?;
+        let body = serde_json::to_vec(&InternalSearchRequest {
+            timeout_ms,
+            command: input,
+        })
+        .map_err(|_error| SearchClientError::Unavailable)?;
         let timestamp =
             InternalSearchAuth::now_timestamp().map_err(|_error| SearchClientError::Unavailable)?;
         let signature = self
@@ -170,10 +184,14 @@ impl InternalSearchHttpClient {
         if let Some(request_id) = context.request_id() {
             request = request.header(REQUEST_ID_HEADER, request_id.clone());
         }
-        let mut response = request.send().await.map_err(|error| {
-            tracing::warn!(event = "internal_search.request_failed", %error);
-            SearchClientError::Unavailable
-        })?;
+        let remaining = context
+            .remaining()
+            .ok_or(SearchClientError::DeadlineExceeded)?;
+        let mut response = request
+            .timeout(remaining)
+            .send()
+            .await
+            .map_err(map_transport_error)?;
         let status = response.status();
         let response_timestamp = response
             .headers()
@@ -195,11 +213,7 @@ impl InternalSearchHttpClient {
             return Err(SearchClientError::Unavailable);
         }
         let mut body = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_error| SearchClientError::Unavailable)?
-        {
+        while let Some(chunk) = response.chunk().await.map_err(map_transport_error)? {
             if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
                 return Err(SearchClientError::Unavailable);
             }
@@ -241,6 +255,15 @@ impl InternalSearchHttpClient {
     }
 }
 
+fn map_transport_error(error: reqwest::Error) -> SearchClientError {
+    tracing::warn!(event = "internal_search.request_failed", %error);
+    if error.is_timeout() {
+        SearchClientError::DeadlineExceeded
+    } else {
+        SearchClientError::Unavailable
+    }
+}
+
 fn map_wire_error(error: InternalSearchError) -> SearchClientError {
     let error = match error {
         InternalSearchError::NotFound { message } => SearchError::NotFound(message),
@@ -258,6 +281,7 @@ fn map_wire_error(error: InternalSearchError) -> SearchClientError {
         InternalSearchError::Busy { operation } => {
             return SearchClientError::Capacity(operation.into());
         }
+        InternalSearchError::DeadlineExceeded => return SearchClientError::DeadlineExceeded,
         InternalSearchError::Internal => {
             SearchError::Internal("internal search service error".to_owned())
         }
@@ -272,9 +296,9 @@ mod tests {
     use std::convert::Infallible;
 
     use axum::Router;
-    use axum::body::Body;
+    use axum::body::{Body, to_bytes};
     use axum::extract::State;
-    use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
+    use axum::http::{HeaderMap, HeaderValue, Request, Response, StatusCode};
     use axum::routing::post;
     use futures_util::stream;
     use serde_json::{Value, json};
@@ -293,6 +317,7 @@ mod tests {
         signed_body: Option<Vec<u8>>,
         stream_body: bool,
         expected_request_id: Option<HeaderValue>,
+        expected_command: Option<Value>,
     }
 
     impl StubResponse {
@@ -305,22 +330,55 @@ mod tests {
                 signed_body: None,
                 stream_body: false,
                 expected_request_id: None,
+                expected_command: None,
             }
         }
     }
 
     async fn stub_handler(
         State(response): State<StubResponse>,
-        headers: HeaderMap,
+        request: Request<Body>,
     ) -> Response<Body> {
+        let (parts, body) = request.into_parts();
         if let Some(expected_request_id) = &response.expected_request_id {
-            assert_eq!(headers.get(REQUEST_ID_HEADER), Some(expected_request_id));
+            assert_eq!(
+                parts.headers.get(REQUEST_ID_HEADER),
+                Some(expected_request_id)
+            );
         }
-        let request_timestamp = headers
+        let request_timestamp = parts
+            .headers
             .get(TIMESTAMP_HEADER)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<i64>().ok())
             .unwrap_or_default();
+        let request_signature = parts
+            .headers
+            .get(REQUEST_SIGNATURE_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        let request_body = to_bytes(body, MAX_RESPONSE_BYTES)
+            .await
+            .expect("bounded test request body");
+        assert!(InternalSearchAuth::new(SIGNING_KEY).verify_request_at(
+            request_timestamp,
+            request_timestamp,
+            "POST",
+            FIND_PATH,
+            &request_body,
+            request_signature,
+        ));
+        let request_json: Value =
+            serde_json::from_slice(&request_body).expect("client sends JSON request envelope");
+        assert!(
+            request_json
+                .get("timeout_ms")
+                .and_then(Value::as_u64)
+                .is_some_and(|value| value > 0)
+        );
+        if let Some(expected_command) = &response.expected_command {
+            assert_eq!(request_json.get("command"), Some(expected_command));
+        }
         let signed_body = response.signed_body.as_deref().unwrap_or(&response.body);
         let signature = InternalSearchAuth::new(response.signing_key)
             .sign_response(
@@ -497,6 +555,35 @@ mod tests {
             SearchClientError::Search(SearchError::Internal(message))
                 if message == "internal search service error"
         ));
+
+        let error = send_error(
+            StatusCode::GATEWAY_TIMEOUT,
+            InternalSearchError::DeadlineExceeded,
+        )
+        .await?;
+        assert!(matches!(error, SearchClientError::DeadlineExceeded));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn elapsed_context_is_rejected_before_transport() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let (client, server) = start_stub(StubResponse::signed(
+            StatusCode::OK,
+            br#"{"ok":true}"#.to_vec(),
+        ))
+        .await?;
+
+        let result = client
+            .send::<_, Value>(
+                FIND_PATH,
+                &json!({}),
+                &RequestContext::with_timeout(Duration::ZERO),
+            )
+            .await;
+
+        server.abort();
+        assert!(matches!(result, Err(SearchClientError::DeadlineExceeded)));
         Ok(())
     }
 
@@ -530,6 +617,7 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let mut response = StubResponse::signed(StatusCode::OK, br#"{"ok":true}"#.to_vec());
         response.expected_request_id = Some(HeaderValue::from_static("request-123"));
+        response.expected_command = Some(json!({"q": "needle"}));
         let (client, server) = start_stub(response).await?;
         let mut headers = HeaderMap::new();
         headers.insert(REQUEST_ID_HEADER, HeaderValue::from_static("request-123"));
@@ -537,7 +625,7 @@ mod tests {
         let result = client
             .send::<_, Value>(
                 FIND_PATH,
-                &json!({}),
+                &json!({"q": "needle"}),
                 &RequestContext::from_headers(&headers),
             )
             .await?;

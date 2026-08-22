@@ -1,3 +1,6 @@
+use std::future::Future;
+use std::time::Duration;
+
 use axum::body::{Body, to_bytes};
 use axum::extract::State;
 use axum::http::header::CONTENT_TYPE;
@@ -16,8 +19,10 @@ use tower_http::timeout::TimeoutLayer;
 use super::auth::{
     InternalSearchAuth, REQUEST_SIGNATURE_HEADER, RESPONSE_SIGNATURE_HEADER, TIMESTAMP_HEADER,
 };
+use super::context::SEARCH_RESPONSE_HEADROOM;
 use super::contract::{
     ErrorOutput, FindCommand, FindOutput, GrepCommand, GrepOutput, InternalSearchError,
+    InternalSearchRequest,
 };
 use super::{FIND_PATH, GREP_PATH};
 use crate::error::ApiError;
@@ -121,33 +126,105 @@ async fn scrape(State(state): State<SearchServerState>) -> Response {
 }
 
 async fn find(State(state): State<SearchServerState>, request: Request<Body>) -> Response {
-    let (timestamp, command) = match verified_json::<FindCommand>(&state, request).await {
-        Ok(value) => value,
-        Err(error) => return request_error_response(&state, FIND_PATH, error),
-    };
+    let (timestamp, input) =
+        match verified_json::<InternalSearchRequest<FindCommand>>(&state, request).await {
+            Ok(value) => value,
+            Err(error) => return request_error_response(&state, FIND_PATH, error),
+        };
+    let command = input.command;
     let caller_account_id = command.caller_account_id;
     let space_id = command.space_id;
-    let result = state
-        .runtime
-        .find(caller_account_id, space_id, command.into_request())
-        .await
-        .map(FindOutput::from);
-    search_response(&state, FIND_PATH, timestamp, result)
+    match run_before_deadline(
+        input.timeout_ms,
+        state
+            .runtime
+            .find(caller_account_id, space_id, command.into_request()),
+    )
+    .await
+    {
+        Ok(result) => search_response(&state, FIND_PATH, timestamp, result.map(FindOutput::from)),
+        Err(deadline) => deadline_response(&state, FIND_PATH, timestamp, "find", deadline),
+    }
 }
 
 async fn grep(State(state): State<SearchServerState>, request: Request<Body>) -> Response {
-    let (timestamp, command) = match verified_json::<GrepCommand>(&state, request).await {
-        Ok(value) => value,
-        Err(error) => return request_error_response(&state, GREP_PATH, error),
-    };
+    let (timestamp, input) =
+        match verified_json::<InternalSearchRequest<GrepCommand>>(&state, request).await {
+            Ok(value) => value,
+            Err(error) => return request_error_response(&state, GREP_PATH, error),
+        };
+    let command = input.command;
     let caller_account_id = command.caller_account_id;
     let space_id = command.space_id;
-    let result = state
-        .runtime
-        .grep(caller_account_id, space_id, command.into_request())
+    match run_before_deadline(
+        input.timeout_ms,
+        state
+            .runtime
+            .grep(caller_account_id, space_id, command.into_request()),
+    )
+    .await
+    {
+        Ok(result) => search_response(&state, GREP_PATH, timestamp, result.map(GrepOutput::from)),
+        Err(deadline) => deadline_response(&state, GREP_PATH, timestamp, "grep", deadline),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeadlineExceeded {
+    BeforeExecution,
+    DuringExecution,
+}
+
+impl DeadlineExceeded {
+    const fn phase(self) -> &'static str {
+        match self {
+            Self::BeforeExecution => "before_execution",
+            Self::DuringExecution => "during_execution",
+        }
+    }
+}
+
+async fn run_before_deadline<F, T>(timeout_ms: u64, future: F) -> Result<T, DeadlineExceeded>
+where
+    F: Future<Output = T>,
+{
+    let timeout = execution_timeout(timeout_ms).ok_or(DeadlineExceeded::BeforeExecution)?;
+    tokio::time::timeout(timeout, future)
         .await
-        .map(GrepOutput::from);
-    search_response(&state, GREP_PATH, timestamp, result)
+        .map_err(|_elapsed| DeadlineExceeded::DuringExecution)
+}
+
+fn execution_timeout(timeout_ms: u64) -> Option<Duration> {
+    if timeout_ms == 0 {
+        return None;
+    }
+    let max_execution = Duration::from_secs(notegate_core::limits::HTTP_REQUEST_TIMEOUT_SECS)
+        .saturating_sub(SEARCH_RESPONSE_HEADROOM);
+    Some(Duration::from_millis(timeout_ms).min(max_execution))
+}
+
+fn deadline_response(
+    state: &SearchServerState,
+    path: &str,
+    timestamp: i64,
+    operation: &'static str,
+    deadline: DeadlineExceeded,
+) -> Response {
+    let phase = deadline.phase();
+    observability::record_search_deadline(operation, phase);
+    tracing::warn!(
+        event = "internal_search.deadline_exceeded",
+        operation,
+        phase
+    );
+    let error = InternalSearchError::DeadlineExceeded;
+    signed_json(
+        state,
+        path,
+        timestamp,
+        error.status(),
+        &ErrorOutput { error },
+    )
 }
 
 enum VerifiedRequestError {
@@ -284,4 +361,38 @@ where
         .headers_mut()
         .insert(RESPONSE_SIGNATURE_HEADER, signature);
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::pending;
+
+    use super::*;
+
+    #[test]
+    fn timeout_budget_rejects_zero_and_caps_large_values() {
+        assert_eq!(execution_timeout(0), None);
+        assert_eq!(execution_timeout(1_500), Some(Duration::from_millis(1_500)));
+        assert_eq!(
+            execution_timeout(u64::MAX),
+            Some(
+                Duration::from_secs(notegate_core::limits::HTTP_REQUEST_TIMEOUT_SECS)
+                    .saturating_sub(SEARCH_RESPONSE_HEADROOM)
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn execution_is_cancelled_when_its_deadline_expires() {
+        let result = run_before_deadline(10, pending::<()>()).await;
+
+        assert_eq!(result, Err(DeadlineExceeded::DuringExecution));
+    }
+
+    #[tokio::test]
+    async fn zero_timeout_is_rejected_before_polling_work() {
+        let result = run_before_deadline(0, pending::<()>()).await;
+
+        assert_eq!(result, Err(DeadlineExceeded::BeforeExecution));
+    }
 }
