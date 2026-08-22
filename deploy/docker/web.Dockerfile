@@ -85,11 +85,11 @@ RUN --mount=type=cache,id=notegate-cargo-registry,target=/usr/local/cargo/regist
     cargo build --release --locked --bin notegate-api \
     && cp /app/target/release/notegate-api /usr/local/bin/notegate-api
 
-# Stage 5: minimal runtime image.
+# Stage 5: shared minimal runtime image.
 #
-# The final image contains Debian slim, the CA bundle, a non-root user, the
-# compiled backend, and the built dashboard assets.
-FROM debian:bookworm-slim AS runtime
+# The split-topology test target uses this image without dashboard assets, so
+# backend process composition can be built independently of the Node stage.
+FROM debian:bookworm-slim AS runtime-base
 
 # Runtime only needs a CA bundle for outbound HTTPS. Copy it from the build
 # image instead of apt-installing ca-certificates, which would also pull
@@ -99,11 +99,19 @@ RUN groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin appuser
 WORKDIR /app
 COPY --from=builder /usr/local/bin/notegate-api /usr/local/bin/notegate-api
-COPY --from=web-builder /app/frontend/web/dist /app/web
 
-ENV NOTEGATE_BIND_ADDR=0.0.0.0:9191 \
-    NOTEGATE_WEB_DIST_DIR=/app/web
-EXPOSE 9191
+ENV NOTEGATE_BIND_ADDR=0.0.0.0:9191
 
 USER appuser
 ENTRYPOINT ["/usr/local/bin/notegate-api"]
+
+# Backend-only image used by docker-compose.split.yml.
+FROM runtime-base AS runtime-headless
+EXPOSE 9191 9192
+
+# Production image additionally serves the built dashboard.
+FROM runtime-base AS runtime
+
+COPY --from=web-builder /app/frontend/web/dist /app/web
+ENV NOTEGATE_WEB_DIST_DIR=/app/web
+EXPOSE 9191

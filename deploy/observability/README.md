@@ -8,7 +8,8 @@ configuration and provisioned Grafana dashboards.
 ```text
 deploy/observability/
 ├── prometheus/
-│   └── prometheus.yml
+│   ├── prometheus.yml
+│   └── prometheus-split.yml
 └── grafana/
     ├── dashboards/
     │   ├── notegate-service-overview.json
@@ -62,6 +63,51 @@ The application default for `NOTEGATE_METRICS_ENABLED` is `false`. Docker
 Compose enables it for every web process through `COMPOSE_NOTEGATE_METRICS_ENABLED`,
 which defaults to `true`. HTTP and background-job metrics share the same `/metrics`
 endpoint.
+
+## Run the fully split topology locally
+
+`docker-compose.split.yml` runs the same backend-only image as four independent
+processes: `api`, `search`, `worker`, and `reconciler`. Its
+`runtime-headless` build target contains the production Rust binary but omits
+dashboard assets that are irrelevant to process-composition testing. The API
+process owns migrations and active key-epoch initialization. A one-shot
+`api-ready` probe prevents the other roles from starting before that bootstrap
+is complete.
+
+```sh
+make split-up
+make split-test
+make split-test-isolation
+```
+
+The regular smoke verifies every role's `/health`, `/ready`, and `/metrics`,
+checks the expected `process_mode` label, requires exactly one healthy
+Prometheus target per role, and verifies the provisioned Prometheus datasource
+and all three Grafana dashboards. The split Prometheus configuration preserves
+`job="notegate"` for dashboard compatibility and adds the bounded target label
+`scrape_role="api|search|worker|reconciler"`.
+
+The isolation smoke first passes the regular smoke, stops only the API process,
+and verifies that Search, Worker, Reconciler, Prometheus, and Grafana remain
+healthy. Its Make target always starts the API again, including after a failed
+isolation assertion, and finishes by rerunning the regular smoke against the
+restored topology.
+
+Local endpoints:
+
+- API: `http://localhost:9191`
+- Search control plane: `http://localhost:9192`
+- Worker control plane: `http://localhost:9193`
+- Reconciler control plane: `http://localhost:9194`
+- PostgreSQL: `localhost:15434`
+- MinIO S3 API: `http://localhost:19000`
+- MinIO console: `http://localhost:19001`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000`
+
+Use `make split-logs` to inspect every role and `make split-down` to stop the
+stack. The split Compose stack uses its own `notegate-split` project and named
+volumes, so it does not share containers or data with the default stack.
 
 ## Kubernetes delivery
 
@@ -121,6 +167,11 @@ jq empty deploy/observability/grafana/dashboards/*.json
 
 docker run --rm --entrypoint=promtool \
   -v "$PWD/deploy/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+  prom/prometheus:v3.13.1 \
+  check config /etc/prometheus/prometheus.yml
+
+docker run --rm --entrypoint=promtool \
+  -v "$PWD/deploy/observability/prometheus/prometheus-split.yml:/etc/prometheus/prometheus.yml:ro" \
   prom/prometheus:v3.13.1 \
   check config /etc/prometheus/prometheus.yml
 ```

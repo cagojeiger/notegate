@@ -103,6 +103,7 @@ pub enum ProcessMode {
     All,
     Api,
     Worker,
+    Reconciler,
     Search,
 }
 
@@ -115,6 +116,14 @@ impl ProcessMode {
         matches!(self, Self::All | Self::Worker)
     }
 
+    pub const fn runs_reconciler(self) -> bool {
+        matches!(self, Self::All | Self::Reconciler)
+    }
+
+    pub const fn exposes_public_listener(self) -> bool {
+        !matches!(self, Self::Search)
+    }
+
     pub const fn serves_search(self) -> bool {
         matches!(self, Self::All | Self::Api | Self::Search)
     }
@@ -124,6 +133,7 @@ impl ProcessMode {
             Self::All => "all",
             Self::Api => "api",
             Self::Worker => "worker",
+            Self::Reconciler => "reconciler",
             Self::Search => "search",
         }
     }
@@ -191,6 +201,10 @@ pub struct Config {
     pub database_url: String,
     /// Max connections in the sqlx pool.
     pub db_max_connections: u32,
+    /// Optional Postgres read endpoint. Search uses this pool when configured.
+    pub read_database_url: Option<String>,
+    /// Max connections in the optional read pool.
+    pub read_db_max_connections: u32,
     /// In-process durable background job consumer.
     #[serde(default)]
     pub background_jobs: BackgroundJobsConfig,
@@ -276,6 +290,12 @@ impl Validate for Config {
         }
         if !(1..=256).contains(&self.db_max_connections) {
             errors.add("db_max_connections", ValidationError::new("range"));
+        }
+        if self.read_database_url.as_deref().is_some_and(str::is_empty) {
+            errors.add("read_database_url", ValidationError::new("length"));
+        }
+        if !(1..=256).contains(&self.read_db_max_connections) {
+            errors.add("read_db_max_connections", ValidationError::new("range"));
         }
         if self
             .search_service_url
@@ -438,6 +458,8 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
         .set_default("search_bind_addr", DEFAULT_SEARCH_BIND_ADDR)
         .map_err(map_config_error)?
         .set_default("db_max_connections", DEFAULT_DB_MAX_CONNECTIONS)
+        .map_err(map_config_error)?
+        .set_default("read_db_max_connections", DEFAULT_DB_MAX_CONNECTIONS)
         .map_err(map_config_error)?
         .set_default("jwks_cache_ttl_secs", DEFAULT_JWKS_CACHE_TTL_SECS)
         .map_err(map_config_error)?
@@ -805,6 +827,8 @@ mod tests {
             process_mode: ProcessMode::All,
             database_url: "postgres://example".to_owned(),
             db_max_connections: 10,
+            read_database_url: None,
+            read_db_max_connections: 10,
             background_jobs: BackgroundJobsConfig::default(),
             authgate_url: "https://auth.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),
@@ -924,6 +948,8 @@ mod tests {
                     "env-lookup-root-secret-32-bytes-long",
                 ),
                 ("NOTEGATE_DB_MAX_CONNECTIONS", "7"),
+                ("NOTEGATE_READ_DATABASE_URL", "postgres://read.env"),
+                ("NOTEGATE_READ_DB_MAX_CONNECTIONS", "11"),
                 ("NOTEGATE_PROCESS_MODE", "worker"),
                 ("NOTEGATE_SEARCH_BIND_ADDR", "0.0.0.0:9292"),
                 (
@@ -948,6 +974,11 @@ mod tests {
         assert_eq!(config.bind_addr.to_string(), super::DEFAULT_BIND_ADDR);
         assert_eq!(config.database_url, "postgres://env");
         assert_eq!(config.db_max_connections, 7);
+        assert_eq!(
+            config.read_database_url.as_deref(),
+            Some("postgres://read.env")
+        );
+        assert_eq!(config.read_db_max_connections, 11);
         assert_eq!(config.process_mode, ProcessMode::Worker);
         assert_eq!(config.search_bind_addr.to_string(), "0.0.0.0:9292");
         assert_eq!(
@@ -1210,15 +1241,23 @@ mod tests {
     fn process_modes_select_components() {
         assert!(ProcessMode::All.runs_api());
         assert!(ProcessMode::All.runs_worker());
+        assert!(ProcessMode::All.runs_reconciler());
         assert!(ProcessMode::All.serves_search());
         assert!(ProcessMode::Api.runs_api());
         assert!(!ProcessMode::Api.runs_worker());
+        assert!(!ProcessMode::Api.runs_reconciler());
         assert!(ProcessMode::Api.serves_search());
         assert!(!ProcessMode::Worker.runs_api());
         assert!(ProcessMode::Worker.runs_worker());
+        assert!(!ProcessMode::Worker.runs_reconciler());
         assert!(!ProcessMode::Worker.serves_search());
+        assert!(!ProcessMode::Reconciler.runs_api());
+        assert!(!ProcessMode::Reconciler.runs_worker());
+        assert!(ProcessMode::Reconciler.runs_reconciler());
+        assert!(!ProcessMode::Reconciler.serves_search());
         assert!(!ProcessMode::Search.runs_api());
         assert!(!ProcessMode::Search.runs_worker());
+        assert!(!ProcessMode::Search.runs_reconciler());
         assert!(ProcessMode::Search.serves_search());
     }
 

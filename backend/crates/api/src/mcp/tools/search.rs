@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use super::resolve::{actionable_input_error, caller, resolve_target, search_error};
 use super::support::page_json;
-use crate::internal_search::SearchClientError;
+use crate::internal_search::{RequestContext, SearchClientError};
 use crate::mcp::contract::McpAction;
 use crate::state::AppState;
 
@@ -32,6 +32,7 @@ pub async fn find(
     cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
+    let context = RequestContext::from_headers(&parts.headers);
     let (resolved, scope_path) = resolve_target(state, caller, &target).await?;
     let scope_path = Some(scope_path);
 
@@ -44,6 +45,7 @@ pub async fn find(
     let page = state
         .search
         .find(
+            &context,
             caller.account_id(),
             resolved.space_id(),
             FindRequest {
@@ -88,6 +90,7 @@ pub async fn grep(
     cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
+    let context = RequestContext::from_headers(&parts.headers);
     let (resolved, scope_path) = resolve_target(state, caller, &target).await?;
     let scope_path = Some(scope_path);
     let space = resolved.name().to_owned();
@@ -97,6 +100,7 @@ pub async fn grep(
     let page = state
         .search
         .grep(
+            &context,
             caller.account_id(),
             resolved.space_id(),
             GrepRequest {

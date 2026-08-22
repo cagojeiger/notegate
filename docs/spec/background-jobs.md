@@ -68,7 +68,7 @@ notegate-api background runtime
 - Handler는 typed payload를 받아 완료, 지연 또는 분류된 실패를 queue runtime에 반환한다.
 - 멱등성, stale 판정, 업무 결과 transaction은 handler가 호출하는 db/service 계층이 소유한다.
 - Queue schema와 migration은 database schema 소유권에 따라 `notegate-db`가 관리한다.
-- `all` mode는 HTTP server와 queue runtime을 함께 실행한다. `api`와 `worker` mode는 같은 binary에서 실행 책임을 분리한다.
+- `all` mode는 HTTP server, queue consumer와 reconciliation runtime을 함께 실행한다. `api`, `worker`, `reconciler` mode는 같은 binary에서 실행 책임을 분리한다.
 
 ## 상태 머신
 
@@ -121,8 +121,8 @@ background_job_attempts
 ## 실행 규칙
 
 - Worker는 자신에게 등록된 `job_kind`만 선점한다. 처리할 수 없는 kind 때문에 polling loop가 계속 깨어나면 안 된다.
-- `NOTEGATE_PROCESS_MODE`는 `all`, `api`, `worker`, `search` 중 하나다. 기본값 `all`은 기존 단일 process 배포를 유지하되 search는 별도 private listener를 사용한다.
-- `api` mode는 데이터·control HTTP와 metadata write-behind만 실행한다. `worker` mode는 queue runtime, reconciliation runtime과 control HTTP만 실행한다. `search` mode는 background job을 실행하지 않는다.
+- `NOTEGATE_PROCESS_MODE`는 `all`, `api`, `worker`, `reconciler`, `search` 중 하나다. 기본값 `all`은 기존 단일 process 배포를 유지하되 search는 별도 private listener를 사용한다.
+- `api` mode는 데이터·control HTTP와 metadata write-behind만 실행한다. `worker` mode는 queue consumer와 control HTTP, `reconciler` mode는 fixed-schedule convergence와 control HTTP만 실행한다. `search` mode는 background job을 실행하지 않는다.
 - Process mode는 실행 책임만 분리한다. 모든 mode는 같은 binary와 전체 `Config` 계약을 사용한다.
 - 기본 동시 실행 수는 process당 4이고 최대 64다.
 - `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`로 process별 동시 실행 수를 설정한다.
@@ -140,7 +140,7 @@ background_job_attempts
 - Panic, timeout, graceful shutdown 중 취소는 retryable failure로 기록한다.
 - Worker가 비정상 종료되어 attempt를 닫지 못하면 lease recovery가 `lease_expired`로 마감하고 재시도하거나 `dead`로 전환한다.
 - Lease recovery와 retention 정리는 consumer loop와 독립적인 범용 reconciliation runtime이 수행한다.
-- 모든 `all` 또는 `worker` mode replica가 같은 reconciler를 등록한다. 각 kind는 PostgreSQL session advisory lock으로 같은 database에서 동시에 하나만 실행된다.
+- 모든 `all` 또는 `reconciler` mode replica가 같은 reconciler를 등록한다. 각 kind는 PostgreSQL session advisory lock으로 같은 database에서 동시에 하나만 실행된다.
 - Advisory lock은 handler가 공유 pool을 기다리는 동안 pool slot을 점유하지 않도록 별도 session을 사용한다. 한 process에서 동시에 실행되는 reconciler kind 수만큼 database 연결이 공유 pool 밖에서 추가될 수 있다.
 - Lease recovery는 60초, retention 정리는 1시간의 고정 주기로 실행한다. 각 실행은 제한된 시간 동안 batch를 처리하고 backlog가 남으면 lock을 해제한 뒤 1초 후 다시 선점한다. 실패는 다음 고정 주기에서 현재 상태를 다시 읽어 수렴한다.
 - Reconciler 구현은 반복 실행해도 같은 현재 상태로 수렴해야 한다. Runtime은 동일 kind의 동시 실행을 막지만 exactly-once 실행은 보장하지 않는다.

@@ -43,6 +43,54 @@ pub type LinkGraph = LinkGraphService;
 /// User-facing account and Space usage service.
 pub type Usage = UsageService;
 
+#[derive(Debug, Clone)]
+pub(crate) struct DatabasePoolObservation {
+    pub(crate) role: &'static str,
+    pub(crate) pool: PgPool,
+    pub(crate) max_connections: u32,
+}
+
+#[derive(Clone)]
+pub(crate) struct ControlPlaneState {
+    pub(crate) readiness_pool: PgPool,
+    pub(crate) database_pools: Vec<DatabasePoolObservation>,
+    pub(crate) metrics: Option<MetricsHandle>,
+    pub(crate) search_metrics_runtime: Option<SearchRuntime>,
+}
+
+impl ControlPlaneState {
+    pub(crate) fn primary(
+        pool: PgPool,
+        max_connections: u32,
+        metrics: Option<MetricsHandle>,
+    ) -> Self {
+        Self {
+            readiness_pool: pool.clone(),
+            database_pools: vec![DatabasePoolObservation {
+                role: "primary",
+                pool,
+                max_connections,
+            }],
+            metrics,
+            search_metrics_runtime: None,
+        }
+    }
+
+    pub(crate) fn with_read_pool(mut self, pool: PgPool, max_connections: u32) -> Self {
+        self.database_pools.push(DatabasePoolObservation {
+            role: "read",
+            pool,
+            max_connections,
+        });
+        self
+    }
+
+    pub(crate) fn with_search_metrics_runtime(mut self, runtime: Option<SearchRuntime>) -> Self {
+        self.search_metrics_runtime = runtime;
+        self
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
@@ -69,6 +117,7 @@ pub struct AppState {
     pub(crate) mcp_invocations: McpInvocationRepo,
     pub(crate) metrics: Option<MetricsHandle>,
     pub(crate) search_metrics_runtime: Option<SearchRuntime>,
+    pub(crate) read_db_metrics: Option<(PgPool, u32)>,
     pub(crate) shutdown: CancellationToken,
 }
 
@@ -84,7 +133,15 @@ impl AppState {
         http: reqwest::Client,
         pii_crypto: PiiCrypto,
     ) -> Self {
-        Self::build(db, config, jwt, oidc, resolver, http, pii_crypto, None)
+        let search_store =
+            FilesRepo::with_limits_and_crypto(db.clone(), config.limits, pii_crypto.clone())
+                .with_metrics_enabled(config.metrics_enabled);
+        let search = SearchClient::local(SearchRuntime::new(
+            search_store,
+            config.search_body_cache,
+            config.metrics_enabled,
+        ));
+        Self::build(db, config, jwt, oidc, resolver, http, pii_crypto, search)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -98,16 +155,7 @@ impl AppState {
         pii_crypto: PiiCrypto,
         search: SearchClient,
     ) -> Self {
-        Self::build(
-            db,
-            config,
-            jwt,
-            oidc,
-            resolver,
-            http,
-            pii_crypto,
-            Some(search),
-        )
+        Self::build(db, config, jwt, oidc, resolver, http, pii_crypto, search)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -119,7 +167,7 @@ impl AppState {
         resolver: Arc<dyn CallerResolver>,
         http: reqwest::Client,
         pii_crypto: PiiCrypto,
-        search: Option<SearchClient>,
+        search: SearchClient,
     ) -> Self {
         let object_storage = ObjectStorage::new(&config.s3);
         let spaces = SpaceService::new(SpaceRepo::new(db.clone()));
@@ -150,16 +198,9 @@ impl AppState {
         let files = FilesService::new(files_repo.clone());
         let link_graph = LinkGraphService::new(
             LinkGraphRepo::new(db.clone()),
-            files_repo.clone(),
+            files_repo,
             notegate_db::LinkGraphWorkRepo::new(db.clone()),
         );
-        let search = search.unwrap_or_else(|| {
-            SearchClient::local(SearchRuntime::new(
-                files_repo,
-                config.search_body_cache,
-                config.metrics_enabled,
-            ))
-        });
         let usage = UsageService::new(UsageRepo::new(db.clone()), config.limits);
         let browser_sessions = BrowserSessionRepo::with_lookup_key(
             db.clone(),
@@ -190,6 +231,7 @@ impl AppState {
             mcp_invocations,
             metrics: None,
             search_metrics_runtime: None,
+            read_db_metrics: None,
             shutdown: CancellationToken::new(),
         }
     }
@@ -202,6 +244,24 @@ impl AppState {
     pub(crate) fn with_search_metrics_runtime(mut self, runtime: Option<SearchRuntime>) -> Self {
         self.search_metrics_runtime = runtime;
         self
+    }
+
+    pub(crate) fn with_read_db_metrics(mut self, pool: PgPool, max_connections: u32) -> Self {
+        self.read_db_metrics = Some((pool, max_connections));
+        self
+    }
+
+    pub(crate) fn control_plane_state(&self) -> ControlPlaneState {
+        let mut state = ControlPlaneState::primary(
+            self.db.clone(),
+            self.config.db_max_connections,
+            self.metrics.clone(),
+        )
+        .with_search_metrics_runtime(self.search_metrics_runtime.clone());
+        if let Some((pool, max_connections)) = &self.read_db_metrics {
+            state = state.with_read_pool(pool.clone(), *max_connections);
+        }
+        state
     }
 
     pub(crate) fn with_shutdown_token(mut self, shutdown: CancellationToken) -> Self {

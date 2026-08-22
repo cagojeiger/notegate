@@ -27,8 +27,9 @@ const MAX_REQUEST_BYTES: usize = 64 * 1024;
 
 #[derive(Clone)]
 pub(crate) struct SearchServerState {
-    pub(crate) db: PgPool,
-    db_max_connections: u32,
+    pub(crate) authority_db: PgPool,
+    authority_db_max_connections: u32,
+    read_db: Option<(PgPool, u32)>,
     runtime: SearchRuntime,
     auth: InternalSearchAuth,
     metrics: Option<MetricsHandle>,
@@ -36,15 +37,17 @@ pub(crate) struct SearchServerState {
 
 impl SearchServerState {
     pub(crate) fn new(
-        db: PgPool,
-        db_max_connections: u32,
+        authority_db: PgPool,
+        authority_db_max_connections: u32,
+        read_db: Option<(PgPool, u32)>,
         runtime: SearchRuntime,
         signing_key: [u8; 32],
         metrics: Option<MetricsHandle>,
     ) -> Self {
         Self {
-            db,
-            db_max_connections,
+            authority_db,
+            authority_db_max_connections,
+            read_db,
             runtime,
             auth: InternalSearchAuth::new(signing_key),
             metrics,
@@ -87,20 +90,32 @@ async fn health() -> Json<HealthResponse> {
 }
 
 async fn ready(State(state): State<SearchServerState>) -> Result<Json<HealthResponse>, ApiError> {
-    notegate_db::check_readiness(&state.db)
-        .await
-        .map_err(|error| {
-            tracing::error!(event = "search.ready.failed", %error);
-            ApiError::internal("database not ready")
-        })?;
+    check_database_ready("primary", &state.authority_db).await?;
+    if let Some((read_db, _max_connections)) = &state.read_db {
+        check_database_ready("read", read_db).await?;
+    }
     Ok(Json(HealthResponse { status: "ready" }))
+}
+
+async fn check_database_ready(role: &'static str, pool: &PgPool) -> Result<(), ApiError> {
+    notegate_db::check_readiness(pool).await.map_err(|error| {
+        tracing::error!(event = "search.ready.failed", database_role = role, %error);
+        ApiError::internal("database not ready")
+    })
 }
 
 async fn scrape(State(state): State<SearchServerState>) -> Response {
     let Some(metrics) = &state.metrics else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    observability::record_database_metrics(&state.db, state.db_max_connections);
+    observability::record_database_metrics(
+        "primary",
+        &state.authority_db,
+        state.authority_db_max_connections,
+    );
+    if let Some((read_db, max_connections)) = &state.read_db {
+        observability::record_database_metrics("read", read_db, *max_connections);
+    }
     state.runtime.record_body_cache_metrics();
     observability::scrape_response(metrics)
 }

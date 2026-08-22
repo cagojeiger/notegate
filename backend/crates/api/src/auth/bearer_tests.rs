@@ -222,6 +222,8 @@ fn state_with_pool(
         process_mode: notegate_core::ProcessMode::All,
         database_url: "postgres://notegate:notegate@localhost/notegate".to_owned(),
         db_max_connections: 1,
+        read_database_url: None,
+        read_db_max_connections: 1,
         background_jobs: notegate_core::BackgroundJobsConfig::default(),
         authgate_url: "https://auth.example.test".to_owned(),
         notegate_public_url: "http://localhost:9191".to_owned(),

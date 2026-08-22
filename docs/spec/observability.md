@@ -4,6 +4,8 @@ NoteGate exposes process-local Prometheus metrics on each active process control
 `NOTEGATE_METRICS_ENABLED=true`. Public/worker processes use their application listener;
 `search` mode uses the private search listener. Metrics are disabled by default. When disabled,
 `/metrics` is not registered and the HTTP middleware skips metric recording.
+Every exported series carries the bounded global label `process_mode`, whose value is the configured
+process mode: `all`, `api`, `search`, `worker`, or `reconciler`.
 
 Combined `all`/local `api` mode intentionally exposes one process-local scrape endpoint on the
 public listener. Search operation and cache metrics are recorded in the shared process recorder and
@@ -45,16 +47,18 @@ notegate_http_requests_in_flight
 
 ```text
 notegate_db_pool_connections
-  labels: state (in_use, idle)
+  labels: pool (primary, read), state (in_use, idle)
 
 notegate_db_pool_max_connections
+  labels: pool (primary, read)
 
 notegate_search_body_cache_size_bytes
 notegate_search_body_cache_capacity_bytes
 notegate_search_body_cache_entries
 ```
 
-DB pool gauges are read when `/metrics` is scraped. Search cache gauges are initialized by the
+DB pool gauges are read when `/metrics` is scraped. `read` is emitted only when the process owns a
+separate read pool; an aliased read handle is reported once as `primary`. Search cache gauges are initialized by the
 owning SearchRuntime, refreshed after search execution, and refreshed again on its `/metrics`
 scrape. DB pool utilization can be derived from `in_use / max_connections`.
 Cache utilization can be derived from `size_bytes / capacity_bytes`. Cache size and
@@ -138,6 +142,8 @@ Metric labels must be bounded and must not contain:
 
 New metrics must define their label domains in this document before implementation.
 Unbounded diagnostic values belong in structured logs or traces, not Prometheus labels.
+The global `process_mode` label is bounded to the five process modes above; request and trace IDs must
+never be added as metric labels.
 
 ## Reconciliation 메트릭
 

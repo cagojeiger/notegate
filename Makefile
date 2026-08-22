@@ -1,4 +1,4 @@
-.PHONY: fmt check test clippy build frontend-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics
+.PHONY: fmt check test clippy build frontend-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics split-up split-test split-test-isolation split-logs split-down
 
 fmt:
 	cargo fmt --all --check
@@ -54,3 +54,26 @@ curl-metrics:
 	curl -fsS http://localhost:9191/metrics
 	curl -fsS http://localhost:9090/-/ready
 	curl -fsS http://localhost:3000/api/health
+
+split-up:
+	docker compose -f docker-compose.split.yml build api
+	docker compose -f docker-compose.split.yml up -d --remove-orphans
+
+split-test: split-up
+	docker compose -f docker-compose.split.yml --profile test run --rm --no-deps smoke
+
+split-test-isolation: split-test
+	@set -eu; \
+	cleanup() { docker compose -f docker-compose.split.yml start api >/dev/null; }; \
+	trap cleanup EXIT HUP INT TERM; \
+	docker compose -f docker-compose.split.yml stop api; \
+	docker compose -f docker-compose.split.yml --profile test run --rm --no-deps smoke-isolation; \
+	cleanup; \
+	trap - EXIT HUP INT TERM; \
+	docker compose -f docker-compose.split.yml --profile test run --rm --no-deps smoke
+
+split-logs:
+	docker compose -f docker-compose.split.yml logs -f api search worker reconciler prometheus grafana
+
+split-down:
+	docker compose -f docker-compose.split.yml down --remove-orphans

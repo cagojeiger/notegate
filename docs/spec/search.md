@@ -17,13 +17,22 @@ MCP search
   -> SearchRuntime
        -> admission
        -> SearchService
-       -> PostgreSQL
+       -> PostgresSearchStore
+       -> PostgreSQL primary/read pool
 ```
 
 기본 `all`과 local `api` mode도 public listener와 search listener를 다른 socket으로 띄운다.
 `search` mode는 private search listener만 띄우므로 같은 image를 별도 search pod로 배포할 수 있다.
 API pod에 `search_service_url`을 지정하면 local search listener를 만들지 않고 해당 내부 service를
 호출한다. Public listener에는 private search route를 등록하지 않는다.
+
+Search storage access는 `notegate-search` 내부 `store` 경계가 소유한다. 현재 구현은
+`PostgresSearchStore` 하나이며 기존 `FilesRepo`의 권한, scope, candidate, body와 result hydration
+연산을 그대로 위임한다. 권한 판정은 항상 primary pool을 사용한다. `read_database_url`이 설정되면
+scope, candidate, body와 result hydration만 별도 read pool을 사용하고, 설정되지 않으면 primary
+pool을 공유한다. 이 분리는 권한 철회가 replica lag 때문에 늦게 반영되는 것을 막지만, 변경 직후
+검색 결과 자체는 read replica의 지연만큼 이전 상태일 수 있다. SQLite 구현과 snapshot lifecycle은
+이 계약에 포함되지 않는다. 별도 read pool은 local search listener를 소유한 process에서만 생성한다.
 
 API `/ready`는 원격 search service를 동기적으로 probe하지 않는다. 검색 장애 때문에 읽기·쓰기까지
 같이 service endpoint에서 제거되는 연쇄 장애를 피하기 위한 의도적인 부분 가용성 계약이다. Search
@@ -35,6 +44,10 @@ skew는 60초다. Response도 request timestamp, status, path와 body를 묶어 
 LOOKUP root에서 session key와 다른 purpose label로 파생한다. 이 서명은 service authentication과
 integrity 경계이고, pod 간 transport confidentiality와 `/metrics` 접근 제한은 TLS 또는 cluster
 network policy가 담당한다.
+
+API는 `x-request-id`를 내부 Search 요청에 전달하고 Search 응답도 같은 값을 유지한다. 이 request
+context carrier는 향후 W3C `traceparent`/`tracestate` 전파를 추가하는 경계이며, 검색 명령 본문이나
+권한 계약에는 관측성 필드를 넣지 않는다.
 
 검색은 항상 folder scope의 subtree를 대상으로 한다. Scope를 생략하면 Space root `/`를 scope로 사용한다.
 

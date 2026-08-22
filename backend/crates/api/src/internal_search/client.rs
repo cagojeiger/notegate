@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use notegate_search::{
-    FindRequest, GrepRequest, SearchCapacity, SearchError, SearchRunError, SearchRuntime,
-};
+use notegate_search::{FindRequest, GrepRequest, SearchCapacity, SearchError};
+#[cfg(test)]
+use notegate_search::{SearchRunError, SearchRuntime};
 use reqwest::header::CONTENT_TYPE;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -11,6 +11,7 @@ use uuid::Uuid;
 use super::auth::{
     InternalSearchAuth, REQUEST_SIGNATURE_HEADER, RESPONSE_SIGNATURE_HEADER, TIMESTAMP_HEADER,
 };
+use super::context::{REQUEST_ID_HEADER, RequestContext};
 use super::contract::{
     ErrorOutput, FindCommand, FindOutput, GrepCommand, GrepOutput, InternalSearchError,
 };
@@ -35,12 +36,14 @@ pub(crate) struct SearchClient {
 
 #[derive(Clone)]
 enum SearchTransport {
+    #[cfg(test)]
     Local(SearchRuntime),
     Http(InternalSearchHttpClient),
     Disabled,
 }
 
 impl SearchClient {
+    #[cfg(test)]
     pub(crate) const fn local(runtime: SearchRuntime) -> Self {
         Self {
             transport: SearchTransport::Local(runtime),
@@ -71,11 +74,13 @@ impl SearchClient {
 
     pub(crate) async fn find(
         &self,
+        context: &RequestContext,
         caller_account_id: Uuid,
         space_id: Uuid,
         request: FindRequest,
     ) -> Result<FindOutput, SearchClientError> {
         match &self.transport {
+            #[cfg(test)]
             SearchTransport::Local(runtime) => runtime
                 .find(caller_account_id, space_id, request)
                 .await
@@ -86,6 +91,7 @@ impl SearchClient {
                     .send(
                         FIND_PATH,
                         &FindCommand::new(caller_account_id, space_id, request),
+                        context,
                     )
                     .await
             }
@@ -95,11 +101,13 @@ impl SearchClient {
 
     pub(crate) async fn grep(
         &self,
+        context: &RequestContext,
         caller_account_id: Uuid,
         space_id: Uuid,
         request: GrepRequest,
     ) -> Result<GrepOutput, SearchClientError> {
         match &self.transport {
+            #[cfg(test)]
             SearchTransport::Local(runtime) => runtime
                 .grep(caller_account_id, space_id, request)
                 .await
@@ -110,6 +118,7 @@ impl SearchClient {
                     .send(
                         GREP_PATH,
                         &GrepCommand::new(caller_account_id, space_id, request),
+                        context,
                     )
                     .await
             }
@@ -118,6 +127,7 @@ impl SearchClient {
     }
 }
 
+#[cfg(test)]
 fn map_run_error(error: SearchRunError) -> SearchClientError {
     match error {
         SearchRunError::Capacity(capacity) => SearchClientError::Capacity(capacity),
@@ -133,7 +143,12 @@ struct InternalSearchHttpClient {
 }
 
 impl InternalSearchHttpClient {
-    async fn send<I, O>(&self, path: &str, input: &I) -> Result<O, SearchClientError>
+    async fn send<I, O>(
+        &self,
+        path: &str,
+        input: &I,
+        context: &RequestContext,
+    ) -> Result<O, SearchClientError>
     where
         I: Serialize + ?Sized,
         O: DeserializeOwned,
@@ -145,19 +160,20 @@ impl InternalSearchHttpClient {
             .auth
             .sign_request(timestamp, "POST", path, &body)
             .map_err(|_error| SearchClientError::Unavailable)?;
-        let mut response = self
+        let mut request = self
             .http
             .post(format!("{}{path}", self.base_url))
             .header(CONTENT_TYPE, "application/json")
             .header(TIMESTAMP_HEADER, timestamp.to_string())
             .header(REQUEST_SIGNATURE_HEADER, signature)
-            .body(body)
-            .send()
-            .await
-            .map_err(|error| {
-                tracing::warn!(event = "internal_search.request_failed", %error);
-                SearchClientError::Unavailable
-            })?;
+            .body(body);
+        if let Some(request_id) = context.request_id() {
+            request = request.header(REQUEST_ID_HEADER, request_id.clone());
+        }
+        let mut response = request.send().await.map_err(|error| {
+            tracing::warn!(event = "internal_search.request_failed", %error);
+            SearchClientError::Unavailable
+        })?;
         let status = response.status();
         let response_timestamp = response
             .headers()
@@ -242,7 +258,7 @@ mod tests {
     use axum::Router;
     use axum::body::Body;
     use axum::extract::State;
-    use axum::http::{HeaderMap, Response, StatusCode};
+    use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
     use axum::routing::post;
     use futures_util::stream;
     use serde_json::{Value, json};
@@ -260,6 +276,7 @@ mod tests {
         signing_key: [u8; 32],
         signed_body: Option<Vec<u8>>,
         stream_body: bool,
+        expected_request_id: Option<HeaderValue>,
     }
 
     impl StubResponse {
@@ -271,6 +288,7 @@ mod tests {
                 signing_key: SIGNING_KEY,
                 signed_body: None,
                 stream_body: false,
+                expected_request_id: None,
             }
         }
     }
@@ -279,6 +297,9 @@ mod tests {
         State(response): State<StubResponse>,
         headers: HeaderMap,
     ) -> Response<Body> {
+        if let Some(expected_request_id) = &response.expected_request_id {
+            assert_eq!(headers.get(REQUEST_ID_HEADER), Some(expected_request_id));
+        }
         let request_timestamp = headers
             .get(TIMESTAMP_HEADER)
             .and_then(|value| value.to_str().ok())
@@ -339,7 +360,9 @@ mod tests {
 
     async fn send(response: StubResponse) -> Result<SearchClientError, Box<dyn std::error::Error>> {
         let (client, server) = start_stub(response).await?;
-        let result = client.send::<_, Value>(FIND_PATH, &json!({})).await;
+        let result = client
+            .send::<_, Value>(FIND_PATH, &json!({}), &RequestContext::default())
+            .await;
         server.abort();
         match result {
             Ok(_) => Err(std::io::Error::other("stub response unexpectedly succeeded").into()),
@@ -458,6 +481,28 @@ mod tests {
             SearchClientError::Search(SearchError::Internal(message))
                 if message == "internal search service error"
         ));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn request_context_is_forwarded_to_the_search_service()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut response = StubResponse::signed(StatusCode::OK, br#"{"ok":true}"#.to_vec());
+        response.expected_request_id = Some(HeaderValue::from_static("request-123"));
+        let (client, server) = start_stub(response).await?;
+        let mut headers = HeaderMap::new();
+        headers.insert(REQUEST_ID_HEADER, HeaderValue::from_static("request-123"));
+
+        let result = client
+            .send::<_, Value>(
+                FIND_PATH,
+                &json!({}),
+                &RequestContext::from_headers(&headers),
+            )
+            .await?;
+
+        server.abort();
+        assert_eq!(result, json!({ "ok": true }));
         Ok(())
     }
 

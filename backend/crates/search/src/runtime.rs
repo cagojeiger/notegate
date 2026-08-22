@@ -44,10 +44,29 @@ impl SearchRuntime {
         body_cache_config: SearchBodyCacheConfig,
         metrics_enabled: bool,
     ) -> Self {
+        Self::with_authority_and_query_stores(
+            store.clone(),
+            store,
+            body_cache_config,
+            metrics_enabled,
+        )
+    }
+
+    /// Use a primary-backed authority store and an independently scalable query store.
+    pub fn with_authority_and_query_stores(
+        authority_store: FilesRepo,
+        query_store: FilesRepo,
+        body_cache_config: SearchBodyCacheConfig,
+        metrics_enabled: bool,
+    ) -> Self {
         let runtime = Self {
             inner: Arc::new(SearchRuntimeInner {
-                service: SearchService::with_body_cache_config(store, body_cache_config)
-                    .with_metrics_enabled(metrics_enabled),
+                service: SearchService::with_authority_and_query_stores(
+                    authority_store,
+                    query_store,
+                    body_cache_config,
+                )
+                .with_metrics_enabled(metrics_enabled),
                 admission: SearchAdmission::default(),
             }),
         };

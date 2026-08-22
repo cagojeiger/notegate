@@ -6,8 +6,12 @@ use tokio::task::{JoinError, JoinHandle};
 use tokio_util::sync::CancellationToken;
 
 use crate::background_jobs::{self, BackgroundJobs};
-use crate::state::AppState;
+use crate::metadata_write_behind::MetadataWriteBuffer;
+use crate::object_storage::ObjectStorage;
 use crate::{metadata_write_behind, observability, reconciliations};
+use notegate_core::BackgroundJobsConfig;
+use notegate_db::PgPool;
+use notegate_service::link_graph::LinkGraphService;
 
 pub(crate) struct ProcessRuntime {
     shutdown: CancellationToken,
@@ -18,66 +22,11 @@ pub(crate) struct ProcessRuntime {
 }
 
 impl ProcessRuntime {
-    pub(crate) fn start(state: &AppState, shutdown: CancellationToken) -> anyhow::Result<Self> {
-        let process_mode = state.config.process_mode;
-        let background_jobs = if process_mode.runs_worker() {
-            Some(background_jobs::spawn(
-                state.db.clone(),
-                state.config.background_jobs,
-                state.config.metrics_enabled,
-                state.link_graph.clone(),
-                shutdown.clone(),
-            )?)
-        } else {
-            None
-        };
-        let metadata_shutdown = CancellationToken::new();
-        let mut critical_tasks = TaskSet::default();
-        let mut auxiliary_tasks = TaskSet::default();
-        auxiliary_tasks.push(
-            "metrics upkeep worker",
-            observability::spawn_upkeep(state.metrics.clone(), shutdown.clone()),
-        );
-        let reconciliation_runtime = if process_mode.runs_worker() {
-            let job_kinds = background_jobs
-                .as_ref()
-                .map(BackgroundJobs::job_kinds)
-                .unwrap_or_default();
-            Some(reconciliations::spawn(
-                &state.db,
-                state.object_storage.clone(),
-                job_kinds,
-                shutdown.clone(),
-            )?)
-        } else {
-            None
-        };
-        critical_tasks.push("reconciliation runtime", reconciliation_runtime);
-        auxiliary_tasks.push(
-            "metadata write-behind",
-            process_mode.runs_api().then(|| {
-                metadata_write_behind::spawn(
-                    state.metadata_writes.clone(),
-                    state.db.clone(),
-                    metadata_shutdown.clone(),
-                    state.config.metrics_enabled,
-                )
-            }),
-        );
-
-        Ok(Self {
-            shutdown,
-            metadata_shutdown,
-            background_jobs,
-            critical_tasks,
-            auxiliary_tasks,
-        })
-    }
-
-    pub(crate) fn search_only(
+    pub(crate) fn new(
         metrics: Option<observability::MetricsHandle>,
         shutdown: CancellationToken,
     ) -> Self {
+        let metadata_shutdown = CancellationToken::new();
         let mut auxiliary_tasks = TaskSet::default();
         auxiliary_tasks.push(
             "metrics upkeep worker",
@@ -85,11 +34,60 @@ impl ProcessRuntime {
         );
         Self {
             shutdown,
-            metadata_shutdown: CancellationToken::new(),
+            metadata_shutdown,
             background_jobs: None,
             critical_tasks: TaskSet::default(),
             auxiliary_tasks,
         }
+    }
+
+    pub(crate) fn start_worker(
+        &mut self,
+        pool: PgPool,
+        config: BackgroundJobsConfig,
+        metrics_enabled: bool,
+        link_graph: LinkGraphService,
+    ) -> anyhow::Result<()> {
+        if self.background_jobs.is_some() {
+            anyhow::bail!("background job worker already started");
+        }
+        self.background_jobs = Some(background_jobs::spawn(
+            pool,
+            config,
+            metrics_enabled,
+            link_graph,
+            self.shutdown.clone(),
+        )?);
+        Ok(())
+    }
+
+    pub(crate) fn start_reconciler(
+        &mut self,
+        pool: &PgPool,
+        object_storage: ObjectStorage,
+    ) -> anyhow::Result<()> {
+        let job_kinds = background_jobs::registered_job_kinds();
+        let task = reconciliations::spawn(pool, object_storage, &job_kinds, self.shutdown.clone())?;
+        self.critical_tasks
+            .push("reconciliation runtime", Some(task));
+        Ok(())
+    }
+
+    pub(crate) fn start_metadata_writer(
+        &mut self,
+        buffer: MetadataWriteBuffer,
+        pool: PgPool,
+        metrics_enabled: bool,
+    ) {
+        self.auxiliary_tasks.push(
+            "metadata write-behind",
+            Some(metadata_write_behind::spawn(
+                buffer,
+                pool,
+                self.metadata_shutdown.clone(),
+                metrics_enabled,
+            )),
+        );
     }
 
     pub(crate) async fn wait_for_critical_exit(&mut self) -> anyhow::Error {

@@ -4,9 +4,10 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, request::Parts};
 use notegate_db::{SpaceRepo, test_support::TestDb};
 use notegate_search::{
-    FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchRuntime,
+    FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchRunError,
+    SearchRuntime,
 };
-use notegate_service::files::{CreateText, WriteTarget, WriteText, WriteTextBody};
+use notegate_service::files::{CreateFolder, CreateText, WriteTarget, WriteText, WriteTextBody};
 use serde_json::Value;
 use tower::ServiceExt as _;
 
@@ -51,14 +52,32 @@ async fn search_app_rejects_unauthorized_search_and_exposes_only_control_plane()
         false,
     );
     let signing_key = crypto.internal_search_signing_key();
-    let app =
-        crate::routes::search_app(SearchServerState::new(pool, 10, runtime, signing_key, None));
+    let app = crate::routes::search_app(SearchServerState::new(
+        pool,
+        10,
+        None,
+        runtime,
+        signing_key,
+        None,
+    ));
 
     let health = app
         .clone()
-        .oneshot(Request::builder().uri("/health").body(Body::empty())?)
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .header("x-request-id", "search-request-123")
+                .body(Body::empty())?,
+        )
         .await?;
     assert_eq!(health.status(), StatusCode::OK);
+    assert_eq!(
+        health
+            .headers()
+            .get("x-request-id")
+            .and_then(|value| value.to_str().ok()),
+        Some("search-request-123")
+    );
 
     for path in ["/api/v1/me", "/api/v2", "/mcp", "/mcp/v2"] {
         let response = app
@@ -149,6 +168,7 @@ async fn http_search_preserves_local_mcp_find_and_grep_results()
     let search_state = SearchServerState::new(
         api_state.db.clone(),
         api_state.config.db_max_connections,
+        None,
         SearchRuntime::new(store, api_state.config.search_body_cache, false),
         signing_key,
         None,
@@ -194,6 +214,195 @@ async fn http_search_preserves_local_mcp_find_and_grep_results()
     server.abort();
     let _ = server.await;
     db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn search_runtime_routes_authority_and_queries_to_their_configured_stores()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(data_db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let Some(empty_db) = TestDb::setup().await? else {
+        data_db.cleanup().await;
+        return Ok(());
+    };
+    let state = crate::rest::test_support::state(&data_db);
+    let (caller, space_id, _root_node_id) =
+        crate::rest::test_support::caller_and_space(&state).await?;
+    SpaceRepo::new(state.db.clone())
+        .update_space(space_id, caller.account_id(), None, None, Some(true))
+        .await?;
+    let store = |pool| {
+        notegate_db::FilesRepo::with_limits_and_crypto(
+            pool,
+            state.config.limits,
+            state.security.clone(),
+        )
+    };
+    let request = || FindRequest {
+        q: "anything".to_owned(),
+        path: None,
+        kind: None,
+        match_mode: FindMatchMode::Contains,
+        include: Vec::new(),
+        exclude: Vec::new(),
+        limit: Some(1),
+        cursor: None,
+    };
+
+    let authority_result = SearchRuntime::with_authority_and_query_stores(
+        store(empty_db.pool.clone()),
+        store(data_db.pool.clone()),
+        state.config.search_body_cache,
+        false,
+    )
+    .find(caller.account_id(), space_id, request())
+    .await;
+    assert!(matches!(
+        authority_result,
+        Err(SearchRunError::Search(notegate_search::SearchError::NotFound(message)))
+            if message == "space not found"
+    ));
+
+    let query_result = SearchRuntime::with_authority_and_query_stores(
+        store(data_db.pool.clone()),
+        store(empty_db.pool.clone()),
+        state.config.search_body_cache,
+        false,
+    )
+    .find(caller.account_id(), space_id, request())
+    .await;
+    assert!(matches!(
+        query_result,
+        Err(SearchRunError::Search(notegate_search::SearchError::NotFound(message)))
+            if message == "scope path not found"
+    ));
+
+    empty_db.cleanup().await;
+    data_db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn search_runtime_grep_reads_candidates_bodies_and_hydration_from_query_store()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(authority_db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let Some(query_db) = TestDb::setup().await? else {
+        authority_db.cleanup().await;
+        return Ok(());
+    };
+    let authority_state = crate::rest::test_support::state(&authority_db);
+    let (caller, space_id, _root_node_id) =
+        crate::rest::test_support::caller_and_space(&authority_state).await?;
+    SpaceRepo::new(authority_state.db.clone())
+        .update_space(space_id, caller.account_id(), None, None, Some(true))
+        .await?;
+
+    let query_state = crate::rest::test_support::state(&query_db);
+    let (query_caller, _query_space_id, _query_root_node_id) =
+        crate::rest::test_support::caller_and_space(&query_state).await?;
+    sqlx::query("INSERT INTO spaces (id, owner_user_id, name) VALUES ($1, $2, $3)")
+        .bind(space_id)
+        .bind(query_caller.account_id())
+        .bind("grep-query")
+        .execute(&query_db.pool)
+        .await?;
+    let query_root_node_id = SpaceRepo::new(query_state.db.clone())
+        .root_node_id(space_id)
+        .await?
+        .ok_or_else(|| std::io::Error::other("expected query-store root node"))?;
+    let query_folder = query_state
+        .files
+        .create_folder(
+            query_caller.account_id(),
+            space_id,
+            CreateFolder {
+                parent_node_id: query_root_node_id,
+                name: "Query Folder".to_owned(),
+            },
+        )
+        .await?;
+    let query_node = query_state
+        .files
+        .create_text(
+            query_caller.account_id(),
+            space_id,
+            CreateText {
+                parent_node_id: query_folder.node.id,
+                name: "Query Body.md".to_owned(),
+            },
+        )
+        .await?;
+    query_state
+        .files
+        .write_text(
+            query_caller.account_id(),
+            space_id,
+            WriteText {
+                target: WriteTarget::Existing {
+                    node_id: query_node.node.node.id,
+                },
+                body: WriteTextBody::Plain("first line\nquery-only needle".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    sqlx::query("UPDATE nodes SET write_locked = true WHERE space_id = $1 AND id = $2")
+        .bind(space_id)
+        .bind(query_folder.node.id)
+        .execute(&query_db.pool)
+        .await?;
+
+    let store = |db: &TestDb| {
+        notegate_db::FilesRepo::with_limits_and_crypto(
+            db.pool.clone(),
+            authority_state.config.limits,
+            authority_state.security.clone(),
+        )
+    };
+    let result = SearchRuntime::with_authority_and_query_stores(
+        store(&authority_db),
+        store(&query_db),
+        authority_state.config.search_body_cache,
+        false,
+    )
+    .grep(
+        caller.account_id(),
+        space_id,
+        GrepRequest {
+            q: "query-only needle".to_owned(),
+            path: None,
+            match_mode: GrepMatchMode::Literal,
+            line_mode: GrepLineMode::First,
+            include: Vec::new(),
+            exclude: Vec::new(),
+            limit: Some(10),
+            cursor: None,
+        },
+    )
+    .await?;
+
+    assert_eq!(result.items.len(), 1);
+    let hit = result
+        .items
+        .first()
+        .ok_or_else(|| std::io::Error::other("expected query-store grep hit"))?;
+    assert_eq!(hit.node.path, "/Query Folder/Query Body.md");
+    assert_eq!(hit.match_lines, [2]);
+    assert_eq!(hit.node.text.as_ref().map(|text| text.line_count), Some(2));
+    assert_eq!(
+        hit.node
+            .write_lock_sources
+            .first()
+            .map(|source| (source.node_id, source.path.as_str())),
+        Some((query_folder.node.id, "/Query Folder"))
+    );
+
+    query_db.cleanup().await;
+    authority_db.cleanup().await;
     Ok(())
 }
 
