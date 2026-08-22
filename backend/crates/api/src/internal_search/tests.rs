@@ -11,7 +11,9 @@ use notegate_service::files::{CreateFolder, CreateText, WriteTarget, WriteText, 
 use serde_json::Value;
 use tower::ServiceExt as _;
 
-use super::auth::{InternalSearchAuth, REQUEST_SIGNATURE_HEADER, TIMESTAMP_HEADER};
+use super::auth::{
+    InternalSearchAuth, REQUEST_SIGNATURE_HEADER, RESPONSE_SIGNATURE_HEADER, TIMESTAMP_HEADER,
+};
 use super::loopback_base_url;
 use super::{FIND_PATH, SearchClient, SearchServerState};
 
@@ -104,6 +106,7 @@ async fn search_app_rejects_unauthorized_search_and_exposes_only_control_plane()
     let signature = InternalSearchAuth::new(signing_key)
         .sign_request(timestamp, "POST", FIND_PATH, original)?;
     let rejected_tamper = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -114,6 +117,55 @@ async fn search_app_rejects_unauthorized_search_and_exposes_only_control_plane()
         )
         .await?;
     assert_eq!(rejected_tamper.status(), StatusCode::NOT_FOUND);
+
+    let expired_body = serde_json::to_vec(&serde_json::json!({
+        "deadline_unix_ms": 0,
+        "command": {
+            "caller_account_id": uuid::Uuid::nil(),
+            "space_id": uuid::Uuid::nil(),
+            "q": "anything",
+            "path": null,
+            "kind": null,
+            "match_mode": "contains",
+            "include": [],
+            "exclude": [],
+            "limit": 1,
+            "cursor": null,
+        }
+    }))?;
+    let timestamp = InternalSearchAuth::now_timestamp()?;
+    let auth = InternalSearchAuth::new(signing_key);
+    let signature = auth.sign_request(timestamp, "POST", FIND_PATH, &expired_body)?;
+    let expired = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(FIND_PATH)
+                .header(TIMESTAMP_HEADER, timestamp.to_string())
+                .header(REQUEST_SIGNATURE_HEADER, signature)
+                .body(Body::from(expired_body))?,
+        )
+        .await?;
+    assert_eq!(expired.status(), StatusCode::GATEWAY_TIMEOUT);
+    let response_signature = expired
+        .headers()
+        .get(RESPONSE_SIGNATURE_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| std::io::Error::other("expected signed deadline response"))?
+        .to_owned();
+    let expired_body = axum::body::to_bytes(expired.into_body(), usize::MAX).await?;
+    assert!(auth.verify_response(
+        timestamp,
+        StatusCode::GATEWAY_TIMEOUT.as_u16(),
+        FIND_PATH,
+        &expired_body,
+        &response_signature,
+    ));
+    let expired_json: Value = serde_json::from_slice(&expired_body)?;
+    assert_eq!(
+        expired_json.pointer("/error/kind"),
+        Some(&serde_json::json!("deadline_exceeded"))
+    );
     Ok(())
 }
 

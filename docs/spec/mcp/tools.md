@@ -160,6 +160,9 @@ type SearchInput = {
 - 별도 Search role의 연결, 서명 또는 private response 계약 검증에 실패하면
   `data.code=search_unavailable`, `retryable=true`, `retry_after_ms=1000`을 반환한다. JSON-RPC
   server code `-32001`은 다른 임시 dependency 오류도 공유하므로 caller는 `data.code`로 분기한다.
+- 외부 요청의 남은 deadline 안에 검색을 끝내지 못하면 `data.code=deadline_exceeded`,
+  `retryable=true`를 반환한다. 같은 요청을 내부에서 자동 재시도하지 않으며 caller는 target scope나
+  limit을 줄여 새 요청으로 재시도할 수 있다.
 
 필수 필드:
 

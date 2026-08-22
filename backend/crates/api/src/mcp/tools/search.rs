@@ -28,7 +28,7 @@ pub async fn find(
     cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let context = RequestContext::from_headers(&parts.headers);
+    let context = RequestContext::from_parts(parts);
     let (resolved, scope_path) = resolve_target(state, caller, &target).await?;
     let scope_path = Some(scope_path);
 
@@ -86,7 +86,7 @@ pub async fn grep(
     cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let context = RequestContext::from_headers(&parts.headers);
+    let context = RequestContext::from_parts(parts);
     let (resolved, scope_path) = resolve_target(state, caller, &target).await?;
     let scope_path = Some(scope_path);
     let space = resolved.name().to_owned();
@@ -131,6 +131,15 @@ fn search_client_error(error: SearchClientError) -> ErrorData {
     match error {
         SearchClientError::Search(error) => search_error(error),
         SearchClientError::Capacity(capacity) => search_busy_error(capacity),
+        SearchClientError::DeadlineExceeded => ErrorData::new(
+            TEMPORARY_UNAVAILABLE_ERROR_CODE,
+            "search deadline exceeded; retry with a narrower target or lower limit",
+            Some(json!({
+                "kind": "deadline_exceeded",
+                "code": "deadline_exceeded",
+                "retryable": true,
+            })),
+        ),
         SearchClientError::Unavailable => ErrorData::new(
             TEMPORARY_UNAVAILABLE_ERROR_CODE,
             "search service is unavailable; retry shortly",
@@ -346,5 +355,21 @@ mod tests {
         assert_eq!(data["kind"], "search_unavailable");
         assert_eq!(data["retryable"], true);
         assert_eq!(data["retry_after_ms"], 1_000);
+    }
+
+    #[test]
+    fn search_deadline_is_distinct_from_transport_unavailability() {
+        let error = search_client_error(SearchClientError::DeadlineExceeded);
+
+        assert_eq!(error.code, TEMPORARY_UNAVAILABLE_ERROR_CODE);
+        assert_eq!(
+            error.message,
+            "search deadline exceeded; retry with a narrower target or lower limit"
+        );
+        let data = error.data.expect("deadline error carries metadata");
+        assert_eq!(data["kind"], "deadline_exceeded");
+        assert_eq!(data["code"], "deadline_exceeded");
+        assert_eq!(data["retryable"], true);
+        assert!(data.get("retry_after_ms").is_none());
     }
 }
