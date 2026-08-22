@@ -47,6 +47,10 @@ for (const viewport of [
     }
     const tree = page.getByRole("tree", { name: "Files" });
     await expect(tree).toBeVisible();
+    const expectedWorkbenchLabel = { fontSize: "13px", lineHeight: "18px", fontWeight: "500" };
+    expect(await typography(page.getByRole("tab", { name: "Browse" }))).toEqual(expectedWorkbenchLabel);
+    expect(await typography(page.getByRole("button", { name: "Files", exact: true }))).toEqual(expectedWorkbenchLabel);
+    expect(await typography(page.getByRole("button", { name: "Recent", exact: true }))).toEqual(expectedWorkbenchLabel);
     const treeFontFamily = await tree.evaluate((element) => getComputedStyle(element).fontFamily);
     const titleFontFamily = await page.locator("header").first().evaluate((element) => getComputedStyle(element).fontFamily);
     expect(treeFontFamily).toContain("-apple-system");
@@ -56,6 +60,7 @@ for (const viewport of [
       const inspectorFontFamily = await page.getByRole("complementary", { name: "Inspector" })
         .evaluate((element) => getComputedStyle(element).fontFamily);
       expect(inspectorFontFamily).toBe(titleFontFamily);
+      expect(await typography(page.getByRole("tab", { name: "Details" }))).toEqual(expectedWorkbenchLabel);
     }
     await expect(page.getByRole("button", { name: "file-0000.bin" })).toBeVisible();
     await expect.poll(() => childRequestCount).toBe(1);
@@ -131,6 +136,17 @@ for (const viewport of [
     await expect(page.getByRole("button", { name: "file-0999.bin" })).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(recentButton).toBeFocused();
+  });
+}
+
+async function typography(locator: import("@playwright/test").Locator) {
+  return locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      fontSize: style.fontSize,
+      lineHeight: style.lineHeight,
+      fontWeight: style.fontWeight
+    };
   });
 }
 

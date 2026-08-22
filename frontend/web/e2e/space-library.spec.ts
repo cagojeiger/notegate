@@ -203,6 +203,9 @@ for (const viewport of [
     await recalculate.scrollIntoViewIfNeeded();
     await expect(reindex).toHaveText("Reindex");
     await expect(recalculate).toHaveText("Recalculate");
+    const expectedActionTypography = { fontSize: "13px", lineHeight: "18px", fontWeight: "500" };
+    expect(await typography(reindex)).toEqual(expectedActionTypography);
+    expect(await typography(recalculate)).toEqual(expectedActionTypography);
 
     const [filesUsageBox, recalculateBox, reindexBox] = await Promise.all([
       filesUsage.boundingBox(),
@@ -398,6 +401,17 @@ async function cardNames(grid: ReturnType<Page["getByRole"]>) {
     const inspect = item.querySelector<HTMLButtonElement>('button[aria-label^="Inspect "]');
     return inspect?.getAttribute("aria-label")?.replace(/^Inspect /, "") ?? "";
   }));
+}
+
+async function typography(locator: ReturnType<Page["getByRole"]>) {
+  return locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      fontSize: style.fontSize,
+      lineHeight: style.lineHeight,
+      fontWeight: style.fontWeight
+    };
+  });
 }
 
 function space(id: string, name: string, sortOrder: number, navigationPinned: boolean): Space {

@@ -64,6 +64,10 @@ test("marks the final outline row current after navigating to the document botto
   expect(readingTypography).toMatchObject({ fontSize: "16px", lineHeight: "27.2px" });
   expect(readingTypography.fontFamily).toContain("-apple-system");
   expect(readingTypography.fontFamily).not.toContain("LINE Seed Sans KR");
+  expect(await page.getByRole("button", { name: "Load external image: External diagram" }).evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { fontSize: style.fontSize, fontFamily: style.fontFamily };
+  })).toEqual({ fontSize: "14.4px", fontFamily: readingTypography.fontFamily });
 
   await page.getByRole("tab", { name: "Outline" }).click();
   const outline = page.getByRole("navigation", { name: "Document outline" });
@@ -209,6 +213,8 @@ function longMarkdown() {
     "# Opening",
     "",
     "The first heading starts near the top of the preview.",
+    "",
+    "![External diagram](https://example.com/diagram.png)",
     "",
     ...sections,
     "## Final heading",
