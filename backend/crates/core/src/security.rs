@@ -31,6 +31,7 @@ const EMAIL_HMAC_LABEL: &[u8] = b"notegate/lookup/email-hmac/v1";
 const API_KEY_HMAC_LABEL: &[u8] = b"notegate/lookup/api-key-hmac/v1";
 const BROWSER_SESSION_HMAC_LABEL: &[u8] = b"notegate/lookup/browser-session-hmac/v1";
 const SESSION_SIGNING_LABEL: &[u8] = b"notegate/lookup/session-signing/v1";
+const INTERNAL_SEARCH_SIGNING_LABEL: &[u8] = b"notegate/lookup/internal-search-signing/v1";
 
 const PROVIDER_SUB_PREFIX: &str = "provider-sub:v1:";
 const EMAIL_PREFIX: &str = "email:v1:";
@@ -152,6 +153,7 @@ pub struct PiiCrypto {
     api_key_hmac_key: [u8; KEY_LEN],
     browser_session_hmac_key: [u8; KEY_LEN],
     session_signing_key: [u8; KEY_LEN],
+    internal_search_signing_key: [u8; KEY_LEN],
 }
 
 /// Encrypted field value split into ciphertext and nonce columns.
@@ -184,6 +186,7 @@ impl PiiCrypto {
             api_key_hmac_key: hkdf_key(lookup_root, API_KEY_HMAC_LABEL)?,
             browser_session_hmac_key: hkdf_key(lookup_root, BROWSER_SESSION_HMAC_LABEL)?,
             session_signing_key: hkdf_key(lookup_root, SESSION_SIGNING_LABEL)?,
+            internal_search_signing_key: hkdf_key(lookup_root, INTERNAL_SEARCH_SIGNING_LABEL)?,
         })
     }
 
@@ -214,6 +217,11 @@ impl PiiCrypto {
 
     pub fn session_signing_key(&self) -> &[u8] {
         &self.session_signing_key
+    }
+
+    /// Purpose-specific key for authenticating the private search HTTP boundary.
+    pub fn internal_search_signing_key(&self) -> [u8; KEY_LEN] {
+        self.internal_search_signing_key
     }
 
     pub fn enc_epoch_verify_tag(&self, key_id: &str) -> Result<String> {
@@ -548,6 +556,21 @@ mod tests {
         assert_ne!(
             crypto.enc_epoch_verify_tag("key-1").unwrap(),
             crypto.lookup_epoch_verify_tag("key-1").unwrap()
+        );
+    }
+
+    #[test]
+    fn internal_search_signing_key_is_stable_and_purpose_separated() {
+        let first = PiiCrypto::test();
+        let second = PiiCrypto::test();
+
+        assert_eq!(
+            first.internal_search_signing_key(),
+            second.internal_search_signing_key()
+        );
+        assert_ne!(
+            first.internal_search_signing_key().as_slice(),
+            first.session_signing_key()
         );
     }
 

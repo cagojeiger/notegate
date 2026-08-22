@@ -49,7 +49,7 @@ api ──────┤            ├─▶ db ──▶ model ──▶ core
 - db는 service나 search를 의존하지 않는다.
 - model은 여러 레이어가 함께 쓰는 순수 데이터 타입과 command/view/cursor DTO를 둔다.
 - service는 DB repository 위의 비즈니스 규칙·권한 체크·validation·domain command orchestration을 담당한다.
-- search는 concrete `FilesRepo` 위에서 `find`/`grep` 권한 확인과 실행, matcher, decrypted body cache, admission과 search telemetry를 소유한다. 일반 file-tree 조회인 `tree`는 service의 files 영역에 둔다.
+- search는 concrete `FilesRepo` 위에서 `find`/`grep` 권한 확인과 실행, matcher, decrypted body cache, admission과 search telemetry를 소유한다. API application state에는 search client만 두고, 실행 runtime은 public listener와 분리된 private HTTP server state가 소유한다. 같은 image의 `search` process mode로 deployment boundary를 분리할 수 있다. 일반 file-tree 조회인 `tree`는 service의 files 영역에 둔다.
 - api는 REST/MCP/auth/OpenAPI/transport DTO/error mapping과 S3·AuthGate 같은 외부 provider adapter를 담당한다. Service command와 외부 provider 호출을 조합하는 application workflow는 handler에 중복하지 않고 api의 공용 모듈에 둔다.
 
 ### 4. 구조 컨벤션 (보조)

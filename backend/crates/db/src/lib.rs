@@ -64,7 +64,7 @@ pub use link_graph_work_repo::{
 pub use mcp_invocation_repo::{McpInvocationRepo, NewMcpInvocation};
 pub use metadata_write_repo::{MediaTypeObservation, MetadataWriteRepo};
 pub use object_storage_repo::{CleanupCandidate, ObjectStorageRepo};
-pub use postgres_pool::connect;
+pub use postgres_pool::{PgPools, connect};
 pub use purge_repo::{PurgeRepo, PurgeRun};
 pub use space_usage_repo::{
     SPACE_USAGE_JOB_KIND, SpaceUsagePayload, SpaceUsageReconcileJob, SpaceUsageRepo, UsageCounts,

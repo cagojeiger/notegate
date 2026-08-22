@@ -18,7 +18,8 @@ pub struct FindRequest {
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FindMatchMode {
     Contains,
     Regex,
@@ -64,7 +65,8 @@ pub struct TreeRequest {
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum GrepMatchMode {
     Literal,
     Regex,
@@ -87,7 +89,8 @@ impl GrepMatchMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum GrepLineMode {
     None,
     First,

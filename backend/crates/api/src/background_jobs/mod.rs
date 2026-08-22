@@ -5,7 +5,7 @@ use handlers::UsageHandler;
 use link_graph::LinkGraphProjectNodesHandler;
 use notegate_core::BackgroundJobsConfig;
 use notegate_db::{LinkGraphProjectNodesJob, PgPool, SpaceUsageReconcileJob, SpaceUsageRepo};
-use notegate_jobs::{JobQueue, JobQueueResult, JobRegistry, Worker, WorkerConfig};
+use notegate_jobs::{JobQueue, JobQueueResult, JobRegistry, JobSpec, Worker, WorkerConfig};
 use notegate_service::link_graph::LinkGraphService;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -13,7 +13,21 @@ use tokio_util::sync::CancellationToken;
 pub(crate) struct BackgroundJobs {
     consumer: Option<JoinHandle<JobQueueResult<()>>>,
     metrics: Option<JoinHandle<()>>,
-    job_kinds: Vec<String>,
+}
+
+pub(crate) fn registered_job_kinds() -> Vec<String> {
+    let mut kinds = vec![
+        SpaceUsageReconcileJob::KIND.to_owned(),
+        LinkGraphProjectNodesJob::KIND.to_owned(),
+    ];
+    kinds.sort_unstable();
+    kinds
+}
+
+fn handler_registry(pool: PgPool, link_graph: LinkGraphService) -> JobQueueResult<JobRegistry> {
+    JobRegistry::new()
+        .register::<SpaceUsageReconcileJob>(UsageHandler::new(SpaceUsageRepo::new(pool)))?
+        .register::<LinkGraphProjectNodesJob>(LinkGraphProjectNodesHandler::new(link_graph))
 }
 
 pub(crate) fn spawn(
@@ -24,10 +38,9 @@ pub(crate) fn spawn(
     shutdown: CancellationToken,
 ) -> JobQueueResult<BackgroundJobs> {
     let queue = JobQueue::new(pool.clone());
-    let handlers = JobRegistry::new()
-        .register::<SpaceUsageReconcileJob>(UsageHandler::new(SpaceUsageRepo::new(pool)))?
-        .register::<LinkGraphProjectNodesJob>(LinkGraphProjectNodesHandler::new(link_graph))?;
+    let handlers = handler_registry(pool, link_graph)?;
     let job_kinds = handlers.job_kinds();
+    debug_assert_eq!(job_kinds, registered_job_kinds());
     let worker = Worker::new(
         queue.clone(),
         handlers,
@@ -53,15 +66,10 @@ pub(crate) fn spawn(
     Ok(BackgroundJobs {
         consumer: Some(consumer),
         metrics,
-        job_kinds,
     })
 }
 
 impl BackgroundJobs {
-    pub(crate) fn job_kinds(&self) -> &[String] {
-        &self.job_kinds
-    }
-
     pub(crate) async fn wait_for_critical_exit(&mut self) -> anyhow::Error {
         let result = match self.consumer.as_mut() {
             Some(consumer) => consumer.await,
@@ -105,13 +113,25 @@ fn worker_id() -> String {
 mod tests {
     use super::*;
 
+    fn lazy_link_graph(pool: &PgPool) -> LinkGraphService {
+        let files = notegate_db::FilesRepo::with_limits_and_crypto(
+            pool.clone(),
+            notegate_core::limits::Limits::default(),
+            notegate_core::security::PiiCrypto::test(),
+        );
+        LinkGraphService::new(
+            notegate_db::LinkGraphRepo::new(pool.clone()),
+            files,
+            notegate_db::LinkGraphWorkRepo::new(pool.clone()),
+        )
+    }
+
     #[tokio::test]
     async fn reports_an_unexpected_consumer_exit() {
         let consumer = tokio::spawn(async { Ok(()) });
         let mut background_jobs = BackgroundJobs {
             consumer: Some(consumer),
             metrics: None,
-            job_kinds: Vec::new(),
         };
 
         let error = background_jobs.wait_for_critical_exit().await;
@@ -121,5 +141,32 @@ mod tests {
             "background job consumer stopped unexpectedly"
         );
         assert!(background_jobs.consumer.is_none());
+    }
+
+    #[test]
+    fn registered_job_kinds_are_stable_and_unique() {
+        let kinds = registered_job_kinds();
+        assert_eq!(kinds.len(), 2);
+        assert!(
+            kinds
+                .iter()
+                .any(|kind| kind == SpaceUsageReconcileJob::KIND)
+        );
+        assert!(
+            kinds
+                .iter()
+                .any(|kind| kind == LinkGraphProjectNodesJob::KIND)
+        );
+        assert_ne!(kinds.first(), kinds.get(1));
+    }
+
+    #[tokio::test]
+    async fn registered_job_kinds_match_worker_handlers() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let pool = PgPool::connect_lazy("postgres://notegate:notegate@127.0.0.1:1/notegate")?;
+        let handlers = handler_registry(pool.clone(), lazy_link_graph(&pool))?;
+
+        assert_eq!(handlers.job_kinds(), registered_job_kinds());
+        Ok(())
     }
 }

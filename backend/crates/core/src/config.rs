@@ -21,6 +21,7 @@ use crate::limits::{
 use crate::tier::UserTier;
 
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:9191";
+const DEFAULT_SEARCH_BIND_ADDR: &str = "127.0.0.1:9192";
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
 const DEFAULT_JWKS_CACHE_TTL_SECS: u64 = 300;
 const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
@@ -102,6 +103,8 @@ pub enum ProcessMode {
     All,
     Api,
     Worker,
+    Reconciler,
+    Search,
 }
 
 impl ProcessMode {
@@ -113,11 +116,25 @@ impl ProcessMode {
         matches!(self, Self::All | Self::Worker)
     }
 
+    pub const fn runs_reconciler(self) -> bool {
+        matches!(self, Self::All | Self::Reconciler)
+    }
+
+    pub const fn exposes_public_listener(self) -> bool {
+        !matches!(self, Self::Search)
+    }
+
+    pub const fn serves_search(self) -> bool {
+        matches!(self, Self::All | Self::Api | Self::Search)
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::All => "all",
             Self::Api => "api",
             Self::Worker => "worker",
+            Self::Reconciler => "reconciler",
+            Self::Search => "search",
         }
     }
 }
@@ -173,6 +190,10 @@ impl Default for HttpRateLimitsConfig {
 pub struct Config {
     /// Address the HTTP server binds to.
     pub bind_addr: SocketAddr,
+    /// Address the internal search server binds to when hosted by this process.
+    pub search_bind_addr: SocketAddr,
+    /// Optional base URL for a separately deployed internal search server.
+    pub search_service_url: Option<String>,
     /// Runtime role. `all` preserves the single-process deployment.
     #[serde(default)]
     pub process_mode: ProcessMode,
@@ -180,6 +201,10 @@ pub struct Config {
     pub database_url: String,
     /// Max connections in the sqlx pool.
     pub db_max_connections: u32,
+    /// Optional Postgres read endpoint. Search uses this pool when configured.
+    pub read_database_url: Option<String>,
+    /// Max connections in the optional read pool.
+    pub read_db_max_connections: u32,
     /// In-process durable background job consumer.
     #[serde(default)]
     pub background_jobs: BackgroundJobsConfig,
@@ -265,6 +290,31 @@ impl Validate for Config {
         }
         if !(1..=256).contains(&self.db_max_connections) {
             errors.add("db_max_connections", ValidationError::new("range"));
+        }
+        if self.read_database_url.as_deref().is_some_and(str::is_empty) {
+            errors.add("read_database_url", ValidationError::new("length"));
+        }
+        if !(1..=256).contains(&self.read_db_max_connections) {
+            errors.add("read_db_max_connections", ValidationError::new("range"));
+        }
+        if self
+            .search_service_url
+            .as_deref()
+            .is_some_and(|value| validate_internal_service_url(value).is_err())
+        {
+            errors.add(
+                "search_service_url",
+                ValidationError::new("internal_http_url"),
+            );
+        }
+        if self.process_mode.runs_api()
+            && self.search_service_url.is_none()
+            && self.bind_addr == self.search_bind_addr
+        {
+            errors.add(
+                "search_bind_addr",
+                ValidationError::new("conflicts_with_bind_addr"),
+            );
         }
         validate_background_jobs(self, &mut errors);
         if validate_http_url_value(&self.authgate_url).is_err() {
@@ -389,6 +439,9 @@ impl Config {
         } else {
             trim_trailing_slashes(&self.resource_url)
         };
+        if let Some(search_service_url) = &mut self.search_service_url {
+            *search_service_url = trim_trailing_slashes(search_service_url);
+        }
         self.s3.endpoint = trim_trailing_slashes(&self.s3.endpoint);
         if let Some(public_endpoint) = &mut self.s3.public_endpoint {
             *public_endpoint = trim_trailing_slashes(public_endpoint);
@@ -402,7 +455,11 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
     let mut builder = LayeredConfig::builder()
         .set_default("bind_addr", DEFAULT_BIND_ADDR)
         .map_err(map_config_error)?
+        .set_default("search_bind_addr", DEFAULT_SEARCH_BIND_ADDR)
+        .map_err(map_config_error)?
         .set_default("db_max_connections", DEFAULT_DB_MAX_CONNECTIONS)
+        .map_err(map_config_error)?
+        .set_default("read_db_max_connections", DEFAULT_DB_MAX_CONNECTIONS)
         .map_err(map_config_error)?
         .set_default("jwks_cache_ttl_secs", DEFAULT_JWKS_CACHE_TTL_SECS)
         .map_err(map_config_error)?
@@ -534,6 +591,18 @@ fn validate_http_url_value(value: &str) -> std::result::Result<(), ValidationErr
         Ok(())
     } else {
         Err(ValidationError::new("http_url"))
+    }
+}
+
+fn validate_internal_service_url(value: &str) -> std::result::Result<(), ValidationError> {
+    validate_http_url_value(value)?;
+    let url = Url::parse(value).map_err(|_error| ValidationError::new("internal_http_url"))?;
+    let root_path = matches!(url.path(), "" | "/");
+    let no_credentials = url.username().is_empty() && url.password().is_none();
+    if root_path && no_credentials && url.query().is_none() && url.fragment().is_none() {
+        Ok(())
+    } else {
+        Err(ValidationError::new("internal_http_url"))
     }
 }
 
@@ -753,9 +822,13 @@ mod tests {
     fn valid_config() -> Config {
         Config {
             bind_addr: SocketAddr::from(([127, 0, 0, 1], 9191)),
+            search_bind_addr: SocketAddr::from(([127, 0, 0, 1], 9192)),
+            search_service_url: None,
             process_mode: ProcessMode::All,
             database_url: "postgres://example".to_owned(),
             db_max_connections: 10,
+            read_database_url: None,
+            read_db_max_connections: 10,
             background_jobs: BackgroundJobsConfig::default(),
             authgate_url: "https://auth.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),
@@ -875,7 +948,14 @@ mod tests {
                     "env-lookup-root-secret-32-bytes-long",
                 ),
                 ("NOTEGATE_DB_MAX_CONNECTIONS", "7"),
+                ("NOTEGATE_READ_DATABASE_URL", "postgres://read.env"),
+                ("NOTEGATE_READ_DB_MAX_CONNECTIONS", "11"),
                 ("NOTEGATE_PROCESS_MODE", "worker"),
+                ("NOTEGATE_SEARCH_BIND_ADDR", "0.0.0.0:9292"),
+                (
+                    "NOTEGATE_SEARCH_SERVICE_URL",
+                    "http://notegate-search:9292/",
+                ),
                 ("NOTEGATE_BACKGROUND_JOBS__CONCURRENCY", "5"),
                 ("NOTEGATE_METRICS_ENABLED", "true"),
                 ("NOTEGATE_DEFAULT_USER_TIER", "tier0"),
@@ -894,7 +974,17 @@ mod tests {
         assert_eq!(config.bind_addr.to_string(), super::DEFAULT_BIND_ADDR);
         assert_eq!(config.database_url, "postgres://env");
         assert_eq!(config.db_max_connections, 7);
+        assert_eq!(
+            config.read_database_url.as_deref(),
+            Some("postgres://read.env")
+        );
+        assert_eq!(config.read_db_max_connections, 11);
         assert_eq!(config.process_mode, ProcessMode::Worker);
+        assert_eq!(config.search_bind_addr.to_string(), "0.0.0.0:9292");
+        assert_eq!(
+            config.search_service_url.as_deref(),
+            Some("http://notegate-search:9292")
+        );
         assert_eq!(config.background_jobs.concurrency, 5);
         assert!(config.metrics_enabled);
         assert_eq!(config.oauth_client_id, "notegate-web");
@@ -1151,10 +1241,55 @@ mod tests {
     fn process_modes_select_components() {
         assert!(ProcessMode::All.runs_api());
         assert!(ProcessMode::All.runs_worker());
+        assert!(ProcessMode::All.runs_reconciler());
+        assert!(ProcessMode::All.serves_search());
         assert!(ProcessMode::Api.runs_api());
         assert!(!ProcessMode::Api.runs_worker());
+        assert!(!ProcessMode::Api.runs_reconciler());
+        assert!(ProcessMode::Api.serves_search());
         assert!(!ProcessMode::Worker.runs_api());
         assert!(ProcessMode::Worker.runs_worker());
+        assert!(!ProcessMode::Worker.runs_reconciler());
+        assert!(!ProcessMode::Worker.serves_search());
+        assert!(!ProcessMode::Reconciler.runs_api());
+        assert!(!ProcessMode::Reconciler.runs_worker());
+        assert!(ProcessMode::Reconciler.runs_reconciler());
+        assert!(!ProcessMode::Reconciler.serves_search());
+        assert!(!ProcessMode::Search.runs_api());
+        assert!(!ProcessMode::Search.runs_worker());
+        assert!(!ProcessMode::Search.runs_reconciler());
+        assert!(ProcessMode::Search.serves_search());
+    }
+
+    #[test]
+    fn internal_search_url_must_be_a_root_http_url_without_credentials() {
+        let mut config = valid_config();
+        config.search_service_url = Some("http://notegate-search:9192".to_owned());
+        assert!(config.validate().is_ok());
+
+        for invalid in [
+            "postgres://notegate-search",
+            "http://user:password@notegate-search:9192",
+            "http://notegate-search:9192/base",
+            "http://notegate-search:9192?token=secret",
+        ] {
+            config.search_service_url = Some(invalid.to_owned());
+            assert!(config.validate().is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn local_search_listener_must_not_reuse_the_public_address() {
+        let mut config = valid_config();
+        config.search_bind_addr = config.bind_addr;
+        assert!(config.validate().is_err());
+
+        config.search_service_url = Some("http://notegate-search:9192".to_owned());
+        assert!(config.validate().is_ok());
+
+        config.process_mode = ProcessMode::Search;
+        config.search_service_url = None;
+        assert!(config.validate().is_ok());
     }
 
     #[test]

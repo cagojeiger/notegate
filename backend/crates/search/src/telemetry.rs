@@ -1,7 +1,9 @@
 use std::future::Future;
 use std::time::{Duration, Instant};
 
-use crate::{SearchError, SearchResult};
+use metrics::Unit;
+
+use crate::{SearchBodyCacheStats, SearchError, SearchResult};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum SearchOperation {
@@ -70,6 +72,10 @@ pub(super) struct SearchTelemetry {
 impl SearchTelemetry {
     pub(super) const fn new(enabled: bool) -> Self {
         Self { enabled }
+    }
+
+    pub(super) const fn is_enabled(self) -> bool {
+        self.enabled
     }
 
     pub(super) fn operation(
@@ -175,6 +181,14 @@ impl SearchTelemetry {
         )
         .increment(saturating_u64(count));
     }
+
+    pub(super) fn record_body_cache_metrics(self, stats: SearchBodyCacheStats) {
+        if !self.enabled {
+            return;
+        }
+
+        record_body_cache_metrics(stats);
+    }
 }
 
 pub(super) struct SearchOperationTimer {
@@ -215,6 +229,26 @@ fn record_stage(operation: SearchOperation, stage: SearchStage, elapsed: Duratio
         "stage" => stage.as_str(),
     )
     .record(elapsed.as_secs_f64());
+}
+
+fn record_body_cache_metrics(stats: SearchBodyCacheStats) {
+    metrics::describe_gauge!(
+        "notegate_search_body_cache_size",
+        Unit::Bytes,
+        "Approximate weighted size of decrypted search bodies in memory"
+    );
+    metrics::describe_gauge!(
+        "notegate_search_body_cache_capacity",
+        Unit::Bytes,
+        "Configured maximum weighted size of the decrypted search body cache"
+    );
+    metrics::describe_gauge!(
+        "notegate_search_body_cache_entries",
+        "Approximate number of decrypted search bodies in memory"
+    );
+    metrics::gauge!("notegate_search_body_cache_size").set(stats.size_bytes as f64);
+    metrics::gauge!("notegate_search_body_cache_capacity").set(stats.capacity_bytes as f64);
+    metrics::gauge!("notegate_search_body_cache_entries").set(stats.entries as f64);
 }
 
 fn outcome_label<T>(result: &SearchResult<T>) -> &'static str {

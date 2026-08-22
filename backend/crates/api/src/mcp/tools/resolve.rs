@@ -339,50 +339,7 @@ pub fn space_summary(view: &SpaceView) -> serde_json::Value {
 /// A path-first node summary for file tools (`list`/`stat`/`find`/mutation
 /// results). Path is the canonical derived absolute path for MCP callers.
 pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Value {
-    let mut value = json!({
-        "path": view.path,
-        "name": view.node.name,
-        "kind": view.node.kind.as_str(),
-        "has_children": view.has_children,
-        "sort_order": view.node.sort_order,
-        "search_enabled": view.node.search_enabled,
-        "write_locked": view.node.write_locked,
-        "effective_write_locked": !view.write_lock_sources.is_empty(),
-        "created_at": view.node.created_at,
-        "updated_at": view.node.updated_at,
-    });
-    if let Some(text) = &view.text
-        && let Some(object) = value.as_object_mut()
-    {
-        object.insert("content_sha256".to_owned(), json!(text.content_sha256));
-        object.insert("byte_len".to_owned(), json!(text.byte_len));
-        object.insert("line_count".to_owned(), json!(text.line_count));
-        object.insert(
-            "text_storage_format".to_owned(),
-            json!(text.storage_format.as_str()),
-        );
-        object.insert(
-            "text_at_rest_encryption".to_owned(),
-            json!(text.at_rest_encryption.as_str()),
-        );
-    }
-    if let Some(file) = &view.file
-        && let Some(object) = value.as_object_mut()
-    {
-        object.insert("byte_len".to_owned(), json!(file.byte_len));
-        object.insert("media_type".to_owned(), json!(file.media_type));
-        object.insert(
-            "encryption_mode".to_owned(),
-            json!(file.encryption_mode.as_str()),
-        );
-        if let Some(name) = &file.original_filename {
-            object.insert("original_filename".to_owned(), json!(name));
-        }
-        if let Some(metadata) = &file.encryption_metadata {
-            object.insert("encryption_metadata".to_owned(), metadata.clone());
-        }
-    }
-    value
+    json!(crate::path_node_summary::PathNodeSummary::from(view))
 }
 
 #[cfg(test)]
@@ -433,9 +390,13 @@ mod tests {
     fn test_state(pool: notegate_db::PgPool) -> Result<AppState, Box<dyn std::error::Error>> {
         let config = Arc::new(Config {
             bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9191),
+            search_bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9192),
+            search_service_url: None,
             process_mode: notegate_core::ProcessMode::All,
             database_url: "postgres://notegate:notegate@localhost/notegate".to_owned(),
             db_max_connections: 1,
+            read_database_url: None,
+            read_db_max_connections: 1,
             background_jobs: notegate_core::BackgroundJobsConfig::default(),
             authgate_url: "https://auth.example.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),

@@ -139,9 +139,13 @@ mod tests {
     fn config() -> notegate_core::Config {
         notegate_core::Config {
             bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9191),
+            search_bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9192),
+            search_service_url: None,
             process_mode: notegate_core::ProcessMode::All,
             database_url: "postgres://example".to_owned(),
             db_max_connections: 10,
+            read_database_url: None,
+            read_db_max_connections: 10,
             background_jobs: notegate_core::BackgroundJobsConfig::default(),
             authgate_url: "https://auth.example.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),

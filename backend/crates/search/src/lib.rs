@@ -21,15 +21,19 @@ mod error;
 mod find;
 mod grep;
 mod matcher;
+mod runtime;
+mod store;
 mod telemetry;
 mod view;
 
 use body_cache::SearchBodyCache;
 use matcher::{ContentMatcher, NameMatcher, PathFilters};
+use store::PostgresSearchStore;
 use telemetry::SearchTelemetry;
 
 pub use admission::{GrepPermit, SearchAdmission, SearchCapacity};
 pub use error::{SearchError, SearchResult};
+pub use runtime::{SearchRunError, SearchRunResult, SearchRuntime};
 
 /// Process-local snapshot of the decrypted search body cache.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -43,7 +47,7 @@ pub struct SearchBodyCacheStats {
 /// [`find`] and [`grep`] submodules.
 #[derive(Debug, Clone)]
 pub struct SearchService {
-    store: FilesRepo,
+    store: PostgresSearchStore,
     body_cache: SearchBodyCache,
     telemetry: SearchTelemetry,
 }
@@ -57,8 +61,21 @@ impl SearchService {
         store: FilesRepo,
         body_cache_config: SearchBodyCacheConfig,
     ) -> Self {
+        Self::with_authority_and_query_stores(store.clone(), store, body_cache_config)
+    }
+
+    /// Build a Postgres-backed search service with separate authorization and
+    /// query repositories. The authority repository should use the primary DB.
+    pub fn with_authority_and_query_stores(
+        authority_store: FilesRepo,
+        query_store: FilesRepo,
+        body_cache_config: SearchBodyCacheConfig,
+    ) -> Self {
         Self {
-            store,
+            store: PostgresSearchStore::with_authority_and_query_repos(
+                authority_store,
+                query_store,
+            ),
             body_cache: SearchBodyCache::new(body_cache_config),
             telemetry: SearchTelemetry::default(),
         }
@@ -71,6 +88,14 @@ impl SearchService {
 
     pub fn body_cache_stats(&self) -> SearchBodyCacheStats {
         self.body_cache.stats()
+    }
+
+    pub fn record_body_cache_metrics(&self) {
+        if !self.telemetry.is_enabled() {
+            return;
+        }
+        self.telemetry
+            .record_body_cache_metrics(self.body_cache_stats());
     }
 
     async fn resolve_scope_folder(

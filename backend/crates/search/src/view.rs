@@ -2,15 +2,15 @@
 
 use std::collections::{HashMap, HashSet};
 
-use notegate_db::FilesRepo;
 use notegate_model::files::{NodeView, WriteLockSource};
 use notegate_model::{Node, NodeKind};
 use uuid::Uuid;
 
 use crate::SearchResult;
+use crate::store::PostgresSearchStore;
 
 pub(super) async fn hydrate_node_views(
-    store: &FilesRepo,
+    store: &PostgresSearchStore,
     space_id: Uuid,
     rows: Vec<(Node, String)>,
 ) -> SearchResult<Vec<NodeView>> {
@@ -44,7 +44,7 @@ pub(super) async fn hydrate_node_views(
 }
 
 pub(super) async fn write_lock_sources_many(
-    store: &FilesRepo,
+    store: &PostgresSearchStore,
     space_id: Uuid,
     node_ids: &[Uuid],
 ) -> SearchResult<HashMap<Uuid, Vec<WriteLockSource>>> {

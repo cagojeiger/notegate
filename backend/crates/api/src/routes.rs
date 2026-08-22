@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
-use axum::extract::{MatchedPath, State};
+use axum::extract::{Extension, MatchedPath, State};
 use axum::http::header::{
     ALLOW, CACHE_CONTROL, CONTENT_TYPE, HeaderName, RETRY_AFTER, WWW_AUTHENTICATE,
 };
@@ -30,17 +30,19 @@ use crate::auth::metadata::{
 use crate::auth::oauth::{callback, login, logout, success, success_script};
 use crate::auth::{require_browser_session, require_public_api_key, set_private_no_store};
 use crate::error::ApiError;
+use crate::internal_search::SearchServerState;
 use crate::mcp::server::{agent_mcp_v2_handler, user_mcp_handler};
-use crate::observability::{self, HttpRequestMetrics, MetricsHandle};
-use crate::state::AppState;
+use crate::observability::{self, HttpRequestMetrics};
+use crate::state::{AppState, ControlPlaneState};
 
 pub fn app(state: AppState) -> Router {
     let metrics = state.metrics.clone();
     let metrics_enabled = metrics.is_some();
+    let control = state.control_plane_state();
 
     let router = with_web_fallback(
         Router::new()
-            .merge(control_plane_routes(metrics))
+            .merge(control_plane_routes(control))
             .merge(data_plane_routes(state.clone())),
         state.config.web_dist_dir.as_deref(),
     )
@@ -48,11 +50,18 @@ pub fn app(state: AppState) -> Router {
     apply_common_layers(router, metrics_enabled)
 }
 
-/// Health, readiness, and metrics only. Worker processes expose no data-plane routes.
-pub fn worker_app(state: AppState) -> Router {
+/// Health, readiness, and metrics only. Background processes expose no data-plane routes.
+pub(crate) fn control_app(state: ControlPlaneState) -> Router {
     let metrics = state.metrics.clone();
     let metrics_enabled = metrics.is_some();
-    let router = control_plane_routes(metrics).with_state(state);
+    let router: Router = control_plane_routes(state);
+    apply_common_layers(router, metrics_enabled)
+}
+
+/// Health, readiness, metrics, and authenticated private search routes only.
+pub fn search_app(state: SearchServerState) -> Router {
+    let metrics_enabled = state.metrics_enabled();
+    let router = crate::internal_search::routes(metrics_enabled).with_state(state);
     apply_common_layers(router, metrics_enabled)
 }
 
@@ -144,12 +153,15 @@ async fn set_html_revalidation(request: Request<Body>, next: Next) -> Response {
     response
 }
 
-fn control_plane_routes(metrics: Option<MetricsHandle>) -> Router<AppState> {
-    let routes = match metrics {
+fn control_plane_routes<S>(state: ControlPlaneState) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    let routes = match state.metrics.clone() {
         Some(metrics) => system_routes().merge(observability::routes(metrics)),
         None => system_routes(),
     };
-    apply_control_plane_limits(routes)
+    apply_control_plane_limits(routes).layer(Extension(state))
 }
 
 fn data_plane_routes(state: AppState) -> Router<AppState> {
@@ -307,7 +319,10 @@ fn rate_limit_config(limit: HttpRateLimitConfig) -> axum_governor::GovernorConfi
         .expect("global HTTP rate limit config is statically valid")
 }
 
-fn system_routes() -> Router<AppState> {
+fn system_routes<S>() -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
@@ -375,8 +390,10 @@ async fn health() -> Json<HealthResponse> {
 }
 
 /// Readiness: verify the database and embedded migrations before reporting ready.
-async fn ready(State(state): State<AppState>) -> Result<Json<HealthResponse>, ApiError> {
-    notegate_db::check_readiness(&state.db)
+async fn ready(
+    Extension(state): Extension<ControlPlaneState>,
+) -> Result<Json<HealthResponse>, ApiError> {
+    notegate_db::check_readiness(&state.readiness_pool)
         .await
         .map_err(|error| {
             tracing::error!(event = "ready.failed", %error);
@@ -596,12 +613,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn worker_app_exposes_only_control_plane_routes() -> Result<(), Box<dyn std::error::Error>>
-    {
+    async fn control_app_exposes_only_control_plane_routes()
+    -> Result<(), Box<dyn std::error::Error>> {
         let Some(db) = TestDb::setup().await? else {
             return Ok(());
         };
-        let app = worker_app(crate::rest::test_support::state(&db));
+        let app_state = crate::rest::test_support::state(&db);
+        let app = control_app(app_state.control_plane_state());
 
         let health = app
             .clone()

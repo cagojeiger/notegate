@@ -30,10 +30,49 @@ cp .env.example .env
 make dev-infra
 ```
 
-기본 `NOTEGATE_PROCESS_MODE=all`은 HTTP server와 background job runtime을 함께 실행한다.
-운영에서는 같은 image를 `api`와 `worker` mode로 나눌 수 있다. Worker mode의 HTTP listener는
-`/health`, `/ready`, 활성화된 `/metrics`만 제공한다.
-Process mode는 실행할 component만 선택하며, 세 mode 모두 동일한 전체 runtime 설정을 읽고 검증한다.
+기본 `NOTEGATE_PROCESS_MODE=all`은 public HTTP, background job worker, reconciliation runtime과 private search HTTP를
+함께 실행한다. Public listener와 search listener는 같은 process에서도 각각 `9191`, `9192`로
+분리된다. 운영에서는 같은 image를 `api`, `worker`, `reconciler`, `search` mode로 나눌 수 있다.
+Worker와 reconciler mode의 HTTP listener 및 search mode의 private listener는 `/health`, `/ready`,
+활성화된 `/metrics`만 control plane으로 제공한다. Process mode는 실행할 component만 선택하며, 모든 mode가 동일한
+전체 runtime 설정을 읽고 검증한다. Database migration과 usage bootstrap은 `all`/`api` mode가
+소유한다. 독립 `worker`/`reconciler`/`search` process는 schema readiness와 active crypto key
+epoch를 read-only로 검증한다.
+
+```text
+NOTEGATE_SEARCH_BIND_ADDR=127.0.0.1:9192  # default, all/api local search
+# Leave NOTEGATE_SEARCH_SERVICE_URL unset to use the local listener.
+# NOTEGATE_SEARCH_SERVICE_URL=http://notegate-search:9192
+# Optional: local/standalone search reads through a distinct Postgres pool.
+# NOTEGATE_READ_DATABASE_URL=postgres://notegate:notegate@read-replica:5432/notegate
+# NOTEGATE_READ_DB_MAX_CONNECTIONS=10
+```
+
+동일 binary는 다음 네 topology를 지원한다. 이 표는 runtime 조립 계약이며 Helm이나 특정 배포
+도구를 전제로 하지 않는다.
+
+| Topology | Main process | Search URL | Additional processes |
+|---|---|---|---|
+| combined | `all` | unset | none |
+| search split | `all` | internal Search URL | `search` |
+| background split | `api` | unset | `worker`, `reconciler` |
+| full split | `api` | internal Search URL | `search`, `worker`, `reconciler` |
+
+각 process는 자신의 control-plane metric endpoint만 소유한다. Search URL은 Search 실행 위치만
+바꾸며 `all` mode의 worker와 reconciler를 끄지 않는다.
+
+검색 전용 pod는 `NOTEGATE_PROCESS_MODE=search`와 `NOTEGATE_SEARCH_BIND_ADDR=0.0.0.0:9192`를
+사용한다. API pod는 `NOTEGATE_PROCESS_MODE=api`와 내부 Service의 root URL인
+`NOTEGATE_SEARCH_SERVICE_URL=http://notegate-search:9192`를 사용한다. 이 URL에는 path, query,
+credential을 넣지 않는다. Private request와 response는 LOOKUP root에서 분리 파생된 HMAC key로
+서명되며 public listener에는 `/internal/*` route가 등록되지 않는다.
+
+`NOTEGATE_READ_DATABASE_URL`이 없으면 search는 primary pool handle을 공유한다. 값이 있으면 search
+scope, candidate, body와 result hydration은 별도 read pool을 사용하지만 권한 판정은 항상 primary에서
+수행한다. 쓰기, queue worker와 reconciliation도 primary pool을 사용한다. 별도 read endpoint를 선택하면
+권한 철회의 즉시성은 유지되지만 변경 직후 검색 결과 자체에는 replica lag가 보일 수 있다. Read pool은
+로컬 search listener를 소유한 process에서만 생성되며, remote search를 호출하는 API와 background role은
+불필요한 read connection을 만들지 않는다.
 
 ```sh
 cargo run --bin notegate-api
@@ -44,6 +83,7 @@ pnpm web:dev
 |---|---|
 | Dashboard | `http://localhost:5173` |
 | API/MCP | `http://localhost:9191` |
+| Search internal | `http://127.0.0.1:9192` |
 | PostgreSQL | `localhost:5433` |
 | MinIO S3 API | `http://localhost:9000` |
 | MinIO console | `http://localhost:9001` |
@@ -60,7 +100,13 @@ cp .env.example .env
 make up
 ```
 
-`web` image는 dashboard와 Rust server를 포함한다. Proxy는 NoteGate를 `http://localhost:9191`에 노출하고 Compose는 PostgreSQL, MinIO, Prometheus, Grafana와 로컬 bucket 초기화 job을 함께 실행한다. Compose는 `all` mode를 사용하며 `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`는 각 replica에 전달된다.
+`web` image는 dashboard와 Rust server를 포함한다. Proxy는 public listener만 `http://localhost:9191`에 노출하고 Compose는 PostgreSQL, MinIO, Prometheus, Grafana와 로컬 bucket 초기화 job을 함께 실행한다. Compose는 `all` mode를 사용하고 private search listener는 container loopback에 유지한다. `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`는 각 replica에 전달된다.
+
+완전 분리 실행 계약은 `docker-compose.split.yml`로 검증한다. 이 stack은 `api`,
+`search`, `worker`, `reconciler`를 각각 다른 process로 실행하고 Prometheus가 네
+control plane의 `/metrics`를 독립적으로 scrape한다. 실행과 검증은
+`make split-up`, `make split-test`를 사용하며 상세 계약은
+[`deploy/observability/README.md`](../deploy/observability/README.md)를 따른다.
 
 | Service | URL |
 |---|---|

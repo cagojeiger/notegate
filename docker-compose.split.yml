@@ -1,0 +1,247 @@
+name: notegate-split
+
+x-notegate-environment: &notegate-environment
+  NOTEGATE_DATABASE_URL: postgres://notegate:notegate@postgres:5432/notegate
+  NOTEGATE_DB_MAX_CONNECTIONS: ${NOTEGATE_DB_MAX_CONNECTIONS:-10}
+  NOTEGATE_AUTHGATE_URL: ${NOTEGATE_AUTHGATE_URL:-https://authgate.project-jelly.io}
+  NOTEGATE_PUBLIC_URL: ${NOTEGATE_PUBLIC_URL:-http://localhost:9191}
+  NOTEGATE_OAUTH_CLIENT_ID: ${NOTEGATE_OAUTH_CLIENT_ID:-notegate-web}
+  NOTEGATE_MCP_OAUTH_CLIENT_ID: ${NOTEGATE_MCP_OAUTH_CLIENT_ID:-notegate-mcp}
+  NOTEGATE_ENC_ROOT_KEY_ID: ${NOTEGATE_ENC_ROOT_KEY_ID:-dev-enc}
+  NOTEGATE_ENC_ROOT_SECRET: ${NOTEGATE_ENC_ROOT_SECRET:-replace-with-distinct-enc-root-secret-32b}
+  NOTEGATE_LOOKUP_ROOT_KEY_ID: ${NOTEGATE_LOOKUP_ROOT_KEY_ID:-dev-lookup}
+  NOTEGATE_LOOKUP_ROOT_SECRET: ${NOTEGATE_LOOKUP_ROOT_SECRET:-replace-with-distinct-lookup-root-secret-32b}
+  NOTEGATE_METRICS_ENABLED: ${COMPOSE_NOTEGATE_METRICS_ENABLED:-true}
+  NOTEGATE_S3__ENDPOINT: http://minio:9000
+  NOTEGATE_S3__PUBLIC_ENDPOINT: ${NOTEGATE_S3__PUBLIC_ENDPOINT:-http://localhost:19000}
+  NOTEGATE_S3__REGION: ${NOTEGATE_S3__REGION:-us-east-1}
+  NOTEGATE_S3__BUCKET: ${NOTEGATE_S3__BUCKET:-notegate}
+  NOTEGATE_S3__ACCESS_KEY: ${NOTEGATE_S3__ACCESS_KEY:-notegate-app}
+  NOTEGATE_S3__SECRET_KEY: ${NOTEGATE_S3__SECRET_KEY:-notegate-app-secret}
+  NOTEGATE_S3__FORCE_PATH_STYLE: ${NOTEGATE_S3__FORCE_PATH_STYLE:-true}
+
+x-notegate-runtime: &notegate-runtime
+  image: notegate-split:local
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 90s
+  restart: unless-stopped
+
+x-split-smoke: &split-smoke
+  image: curlimages/curl:8.12.1
+  profiles:
+    - test
+  environment:
+    GRAFANA_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+    GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-notegate-local}
+  volumes:
+    - ./deploy/observability/split-smoke.sh:/config/split-smoke.sh:ro
+  entrypoint: ["/bin/sh", "/config/split-smoke.sh"]
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: notegate
+      POSTGRES_PASSWORD: notegate
+      POSTGRES_DB: notegate
+    ports:
+      - "127.0.0.1:${NOTEGATE_SPLIT_POSTGRES_PORT:-15434}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notegate"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio-root}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio-root-secret}
+      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_API_CORS_ALLOW_ORIGIN:-http://localhost:9191,http://127.0.0.1:9191}
+    ports:
+      - "127.0.0.1:${NOTEGATE_SPLIT_MINIO_API_PORT:-19000}:9000"
+      - "127.0.0.1:${NOTEGATE_SPLIT_MINIO_CONSOLE_PORT:-19001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio-root}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio-root-secret}
+      NOTEGATE_S3_BUCKET: ${NOTEGATE_S3__BUCKET:-notegate}
+      NOTEGATE_S3_ACCESS_KEY: ${NOTEGATE_S3__ACCESS_KEY:-notegate-app}
+      NOTEGATE_S3_SECRET_KEY: ${NOTEGATE_S3__SECRET_KEY:-notegate-app-secret}
+    volumes:
+      - ./deploy/minio/init.sh:/config/init.sh:ro
+    entrypoint: ["/bin/sh", "/config/init.sh"]
+    restart: "no"
+
+  api:
+    <<: *notegate-runtime
+    build:
+      context: .
+      dockerfile: deploy/docker/web.Dockerfile
+      target: runtime-headless
+    environment:
+      <<: *notegate-environment
+      NOTEGATE_PROCESS_MODE: api
+      NOTEGATE_BIND_ADDR: 0.0.0.0:9191
+      NOTEGATE_SEARCH_SERVICE_URL: http://search:9192
+    ports:
+      - "127.0.0.1:${NOTEGATE_API_PORT:-9191}:9191"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  # The runtime image intentionally carries no probe utility. This one-shot
+  # sidecar gates schema/key-epoch consumers on the API migration owner.
+  api-ready:
+    image: curlimages/curl:8.12.1
+    depends_on:
+      api:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        attempt=0
+        until curl -fsS http://api:9191/ready >/dev/null; do
+          attempt=$$((attempt + 1))
+          if [ "$$attempt" -ge 120 ]; then
+            echo "API did not become ready" >&2
+            exit 1
+          fi
+          sleep 0.5
+        done
+    restart: "no"
+
+  search:
+    <<: *notegate-runtime
+    environment:
+      <<: *notegate-environment
+      NOTEGATE_PROCESS_MODE: search
+      NOTEGATE_SEARCH_BIND_ADDR: 0.0.0.0:9192
+      NOTEGATE_SEARCH_BODY_CACHE__MAX_CAPACITY_BYTES: ${NOTEGATE_SEARCH_BODY_CACHE__MAX_CAPACITY_BYTES:-134217728}
+      NOTEGATE_SEARCH_BODY_CACHE__TTL_SECS: ${NOTEGATE_SEARCH_BODY_CACHE__TTL_SECS:-1800}
+      NOTEGATE_SEARCH_BODY_CACHE__TTI_SECS: ${NOTEGATE_SEARCH_BODY_CACHE__TTI_SECS:-300}
+    ports:
+      - "127.0.0.1:${NOTEGATE_SEARCH_PORT:-9192}:9192"
+    depends_on:
+      api-ready:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *notegate-runtime
+    environment:
+      <<: *notegate-environment
+      NOTEGATE_PROCESS_MODE: worker
+      NOTEGATE_BIND_ADDR: 0.0.0.0:9191
+      NOTEGATE_BACKGROUND_JOBS__CONCURRENCY: ${NOTEGATE_BACKGROUND_JOBS__CONCURRENCY:-4}
+    ports:
+      - "127.0.0.1:${NOTEGATE_WORKER_PORT:-9193}:9191"
+    depends_on:
+      api-ready:
+        condition: service_completed_successfully
+
+  reconciler:
+    <<: *notegate-runtime
+    environment:
+      <<: *notegate-environment
+      NOTEGATE_PROCESS_MODE: reconciler
+      NOTEGATE_BIND_ADDR: 0.0.0.0:9191
+    ports:
+      - "127.0.0.1:${NOTEGATE_RECONCILER_PORT:-9194}:9191"
+    depends_on:
+      api-ready:
+        condition: service_completed_successfully
+
+  prometheus:
+    image: prom/prometheus:v3.13.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./deploy/observability/prometheus/prometheus-split.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - api
+      - search
+      - worker
+      - reconciler
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.1.1
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-notegate-local}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_LOG_MODE: console
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/notegate-service-overview.json
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./deploy/observability/grafana/provisioning/datasources/prometheus.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+      - ./deploy/observability/grafana/provisioning/dashboards/notegate.yml:/etc/grafana/provisioning/dashboards/notegate.yml:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  smoke:
+    <<: *split-smoke
+    depends_on:
+      - api
+      - search
+      - worker
+      - reconciler
+      - prometheus
+    command: ["full"]
+
+  smoke-isolation:
+    <<: *split-smoke
+    command: ["isolation"]
+
+volumes:
+  pgdata:
+  minio-data:
+  prometheus-data:
+  grafana-data:

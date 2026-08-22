@@ -16,10 +16,14 @@
 
 ```text
 ENC_ROOT     PII, browser refresh token, 서버 관리 Text 암호화용
-LOOKUP_ROOT  provider/email/API key/browser session lookup HMAC와 session signing용
+LOOKUP_ROOT  provider/email/API key/browser session lookup HMAC, session signing과 internal search signing용
 ```
 
 각 root key는 `crypto_key_epochs`에 `key_id`, `domain`, `status`, `verify_tag`, `version`으로 등록한다. 빈 DB에서는 프로세스 시작 시 active epoch row를 생성한다. 이미 active epoch가 존재하면 환경 변수의 active root key와 DB registry가 맞지 않을 때 서버는 시작하지 않는다.
+
+Internal search HTTP는 `notegate/lookup/internal-search-signing/v1` purpose label로 별도 subkey를
+파생한다. Session cursor/signing key를 재사용하지 않는다. Request와 response signature 계약은
+[`search.md`](./search.md#execution-boundary)가 소유한다.
 
 ## PII storage
 

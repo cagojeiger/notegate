@@ -4,21 +4,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::extract::{Extension, State};
+use axum::extract::Extension;
 use axum::http::{Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use metrics::{Gauge, Unit};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
+use notegate_core::ProcessMode;
 use notegate_jobs::JobQueue;
-use notegate_search::SearchBodyCacheStats;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, Layer};
 
-use crate::state::AppState;
+use crate::state::ControlPlaneState;
 
 const HTTP_DURATION_BUCKETS_SECONDS: &[f64] = &[
     0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0,
@@ -37,12 +37,15 @@ const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8"
 #[derive(Clone)]
 pub(crate) struct MetricsHandle(PrometheusHandle);
 
-pub(crate) fn install(enabled: bool) -> anyhow::Result<Option<MetricsHandle>> {
+pub(crate) fn install(
+    enabled: bool,
+    process_mode: ProcessMode,
+) -> anyhow::Result<Option<MetricsHandle>> {
     if !enabled {
         return Ok(None);
     }
 
-    let handle = PrometheusBuilder::new()
+    let handle = prometheus_builder(process_mode)
         .with_recommended_naming(true)
         .set_buckets_for_metric(
             Matcher::Full("notegate_http_request_duration".to_owned()),
@@ -89,6 +92,10 @@ pub(crate) fn install(enabled: bool) -> anyhow::Result<Option<MetricsHandle>> {
     describe_metrics();
 
     Ok(Some(MetricsHandle(handle)))
+}
+
+fn prometheus_builder(process_mode: ProcessMode) -> PrometheusBuilder {
+    PrometheusBuilder::new().add_global_label("process_mode", process_mode.as_str())
 }
 
 fn describe_metrics() {
@@ -481,21 +488,33 @@ async fn refresh_background_job_metrics(
     Ok(())
 }
 
-pub(crate) fn routes(metrics: MetricsHandle) -> Router<AppState> {
+pub(crate) fn routes<S>(metrics: MetricsHandle) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/metrics", get(scrape))
         .layer(Extension(metrics))
 }
 
 async fn scrape(
-    State(state): State<AppState>,
+    Extension(state): Extension<ControlPlaneState>,
     Extension(metrics): Extension<MetricsHandle>,
 ) -> Response {
-    record_resource_metrics(ResourceMetricsSnapshot::capture(&state));
+    for observation in &state.database_pools {
+        record_database_metrics(
+            observation.role,
+            &observation.pool,
+            observation.max_connections,
+        );
+    }
+    if let Some(runtime) = &state.search_metrics_runtime {
+        runtime.record_body_cache_metrics();
+    }
     scrape_response(&metrics)
 }
 
-fn scrape_response(metrics: &MetricsHandle) -> Response {
+pub(crate) fn scrape_response(metrics: &MetricsHandle) -> Response {
     metrics.0.run_upkeep();
     (
         [(header::CONTENT_TYPE, PROMETHEUS_CONTENT_TYPE)],
@@ -509,41 +528,49 @@ struct ResourceMetricsSnapshot {
     db_connections_in_use: u32,
     db_connections_idle: u32,
     db_max_connections: u32,
-    body_cache: SearchBodyCacheStats,
 }
 
 impl ResourceMetricsSnapshot {
-    fn capture(state: &AppState) -> Self {
-        let db_connections = state.db.size();
-        let db_connections_idle = u32::try_from(state.db.num_idle())
+    fn capture(pool: &notegate_db::PgPool, db_max_connections: u32) -> Self {
+        let db_connections = pool.size();
+        let db_connections_idle = u32::try_from(pool.num_idle())
             .unwrap_or(u32::MAX)
             .min(db_connections);
 
         Self {
             db_connections_in_use: db_connections.saturating_sub(db_connections_idle),
             db_connections_idle,
-            db_max_connections: state.config.db_max_connections,
-            body_cache: state.search.body_cache_stats(),
+            db_max_connections,
         }
     }
 }
 
-fn record_resource_metrics(snapshot: ResourceMetricsSnapshot) {
+pub(crate) fn record_database_metrics(
+    role: &'static str,
+    pool: &notegate_db::PgPool,
+    db_max_connections: u32,
+) {
+    record_resource_metrics(
+        role,
+        ResourceMetricsSnapshot::capture(pool, db_max_connections),
+    );
+}
+
+fn record_resource_metrics(role: &'static str, snapshot: ResourceMetricsSnapshot) {
     metrics::gauge!(
         "notegate_db_pool_connections",
+        "pool" => role,
         "state" => "in_use"
     )
     .set(f64::from(snapshot.db_connections_in_use));
     metrics::gauge!(
         "notegate_db_pool_connections",
+        "pool" => role,
         "state" => "idle"
     )
     .set(f64::from(snapshot.db_connections_idle));
-    metrics::gauge!("notegate_db_pool_max_connections").set(f64::from(snapshot.db_max_connections));
-    metrics::gauge!("notegate_search_body_cache_size").set(snapshot.body_cache.size_bytes as f64);
-    metrics::gauge!("notegate_search_body_cache_capacity")
-        .set(snapshot.body_cache.capacity_bytes as f64);
-    metrics::gauge!("notegate_search_body_cache_entries").set(snapshot.body_cache.entries as f64);
+    metrics::gauge!("notegate_db_pool_max_connections", "pool" => role)
+        .set(f64::from(snapshot.db_max_connections));
 }
 
 pub(crate) struct HttpRequestMetrics {
@@ -710,6 +737,22 @@ mod tests {
         assert_eq!(status_class(StatusCode::INTERNAL_SERVER_ERROR), "5xx");
     }
 
+    #[test]
+    fn process_mode_is_a_global_metric_label() {
+        let recorder = prometheus_builder(ProcessMode::Search)
+            .with_recommended_naming(true)
+            .build_recorder();
+        let handle = recorder.handle();
+
+        metrics::with_local_recorder(&recorder, || {
+            metrics::counter!("notegate_test_component").increment(1);
+        });
+
+        let body = handle.render();
+        assert!(body.contains("process_mode=\"search\""), "{body}");
+        assert!(body.contains("notegate_test_component_total"), "{body}");
+    }
+
     #[tokio::test]
     async fn scrape_renders_prometheus_text() {
         let (handle, recorder) = test_metrics();
@@ -722,16 +765,25 @@ mod tests {
             );
             HttpRequestMetrics::start(&Method::GET, "/health")
                 .finish(StatusCode::OK, Duration::from_millis(10));
-            record_resource_metrics(ResourceMetricsSnapshot {
-                db_connections_in_use: 3,
-                db_connections_idle: 7,
-                db_max_connections: 20,
-                body_cache: SearchBodyCacheStats {
-                    entries: 4,
-                    size_bytes: 64,
-                    capacity_bytes: 128,
+            record_resource_metrics(
+                "primary",
+                ResourceMetricsSnapshot {
+                    db_connections_in_use: 3,
+                    db_connections_idle: 7,
+                    db_max_connections: 20,
                 },
-            });
+            );
+            record_resource_metrics(
+                "read",
+                ResourceMetricsSnapshot {
+                    db_connections_in_use: 1,
+                    db_connections_idle: 9,
+                    db_max_connections: 10,
+                },
+            );
+            metrics::gauge!("notegate_search_body_cache_size").set(64.0);
+            metrics::gauge!("notegate_search_body_cache_capacity").set(128.0);
+            metrics::gauge!("notegate_search_body_cache_entries").set(4.0);
             metrics::counter!(
                 "notegate_search_operations",
                 "operation" => "grep",
@@ -829,9 +881,12 @@ mod tests {
         assert!(body.contains("status_class=\"2xx\""));
         assert!(body.contains("notegate_http_request_duration_seconds_bucket"));
         assert!(body.contains("notegate_http_requests_in_flight"));
-        assert!(body.contains("notegate_db_pool_connections{state=\"in_use\"} 3"));
-        assert!(body.contains("notegate_db_pool_connections{state=\"idle\"} 7"));
-        assert!(body.contains("notegate_db_pool_max_connections 20"));
+        assert!(body.contains("notegate_db_pool_connections{pool=\"primary\",state=\"in_use\"} 3"));
+        assert!(body.contains("notegate_db_pool_connections{pool=\"primary\",state=\"idle\"} 7"));
+        assert!(body.contains("notegate_db_pool_max_connections{pool=\"primary\"} 20"));
+        assert!(body.contains("notegate_db_pool_connections{pool=\"read\",state=\"in_use\"} 1"));
+        assert!(body.contains("notegate_db_pool_connections{pool=\"read\",state=\"idle\"} 9"));
+        assert!(body.contains("notegate_db_pool_max_connections{pool=\"read\"} 10"));
         assert!(body.contains("notegate_search_body_cache_size_bytes 64"));
         assert!(body.contains("notegate_search_body_cache_capacity_bytes 128"));
         assert!(body.contains("notegate_search_body_cache_entries 4"));
