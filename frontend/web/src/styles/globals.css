@@ -30,13 +30,6 @@ body {
   font-synthesis-weight: none;
 }
 
-button,
-input,
-textarea,
-select {
-  font: inherit;
-}
-
 button:not(:disabled),
 [role="button"]:not([aria-disabled="true"]) {
   cursor: pointer;
@@ -366,7 +359,6 @@ button:not(:disabled):active {
 
 button.markdown-image-fallback {
   cursor: pointer;
-  font: inherit;
   text-align: left;
 }
 
