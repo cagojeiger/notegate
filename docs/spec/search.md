@@ -52,10 +52,10 @@ context carrier는 향후 W3C `traceparent`/`tracestate` 전파를 추가하는 
 ### Runtime contract
 
 Private Search HTTP는 독립 제품 API가 아니라 같은 NoteGate release의 process role 사이 계약이다.
-`/internal/v1`은 rolling deployment와 직전 release rollback 동안 N/N-1 호환을 유지한다. Public
-MCP/REST 입력은 계속 unknown field를 거부하지만, HMAC 인증된 private find/grep command는 새 release가
-추가한 unknown field를 구 Search process가 무시한다. 필수 필드 누락과 기존 필드의 잘못된 type은 계속
-거부한다. API client도 Search response에 추가된 unknown field를 무시한다.
+이번 release의 `/internal/v1`을 계약 기준선으로 삼으며 이전 private contract와의 호환은 제공하지 않는다.
+Public MCP/REST 입력은 계속 unknown field를 거부하지만, HMAC 인증된 private find/grep command는 이후
+release가 추가한 unknown field를 Search process가 무시한다. 필수 필드 누락과 기존 필드의 잘못된 type은
+계속 거부한다. API client도 Search response에 추가된 unknown field를 무시한다.
 
 `/internal/v1`에서 기존 필드의 삭제, rename, type/의미 변경과 기존 enum 의미 변경은 허용하지 않는다.
 호환되지 않는 의미 변경은 새 version path가 필요하다. 배포는 새 Search role을 먼저 전환하고, readiness를
@@ -63,8 +63,7 @@ MCP/REST 입력은 계속 unknown field를 거부하지만, HMAC 인증된 priva
 
 서명된 private response의 HTTP status와 error kind는 다음 계약을 따른다. API client는 status와 body가
 모순되거나 `200 OK`가 아닌 성공 status를 받으면 해당 body를 신뢰하지 않고 `search_unavailable`로
-처리한다. 계약 도입 전 release가 write lock과 usage recalculation에 사용한 `409`는 한 세대 rolling
-compatibility를 위해 읽기만 허용하며 새 Search process는 canonical status만 반환한다.
+처리한다. Canonical status가 아닌 과거 status는 허용하지 않는다.
 
 | Private error kind | HTTP status | Public error code |
 | --- | ---: | --- |

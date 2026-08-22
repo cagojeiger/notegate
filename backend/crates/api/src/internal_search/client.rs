@@ -227,7 +227,7 @@ impl InternalSearchHttpClient {
         } else {
             let output: ErrorOutput =
                 serde_json::from_slice(&body).map_err(|_error| SearchClientError::Unavailable)?;
-            if !output.error.accepts_status(status) {
+            if output.error.status() != status {
                 tracing::warn!(
                     event = "internal_search.protocol_error",
                     %status,
@@ -496,39 +496,6 @@ mod tests {
             error,
             SearchClientError::Search(SearchError::Internal(message))
                 if message == "internal search service error"
-        ));
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn previous_release_conflict_status_remains_rolling_compatible()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let locked = send_error(
-            StatusCode::CONFLICT,
-            InternalSearchError::WriteLocked {
-                scope: WriteLockScopeWire::TargetOrAncestor,
-            },
-        )
-        .await?;
-        assert!(matches!(
-            locked,
-            SearchClientError::Search(SearchError::WriteLocked {
-                scope: notegate_core::WriteLockScope::TargetOrAncestor
-            })
-        ));
-
-        let recalculating = send_error(
-            StatusCode::CONFLICT,
-            InternalSearchError::UsageRecalculationInProgress {
-                retry_after_seconds: 7,
-            },
-        )
-        .await?;
-        assert!(matches!(
-            recalculating,
-            SearchClientError::Search(SearchError::UsageRecalculationInProgress {
-                retry_after_seconds: 7
-            })
         ));
         Ok(())
     }

@@ -228,18 +228,6 @@ impl InternalSearchError {
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
-
-    /// Accept the one pre-contract status used by the previous release while
-    /// rolling API and Search pods can temporarily run different versions.
-    pub(super) fn accepts_status(&self, status: StatusCode) -> bool {
-        if self.status() == status {
-            return true;
-        }
-        matches!(
-            self,
-            Self::WriteLocked { .. } | Self::UsageRecalculationInProgress { .. }
-        ) && status == StatusCode::CONFLICT
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -397,24 +385,6 @@ mod tests {
         for (error, code, status) in cases {
             assert_eq!(error.code(), code);
             assert_eq!(error.status(), status);
-            assert!(error.accepts_status(status));
         }
-    }
-
-    #[test]
-    fn client_accepts_only_the_documented_legacy_conflict_status() {
-        let locked = InternalSearchError::WriteLocked {
-            scope: WriteLockScopeWire::TargetOrAncestor,
-        };
-        let recalculating = InternalSearchError::UsageRecalculationInProgress {
-            retry_after_seconds: 5,
-        };
-        let invalid = InternalSearchError::InvalidInput {
-            message: "bad".to_owned(),
-        };
-
-        assert!(locked.accepts_status(StatusCode::CONFLICT));
-        assert!(recalculating.accepts_status(StatusCode::CONFLICT));
-        assert!(!invalid.accepts_status(StatusCode::CONFLICT));
     }
 }
