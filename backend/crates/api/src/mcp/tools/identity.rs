@@ -1,40 +1,21 @@
+//! MCP adapter for the shared identity command.
+
 use axum::http::request::Parts;
-use notegate_model::Caller;
 use rmcp::{ErrorData, Json};
-use schemars::JsonSchema;
-use serde::Serialize;
 
-use super::resolve::invalid_input_error;
-use crate::identity::me::{MeOutput, build_me};
+use super::adapter;
+use crate::commands;
 
-#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
-pub struct McpMeOutput {
-    #[serde(flatten)]
-    pub identity: MeOutput,
-    /// Version of the running NoteGate server binary.
-    pub server_version: String,
-}
-
-impl McpMeOutput {
-    fn new(identity: MeOutput) -> Self {
-        Self {
-            identity,
-            server_version: env!("CARGO_PKG_VERSION").to_owned(),
-        }
-    }
-}
+pub type McpMeOutput = commands::identity::IdentityOutput;
 
 pub fn call(parts: &Parts) -> Result<Json<McpMeOutput>, ErrorData> {
-    let caller = parts
-        .extensions
-        .get::<Caller>()
-        .ok_or_else(|| invalid_input_error("authenticated caller extension missing"))?;
-    Ok(Json(McpMeOutput::new(build_me(caller))))
+    let context = adapter::context(parts)?;
+    Ok(Json(commands::identity::call(&context)))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::identity::me::{AccountRefOutput, CapabilitiesOutput};
+    use crate::identity::me::{AccountRefOutput, CapabilitiesOutput, MeOutput};
 
     use super::*;
 

@@ -38,14 +38,16 @@ V2의 공개 endpoint와 제외 범위는 `public-api-v2.md`에서 정의한다.
 api/auth/*      transport 인증과 credential extraction
 api/rest/*      Web V1 request/response와 DTO mapping
 api/public_v2   공개 계약용 request/response와 DTO mapping
-api/mcp/*       tool schema, space/path resolve, DTO mapping
+api/mcp/*       MCP tool schema, protocol envelope와 command adapter
+api/commands/*  인증된 caller 기반 path-first command 실행과 검증
+command/*       transport-neutral command input, recovery와 error 계약
 search/*        find/grep pipeline, matcher, body cache, search telemetry
 service/*       authorization, limits, lifecycle invariant
 repo/db         transaction, SQL, DB constraint mapping
 model           shared domain types
 ```
 
-API layer는 space/text/file/agent 업무 규칙을 직접 구현하지 않는다. V2가 별도 프로세스로 분리되더라도 같은 service/model 계약을 사용한다.
+MCP adapter는 인증된 request에서 command context를 한 번 만들고 공통 command 실행기를 호출한다. 직접 tool과 sequence 내부 command는 같은 입력 검증, 실행, recovery/error 계약을 사용하며 MCP layer는 JSON-RPC envelope만 소유한다. API layer는 space/text/file/agent 업무 규칙을 직접 구현하지 않는다. V2가 별도 프로세스로 분리되더라도 같은 service/model 계약을 사용한다.
 
 ## Identity mapping
 

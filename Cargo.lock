@@ -2529,6 +2529,7 @@ dependencies = [
  "jsonwebtoken",
  "metrics",
  "metrics-exporter-prometheus",
+ "notegate-command",
  "notegate-core",
  "notegate-db",
  "notegate-jobs",
@@ -2560,6 +2561,15 @@ dependencies = [
  "utoipa-swagger-ui",
  "uuid",
  "zip 8.6.0",
+]
+
+[[package]]
+name = "notegate-command"
+version = "0.1.77"
+dependencies = [
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

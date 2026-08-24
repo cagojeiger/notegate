@@ -91,8 +91,9 @@ pub async fn run_read_sequence(
     validate_sequence_command_count(input.commands.len(), SequenceKind::Read)?;
     let commands = prepare_sequence_commands(input.commands, &input.purpose, SequenceKind::Read)?;
     let purpose = input.purpose;
+    let context = adapter::context(parts)?;
     let outcomes = collect_read_outcomes(commands, |command| {
-        execute_sequence_command(state, parts, command, &purpose)
+        execute_sequence_command(state, &context, command, &purpose)
     })
     .await;
     Ok(Json(sequence_response(outcomes, 0)))

@@ -12,7 +12,8 @@ use serde_json::Value;
 
 use super::invocation_redaction::{redact_input, redact_response};
 use super::tool_identity::KnownMcpTool;
-use super::tools::resolve::invalid_input_error;
+use crate::commands;
+use crate::mcp::contract::command_error;
 use crate::observability::record_mcp_tool_metrics;
 use crate::state::AppState;
 
@@ -103,6 +104,10 @@ fn validate_purpose(purpose: &str) -> Result<(), ErrorData> {
         )));
     }
     Ok(())
+}
+
+fn invalid_input_error(message: impl Into<String>) -> ErrorData {
+    command_error(commands::error::invalid_input_error(message))
 }
 
 struct InvocationRecord<'a> {
