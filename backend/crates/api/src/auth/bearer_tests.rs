@@ -748,6 +748,144 @@ async fn v2_routes_require_api_keys() -> Result<(), Box<dyn std::error::Error>> 
 }
 
 #[tokio::test]
+async fn command_routes_require_api_keys() -> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/commands/v1/me")
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("private, no-store")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Bearer realm=\"notegate-command-api\"")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn command_routes_accept_agent_api_keys() -> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/commands/v1/me")
+                .header("authorization", format!("Bearer {TEST_API_KEY}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("private, no-store")
+    );
+    let body = to_bytes(response.into_body(), 16 * 1024).await?;
+    let body: Value = serde_json::from_slice(&body)?;
+    assert_eq!(body["account"]["kind"], "agent");
+    assert!(
+        body["server_version"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn command_routes_reject_non_agent_bearers() -> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let oauth = token(
+        "sub-1",
+        "https://auth.example.test",
+        json!("https://api.example.test"),
+        future_exp(),
+        "kid-1",
+    )?;
+
+    for bearer in [TEST_LEGACY_API_KEY.to_owned(), oauth] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/commands/v1/me")
+                    .header("authorization", format!("Bearer {bearer}"))
+                    .body(Body::empty())?,
+            )
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response
+                .headers()
+                .get(CACHE_CONTROL)
+                .and_then(|value| value.to_str().ok()),
+            Some("private, no-store")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(WWW_AUTHENTICATE)
+                .and_then(|value| value.to_str().ok()),
+            Some("Bearer realm=\"notegate-command-api\"")
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn command_routes_preserve_recovery_errors_and_no_store()
+-> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/commands/v1/read")
+                .header("authorization", format!("Bearer {TEST_API_KEY}"))
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "purpose": "read a text node",
+                        "op": "read"
+                    })
+                    .to_string(),
+                ))?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("private, no-store")
+    );
+    let body = to_bytes(response.into_body(), 16 * 1024).await?;
+    let body: Value = serde_json::from_slice(&body)?;
+    assert_eq!(body["error"], "required_field_missing");
+    assert_eq!(body["kind"], "invalid_input");
+    assert_eq!(body["data"]["next_action"]["kind"], "add_fields");
+    Ok(())
+}
+
+#[tokio::test]
 async fn v2_routes_reject_legacy_agent_keys() -> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let response = app

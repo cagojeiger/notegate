@@ -12,23 +12,46 @@ use crate::state::AppState;
 
 pub async fn require_public_api_key(
     State(state): State<AppState>,
-    mut request: Request<Body>,
+    request: Request<Body>,
     next: Next,
 ) -> Response {
+    require_agent_api_key(
+        &state,
+        request,
+        next,
+        HeaderValue::from_static("Bearer realm=\"notegate-public-api\""),
+    )
+    .await
+}
+
+pub async fn require_command_api_key(
+    State(state): State<AppState>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    require_agent_api_key(
+        &state,
+        request,
+        next,
+        HeaderValue::from_static("Bearer realm=\"notegate-command-api\""),
+    )
+    .await
+}
+
+async fn require_agent_api_key(
+    state: &AppState,
+    mut request: Request<Body>,
+    next: Next,
+    challenge: HeaderValue,
+) -> Response {
     let caller = match extract_bearer(request.headers()) {
-        Some(token) => verify_agent_api_key(&state, token, Channel::Api).await,
+        Some(token) => verify_agent_api_key(state, token, Channel::Api).await,
         None => Err(AuthError::MissingToken),
     };
     let caller = match caller {
         Ok(caller) => caller,
         Err(error) => {
-            return auth_error_response(
-                &state,
-                error,
-                Some(HeaderValue::from_static(
-                    "Bearer realm=\"notegate-public-api\"",
-                )),
-            );
+            return auth_error_response(state, error, Some(challenge));
         }
     };
 
