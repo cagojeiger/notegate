@@ -40,7 +40,7 @@ notegate-cli read --help
 - 성공 JSON 또는 `--schema`는 stdout에 한 줄 JSON으로 출력한다.
 - 서버 오류 JSON은 `next_action`을 포함해 수정하지 않고 stderr로 전달한다.
 - CLI configuration, local input, network와 protocol 오류도 stderr에 JSON으로 출력한다.
-- help와 argument parser 오류는 clap의 일반 text 형식을 사용한다.
+- help와 version은 clap의 일반 text 형식을 사용하고, argument parser 오류는 `invalid_arguments` JSON으로 출력한다.
 
 | Exit code | 의미 |
 |---:|---|

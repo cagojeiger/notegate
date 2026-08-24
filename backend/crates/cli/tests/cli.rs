@@ -127,6 +127,40 @@ async fn server_error_stays_structured_on_stderr_with_a_stable_exit_code() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn server_timeout_is_unavailable_and_preserves_the_error_body() {
+    let body = json!({
+        "error": "request_timeout",
+        "kind": "request_timeout",
+        "message": "request processing timed out",
+    });
+    let response_body = body.clone();
+    let base_url = spawn(Router::new().route(
+        "/api/commands/v1/read",
+        post(move || {
+            let response_body = response_body.clone();
+            async move { (StatusCode::REQUEST_TIMEOUT, Json(response_body)) }
+        }),
+    ))
+    .await;
+
+    let output = cli(&base_url)
+        .args([
+            "read",
+            "--input",
+            r#"{"purpose":"list spaces","op":"spaces"}"#,
+        ])
+        .output()
+        .expect("run CLI");
+
+    assert_eq!(output.status.code(), Some(5));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stderr).expect("JSON stderr"),
+        body
+    );
+}
+
 #[test]
 fn missing_key_is_actionable_and_never_echoes_a_secret() {
     let output = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
@@ -170,6 +204,7 @@ fn read_schema_and_help_need_no_credentials() {
         .output()
         .expect("run help");
     assert!(help.status.success());
+    assert!(help.stderr.is_empty());
     let help = String::from_utf8(help.stdout).expect("UTF-8 help");
     assert!(help.contains("--input <JSON>"));
     assert!(help.contains("--input-file <PATH>"));
@@ -182,10 +217,66 @@ fn read_schema_and_help_need_no_credentials() {
         .output()
         .expect("run top-level help");
     assert!(top_level_help.status.success());
+    assert!(top_level_help.stderr.is_empty());
     let top_level_help = String::from_utf8(top_level_help.stdout).expect("UTF-8 help");
     assert!(top_level_help.contains("NOTEGATE_API_KEY"));
     assert!(top_level_help.contains("NOTEGATE_BASE_URL"));
     assert!(top_level_help.contains("never accepted as a command-line argument"));
+
+    let version = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+        .arg("--version")
+        .env_remove("NOTEGATE_API_KEY")
+        .env_remove("NOTEGATE_BASE_URL")
+        .output()
+        .expect("run version");
+    assert!(version.status.success());
+    assert!(version.stderr.is_empty());
+    assert_eq!(
+        String::from_utf8(version.stdout).expect("UTF-8 version"),
+        format!("notegate-cli {}\n", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn argument_errors_are_structured_json() {
+    for args in [
+        &["read"][..],
+        &["--timeout-seconds", "nope", "me"],
+        &["read", "--input", "{}", "--schema"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+            .args(args)
+            .env_remove("NOTEGATE_API_KEY")
+            .env_remove("NOTEGATE_BASE_URL")
+            .output()
+            .expect("run invalid CLI arguments");
+
+        assert_eq!(output.status.code(), Some(2), "arguments: {args:?}");
+        assert!(output.stdout.is_empty(), "arguments: {args:?}");
+        let error = serde_json::from_slice::<Value>(&output.stderr).expect("JSON stderr");
+        assert_eq!(
+            error.get("error").and_then(Value::as_str),
+            Some("invalid_arguments"),
+            "arguments: {args:?}"
+        );
+        assert_eq!(
+            error.get("kind").and_then(Value::as_str),
+            Some("invalid_input"),
+            "arguments: {args:?}"
+        );
+        assert_eq!(
+            error.pointer("/data/retryable").and_then(Value::as_bool),
+            Some(false),
+            "arguments: {args:?}"
+        );
+        assert!(
+            error
+                .get("message")
+                .and_then(Value::as_str)
+                .is_some_and(|message| message.contains("--help")),
+            "arguments: {args:?}"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -237,7 +328,7 @@ async fn timeout_is_retryable_without_secret_leakage() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn oversized_response_is_retryable_without_secret_leakage() {
+async fn oversized_response_guides_request_reduction_without_secret_leakage() {
     let oversized_base_url = spawn(Router::new().route(
         "/api/commands/v1/me",
         get(|| async { vec![b'x'; 8 * 1024 * 1024 + 1] }),
@@ -251,6 +342,21 @@ async fn oversized_response_is_retryable_without_secret_leakage() {
     assert_eq!(
         error_code(&oversized).as_deref(),
         Some("response_too_large")
+    );
+    let error = serde_json::from_slice::<Value>(&oversized.stderr).expect("JSON stderr");
+    assert_eq!(
+        error.pointer("/data/retryable").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        error.pointer("/data/recoverable").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert!(
+        error
+            .pointer("/data/hint")
+            .and_then(Value::as_str)
+            .is_some_and(|hint| hint.contains("limit") && hint.contains("max_bytes"))
     );
     assert!(!combined_output(&oversized).contains(TEST_KEY));
 }

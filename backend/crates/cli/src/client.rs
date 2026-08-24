@@ -127,9 +127,10 @@ async fn read_bounded(mut response: reqwest::Response) -> Result<Vec<u8>, CliErr
 }
 
 fn response_too_large() -> CliError {
-    CliError::protocol(
+    CliError::recoverable_protocol(
         "response_too_large",
         "NoteGate response exceeded the 8 MiB CLI safety limit",
+        "Reduce limit or max_bytes, or narrow the target, before retrying the command",
     )
 }
 

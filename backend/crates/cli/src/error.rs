@@ -35,10 +35,34 @@ impl CliError {
         Self::new(EXIT_UNAVAILABLE, code, "protocol_error", message, true)
     }
 
+    pub fn recoverable_protocol(
+        code: &'static str,
+        message: impl Into<String>,
+        hint: impl Into<String>,
+    ) -> Self {
+        Self {
+            exit_code: EXIT_UNAVAILABLE,
+            body: json!({
+                "error": code,
+                "kind": "protocol_error",
+                "message": message.into(),
+                "data": {
+                    "retryable": false,
+                    "recoverable": true,
+                    "hint": hint.into(),
+                },
+            }),
+        }
+    }
+
     pub fn server(status: StatusCode, body: Value) -> Self {
         let exit_code = if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
             EXIT_AUTH
-        } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+        } else if matches!(
+            status,
+            StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS
+        ) || status.is_server_error()
+        {
             EXIT_UNAVAILABLE
         } else {
             EXIT_COMMAND_REJECTED
@@ -89,6 +113,7 @@ mod tests {
         for (status, exit_code) in [
             (StatusCode::UNAUTHORIZED, EXIT_AUTH),
             (StatusCode::BAD_REQUEST, EXIT_COMMAND_REJECTED),
+            (StatusCode::REQUEST_TIMEOUT, EXIT_UNAVAILABLE),
             (StatusCode::TOO_MANY_REQUESTS, EXIT_UNAVAILABLE),
             (StatusCode::SERVICE_UNAVAILABLE, EXIT_UNAVAILABLE),
         ] {
