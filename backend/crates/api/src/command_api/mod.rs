@@ -119,6 +119,7 @@ mod tests {
     use axum::http::StatusCode;
     use notegate_db::test_support::TestDb;
     use notegate_model::Channel;
+    use notegate_service::spaces::UpdateSpace;
     use serde_json::json;
 
     use super::*;
@@ -131,7 +132,23 @@ mod tests {
             return Ok(());
         };
         let state = state(&db);
-        let (mut caller, _space_id, _root_id) = caller_and_space(&state).await?;
+        let (mut caller, space_id, _root_id) = caller_and_space(&state).await?;
+        state
+            .spaces
+            .update(
+                caller.account.kind,
+                caller.account_id(),
+                UpdateSpace {
+                    space_id,
+                    name: None,
+                    sort_order: None,
+                    navigation_pinned: None,
+                    user_mcp_enabled: Some(true),
+                    default_search_enabled: None,
+                    default_text_encryption_enabled: None,
+                },
+            )
+            .await?;
         caller.channel = Channel::Api;
         let app = Router::new()
             .nest("/api/commands/v1", routes())
