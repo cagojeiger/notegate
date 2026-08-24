@@ -1,4 +1,4 @@
-.PHONY: fmt check test clippy build frontend-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics split-up split-test split-test-isolation split-logs split-down
+.PHONY: fmt check test clippy build cli-build frontend-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics split-up split-test split-test-isolation split-logs split-down
 
 fmt:
 	cargo fmt --all --check
@@ -14,6 +14,9 @@ clippy:
 
 build:
 	cargo build --release --bin notegate-api
+
+cli-build:
+	cargo build --release --bin notegate-cli
 
 frontend-check:
 	pnpm audit --prod --audit-level moderate

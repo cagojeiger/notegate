@@ -65,11 +65,25 @@ The source release version is tracked in [`VERSION`](VERSION). MCP clients can
 compare it with the running server's `me.server_version` when diagnosing a stale
 tool catalog.
 
+## Use the CLI
+
+The first `notegate-cli` slice calls the shared Command API with an Agent API key:
+
+```sh
+export NOTEGATE_BASE_URL='https://<notegate-host>'
+export NOTEGATE_API_KEY='ngk_v2_...'
+cargo run --package notegate-cli -- me
+cargo run --package notegate-cli -- read --schema
+```
+
+See the [CLI contract](docs/spec/cli.md) for JSON input, output, exit codes, and current scope.
+
 ## Documentation
 
 - [Product model](docs/adr/0001-ai-native-personal-file-space.md)
 - [Agent and permission model](docs/adr/0002-user-managed-agents-and-space-connections.md)
 - [MCP tools](docs/spec/mcp/README.md)
+- [CLI contract](docs/spec/cli.md)
 - [Background jobs](docs/spec/background-jobs.md)
 - [Reconciliation](docs/spec/reconciliation.md)
 - [UI design principles](DESIGN.md)

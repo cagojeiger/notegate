@@ -1,0 +1,100 @@
+use reqwest::StatusCode;
+use serde_json::{Value, json};
+
+pub const EXIT_INVALID_INPUT: u8 = 2;
+pub const EXIT_AUTH: u8 = 3;
+pub const EXIT_COMMAND_REJECTED: u8 = 4;
+pub const EXIT_UNAVAILABLE: u8 = 5;
+
+#[derive(Debug)]
+pub struct CliError {
+    exit_code: u8,
+    body: Value,
+}
+
+impl CliError {
+    pub fn invalid_input(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(EXIT_INVALID_INPUT, code, "invalid_input", message, false)
+    }
+
+    pub fn configuration(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(
+            EXIT_INVALID_INPUT,
+            code,
+            "configuration_error",
+            message,
+            false,
+        )
+    }
+
+    pub fn unavailable(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(EXIT_UNAVAILABLE, code, "transport_error", message, true)
+    }
+
+    pub fn protocol(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(EXIT_UNAVAILABLE, code, "protocol_error", message, true)
+    }
+
+    pub fn server(status: StatusCode, body: Value) -> Self {
+        let exit_code = if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+            EXIT_AUTH
+        } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            EXIT_UNAVAILABLE
+        } else {
+            EXIT_COMMAND_REJECTED
+        };
+        Self { exit_code, body }
+    }
+
+    pub const fn exit_code(&self) -> u8 {
+        self.exit_code
+    }
+
+    pub const fn body(&self) -> &Value {
+        &self.body
+    }
+
+    fn new(
+        exit_code: u8,
+        code: &'static str,
+        kind: &'static str,
+        message: impl Into<String>,
+        retryable: bool,
+    ) -> Self {
+        Self {
+            exit_code,
+            body: json!({
+                "error": code,
+                "kind": kind,
+                "message": message.into(),
+                "data": {
+                    "retryable": retryable,
+                },
+            }),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_statuses_map_to_stable_exit_codes_without_rewriting_the_body() {
+        let body = json!({
+            "error": "required_field_missing",
+            "data": {"next_action": {"kind": "add_fields"}},
+        });
+
+        for (status, exit_code) in [
+            (StatusCode::UNAUTHORIZED, EXIT_AUTH),
+            (StatusCode::BAD_REQUEST, EXIT_COMMAND_REJECTED),
+            (StatusCode::TOO_MANY_REQUESTS, EXIT_UNAVAILABLE),
+            (StatusCode::SERVICE_UNAVAILABLE, EXIT_UNAVAILABLE),
+        ] {
+            let error = CliError::server(status, body.clone());
+            assert_eq!(error.exit_code(), exit_code);
+            assert_eq!(error.body(), &body);
+        }
+    }
+}
