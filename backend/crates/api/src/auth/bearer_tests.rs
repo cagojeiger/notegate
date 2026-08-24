@@ -32,7 +32,7 @@ use crate::auth::jwt::JwtAuthority;
 use crate::identity::{CallerResolver, IdentityError, ResolveAttrs};
 use crate::state::AppState;
 
-use crate::auth::bearer::{AuthError, verify_bearer_mcp};
+use crate::auth::bearer::{AuthError, verify_bearer_command, verify_bearer_mcp};
 use crate::auth::session::{
     BROWSER_SESSION_COOKIE, create_browser_session, verify_browser_session,
 };
@@ -119,6 +119,13 @@ impl CallerResolver for TestResolver {
         attrs: ResolveAttrs,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
         Box::pin(async move { self.resolve(attrs, Channel::Mcp) })
+    }
+
+    fn resolve_command_user(
+        &self,
+        attrs: ResolveAttrs,
+    ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
+        Box::pin(async move { self.resolve(attrs, Channel::Api) })
     }
 
     fn resolve_agent_api_key(
@@ -229,6 +236,7 @@ fn state_with_pool(
         notegate_public_url: "http://localhost:9191".to_owned(),
         oauth_client_id: "notegate-web".to_owned(),
         mcp_oauth_client_id: "notegate-mcp".to_owned(),
+        cli_oauth_client_id: "notegate-cli-local".to_owned(),
         oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
         resource_url: resource_url.to_owned(),
         jwks_cache_ttl: Duration::from_secs(300),
@@ -411,20 +419,91 @@ async fn verify_accepts_aud_array_and_trailing_slash() -> Result<(), Box<dyn std
 }
 
 #[tokio::test]
+async fn command_verify_accepts_exact_cli_audience_on_api_channel()
+-> Result<(), Box<dyn std::error::Error>> {
+    let state = state(ResolverMode::Registered(true))?;
+    let token = token(
+        "sub-1",
+        "https://auth.example.test",
+        json!(["another-audience", "notegate-cli-local"]),
+        future_exp(),
+        "kid-1",
+    )?;
+
+    let caller = verify_bearer_command(&state, &token).await?;
+
+    assert_eq!(caller.channel, Channel::Api);
+    assert!(caller.user().is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn command_and_mcp_reject_each_others_audiences() -> Result<(), Box<dyn std::error::Error>> {
+    let resource_url = "https://api.example.test/mcp";
+    let state = state_with_resource(ResolverMode::Registered(true), resource_url)?;
+    let cli_token = token(
+        "sub-1",
+        "https://auth.example.test",
+        json!("notegate-cli-local"),
+        future_exp(),
+        "kid-1",
+    )?;
+    let cli_with_slash = token(
+        "sub-1",
+        "https://auth.example.test",
+        json!("notegate-cli-local/"),
+        future_exp(),
+        "kid-1",
+    )?;
+    let mcp_token = token(
+        "sub-1",
+        "https://auth.example.test",
+        json!(resource_url),
+        future_exp(),
+        "kid-1",
+    )?;
+
+    assert!(matches!(
+        verify_bearer_mcp(&state, &cli_token).await,
+        Err(AuthError::InvalidToken)
+    ));
+    assert!(matches!(
+        verify_bearer_command(&state, &mcp_token).await,
+        Err(AuthError::InvalidToken)
+    ));
+    assert!(matches!(
+        verify_bearer_command(&state, &cli_with_slash).await,
+        Err(AuthError::InvalidToken)
+    ));
+    Ok(())
+}
+
+#[tokio::test]
 async fn verify_maps_registered_state_errors() -> Result<(), Box<dyn std::error::Error>> {
-    let valid = token(
+    let mcp_token = token(
         "sub-1",
         "https://auth.example.test",
         json!("https://api.example.test"),
         future_exp(),
         "kid-1",
     )?;
+    let cli_token = token(
+        "sub-1",
+        "https://auth.example.test",
+        json!("notegate-cli-local"),
+        future_exp(),
+        "kid-1",
+    )?;
     let missing = state(ResolverMode::Missing)?;
-    let missing_err = verify_bearer_mcp(&missing, &valid).await.err();
+    let missing_err = verify_bearer_mcp(&missing, &mcp_token).await.err();
+    assert!(matches!(missing_err, Some(AuthError::NotRegistered)));
+    let missing_err = verify_bearer_command(&missing, &cli_token).await.err();
     assert!(matches!(missing_err, Some(AuthError::NotRegistered)));
 
     let inactive = state(ResolverMode::Registered(false))?;
-    let inactive_err = verify_bearer_mcp(&inactive, &valid).await.err();
+    let inactive_err = verify_bearer_mcp(&inactive, &mcp_token).await.err();
+    assert!(matches!(inactive_err, Some(AuthError::Inactive)));
+    let inactive_err = verify_bearer_command(&inactive, &cli_token).await.err();
     assert!(matches!(inactive_err, Some(AuthError::Inactive)));
     Ok(())
 }
@@ -748,7 +827,7 @@ async fn v2_routes_require_api_keys() -> Result<(), Box<dyn std::error::Error>> 
 }
 
 #[tokio::test]
-async fn command_routes_require_api_keys() -> Result<(), Box<dyn std::error::Error>> {
+async fn command_routes_require_bearer_auth() -> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let response = app
         .oneshot(
@@ -808,7 +887,71 @@ async fn command_routes_accept_agent_api_keys() -> Result<(), Box<dyn std::error
 }
 
 #[tokio::test]
-async fn command_routes_reject_non_agent_bearers() -> Result<(), Box<dyn std::error::Error>> {
+async fn command_routes_accept_cli_oauth_for_registered_users()
+-> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let oauth = token(
+        "sub-1",
+        "https://auth.example.test",
+        json!("notegate-cli-local"),
+        future_exp(),
+        "kid-1",
+    )?;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/commands/v1/me")
+                .header("authorization", format!("Bearer {oauth}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), 16 * 1024).await?;
+    let body: Value = serde_json::from_slice(&body)?;
+    assert_eq!(body["account"]["kind"], "user");
+    assert!(body["user"].is_object());
+    Ok(())
+}
+
+#[tokio::test]
+async fn command_unregistered_user_error_is_transport_neutral()
+-> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state(ResolverMode::Missing)?);
+    let oauth = token(
+        "sub-1",
+        "https://auth.example.test",
+        json!("notegate-cli-local"),
+        future_exp(),
+        "kid-1",
+    )?;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/commands/v1/me")
+                .header("authorization", format!("Bearer {oauth}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = to_bytes(response.into_body(), 16 * 1024).await?;
+    let body: Value = serde_json::from_slice(&body)?;
+    assert_eq!(body["error"], "not_registered");
+    assert_eq!(
+        body["message"],
+        "This account is authenticated but not registered in NoteGate yet. Open login_url once, then retry the request."
+    );
+    assert_eq!(body["login_url"], "http://localhost:9191/auth/login");
+    assert!(!body["message"].as_str().unwrap_or_default().contains("MCP"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn command_routes_reject_legacy_keys_and_mcp_audience_bearers()
+-> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let oauth = token(
         "sub-1",
@@ -818,7 +961,11 @@ async fn command_routes_reject_non_agent_bearers() -> Result<(), Box<dyn std::er
         "kid-1",
     )?;
 
-    for bearer in [TEST_LEGACY_API_KEY.to_owned(), oauth] {
+    for bearer in [
+        TEST_LEGACY_API_KEY.to_owned(),
+        "ngk_malformed".to_owned(),
+        oauth,
+    ] {
         let response = app
             .clone()
             .oneshot(
@@ -845,6 +992,28 @@ async fn command_routes_reject_non_agent_bearers() -> Result<(), Box<dyn std::er
             Some("Bearer realm=\"notegate-command-api\"")
         );
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn command_api_key_shape_does_not_depend_on_jwks() -> Result<(), Box<dyn std::error::Error>> {
+    let mut state = state(ResolverMode::Registered(true))?;
+    state.jwt = Arc::new(JwtAuthority::from_url(
+        &state.config,
+        "http://127.0.0.1:1/unreachable-jwks".to_owned(),
+    ));
+    let app = crate::routes::app(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/commands/v1/me")
+                .header("authorization", "Bearer ngk_malformed")
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     Ok(())
 }
 
@@ -1090,6 +1259,35 @@ async fn user_mcp_accepts_oauth_bearer() -> Result<(), Box<dyn std::error::Error
         .await?;
 
     assert_eq!(response.status(), StatusCode::OK);
+    Ok(())
+}
+
+#[tokio::test]
+async fn user_mcp_rejects_cli_audience_bearer() -> Result<(), Box<dyn std::error::Error>> {
+    let resource_url = "https://api.example.test/mcp";
+    let app = crate::routes::app(state_with_resource(
+        ResolverMode::Registered(true),
+        resource_url,
+    )?);
+    let oauth = token(
+        "sub-1",
+        "https://auth.example.test",
+        json!("notegate-cli-local"),
+        future_exp(),
+        "kid-1",
+    )?;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("authorization", format!("Bearer {oauth}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     Ok(())
 }
 

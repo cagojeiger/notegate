@@ -29,7 +29,7 @@ use crate::auth::metadata::{
 };
 use crate::auth::oauth::{callback, login, logout, success, success_script};
 use crate::auth::{
-    require_browser_session, require_command_api_key, require_public_api_key, set_private_no_store,
+    require_browser_session, require_command_api_auth, require_public_api_key, set_private_no_store,
 };
 use crate::error::ApiError;
 use crate::internal_search::{RequestDeadline, SearchServerState};
@@ -410,7 +410,7 @@ fn public_v2_routes(state: AppState) -> Router<AppState> {
 fn command_api_routes(state: AppState) -> Router<AppState> {
     crate::command_api::routes()
         .fallback(api_not_found)
-        .layer(from_fn_with_state(state, require_command_api_key))
+        .layer(from_fn_with_state(state, require_command_api_auth))
 }
 
 /// Liveness: the process is up. No dependency checks.

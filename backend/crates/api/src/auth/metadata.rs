@@ -57,6 +57,8 @@ pub struct AuthorizationServerMetadata {
     code_challenge_methods_supported: Vec<&'static str>,
     scopes_supported: Vec<&'static str>,
     client_id_metadata_text_supported: bool,
+    /// Static public OAuth client id registered for the Command API CLI.
+    cli_client_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -98,6 +100,7 @@ pub fn authorization_server_metadata_for_config(config: &Config) -> Authorizatio
         code_challenge_methods_supported: vec!["S256"],
         scopes_supported: vec!["openid", "profile", "email", "offline_access"],
         client_id_metadata_text_supported: true,
+        cli_client_id: config.cli_oauth_client_id.clone(),
     }
 }
 
@@ -151,6 +154,7 @@ mod tests {
             notegate_public_url: "http://localhost:9191".to_owned(),
             oauth_client_id: "notegate-web".to_owned(),
             mcp_oauth_client_id: "notegate-mcp".to_owned(),
+            cli_oauth_client_id: "notegate-cli-local".to_owned(),
             oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
             resource_url: "http://localhost:9191/mcp".to_owned(),
             jwks_cache_ttl: Duration::from_secs(300),
@@ -231,6 +235,9 @@ mod tests {
         );
         assert_eq!(metadata.code_challenge_methods_supported, vec!["S256"]);
         assert!(metadata.client_id_metadata_text_supported);
+        assert_eq!(metadata.cli_client_id, "notegate-cli-local");
+        let json = serde_json::to_value(metadata).expect("metadata serializes");
+        assert_eq!(json["cli_client_id"], "notegate-cli-local");
     }
 
     #[test]

@@ -8,4 +8,4 @@ pub use error::{
     status_for_error,
 };
 pub use extractor::{extract_bearer, extract_cookie_value};
-pub use verify::verify_bearer_mcp;
+pub use verify::{verify_bearer_command, verify_bearer_mcp};

@@ -16,5 +16,5 @@ pub mod session;
 
 pub(crate) use browser_session::{require_browser_session, require_browser_session_for_docs};
 pub(crate) use public_api::{
-    mark_private_no_store, require_command_api_key, require_public_api_key, set_private_no_store,
+    mark_private_no_store, require_command_api_auth, require_public_api_key, set_private_no_store,
 };

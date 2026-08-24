@@ -9,6 +9,8 @@
 //! - MCP OAuth bearer tokens resolve an already-registered user account
 //!   (an authenticated authgate identity with no local account is
 //!   [`IdentityError::NotRegistered`] — the spec onboarding path);
+//! - Command API OAuth bearer tokens resolve an already-registered user on the
+//!   API channel;
 //! - an Agent API key resolves an active `kind='agent'` account, rejecting
 //!   revoked, expired, user-owned, or inactive credentials.
 
@@ -85,6 +87,11 @@ impl Resolver {
     /// Resolve an MCP bearer for an already-registered user account.
     pub async fn resolve_mcp(&self, attrs: ResolveAttrs) -> Result<Caller, IdentityError> {
         self.resolve_registered_user(&attrs.sub, Channel::Mcp).await
+    }
+
+    /// Resolve a Command API OAuth bearer for an already-registered user account.
+    pub async fn resolve_command_user(&self, attrs: ResolveAttrs) -> Result<Caller, IdentityError> {
+        self.resolve_registered_user(&attrs.sub, Channel::Api).await
     }
 
     /// Resolve an Agent API key on the given channel.
