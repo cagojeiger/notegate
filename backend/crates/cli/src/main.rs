@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use clap::Parser as _;
 use clap::error::ErrorKind;
-use notegate_cli::{Cli, CliError, execute};
+use notegate_cli::{Cli, CliError, execute_with_events};
 use serde_json::Value;
 
 #[tokio::main]
@@ -25,8 +25,19 @@ async fn main() -> ExitCode {
             ));
         }
     };
-    match execute(cli).await {
-        Ok(value) => match write_json(io::stdout().lock(), &value) {
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    let result = execute_with_events(cli, |event| {
+        write_json(&mut stdout, event).map_err(|_error| {
+            CliError::unavailable(
+                "output_failed",
+                "could not write the Device authorization event to stdout",
+            )
+        })
+    })
+    .await;
+    match result {
+        Ok(value) => match write_json(&mut stdout, &value) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) if error.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
             Err(error) => {

@@ -169,14 +169,38 @@ fn missing_key_is_actionable_and_never_echoes_a_secret() {
         .output()
         .expect("run CLI");
 
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(3));
     assert!(output.stdout.is_empty());
     let error = serde_json::from_slice::<Value>(&output.stderr).expect("JSON stderr");
     assert_eq!(
         error.get("error").and_then(Value::as_str),
-        Some("missing_api_key")
+        Some("login_required")
     );
     assert!(!String::from_utf8_lossy(&output.stderr).contains(TEST_KEY));
+}
+
+#[test]
+fn auth_status_reports_api_key_precedence_without_exposing_it() {
+    let output = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+        .args(["--base-url", "https://notegate.example", "auth", "status"])
+        .env("NOTEGATE_API_KEY", TEST_KEY)
+        .env_remove("NOTEGATE_AUTHGATE_URL")
+        .env_remove("NOTEGATE_CLI_CLIENT_ID")
+        .output()
+        .expect("run auth status");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let status = serde_json::from_slice::<Value>(&output.stdout).expect("JSON stdout");
+    assert_eq!(
+        status.get("credential").and_then(Value::as_str),
+        Some("agent_api_key")
+    );
+    assert_eq!(
+        status.get("source").and_then(Value::as_str),
+        Some("environment")
+    );
+    assert!(!combined_output(&output).contains(TEST_KEY));
 }
 
 #[test]

@@ -27,6 +27,10 @@ impl CliError {
         )
     }
 
+    pub fn auth(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(EXIT_AUTH, code, "authentication_error", message, false)
+    }
+
     pub fn unavailable(code: &'static str, message: impl Into<String>) -> Self {
         Self::new(EXIT_UNAVAILABLE, code, "transport_error", message, true)
     }

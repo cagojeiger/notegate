@@ -13,11 +13,11 @@ const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 pub struct CommandClient {
     http: reqwest::Client,
     command_base_url: Url,
-    api_key: SecretString,
+    bearer: SecretString,
 }
 
 impl CommandClient {
-    pub fn new(base_url: &str, api_key: SecretString, timeout: Duration) -> Result<Self, CliError> {
+    pub fn new(base_url: &str, bearer: SecretString, timeout: Duration) -> Result<Self, CliError> {
         let command_base_url = command_base_url(base_url)?;
         let http = reqwest::Client::builder()
             .timeout(timeout)
@@ -33,7 +33,7 @@ impl CommandClient {
         Ok(Self {
             http,
             command_base_url,
-            api_key,
+            bearer,
         })
     }
 
@@ -58,7 +58,7 @@ impl CommandClient {
 
     async fn send(&self, request: reqwest::RequestBuilder) -> Result<Value, CliError> {
         let response = request
-            .bearer_auth(self.api_key.expose_secret())
+            .bearer_auth(self.bearer.expose_secret())
             .header(ACCEPT, "application/json")
             .header(
                 USER_AGENT,
