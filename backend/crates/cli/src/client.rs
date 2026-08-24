@@ -3,7 +3,7 @@ use std::time::Duration;
 use reqwest::header::{ACCEPT, USER_AGENT};
 use secrecy::{ExposeSecret as _, SecretString};
 use serde_json::Value;
-use url::Url;
+use url::{Host, Url};
 
 use crate::error::CliError;
 
@@ -104,8 +104,24 @@ fn command_base_url(input: &str) -> Result<Url, CliError> {
             "NOTEGATE_BASE_URL must contain only an HTTP or HTTPS origin",
         ));
     }
+    if !uses_secure_or_loopback_transport(&url) {
+        return Err(CliError::configuration(
+            "invalid_base_url",
+            "NOTEGATE_BASE_URL must use HTTPS unless the host is localhost or a loopback IP address",
+        ));
+    }
     url.set_path(COMMAND_PATH);
     Ok(url)
+}
+
+fn uses_secure_or_loopback_transport(url: &Url) -> bool {
+    match (url.scheme(), url.host()) {
+        ("https", Some(_)) => true,
+        ("http", Some(Host::Domain(host))) => host.eq_ignore_ascii_case("localhost"),
+        ("http", Some(Host::Ipv4(host))) => host.is_loopback(),
+        ("http", Some(Host::Ipv6(host))) => host.is_loopback(),
+        _ => false,
+    }
 }
 
 async fn read_bounded(mut response: reqwest::Response) -> Result<Vec<u8>, CliError> {
@@ -150,13 +166,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn base_url_accepts_an_origin_and_rejects_credential_or_path_components() -> Result<(), CliError>
-    {
+    fn base_url_accepts_https_and_loopback_http_origins() -> Result<(), CliError> {
         let url = command_base_url("https://notegate.example")?;
         assert_eq!(url.as_str(), "https://notegate.example/api/commands/v1/");
 
+        for valid in [
+            "https://notegate.example:8443",
+            "http://localhost:9191",
+            "http://LOCALHOST:9191",
+            "http://127.0.0.1:9191",
+            "http://127.42.0.9:9191",
+            "http://[::1]:9191",
+        ] {
+            assert!(
+                command_base_url(valid).is_ok(),
+                "safe URL was rejected: {valid}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn base_url_rejects_remote_http_and_non_origin_components() {
         for invalid in [
             "file:///tmp/notegate",
+            "http://example.test",
+            "http://10.0.0.1",
+            "http://192.168.1.1",
+            "http://[fe80::1]",
+            "http://[::ffff:127.0.0.1]",
+            "http://foo.localhost",
+            "http://localhost.evil.test",
+            "http://localhost.",
             "https://user@example.test",
             "https://example.test/prefix",
             "https://example.test?token=secret",
@@ -168,6 +209,5 @@ mod tests {
                 assert_eq!(error.exit_code(), crate::error::EXIT_INVALID_INPUT);
             }
         }
-        Ok(())
     }
 }

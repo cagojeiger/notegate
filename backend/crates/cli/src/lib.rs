@@ -31,7 +31,8 @@ const MAX_INPUT_BYTES: usize = 1024 * 1024;
                   notegate-cli read --schema"
 )]
 pub struct Cli {
-    /// NoteGate origin. May also be set with NOTEGATE_BASE_URL.
+    /// NoteGate HTTPS origin. Loopback HTTP is allowed for local development.
+    /// May also be set with NOTEGATE_BASE_URL.
     #[arg(long, global = true, env = "NOTEGATE_BASE_URL", value_name = "URL")]
     pub base_url: Option<String>,
 

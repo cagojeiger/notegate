@@ -464,6 +464,27 @@ fn local_input_and_key_errors_are_structured_and_redacted() {
     assert!(!combined_output(&invalid_key).contains(TEST_KEY));
 }
 
+#[test]
+fn remote_http_base_url_is_rejected_before_sending_the_api_key() {
+    let output = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+        .args(["--base-url", "http://notegate.example", "me"])
+        .env("NOTEGATE_API_KEY", TEST_KEY)
+        .output()
+        .expect("run remote HTTP CLI");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(error_code(&output).as_deref(), Some("invalid_base_url"));
+    assert!(
+        serde_json::from_slice::<Value>(&output.stderr)
+            .expect("JSON stderr")
+            .get("message")
+            .and_then(Value::as_str)
+            .is_some_and(|message| message.contains("HTTPS"))
+    );
+    assert!(!combined_output(&output).contains(TEST_KEY));
+}
+
 fn cli(base_url: &str) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_notegate-cli"));
     command

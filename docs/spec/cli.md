@@ -12,6 +12,7 @@ export NOTEGATE_API_KEY='ngk_v2_...'
 - `NOTEGATE_API_KEY`는 Agent가 소유한 `ngk_v2_` key여야 한다.
 - API key는 shell history와 process list 노출을 막기 위해 command-line option으로 받지 않는다.
 - `--base-url`은 `NOTEGATE_BASE_URL`보다 우선한다.
+- 원격 origin은 HTTPS만 허용한다. 로컬 개발용 HTTP는 `localhost`와 loopback IP에서만 허용한다.
 - 현재 credential 저장, User Device Flow와 token refresh는 제공하지 않는다.
 - HTTP redirect를 따르지 않으므로 bearer credential이 다른 origin으로 전달되지 않는다.
 
