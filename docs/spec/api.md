@@ -1,14 +1,15 @@
 # API 구조
 
-NoteGate API는 사람과 AI agent가 같은 Space tree를 다루도록 한다. V1은 브라우저 UI 전용 resource API, V2는 외부 확장용 API key API, MCP는 User·Agent client용 path-first command API다.
+NoteGate API는 사람과 AI agent가 같은 Space tree를 다루도록 한다. V1은 브라우저 UI 전용 resource API, V2는 외부 확장용 API key API, Command API와 MCP는 path-first command API다.
 
 ```text
 V1 REST  = 브라우저 UI가 사용하는 전체 resource API
 V2 REST  = 외부 확장이 사용하는 안정적인 공개 API
-MCP      = agent가 쓰기 쉬운 space name + path 기반 command/search API
+Command  = CLI가 직접 호출하는 space name + path 기반 HTTP API
+MCP      = MCP client가 호출하는 동일 command의 JSON-RPC adapter
 ```
 
-세 surface는 같은 service invariant를 사용한다. V2는 Agent MCP와 동등한 Space 내부 기능을 ID 기반 resource API로 제공한다.
+네 surface는 같은 service invariant를 사용한다. V2는 Agent MCP와 동등한 Space 내부 기능을 ID 기반 resource API로 제공한다.
 
 ## 문서 원칙
 
@@ -24,6 +25,7 @@ MCP      = agent가 쓰기 쉬운 space name + path 기반 command/search API
 Auth        /auth/*, /.well-known/*
 Web API     /api/v1/*
 Public API  /api/v2/*
+Command API /api/commands/v1/*
 System      /health, /ready
 API Docs    /openapi/v2.json, /swagger-ui/v2
 User MCP    /mcp
@@ -38,6 +40,7 @@ V2의 공개 endpoint와 제외 범위는 `public-api-v2.md`에서 정의한다.
 api/auth/*      transport 인증과 credential extraction
 api/rest/*      Web V1 request/response와 DTO mapping
 api/public_v2   공개 계약용 request/response와 DTO mapping
+api/command_api HTTP command request/response와 error mapping
 api/mcp/*       MCP tool schema, protocol envelope와 command adapter
 api/commands/*  인증된 caller 기반 path-first command 실행과 검증
 command/*       transport-neutral command input, recovery와 error 계약
@@ -63,12 +66,12 @@ OAuth 계열 인증은 user로 처리한다. Browser login은 opaque browser ses
 ```text
 /api/v1/* -> browser session cookie만 허용
 /api/v2/* -> Agent 소유 ngk_v2_ API key만 허용
+/api/commands/v1/* -> Agent 소유 ngk_v2_ API key만 허용
 /mcp      -> user MCP OAuth bearer만 허용
 /mcp/v2   -> Agent 소유 ngk_v2_ API key만 허용
 ```
 
-두 MCP endpoint는 같은 tool engine과 업무 규칙을 사용한다. 경로를 나누는 목적은 인증과
-운영 한계를 분리하는 것이며 tool 동작을 복제하는 것이 아니다.
+Command API와 두 MCP endpoint는 같은 command engine과 업무 규칙을 사용한다. 경로를 나누는 목적은 인증, transport와 운영 한계를 분리하는 것이며 command 동작을 복제하는 것이 아니다. Command API의 현재 계약은 [`command-api.md`](./command-api.md)에서 정의한다.
 
 ## Common invariants
 

@@ -28,7 +28,9 @@ use crate::auth::metadata::{
     authorization_server_metadata, protected_resource_metadata, protected_resource_metadata_url,
 };
 use crate::auth::oauth::{callback, login, logout, success, success_script};
-use crate::auth::{require_browser_session, require_public_api_key, set_private_no_store};
+use crate::auth::{
+    require_browser_session, require_command_api_key, require_public_api_key, set_private_no_store,
+};
 use crate::error::ApiError;
 use crate::internal_search::{RequestDeadline, SearchServerState};
 use crate::mcp::server::{agent_mcp_v2_handler, user_mcp_handler};
@@ -173,8 +175,10 @@ fn data_plane_routes(state: AppState) -> Router<AppState> {
         Router::new().nest("/api", rest_api_routes(state.clone())),
         limits.rate_limits.browser_v1,
     );
-    let public_v2 = apply_rate_limit(
-        Router::new().nest("/api/v2", public_v2_routes(state.clone())),
+    let agent_apis = apply_rate_limit(
+        Router::new()
+            .nest("/api/v2", public_v2_routes(state.clone()))
+            .nest("/api/commands/v1", command_api_routes(state.clone())),
         limits.rate_limits.public_v2,
     );
     let user_mcp = apply_rate_limit(
@@ -190,23 +194,23 @@ fn data_plane_routes(state: AppState) -> Router<AppState> {
         .merge(metadata_routes(&state))
         .merge(crate::openapi::routes(state.clone()))
         .merge(browser_v1)
-        .merge(public_v2)
+        .merge(agent_apis)
         .merge(user_mcp)
         .merge(agent_mcp_v2);
-    apply_public_v2_contract(apply_data_plane_limits(router, limits))
+    apply_machine_api_contract(apply_data_plane_limits(router, limits))
 }
 
-fn apply_public_v2_contract<S>(router: Router<S>) -> Router<S>
+fn apply_machine_api_contract<S>(router: Router<S>) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-    router.layer(from_fn(enforce_public_v2_contract))
+    router.layer(from_fn(enforce_machine_api_contract))
 }
 
-async fn enforce_public_v2_contract(request: Request<Body>, next: Next) -> Response {
-    let is_public_v2 = is_public_v2_path(request.uri().path());
+async fn enforce_machine_api_contract(request: Request<Body>, next: Next) -> Response {
+    let is_machine_api = is_machine_api_path(request.uri().path());
     let mut response = next.run(request).await;
-    if !is_public_v2 {
+    if !is_machine_api {
         return response;
     }
 
@@ -216,17 +220,20 @@ async fn enforce_public_v2_contract(request: Request<Body>, next: Next) -> Respo
             .get(CONTENT_TYPE)
             .is_some_and(is_application_json)
     {
-        response = normalize_public_v2_error(response);
+        response = normalize_machine_api_error(response);
     }
     set_private_no_store(&mut response);
     response
 }
 
-fn is_public_v2_path(path: &str) -> bool {
-    path == "/api/v2" || path.starts_with("/api/v2/")
+fn is_machine_api_path(path: &str) -> bool {
+    path == "/api/v2"
+        || path.starts_with("/api/v2/")
+        || path == "/api/commands/v1"
+        || path.starts_with("/api/commands/v1/")
 }
 
-fn normalize_public_v2_error(response: Response) -> Response {
+fn normalize_machine_api_error(response: Response) -> Response {
     let status = response.status();
     let preserved_headers = [RETRY_AFTER, ALLOW, WWW_AUTHENTICATE]
         .into_iter()
@@ -238,14 +245,14 @@ fn normalize_public_v2_error(response: Response) -> Response {
                 .map(|value| (name, value))
         })
         .collect::<Vec<_>>();
-    let mut response = public_v2_transport_error(status).into_response();
+    let mut response = machine_api_transport_error(status).into_response();
     for (name, value) in preserved_headers {
         response.headers_mut().insert(name, value);
     }
     response
 }
 
-fn public_v2_transport_error(status: StatusCode) -> ApiError {
+fn machine_api_transport_error(status: StatusCode) -> ApiError {
     match status {
         StatusCode::BAD_REQUEST
         | StatusCode::UNPROCESSABLE_ENTITY
@@ -398,6 +405,12 @@ fn public_v2_routes(state: AppState) -> Router<AppState> {
     crate::public_v2::routes()
         .fallback(api_not_found)
         .layer(from_fn_with_state(state, require_public_api_key))
+}
+
+fn command_api_routes(state: AppState) -> Router<AppState> {
+    crate::command_api::routes()
+        .fallback(api_not_found)
+        .layer(from_fn_with_state(state, require_command_api_key))
 }
 
 /// Liveness: the process is up. No dependency checks.
@@ -643,7 +656,13 @@ mod tests {
             .await?;
         assert_eq!(health.status(), StatusCode::OK);
 
-        for path in ["/api/v1/me", "/auth/login", "/mcp", "/mcp/v2"] {
+        for path in [
+            "/api/v1/me",
+            "/api/commands/v1/me",
+            "/auth/login",
+            "/mcp",
+            "/mcp/v2",
+        ] {
             let response = app
                 .clone()
                 .oneshot(Request::builder().uri(path).body(Body::empty())?)
@@ -818,7 +837,7 @@ mod tests {
 
     #[tokio::test]
     async fn public_v2_contract_normalizes_extractor_errors() {
-        let app = apply_public_v2_contract(
+        let app = apply_machine_api_contract(
             Router::new()
                 .route(
                     "/api/v2/items/{item_id}",
@@ -844,7 +863,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_public_v2_error(path_response, StatusCode::BAD_REQUEST, "invalid_input").await;
+        assert_machine_api_error(path_response, StatusCode::BAD_REQUEST, "invalid_input").await;
 
         let json_response = app
             .oneshot(
@@ -857,12 +876,34 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_public_v2_error(json_response, StatusCode::BAD_REQUEST, "invalid_input").await;
+        assert_machine_api_error(json_response, StatusCode::BAD_REQUEST, "invalid_input").await;
+    }
+
+    #[tokio::test]
+    async fn command_api_contract_normalizes_extractor_errors() {
+        let app = apply_machine_api_contract(Router::new().route(
+            "/api/commands/v1/read",
+            post(|Json(_item_id): Json<uuid::Uuid>| async { "ok" }),
+        ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/commands/v1/read")
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#""not-a-uuid""#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_machine_api_error(response, StatusCode::BAD_REQUEST, "invalid_input").await;
     }
 
     #[tokio::test]
     async fn public_v2_contract_normalizes_outer_limit_errors() {
-        let app = apply_public_v2_contract(apply_data_plane_limits(
+        let app = apply_machine_api_contract(apply_data_plane_limits(
             Router::new().route("/api/v2/upload", post(|body: String| async move { body })),
             DataPlaneLimits {
                 request_body_max_bytes: 4,
@@ -881,12 +922,13 @@ mod tests {
             .await
             .unwrap();
 
-        assert_public_v2_error(response, StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large").await;
+        assert_machine_api_error(response, StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large")
+            .await;
     }
 
     #[tokio::test]
     async fn public_v2_contract_preserves_retry_after_on_rate_limit() {
-        let app = apply_public_v2_contract(apply_data_plane_limits(
+        let app = apply_machine_api_contract(apply_data_plane_limits(
             Router::new().route("/api/v2/items", get(|| async { "ok" })),
             DataPlaneLimits {
                 rate_limits: HttpRateLimitsConfig {
@@ -922,13 +964,55 @@ mod tests {
 
         assert_eq!(first.status(), StatusCode::OK);
         assert!(second.headers().contains_key(RETRY_AFTER));
-        assert_public_v2_error(second, StatusCode::TOO_MANY_REQUESTS, "rate_limited").await;
+        assert_machine_api_error(second, StatusCode::TOO_MANY_REQUESTS, "rate_limited").await;
+    }
+
+    #[tokio::test]
+    async fn command_api_contract_preserves_retry_after_on_rate_limit() {
+        let app = apply_machine_api_contract(apply_data_plane_limits(
+            Router::new().route("/api/commands/v1/me", get(|| async { "ok" })),
+            DataPlaneLimits {
+                rate_limits: HttpRateLimitsConfig {
+                    ingress: HttpRateLimitConfig {
+                        requests_per_second: 1,
+                        burst: 1,
+                    },
+                    ..HttpRateLimitsConfig::default()
+                },
+                ..DataPlaneLimits::default()
+            },
+        ));
+
+        let first = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/commands/v1/me")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let second = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/commands/v1/me")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(first.status(), StatusCode::OK);
+        assert!(second.headers().contains_key(RETRY_AFTER));
+        assert_machine_api_error(second, StatusCode::TOO_MANY_REQUESTS, "rate_limited").await;
     }
 
     #[tokio::test]
     async fn public_v2_contract_normalizes_method_not_allowed_and_preserves_allow() {
-        let app =
-            apply_public_v2_contract(Router::new().route("/api/v2/items", get(|| async { "ok" })));
+        let app = apply_machine_api_contract(
+            Router::new().route("/api/v2/items", get(|| async { "ok" })),
+        );
 
         let response = app
             .oneshot(
@@ -948,7 +1032,7 @@ mod tests {
                 .and_then(|value| value.to_str().ok())
                 .is_some_and(|value| value.contains("GET"))
         );
-        assert_public_v2_error(
+        assert_machine_api_error(
             response,
             StatusCode::METHOD_NOT_ALLOWED,
             "method_not_allowed",
@@ -958,7 +1042,7 @@ mod tests {
 
     #[tokio::test]
     async fn public_v2_contract_does_not_change_v1_errors() {
-        let app = apply_public_v2_contract(Router::new().route(
+        let app = apply_machine_api_contract(Router::new().route(
             "/api/v1/items",
             get(|| async { (StatusCode::BAD_REQUEST, "bad request") }),
         ));
@@ -983,7 +1067,7 @@ mod tests {
         );
     }
 
-    async fn assert_public_v2_error(response: Response, status: StatusCode, code: &str) {
+    async fn assert_machine_api_error(response: Response, status: StatusCode, code: &str) {
         assert_eq!(response.status(), status);
         assert_eq!(
             response.headers().get(CACHE_CONTROL),
@@ -1096,6 +1180,43 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS, "{path}");
         }
+    }
+
+    #[tokio::test]
+    async fn command_api_shares_public_v2_rate_limit() {
+        let limit = HttpRateLimitConfig {
+            requests_per_second: 1,
+            burst: 1,
+        };
+        let app = apply_rate_limit(
+            Router::new()
+                .route("/api/v2/ping", get(|| async { "v2" }))
+                .route("/api/commands/v1/me", get(|| async { "command" })),
+            limit,
+        );
+
+        let first = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v2/ping")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let second = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/commands/v1/me")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[tokio::test]
