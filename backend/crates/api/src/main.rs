@@ -3,6 +3,7 @@ mod agent_text;
 mod auth;
 mod background_jobs;
 mod boot;
+mod commands;
 mod error;
 mod file_change;
 mod file_preview;

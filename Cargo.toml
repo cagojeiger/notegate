@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "backend/crates/api",
+    "backend/crates/command",
     "backend/crates/core",
     "backend/crates/db",
     "backend/crates/jobs",
@@ -20,6 +21,7 @@ repository = "https://github.com/cagojeiger/notegate"
 
 [workspace.dependencies]
 # Internal crates
+notegate-command = { path = "backend/crates/command" }
 notegate-core = { path = "backend/crates/core" }
 notegate-db = { path = "backend/crates/db" }
 notegate-jobs = { path = "backend/crates/jobs" }

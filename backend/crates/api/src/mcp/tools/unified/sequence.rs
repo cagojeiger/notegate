@@ -1,6 +1,19 @@
-use super::*;
+use axum::http::request::Parts;
+use notegate_command::{ManageInput, ReadInput, SearchInput, WriteInput};
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::{ErrorData, Json};
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde_json::{Value, json};
 
-use crate::mcp::contract::{McpErrorData, error_json};
+use super::{
+    actionable_input_error, adapter, execute_manage, execute_read, execute_search, execute_write,
+    invalid_input_error, required, validate_manage_operation, validate_read_operation,
+    validate_search_operation, validate_static_write_content, validate_write_operation,
+};
+use crate::commands::CommandContext;
+use crate::mcp::contract::{McpAction, McpErrorData, error_json};
+use crate::state::AppState;
 
 mod read;
 mod write;
@@ -610,13 +623,13 @@ fn validate_sequence_command(
 
 async fn execute_sequence_command(
     state: &AppState,
-    parts: &Parts,
+    context: &CommandContext,
     prepared: PreparedSequenceCommand,
     purpose: &str,
 ) -> SequenceOutcome {
     let tool = prepared.command.tool.clone();
     let op = prepared.command.op.clone();
-    let result = dispatch_command(state, parts, prepared.command, purpose).await;
+    let result = dispatch_command(state, context, prepared.command, purpose).await;
     SequenceOutcome {
         index: prepared.index,
         tool,
@@ -669,40 +682,33 @@ fn sequence_response(outcomes: Vec<SequenceOutcome>, skipped: usize) -> Value {
 
 async fn dispatch_command(
     state: &AppState,
-    parts: &Parts,
+    context: &CommandContext,
     command: SequenceCommand,
     purpose: &str,
 ) -> Result<Json<Value>, ErrorData> {
     match command.tool.as_str() {
-        "read" => {
-            read(
-                state,
-                parts,
-                Parameters(command.into_read_input(purpose.to_owned())),
-            )
-            .await
-        }
+        "read" => execute_read(state, context, command.into_read_input(purpose.to_owned())).await,
         "search" => {
-            search(
+            execute_search(
                 state,
-                parts,
-                Parameters(command.into_search_input(purpose.to_owned())?),
+                context,
+                command.into_search_input(purpose.to_owned())?,
             )
             .await
         }
         "write" => {
-            write(
+            execute_write(
                 state,
-                parts,
-                Parameters(command.into_write_input(purpose.to_owned())?),
+                context,
+                command.into_write_input(purpose.to_owned())?,
             )
             .await
         }
         "manage" => {
-            manage(
+            execute_manage(
                 state,
-                parts,
-                Parameters(command.into_manage_input(purpose.to_owned())),
+                context,
+                command.into_manage_input(purpose.to_owned()),
             )
             .await
         }

@@ -3,6 +3,7 @@
 use std::future::Future;
 use std::time::Instant;
 
+use notegate_command::validate_purpose;
 use notegate_db::NewMcpInvocation;
 use notegate_model::{Caller, CallerIdentity};
 use notegate_service::files::parse_target;
@@ -12,11 +13,10 @@ use serde_json::Value;
 
 use super::invocation_redaction::{redact_input, redact_response};
 use super::tool_identity::KnownMcpTool;
-use super::tools::resolve::invalid_input_error;
+use crate::commands;
+use crate::mcp::contract::command_error;
 use crate::observability::record_mcp_tool_metrics;
 use crate::state::AppState;
-
-pub(crate) const PURPOSE_MAX_CHARS: usize = 200;
 
 pub(crate) async fn execute_call(
     state: &AppState,
@@ -33,7 +33,10 @@ pub(crate) async fn execute_call(
     } else {
         input.get("purpose").and_then(Value::as_str)
     };
-    let purpose_validation = raw_purpose.map(validate_purpose).transpose();
+    let purpose_validation = raw_purpose
+        .map(validate_purpose)
+        .transpose()
+        .map_err(|error| invalid_input_error(error.to_string()));
     let purpose = raw_purpose.filter(|_| purpose_validation.is_ok());
     let space_name = if known_tool == Some(KnownMcpTool::Read) && op == Some("changes") {
         invocation_space_name(input.get("target").and_then(Value::as_str))
@@ -90,19 +93,8 @@ pub(crate) fn invocation_space_name(target: Option<&str>) -> Option<String> {
         .map(|target| target.space)
 }
 
-fn validate_purpose(purpose: &str) -> Result<(), ErrorData> {
-    let char_count = purpose.chars().count();
-    if char_count == 0 || purpose.trim() != purpose {
-        return Err(invalid_input_error(
-            "purpose must be non-empty and must not have leading or trailing whitespace",
-        ));
-    }
-    if char_count > PURPOSE_MAX_CHARS {
-        return Err(invalid_input_error(format!(
-            "purpose must be at most {PURPOSE_MAX_CHARS} characters"
-        )));
-    }
-    Ok(())
+fn invalid_input_error(message: impl Into<String>) -> ErrorData {
+    command_error(commands::error::invalid_input_error(message))
 }
 
 struct InvocationRecord<'a> {
@@ -257,19 +249,6 @@ mod tests {
     )]
 
     use super::*;
-
-    #[test]
-    fn purpose_rejects_blank_padded_and_overlong_values() {
-        assert!(validate_purpose("").is_err());
-        assert!(validate_purpose(" search daily notes ").is_err());
-        assert!(validate_purpose(&"가".repeat(PURPOSE_MAX_CHARS + 1)).is_err());
-    }
-
-    #[test]
-    fn purpose_accepts_a_bounded_unicode_description() {
-        assert!(validate_purpose("오늘 변경된 검색 설계 노트를 확인").is_ok());
-        assert!(validate_purpose(&"가".repeat(PURPOSE_MAX_CHARS)).is_ok());
-    }
 
     #[test]
     fn invocation_space_name_keeps_only_a_valid_space_segment() {

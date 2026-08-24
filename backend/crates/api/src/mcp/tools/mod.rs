@@ -1,11 +1,10 @@
 //! MCP tools grouped by product category.
 
-pub mod events;
+mod adapter;
+#[cfg(test)]
 pub mod files;
 pub mod identity;
-pub mod resolve;
+#[cfg(test)]
 pub mod search;
-pub mod spaces;
-pub mod support;
 pub mod transfers;
 pub mod unified;

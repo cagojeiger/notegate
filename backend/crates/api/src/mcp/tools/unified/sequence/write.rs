@@ -1,4 +1,4 @@
-use super::super::{ManageOperationSchema, WriteOperationSchema};
+use super::super::{ManageOperationSchema, WriteEditEntrySchema, WriteOperationSchema};
 use super::*;
 
 use std::future::Future;
@@ -75,8 +75,9 @@ pub async fn run_write_sequence(
     validate_sequence_command_count(input.commands.len(), SequenceKind::Write)?;
     let command_count = input.commands.len();
     let commands = prepare_sequence_commands(input.commands, &input.purpose, SequenceKind::Write)?;
+    let context = adapter::context(parts)?;
     let (outcomes, skipped) = collect_write_outcomes(commands, command_count, |command| {
-        execute_sequence_command(state, parts, command, &input.purpose)
+        execute_sequence_command(state, &context, command, &input.purpose)
     })
     .await;
     Ok(Json(sequence_response(outcomes, skipped)))

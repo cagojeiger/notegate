@@ -504,7 +504,7 @@ mod tests {
         assert!(
             data["next_action"]["fields"][0]["description"]
                 .as_str()
-                .is_some_and(|description| description.contains("MCP invocation"))
+                .is_some_and(|description| description.contains("command invocation"))
         );
         assert!(
             required_fields_error(
@@ -846,7 +846,7 @@ mod tests {
             assert_required_properties(&tools, tool_name, required);
         }
 
-        let common_purpose_description = "Reason for this MCP invocation. Required once at the top level; maximum 200 characters.";
+        let common_purpose_description = "Reason for this command invocation. Required once at the top level; maximum 200 characters.";
         for tool_name in [
             "read",
             "search",
