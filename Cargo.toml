@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "backend/crates/api",
+    "backend/crates/cli",
     "backend/crates/command",
     "backend/crates/core",
     "backend/crates/db",
@@ -81,6 +82,7 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2
 roxmltree = { version = "0.21.1", default-features = false, features = ["std"] }
 percent-encoding = "2"
 pulldown-cmark = { version = "0.13", default-features = false }
+clap = { version = "4", features = ["derive", "env"] }
 
 # Auth / OAuth / MCP
 aliri = { version = "0.6.4", default-features = false, features = ["rsa"] }
