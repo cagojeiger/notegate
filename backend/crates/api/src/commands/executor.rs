@@ -14,6 +14,7 @@ use notegate_service::files::{
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use super::error::validate_purpose;
 use super::resolve::{
     actionable_input_error, invalid_input_error, required_input, search_error, service_error,
     split_parent_name,
@@ -84,6 +85,7 @@ pub async fn read(
 }
 
 pub(crate) fn validate_read_operation(input: &ReadInput) -> Result<(), CommandError> {
+    validate_purpose(&input.purpose)?;
     validate_read_change_fields(input)?;
     match input.op.as_str() {
         "spaces" => {
@@ -190,6 +192,7 @@ pub async fn search(
 }
 
 pub(crate) fn validate_search_operation(input: &SearchInput) -> Result<(), CommandError> {
+    validate_purpose(&input.purpose)?;
     match input.op.as_str() {
         "find" => {
             parse_input_target(&input.target)?;
@@ -278,6 +281,7 @@ pub async fn write(
 }
 
 pub(crate) fn validate_write_operation(input: &WriteInput) -> Result<(), CommandError> {
+    validate_purpose(&input.purpose)?;
     match input.op.as_str() {
         "write" | "append" => {
             required_ref(input.content.as_ref(), "content", input.op.as_str())?;
@@ -367,6 +371,7 @@ pub async fn manage(
 }
 
 pub(crate) fn validate_manage_operation(input: &ManageInput) -> Result<(), CommandError> {
+    validate_purpose(&input.purpose)?;
     match input.op.as_str() {
         "mkdir" => {
             let target =
@@ -475,7 +480,10 @@ fn invalid_op(tool: &'static str, allowed: &[&str]) -> CommandError {
 mod tests {
     #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
-    use notegate_command::{CommandErrorClass, ManageInput, ReadInput};
+    use notegate_command::{CommandErrorClass, ManageInput, ReadInput, SearchInput, WriteInput};
+    use notegate_db::{SpaceRepo, test_support::TestDb};
+    use notegate_service::files::{WriteTarget, WriteText, WriteTextBody};
+    use serde_json::json;
 
     use super::*;
 
@@ -519,5 +527,230 @@ mod tests {
 
         assert_eq!(error.class, CommandErrorClass::InvalidParams);
         assert!(error.message.contains("same space"));
+    }
+
+    #[test]
+    fn every_shared_executor_rejects_an_invalid_purpose() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let read: ReadInput = serde_json::from_value(json!({
+            "purpose": "",
+            "op": "spaces"
+        }))?;
+        let search: SearchInput = serde_json::from_value(json!({
+            "purpose": " padded ",
+            "op": "find",
+            "target": "daily:/",
+            "q": "note"
+        }))?;
+        let write: WriteInput = serde_json::from_value(json!({
+            "purpose": "가".repeat(notegate_command::PURPOSE_MAX_CHARS + 1),
+            "op": "write",
+            "target": "daily:/note.md",
+            "content": "body"
+        }))?;
+        let manage: ManageInput = serde_json::from_value(json!({
+            "purpose": "",
+            "op": "mkdir",
+            "target": "daily:/folder"
+        }))?;
+
+        let errors = [
+            validate_read_operation(&read).expect_err("read purpose is validated"),
+            validate_search_operation(&search).expect_err("search purpose is validated"),
+            validate_write_operation(&write).expect_err("write purpose is validated"),
+            validate_manage_operation(&manage).expect_err("manage purpose is validated"),
+        ];
+        for error in errors {
+            assert_eq!(error.class, CommandErrorClass::InvalidParams);
+            assert!(error.message.contains("purpose"));
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn shared_command_file_flow_round_trips() -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space_id, caller.account_id(), None, None, Some(true))
+            .await?;
+        let context = CommandContext::new(caller, None);
+
+        let created = manage(
+            &state,
+            &context,
+            serde_json::from_value(json!({
+                "purpose": "create a nested notes folder",
+                "op": "mkdir",
+                "target": "rest-test:/docs/notes",
+                "parents": true
+            }))?,
+        )
+        .await
+        .expect("recursive mkdir succeeds");
+        assert_eq!(created["node"]["path"], "/docs/notes");
+        assert_eq!(created["created_paths"], json!(["/docs", "/docs/notes"]));
+
+        let missing_error = write(
+            &state,
+            &context,
+            serde_json::from_value(json!({
+                "purpose": "confirm explicit creation is required",
+                "op": "write",
+                "target": "rest-test:/docs/notes/log.md",
+                "content": "line1"
+            }))?,
+        )
+        .await
+        .expect_err("a missing target without create=true must fail");
+        assert_eq!(missing_error.class, CommandErrorClass::InvalidParams);
+        assert_eq!(
+            missing_error.data.expect("not-found metadata")["kind"],
+            "not_found"
+        );
+
+        let written = write(
+            &state,
+            &context,
+            serde_json::from_value(json!({
+                "purpose": "create the first log line",
+                "op": "write",
+                "target": "rest-test:/docs/notes/log.md",
+                "content": "line1",
+                "create": true
+            }))?,
+        )
+        .await
+        .expect("write with create=true succeeds");
+        assert_eq!(written["node"]["path"], "/docs/notes/log.md");
+        assert_eq!(written["byte_len"], 5);
+        assert!(written["content_sha256"].is_string());
+
+        let appended = write(
+            &state,
+            &context,
+            serde_json::from_value(json!({
+                "purpose": "append the second log line",
+                "op": "append",
+                "target": "rest-test:/docs/notes/log.md",
+                "content": "line2",
+                "ensure_newline": true
+            }))?,
+        )
+        .await
+        .expect("append succeeds");
+        assert_eq!(appended["appended"], true);
+        assert_eq!(appended["byte_len"], 11);
+
+        let read_back = read(
+            &state,
+            &context,
+            serde_json::from_value(json!({
+                "purpose": "verify the completed log",
+                "op": "read",
+                "target": "rest-test:/docs/notes/log.md"
+            }))?,
+        )
+        .await
+        .expect("read succeeds");
+        assert_eq!(read_back["content"], "line1\nline2");
+        assert_eq!(read_back["content_sha256"], appended["content_sha256"]);
+        assert_eq!(read_back["byte_len"], 11);
+        assert_eq!(read_back["truncated"], false);
+
+        db.cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn shared_command_write_preserves_content_guards()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space_id, root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space_id, caller.account_id(), None, None, Some(true))
+            .await?;
+        let account_id = caller.account_id();
+        let context = CommandContext::new(caller, None);
+
+        write(
+            &state,
+            &context,
+            serde_json::from_value(json!({
+                "purpose": "create guarded text",
+                "op": "write",
+                "target": "rest-test:/guarded.md",
+                "content": "current",
+                "create": true
+            }))?,
+        )
+        .await
+        .expect("initial guarded write succeeds");
+
+        let conflict = write(
+            &state,
+            &context,
+            serde_json::from_value(json!({
+                "purpose": "reject a stale overwrite",
+                "op": "write",
+                "target": "rest-test:/guarded.md",
+                "content": "replacement",
+                "expected_sha256": "stale-sha256"
+            }))?,
+        )
+        .await
+        .expect_err("a stale optimistic-write guard must fail");
+        assert_eq!(conflict.class, CommandErrorClass::InvalidRequest);
+        assert_eq!(
+            conflict.data.expect("conflict metadata")["kind"],
+            "conflict"
+        );
+
+        state
+            .files
+            .write_text(
+                account_id,
+                space_id,
+                WriteText {
+                    target: WriteTarget::Create {
+                        parent_node_id: root_id,
+                        name: "secret.bin".to_owned(),
+                    },
+                    body: WriteTextBody::Encrypted(json!({"ct": "opaque"})),
+                    expected_sha256: None,
+                },
+            )
+            .await?;
+
+        let encrypted_error = write(
+            &state,
+            &context,
+            serde_json::from_value(json!({
+                "purpose": "reject plaintext over encrypted text",
+                "op": "write",
+                "target": "rest-test:/secret.bin",
+                "content": "plaintext"
+            }))?,
+        )
+        .await
+        .expect_err("encrypted text must reject a plaintext overwrite");
+        assert!(
+            encrypted_error
+                .message
+                .contains("encrypted text cannot be modified"),
+            "unexpected error: {}",
+            encrypted_error.message
+        );
+
+        db.cleanup().await;
+        Ok(())
     }
 }

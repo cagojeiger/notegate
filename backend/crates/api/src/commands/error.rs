@@ -88,6 +88,12 @@ pub fn invalid_input_error(message: impl Into<String>) -> CommandError {
     CommandError::invalid_params(message).with_data(error_meta("invalid_input"))
 }
 
+/// Enforce the purpose invariant shared by every command transport.
+pub fn validate_purpose(purpose: &str) -> Result<(), CommandError> {
+    notegate_command::validate_purpose(purpose)
+        .map_err(|error| invalid_input_error(error.to_string()))
+}
+
 /// Build an invalid-input error that a caller can correct without parsing the
 /// human-readable message.
 pub fn actionable_input_error(
@@ -228,6 +234,22 @@ mod tests {
         assert_eq!(data["recoverable"], true);
         assert_eq!(data["hint"], "Remove the field and retry.");
         assert_eq!(data["next_action"]["kind"], "remove_fields");
+    }
+
+    #[test]
+    fn purpose_validation_uses_the_shared_command_contract() {
+        for purpose in ["", " padded "] {
+            let error = validate_purpose(purpose).expect_err("invalid purpose is rejected");
+            assert_eq!(error.class, CommandErrorClass::InvalidParams);
+            assert_eq!(
+                error.data.expect("invalid purpose carries metadata")["kind"],
+                "invalid_input"
+            );
+        }
+
+        let error = validate_purpose(&"가".repeat(notegate_command::PURPOSE_MAX_CHARS + 1))
+            .expect_err("overlong purpose is rejected");
+        assert_eq!(error.class, CommandErrorClass::InvalidParams);
     }
 
     #[test]

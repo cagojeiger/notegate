@@ -144,7 +144,7 @@ fn ambiguity_error(name: &str, matches: &[SpaceView]) -> CommandError {
         "code": "space_ambiguous",
         "space": name,
         "matches": spaces,
-        "hint": "rename spaces so MCP can select by name; use read op=spaces to inspect accessible spaces",
+        "hint": "rename spaces so commands can select by name; use read op=spaces to inspect accessible spaces",
     }))
 }
 

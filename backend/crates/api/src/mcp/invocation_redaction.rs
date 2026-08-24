@@ -4,13 +4,13 @@
 //! They build a separate, bounded copy for persistence and omit every field
 //! that has not been explicitly classified.
 
+use notegate_command::validate_purpose;
 use rmcp::ErrorData;
 use rmcp::model::{CallToolResponse, CallToolResult};
 use serde_json::{Map, Value, json};
 
 use super::tool_identity::KnownMcpTool;
 
-const PURPOSE_MAX_CHARS: usize = 200;
 const SAFE_STRING_MAX_CHARS: usize = 2_048;
 const SAFE_INPUT_ARRAY_MAX_ITEMS: usize = 100;
 const SAFE_OUTPUT_ARRAY_MAX_ITEMS: usize = 1_000;
@@ -604,8 +604,7 @@ fn redact_purpose(value: &Value) -> Value {
     let Some(purpose) = value.as_str() else {
         return redaction_marker("invalid_purpose", value);
     };
-    let chars = purpose.chars().count();
-    if chars == 0 || chars > PURPOSE_MAX_CHARS || purpose.trim() != purpose {
+    if validate_purpose(purpose).is_err() {
         redaction_marker("invalid_purpose", value)
     } else {
         Value::String(purpose.to_owned())

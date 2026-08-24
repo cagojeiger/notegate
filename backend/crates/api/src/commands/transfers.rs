@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::CommandContext;
+use super::error::validate_purpose;
 use super::resolve::{
     invalid_input_error, node_summary, required_input, resolve_target, service_error,
     split_parent_name,
@@ -26,6 +27,7 @@ pub async fn upload(
     context: &CommandContext,
     input: FileUploadInput,
 ) -> Result<Value, CommandError> {
+    validate_purpose(&input.purpose)?;
     match input.op.as_str() {
         "begin_upload" => begin_upload(state, context, input).await,
         "prepare_parts" => prepare_parts(state, context, input).await,
@@ -42,6 +44,7 @@ pub async fn download(
     context: &CommandContext,
     input: FileDownloadInput,
 ) -> Result<Value, CommandError> {
+    validate_purpose(&input.purpose)?;
     let FileDownloadInput { target, .. } = input;
     prepare_download(state, context, target).await
 }

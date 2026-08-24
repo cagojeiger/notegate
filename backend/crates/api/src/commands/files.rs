@@ -230,7 +230,7 @@ pub async fn read(
 
     if result.storage_format == TextStorageFormat::Encrypted {
         return Err(service_error(ServiceError::InvalidInput(
-            "encrypted text is not readable through MCP".to_owned(),
+            "encrypted text is not readable through text commands".to_owned(),
         )));
     }
 
@@ -245,7 +245,7 @@ pub async fn read(
         }),
         ReadTextBody::Encrypted(_) => {
             return Err(service_error(ServiceError::InvalidInput(
-                "encrypted text is not readable through MCP".to_owned(),
+                "encrypted text is not readable through text commands".to_owned(),
             )));
         }
         ReadTextBody::Content(content) => json!({

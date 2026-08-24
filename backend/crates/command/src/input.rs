@@ -93,7 +93,7 @@ pub enum ManageOperationSchema {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {
-    /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
+    /// Reason for this command invocation. Required once at the top level; maximum 200 characters.
     pub purpose: String,
     /// Operation: spaces/ls/tree/stat/read/changes.
     #[schemars(with = "ReadOperationSchema")]
@@ -133,7 +133,7 @@ pub struct ReadInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchInput {
-    /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
+    /// Reason for this command invocation. Required once at the top level; maximum 200 characters.
     pub purpose: String,
     /// Operation: find/grep.
     #[schemars(with = "SearchOperationSchema")]
@@ -168,7 +168,7 @@ pub struct SearchInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WriteInput {
-    /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
+    /// Reason for this command invocation. Required once at the top level; maximum 200 characters.
     pub purpose: String,
     /// Operation: write/append/patch/edit.
     #[schemars(with = "WriteOperationSchema")]
@@ -196,7 +196,7 @@ pub struct WriteInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ManageInput {
-    /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
+    /// Reason for this command invocation. Required once at the top level; maximum 200 characters.
     pub purpose: String,
     /// Operation: mkdir/mv/cp/rm.
     #[schemars(with = "ManageOperationSchema")]
@@ -231,7 +231,7 @@ enum FileUploadOperationSchema {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FileUploadInput {
-    /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
+    /// Reason for this command invocation. Required once at the top level; maximum 200 characters.
     pub purpose: String,
     /// Operation: begin_upload/prepare_parts/complete_upload/abort_upload.
     #[schemars(with = "FileUploadOperationSchema")]
@@ -264,7 +264,7 @@ pub struct FileUploadInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FileDownloadInput {
-    /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
+    /// Reason for this command invocation. Required once at the top level; maximum 200 characters.
     pub purpose: String,
     /// Path-first File target in `<space>:/absolute/path` form.
     pub target: String,
