@@ -1,4 +1,6 @@
+mod auth;
 mod client;
+mod credentials;
 mod error;
 
 use std::ffi::OsString;
@@ -10,8 +12,9 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand};
 use notegate_command::ReadInput;
 use secrecy::SecretString;
-use serde_json::Value;
+use serde_json::{Value, json};
 
+use auth::{AuthManager, AuthOverride, canonical_origin};
 use client::CommandClient;
 pub use error::CliError;
 
@@ -24,7 +27,7 @@ const MAX_INPUT_BYTES: usize = 1024 * 1024;
     version,
     about = "Path-first NoteGate commands for humans and AI agents",
     long_about = "Call NoteGate's shared Command API without the MCP transport.\n\
-                  Set NOTEGATE_API_KEY to an Agent ngk_v2_ API key. The key is never accepted as a command-line argument.",
+                  Use auth login for a User Device login, or set NOTEGATE_API_KEY to an Agent ngk_v2_ API key. The API key is never accepted as a command-line argument; OAuth tokens stay in the OS keychain.",
     after_help = "Examples:\n  \
                   notegate-cli --base-url https://notegate.example me\n  \
                   notegate-cli --base-url https://notegate.example read --input '{\"purpose\":\"list spaces\",\"op\":\"spaces\"}'\n  \
@@ -53,10 +56,28 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Manage the User Device-login credential stored in the OS keychain.
+    Auth(AuthArgs),
     /// Show the authenticated Agent identity and NoteGate server version.
     Me,
     /// Run one shared read command with the same JSON input as MCP read.
     Read(ReadArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct AuthArgs {
+    #[command(subcommand)]
+    pub command: AuthCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AuthCommand {
+    /// Sign in through production AuthGate using RFC 8628 Device Flow.
+    Login,
+    /// Inspect the local credential without contacting NoteGate or AuthGate.
+    Status,
+    /// Revoke the refresh token once, then delete the local credential.
+    Logout,
 }
 
 #[derive(Debug, Args)]
@@ -76,14 +97,61 @@ pub struct ReadArgs {
 }
 
 pub async fn execute(cli: Cli) -> Result<Value, CliError> {
+    execute_with_events(cli, |_event| Ok(())).await
+}
+
+pub async fn execute_with_events(
+    cli: Cli,
+    mut emit: impl FnMut(&Value) -> Result<(), CliError>,
+) -> Result<Value, CliError> {
     let Cli {
         base_url,
         timeout_seconds,
         command,
     } = cli;
     match command {
+        Command::Auth(args) => {
+            let base_url = required_base_url(base_url.as_deref())?;
+            match args.command {
+                AuthCommand::Login => {
+                    let auth_override = AuthOverride::from_env()?;
+                    AuthManager::system(Duration::from_secs(timeout_seconds))?
+                        .login(base_url, auth_override, &mut emit)
+                        .await
+                }
+                AuthCommand::Status => match api_key()? {
+                    Some(_api_key) => Ok(json!({
+                        "authenticated": true,
+                        "credential": "agent_api_key",
+                        "source": "environment",
+                        "base_url": canonical_origin(base_url, "NOTEGATE_BASE_URL")?,
+                    })),
+                    None => AuthManager::system(Duration::from_secs(timeout_seconds))?
+                        .status(base_url, AuthOverride::from_env()?),
+                },
+                AuthCommand::Logout => {
+                    let auth_override = AuthOverride::from_env()?;
+                    let api_key_active = std::env::var_os(API_KEY_ENV).is_some();
+                    let mut result = AuthManager::system(Duration::from_secs(timeout_seconds))?
+                        .logout(base_url, auth_override)
+                        .await?;
+                    if api_key_active && let Some(object) = result.as_object_mut() {
+                        object.insert("agent_api_key_active".to_owned(), Value::Bool(true));
+                        object.insert(
+                            "hint".to_owned(),
+                            Value::String(
+                                "NOTEGATE_API_KEY remains active; unset it to stop Agent API-key commands"
+                                    .to_owned(),
+                            ),
+                        );
+                    }
+                    Ok(result)
+                }
+            }
+        }
         Command::Me => {
-            command_client(base_url.as_deref(), timeout_seconds)?
+            command_client(base_url.as_deref(), timeout_seconds)
+                .await?
                 .me()
                 .await
         }
@@ -97,31 +165,43 @@ pub async fn execute(cli: Cli) -> Result<Value, CliError> {
         }
         Command::Read(args) => {
             let input = read_input(args)?;
-            command_client(base_url.as_deref(), timeout_seconds)?
+            command_client(base_url.as_deref(), timeout_seconds)
+                .await?
                 .read(&input)
                 .await
         }
     }
 }
 
-fn command_client(base_url: Option<&str>, timeout_seconds: u64) -> Result<CommandClient, CliError> {
-    let base_url = base_url.ok_or_else(|| {
+async fn command_client(
+    base_url: Option<&str>,
+    timeout_seconds: u64,
+) -> Result<CommandClient, CliError> {
+    let base_url = required_base_url(base_url)?;
+    let bearer = match api_key()? {
+        Some(api_key) => api_key,
+        None => {
+            AuthManager::system(Duration::from_secs(timeout_seconds))?
+                .access_token(base_url)
+                .await?
+        }
+    };
+    CommandClient::new(base_url, bearer, Duration::from_secs(timeout_seconds))
+}
+
+fn required_base_url(base_url: Option<&str>) -> Result<&str, CliError> {
+    base_url.ok_or_else(|| {
         CliError::configuration(
             "missing_base_url",
             "set NOTEGATE_BASE_URL or pass --base-url",
         )
-    })?;
-    let api_key = required_api_key()?;
-    CommandClient::new(base_url, api_key, Duration::from_secs(timeout_seconds))
+    })
 }
 
-fn required_api_key() -> Result<SecretString, CliError> {
-    let value = std::env::var_os(API_KEY_ENV).ok_or_else(|| {
-        CliError::configuration(
-            "missing_api_key",
-            "set NOTEGATE_API_KEY to an Agent ngk_v2_ API key",
-        )
-    })?;
+fn api_key() -> Result<Option<SecretString>, CliError> {
+    let Some(value) = std::env::var_os(API_KEY_ENV) else {
+        return Ok(None);
+    };
     let value = value.into_string().map_err(|_value: OsString| {
         CliError::configuration("invalid_api_key", "NOTEGATE_API_KEY must be valid UTF-8")
     })?;
@@ -131,7 +211,7 @@ fn required_api_key() -> Result<SecretString, CliError> {
             "NOTEGATE_API_KEY must be non-empty and contain no surrounding whitespace",
         ));
     }
-    Ok(SecretString::from(value))
+    Ok(Some(SecretString::from(value)))
 }
 
 fn read_input(args: ReadArgs) -> Result<Value, CliError> {

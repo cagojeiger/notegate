@@ -48,8 +48,21 @@ impl JwtAuthority {
         }
     }
 
-    pub async fn verify(&self, token: &str) -> Result<ResolveAttrs, AuthError> {
+    pub async fn verify_for_audiences(
+        &self,
+        token: &str,
+        expected_audiences: &[&str],
+    ) -> Result<ResolveAttrs, AuthError> {
         let claims = self.verify_claims(token).await?;
+        let audience_matches = !expected_audiences.is_empty()
+            && claims.aud().iter().any(|actual| {
+                expected_audiences
+                    .iter()
+                    .any(|expected| actual.as_str() == *expected)
+            });
+        if !audience_matches {
+            return Err(AuthError::InvalidToken);
+        }
         attrs_from_claims(claims)
     }
 
@@ -97,11 +110,10 @@ impl JwtAuthority {
 }
 
 fn jwt_validator(config: &notegate_core::Config) -> jwt::CoreValidator {
-    let resource = config.resource_url.trim_end_matches('/');
+    // Audience is intentionally enforced by `verify_for_audiences` at each
+    // protected surface so one JWKS cache can safely serve MCP and Command API.
     jwt::CoreValidator::default()
         .add_approved_algorithm(jwa::Algorithm::RS256)
-        .add_allowed_audience(jwt::Audience::new(resource.to_owned()))
-        .add_allowed_audience(jwt::Audience::new(format!("{resource}/")))
         .require_issuer(jwt::Issuer::new(config.authgate_url.clone()))
 }
 

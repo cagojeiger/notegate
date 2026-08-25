@@ -4,13 +4,15 @@ Command API는 `notegate-cli` 같은 HTTP client가 NoteGate의 공통 path-firs
 
 ## 인증
 
-현재 버전은 Agent가 소유한 `ngk_v2_` API key만 허용한다.
+Agent가 소유한 `ngk_v2_` API key와 AuthGate Device Flow가 발급한 User OAuth access token을 허용한다.
 
 ```http
 Authorization: Bearer ngk_v2_...
 ```
 
-Browser session cookie, OAuth bearer와 legacy `ngk_v1_` key는 허용하지 않는다. Device Flow 기반 User 인증은 별도 단계이며 현재 계약에 포함하지 않는다. 모든 응답은 `Cache-Control: private, no-store`다.
+User OAuth token의 `aud`는 서버의 `NOTEGATE_CLI_OAUTH_CLIENT_ID`와 정확히 일치해야 한다. 로컬 서버는 `notegate-cli-local`, 운영 서버는 `notegate-cli`처럼 AuthGate에 별도로 등록한 client를 사용한다. 검증된 User는 `Channel::Api`로 처리하며 NoteGate에 이미 등록된 활성 계정이어야 한다.
+
+Browser session cookie, MCP resource audience token과 legacy `ngk_v1_` key는 허용하지 않는다. 반대로 User MCP는 계속 `NOTEGATE_RESOURCE_URL` audience만 허용하고 Public V2는 Agent `ngk_v2_` key만 허용한다. 모든 응답은 `Cache-Control: private, no-store`다.
 
 ## Endpoint
 

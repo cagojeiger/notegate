@@ -57,6 +57,13 @@ impl CallerResolver for UnusedResolver {
         Box::pin(async { Err(IdentityError::NotRegistered) })
     }
 
+    fn resolve_command_user(
+        &self,
+        _attrs: ResolveAttrs,
+    ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
+        Box::pin(async { Err(IdentityError::NotRegistered) })
+    }
+
     fn resolve_agent_api_key(
         &self,
         _token: String,
@@ -81,6 +88,7 @@ fn test_config() -> Arc<Config> {
         notegate_public_url: "http://localhost:9191".to_owned(),
         oauth_client_id: "notegate-web".to_owned(),
         mcp_oauth_client_id: "notegate-mcp".to_owned(),
+        cli_oauth_client_id: "notegate-cli-local".to_owned(),
         oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
         resource_url: "https://api.example.test".to_owned(),
         jwks_cache_ttl: Duration::from_secs(300),

@@ -219,6 +219,9 @@ pub struct Config {
     /// Public MCP OAuth client id registered in authgate.
     #[serde(default)]
     pub mcp_oauth_client_id: String,
+    /// Public CLI OAuth client id registered in authgate.
+    #[serde(default)]
+    pub cli_oauth_client_id: String,
     /// Exact redirect URL registered in authgate.
     #[serde(default)]
     pub oauth_redirect_url: String,
@@ -328,6 +331,9 @@ impl Validate for Config {
         }
         if self.mcp_oauth_client_id.is_empty() {
             errors.add("mcp_oauth_client_id", ValidationError::new("length"));
+        }
+        if self.cli_oauth_client_id.is_empty() {
+            errors.add("cli_oauth_client_id", ValidationError::new("length"));
         }
         if validate_http_url_value(&self.oauth_redirect_url).is_err() {
             errors.add("oauth_redirect_url", ValidationError::new("http_url"));
@@ -834,6 +840,7 @@ mod tests {
             notegate_public_url: "http://localhost:9191".to_owned(),
             oauth_client_id: "notegate-web".to_owned(),
             mcp_oauth_client_id: "notegate-mcp".to_owned(),
+            cli_oauth_client_id: "notegate-cli-local".to_owned(),
             oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
             resource_url: "http://localhost:9191/mcp".to_owned(),
             jwks_cache_ttl: Duration::from_secs(300),
@@ -888,6 +895,10 @@ mod tests {
             (
                 "NOTEGATE_S3__FORCE_PATH_STYLE".to_owned(),
                 "true".to_owned(),
+            ),
+            (
+                "NOTEGATE_CLI_OAUTH_CLIENT_ID".to_owned(),
+                "notegate-cli-local".to_owned(),
             ),
         ]);
         values.extend(
@@ -989,6 +1000,7 @@ mod tests {
         assert!(config.metrics_enabled);
         assert_eq!(config.oauth_client_id, "notegate-web");
         assert_eq!(config.mcp_oauth_client_id, "notegate-mcp");
+        assert_eq!(config.cli_oauth_client_id, "notegate-cli-local");
         assert_eq!(
             config.oauth_redirect_url,
             "http://localhost:9191/auth/callback"
@@ -1235,6 +1247,15 @@ mod tests {
         config.search_body_cache.ttl = Duration::ZERO;
         config.search_body_cache.tti = Duration::ZERO;
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_missing_cli_oauth_client_id() {
+        let mut config = valid_config();
+        config.cli_oauth_client_id.clear();
+
+        let errors = config.validate().expect_err("empty CLI client id");
+        assert!(errors.field_errors().contains_key("cli_oauth_client_id"));
     }
 
     #[test]
