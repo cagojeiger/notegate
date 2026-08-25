@@ -31,6 +31,16 @@ impl CliError {
         Self::new(EXIT_AUTH, code, "authentication_error", message, false)
     }
 
+    pub fn retryable_auth(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(
+            EXIT_UNAVAILABLE,
+            code,
+            "authentication_error",
+            message,
+            true,
+        )
+    }
+
     pub fn unavailable(code: &'static str, message: impl Into<String>) -> Self {
         Self::new(EXIT_UNAVAILABLE, code, "transport_error", message, true)
     }

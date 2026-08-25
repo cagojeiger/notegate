@@ -41,6 +41,7 @@ notegate-cli auth logout
 ```
 
 - `auth login`은 기존 User credential이 있으면 덮어쓰지 않고 `already_authenticated`를 반환한다. 먼저 `auth logout`으로 기존 refresh token을 폐기해야 한다.
+- 같은 OAuth client의 인증 작업이 이미 lock을 보유하고 있으면 기다리지 않고 retryable `login_in_progress`를 반환한다. 진행 중인 인증이 끝난 뒤 `auth status`로 결과를 확인한다.
 - 이전 refresh 결과가 불명확한 상태라면 `auth login`이 같은 credential lock 아래에서 구 local bundle과 marker를 삭제하고 새 Device Flow를 시작한다. 불명확한 구 refresh token을 revoke/refresh 요청에 다시 보내지 않는다.
 - 새 login credential의 keychain write 뒤 profile index commit과 보상 삭제가 모두 실패하면 `credential_store_state_unknown`을 반환한다. 이때 위의 explicit AuthGate URL/client ID 두 override를 설정한 `auth logout`으로 issuer+client key를 직접 정리한 뒤 다시 로그인한다.
 - `auth status`는 network 요청이나 refresh 없이 local 상태만 읽는다. `NOTEGATE_API_KEY`가 있으면 실제 일반 command 우선순위에 맞춰 `credential=agent_api_key`, `source=environment`를 표시하며 값은 출력하지 않는다.
@@ -80,7 +81,7 @@ notegate-cli manage --help
 ## 출력 계약
 
 - 성공 JSON 또는 `--schema`는 stdout에 한 줄 JSON으로 출력한다.
-- `auth login`만 polling 전에 아래 `verification_required` event를 stdout에 먼저 쓰고, 완료 시 `login_succeeded` event를 쓰는 NDJSON이다. `device_code`, access token, refresh token과 ID token은 어떤 event나 error에도 포함하지 않는다.
+- `auth login`만 polling 전에 아래 `verification_required` event를 stdout에 먼저 쓰고, 완료 시 `login_succeeded` event를 쓰는 NDJSON이다. `verification_uri_complete`는 `user_code`가 포함된 직접 인증 URL이며, issuer가 제공하지 않으면 CLI가 안전하게 구성한다. `device_code`, access token, refresh token과 ID token은 어떤 event나 error에도 포함하지 않는다.
 - 서버 오류 JSON은 `next_action`을 포함해 수정하지 않고 stderr로 전달한다.
 - CLI configuration, local input, network와 protocol 오류도 stderr에 JSON으로 출력한다.
 - help와 version은 clap의 일반 text 형식을 사용하고, argument parser 오류는 `invalid_arguments` JSON으로 출력한다.
@@ -91,12 +92,12 @@ notegate-cli manage --help
 | `2` | CLI configuration, argument 또는 local JSON input 오류 |
 | `3` | 인증 또는 권한 오류 |
 | `4` | NoteGate가 command를 거부한 비재시도 오류 |
-| `5` | rate limit, 서버/네트워크, timeout 또는 protocol 오류 |
+| `5` | 일시적인 인증 경합, rate limit, 서버/네트워크, timeout 또는 protocol 오류 |
 
 기본 timeout은 30초이며 `--timeout-seconds` 또는 `NOTEGATE_TIMEOUT_SECONDS`로 1~300초 사이에서 설정한다. 입력은 1 MiB, 응답은 8 MiB로 제한한다.
 
 ```json
-{"event":"verification_required","verification_uri":"https://authgate.project-jelly.io/device","user_code":"BCDF-GHKM","expires_in":300,"interval":5}
+{"event":"verification_required","verification_uri":"https://authgate.project-jelly.io/device","verification_uri_complete":"https://authgate.project-jelly.io/device?user_code=BCDF-GHKM","user_code":"BCDF-GHKM","expires_in":300,"interval":5}
 {"event":"login_succeeded","base_url":"http://localhost:9191","issuer":"https://authgate.project-jelly.io","client_id":"notegate-cli-local","expires_at":1787530000}
 ```
 

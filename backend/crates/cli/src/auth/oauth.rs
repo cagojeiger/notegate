@@ -93,6 +93,7 @@ pub(super) struct DeviceAuthorization {
     pub(super) device_code: SecretString,
     pub(super) user_code: String,
     pub(super) verification_uri: String,
+    pub(super) verification_uri_complete: String,
     pub(super) expires_in: u64,
     pub(super) interval: u64,
 }
@@ -102,6 +103,7 @@ pub(super) struct DeviceAuthorizationResponse {
     device_code: String,
     user_code: String,
     verification_uri: String,
+    verification_uri_complete: Option<String>,
     expires_in: u64,
     interval: Option<u64>,
 }
@@ -131,10 +133,25 @@ impl DeviceAuthorization {
             issuer,
             "Device verification URI",
         )?;
+        let verification_uri_complete = match response.verification_uri_complete {
+            Some(uri) => parse_same_origin_verification_uri(
+                &uri,
+                issuer,
+                "Device complete verification URI",
+            )?
+            .to_string(),
+            None => {
+                let mut uri = verification_uri.clone();
+                uri.query_pairs_mut()
+                    .append_pair("user_code", &response.user_code);
+                uri.to_string()
+            }
+        };
         Ok(Self {
             device_code: SecretString::from(response.device_code),
             user_code: response.user_code,
             verification_uri: verification_uri.to_string(),
+            verification_uri_complete,
             expires_in: response.expires_in,
             interval,
         })
@@ -255,6 +272,33 @@ fn parse_same_origin_endpoint(value: &str, issuer: &Url, name: &str) -> Result<U
     Ok(url)
 }
 
+fn parse_same_origin_verification_uri(
+    value: &str,
+    issuer: &Url,
+    name: &str,
+) -> Result<Url, CliError> {
+    let url = Url::parse(value).map_err(|_error| {
+        CliError::protocol(
+            "invalid_oauth_metadata",
+            format!("{name} is not a valid URL"),
+        )
+    })?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.has_host()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+        || !uses_secure_or_loopback_transport(&url)
+        || url.origin() != issuer.origin()
+    {
+        return Err(CliError::protocol(
+            "invalid_oauth_metadata",
+            format!("{name} must use the OAuth issuer origin and a secure transport"),
+        ));
+    }
+    Ok(url)
+}
+
 pub(super) fn oauth_error_code(body: &[u8]) -> Option<String> {
     #[derive(Deserialize)]
     struct OAuthError {
@@ -297,4 +341,60 @@ fn login_required() -> CliError {
         "login_required",
         "run notegate-cli auth login, or set NOTEGATE_API_KEY for an Agent command",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use super::*;
+
+    fn device_response(verification_uri_complete: Option<&str>) -> DeviceAuthorizationResponse {
+        DeviceAuthorizationResponse {
+            device_code: "device-secret".to_owned(),
+            user_code: "ABC+123".to_owned(),
+            verification_uri: "https://auth.example.test/device".to_owned(),
+            verification_uri_complete: verification_uri_complete.map(str::to_owned),
+            expires_in: 300,
+            interval: Some(5),
+        }
+    }
+
+    #[test]
+    fn complete_verification_uri_is_preserved_or_built_with_encoded_user_code() {
+        let issuer = Url::parse("https://auth.example.test").expect("valid issuer");
+        let supplied = "https://auth.example.test/device?user_code=SUPPLIED";
+
+        let supplied_device =
+            DeviceAuthorization::validate(device_response(Some(supplied)), &issuer)
+                .expect("same-origin complete URI");
+        assert_eq!(supplied_device.verification_uri_complete, supplied);
+
+        let fallback = DeviceAuthorization::validate(device_response(None), &issuer)
+            .expect("fallback complete URI");
+        assert_eq!(
+            fallback.verification_uri_complete,
+            "https://auth.example.test/device?user_code=ABC%2B123"
+        );
+    }
+
+    #[test]
+    fn complete_verification_uri_must_stay_on_the_oauth_issuer_origin() {
+        let issuer = Url::parse("https://auth.example.test").expect("valid issuer");
+
+        let error = DeviceAuthorization::validate(
+            device_response(Some("https://phishing.example/device?user_code=ABC%2B123")),
+            &issuer,
+        )
+        .err()
+        .expect("cross-origin complete URI must be rejected");
+
+        assert_eq!(
+            error
+                .body()
+                .get("error")
+                .and_then(serde_json::Value::as_str),
+            Some("invalid_oauth_metadata")
+        );
+    }
 }

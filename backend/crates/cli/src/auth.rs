@@ -133,14 +133,12 @@ impl AuthManager {
         };
         let lock_path = self.lock_dir.join(format!("{}.lock", key_digest(&key)));
         let mut lock = lock_file(&lock_path).map_err(map_store_error)?;
-        let _guard = loop {
-            match lock.try_write() {
-                Ok(guard) => break guard,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    sleep(Duration::from_millis(25)).await;
-                }
-                Err(_error) => return Err(credential_store_unavailable()),
+        let _guard = match lock.try_write() {
+            Ok(guard) => guard,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                return Err(login_in_progress());
             }
+            Err(_error) => return Err(credential_store_unavailable()),
         };
         let existing = self.store.load(&key).map_err(map_store_error)?;
         let has_uncertain_marker = self.has_uncertain_marker(&key)?;
@@ -176,6 +174,7 @@ impl AuthManager {
         emit(&json!({
             "event": "verification_required",
             "verification_uri": device.verification_uri,
+            "verification_uri_complete": device.verification_uri_complete,
             "user_code": device.user_code,
             "expires_in": device.expires_in,
             "interval": device.interval,
@@ -734,6 +733,13 @@ fn already_authenticated() -> CliError {
     )
 }
 
+fn login_in_progress() -> CliError {
+    CliError::retryable_auth(
+        "login_in_progress",
+        "another authentication operation is in progress; wait for it to finish, then run auth status",
+    )
+}
+
 fn credential_store_unavailable() -> CliError {
     CliError::configuration(
         "credential_store_unavailable",
@@ -797,6 +803,7 @@ mod tests {
     use axum::routing::{get, post};
     use axum::{Json, Router};
     use tokio::net::TcpListener;
+    use tokio::sync::Notify;
 
     use super::*;
 
@@ -985,6 +992,7 @@ mod tests {
                                     "device_code": "device-secret-never-print",
                                     "user_code": "BCDF-GHKM",
                                     "verification_uri": format!("{base}/device"),
+                                    "verification_uri_complete": format!("{base}/device?user_code=BCDF-GHKM"),
                                     "expires_in": 30,
                                     "interval": 1,
                                 }))
@@ -1032,6 +1040,12 @@ mod tests {
         assert_eq!(
             event.get("event").and_then(Value::as_str),
             Some("verification_required")
+        );
+        assert_eq!(
+            event
+                .get("verification_uri_complete")
+                .and_then(Value::as_str),
+            Some(format!("{base}/device?user_code=BCDF-GHKM").as_str())
         );
         assert_eq!(
             result.get("event").and_then(Value::as_str),
@@ -1095,11 +1109,13 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn concurrent_logins_issue_only_one_device_credential() {
+    async fn concurrent_login_fails_without_waiting_and_issues_one_device_credential() {
         let device_hits = Arc::new(AtomicUsize::new(0));
-        let token_hits = Arc::new(AtomicUsize::new(0));
+        let authorization_entered = Arc::new(Notify::new());
+        let release_authorization = Arc::new(Notify::new());
         let device_counter = Arc::clone(&device_hits);
-        let token_counter = Arc::clone(&token_hits);
+        let entered = Arc::clone(&authorization_entered);
+        let release = Arc::clone(&release_authorization);
         let base = spawn_with_builder(move |base| {
             let metadata_base = base.clone();
             Router::new()
@@ -1126,10 +1142,14 @@ mod tests {
                         move || {
                             let base = base.clone();
                             let device_counter = Arc::clone(&device_counter);
+                            let entered = Arc::clone(&entered);
+                            let release = Arc::clone(&release);
                             async move {
                                 device_counter.fetch_add(1, Ordering::SeqCst);
+                                entered.notify_one();
+                                release.notified().await;
                                 Json(json!({
-                                    "device_code": "one-device-code",
+                                    "device_code": "blocked-device",
                                     "user_code": "BCDF-GHKM",
                                     "verification_uri": format!("{base}/device"),
                                     "expires_in": 30,
@@ -1141,40 +1161,56 @@ mod tests {
                 )
                 .route(
                     "/oauth/token",
-                    post(move || {
-                        let token_counter = Arc::clone(&token_counter);
-                        async move {
-                            token_counter.fetch_add(1, Ordering::SeqCst);
-                            Json(json!({
-                                "access_token": "one-access",
-                                "refresh_token": "one-refresh",
-                                "token_type": "Bearer",
-                                "expires_in": 900,
-                            }))
-                        }
+                    post(|| async {
+                        Json(json!({
+                            "access_token": "blocked-access",
+                            "refresh_token": "blocked-refresh",
+                            "token_type": "Bearer",
+                            "expires_in": 900,
+                        }))
                     }),
                 )
         })
         .await;
         let store = Arc::new(MemoryStore::default());
-        let lock_dir = test_lock_dir("concurrent-login");
+        let lock_dir = test_lock_dir("login-in-progress");
         let first =
             AuthManager::new(Duration::from_secs(5), store.clone(), lock_dir.clone()).unwrap();
         let second = AuthManager::new(Duration::from_secs(5), store, lock_dir).unwrap();
+        let first_base = base.clone();
+        let first_task =
+            tokio::spawn(async move { first.login(&first_base, None, |_event| Ok(())).await });
 
-        let (first_result, second_result) = tokio::join!(
-            first.login(&base, None, |_event| Ok(())),
+        tokio::time::timeout(Duration::from_secs(1), authorization_entered.notified())
+            .await
+            .expect("first login must reach Device authorization");
+        let second_error = tokio::time::timeout(
+            Duration::from_millis(500),
             second.login(&base, None, |_event| Ok(())),
-        );
+        )
+        .await
+        .expect("second login must fail without waiting for the first login")
+        .unwrap_err();
 
-        assert!(first_result.is_ok() ^ second_result.is_ok());
-        let losing_error = first_result.err().or_else(|| second_result.err()).unwrap();
         assert_eq!(
-            losing_error.body().get("error").and_then(Value::as_str),
-            Some("already_authenticated")
+            second_error.body().get("error").and_then(Value::as_str),
+            Some("login_in_progress")
+        );
+        assert_eq!(second_error.exit_code(), crate::error::EXIT_UNAVAILABLE);
+        assert_eq!(
+            second_error.body().get("kind").and_then(Value::as_str),
+            Some("authentication_error")
+        );
+        assert_eq!(
+            second_error
+                .body()
+                .pointer("/data/retryable")
+                .and_then(Value::as_bool),
+            Some(true)
         );
         assert_eq!(device_hits.load(Ordering::SeqCst), 1);
-        assert_eq!(token_hits.load(Ordering::SeqCst), 1);
+        release_authorization.notify_one();
+        first_task.await.unwrap().unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
