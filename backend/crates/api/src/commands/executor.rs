@@ -1,8 +1,11 @@
 //! Transport-neutral dispatch and input-only validation for NoteGate commands.
 
 use notegate_command::{
-    CommandError, LineEditInput, ManageInput, PatchEdit, ReadInput, RecoveryAction, SearchInput,
-    WriteInput,
+    CommandError, LineEditInput, MANAGE_OP_CP, MANAGE_OP_MKDIR, MANAGE_OP_MV, MANAGE_OP_RM,
+    MANAGE_OPERATIONS, ManageInput, PatchEdit, READ_OP_CHANGES, READ_OP_LS, READ_OP_READ,
+    READ_OP_SPACES, READ_OP_STAT, READ_OP_TREE, READ_OPERATIONS, ReadInput, RecoveryAction,
+    SEARCH_OP_FIND, SEARCH_OP_GREP, SEARCH_OPERATIONS, SearchInput, WRITE_OP_APPEND, WRITE_OP_EDIT,
+    WRITE_OP_PATCH, WRITE_OP_WRITE, WRITE_OPERATIONS, WriteInput,
 };
 use notegate_core::validation::validate_space_name;
 use notegate_search::{validate_find_input, validate_grep_input};
@@ -29,35 +32,42 @@ pub async fn read(
 ) -> Result<Value, CommandError> {
     validate_read_operation(&input)?;
     match input.op.as_str() {
-        "spaces" => spaces::list(state, context, input.name, input.limit, input.cursor).await,
-        "ls" => {
+        READ_OP_SPACES => spaces::list(state, context, input.name, input.limit, input.cursor).await,
+        READ_OP_LS => {
             files::list(
                 state,
                 context,
-                required(input.target, "target", "ls")?,
+                required(input.target, "target", READ_OP_LS)?,
                 Some(1),
                 input.limit,
                 input.cursor,
             )
             .await
         }
-        "tree" => {
+        READ_OP_TREE => {
             files::list(
                 state,
                 context,
-                required(input.target, "target", "tree")?,
+                required(input.target, "target", READ_OP_TREE)?,
                 Some(input.depth.unwrap_or(5)),
                 input.limit,
                 input.cursor,
             )
             .await
         }
-        "stat" => files::stat(state, context, required(input.target, "target", "stat")?).await,
-        "read" => {
+        READ_OP_STAT => {
+            files::stat(
+                state,
+                context,
+                required(input.target, "target", READ_OP_STAT)?,
+            )
+            .await
+        }
+        READ_OP_READ => {
             files::read(
                 state,
                 context,
-                required(input.target, "target", "read")?,
+                required(input.target, "target", READ_OP_READ)?,
                 input.start_line,
                 input.max_lines,
                 input.max_bytes,
@@ -65,22 +75,19 @@ pub async fn read(
             )
             .await
         }
-        "changes" => {
+        READ_OP_CHANGES => {
             events::call(
                 state,
                 context,
                 &input.purpose,
-                required(input.target, "target", "changes")?,
+                required(input.target, "target", READ_OP_CHANGES)?,
                 input.limit,
                 input.direction,
                 input.cursor,
             )
             .await
         }
-        _ => Err(invalid_op(
-            "read",
-            &["spaces", "ls", "tree", "stat", "read", "changes"],
-        )),
+        _ => Err(invalid_op("read", READ_OPERATIONS)),
     }
 }
 
@@ -88,14 +95,14 @@ pub(crate) fn validate_read_operation(input: &ReadInput) -> Result<(), CommandEr
     validate_purpose(&input.purpose)?;
     validate_read_change_fields(input)?;
     match input.op.as_str() {
-        "spaces" => {
+        READ_OP_SPACES => {
             if let Some(name) = input.name.as_deref() {
                 validate_space_name(name)
                     .map_err(|error| invalid_input_error(error.to_string()))?;
             }
             Ok(())
         }
-        "ls" | "stat" => {
+        READ_OP_LS | READ_OP_STAT => {
             parse_input_target(required_ref(
                 input.target.as_ref(),
                 "target",
@@ -103,38 +110,35 @@ pub(crate) fn validate_read_operation(input: &ReadInput) -> Result<(), CommandEr
             )?)?;
             Ok(())
         }
-        "tree" => {
-            parse_input_target(required_ref(input.target.as_ref(), "target", "tree")?)?;
+        READ_OP_TREE => {
+            parse_input_target(required_ref(input.target.as_ref(), "target", READ_OP_TREE)?)?;
             if input.depth.is_some_and(|depth| depth < 1) {
                 return Err(invalid_input_error("depth must be at least 1"));
             }
             Ok(())
         }
-        "read" => {
-            parse_input_target(required_ref(input.target.as_ref(), "target", "read")?)?;
+        READ_OP_READ => {
+            parse_input_target(required_ref(input.target.as_ref(), "target", READ_OP_READ)?)?;
             if input.max_bytes == Some(0) {
                 return Err(invalid_input_error("max_bytes must be at least 1"));
             }
             Ok(())
         }
-        "changes" => {
+        READ_OP_CHANGES => {
             events::validate_input(
-                required_ref(input.target.as_ref(), "target", "changes")?,
+                required_ref(input.target.as_ref(), "target", READ_OP_CHANGES)?,
                 input.direction.as_deref(),
                 input.cursor.as_deref(),
                 &input.purpose,
             )?;
             Ok(())
         }
-        _ => Err(invalid_op(
-            "read",
-            &["spaces", "ls", "tree", "stat", "read", "changes"],
-        )),
+        _ => Err(invalid_op("read", READ_OPERATIONS)),
     }
 }
 
 fn validate_read_change_fields(input: &ReadInput) -> Result<(), CommandError> {
-    if input.op == "changes" {
+    if input.op == READ_OP_CHANGES {
         return Ok(());
     }
     if input.direction.is_some() {
@@ -157,7 +161,7 @@ pub async fn search(
 ) -> Result<Value, CommandError> {
     validate_search_operation(&input)?;
     match input.op.as_str() {
-        "find" => {
+        SEARCH_OP_FIND => {
             search::find(
                 state,
                 context,
@@ -172,7 +176,7 @@ pub async fn search(
             )
             .await
         }
-        "grep" => {
+        SEARCH_OP_GREP => {
             search::grep(
                 state,
                 context,
@@ -187,14 +191,14 @@ pub async fn search(
             )
             .await
         }
-        _ => Err(invalid_op("search", &["find", "grep"])),
+        _ => Err(invalid_op("search", SEARCH_OPERATIONS)),
     }
 }
 
 pub(crate) fn validate_search_operation(input: &SearchInput) -> Result<(), CommandError> {
     validate_purpose(&input.purpose)?;
     match input.op.as_str() {
-        "find" => {
+        SEARCH_OP_FIND => {
             parse_input_target(&input.target)?;
             if let Some(kind) = input.kind.as_deref() {
                 search::parse_kind(kind)?;
@@ -209,7 +213,7 @@ pub(crate) fn validate_search_operation(input: &SearchInput) -> Result<(), Comma
             .map_err(search_error)?;
             Ok(())
         }
-        "grep" => {
+        SEARCH_OP_GREP => {
             parse_input_target(&input.target)?;
             let match_mode = search::parse_grep_match_mode(input.match_mode.as_deref())?;
             search::parse_grep_line_mode(input.lines.as_deref())?;
@@ -222,7 +226,7 @@ pub(crate) fn validate_search_operation(input: &SearchInput) -> Result<(), Comma
             .map_err(search_error)?;
             Ok(())
         }
-        _ => Err(invalid_op("search", &["find", "grep"])),
+        _ => Err(invalid_op("search", SEARCH_OPERATIONS)),
     }
 }
 
@@ -233,80 +237,82 @@ pub async fn write(
 ) -> Result<Value, CommandError> {
     validate_write_operation(&input)?;
     match input.op.as_str() {
-        "write" => {
+        WRITE_OP_WRITE => {
             files::write(
                 state,
                 context,
                 input.target,
-                required(input.content, "content", "write")?,
+                required(input.content, "content", WRITE_OP_WRITE)?,
                 input.create,
                 input.expected_sha256,
             )
             .await
         }
-        "append" => {
+        WRITE_OP_APPEND => {
             files::append(
                 state,
                 context,
                 input.target,
-                required(input.content, "content", "append")?,
+                required(input.content, "content", WRITE_OP_APPEND)?,
                 input.create,
                 input.ensure_newline,
                 input.expected_sha256,
             )
             .await
         }
-        "patch" => {
+        WRITE_OP_PATCH => {
             files::patch(
                 state,
                 context,
                 input.target,
-                parse_edits(input.edits, "patch")?,
+                parse_edits(input.edits, WRITE_OP_PATCH)?,
                 input.expected_sha256,
             )
             .await
         }
-        "edit" => {
+        WRITE_OP_EDIT => {
             files::edit(
                 state,
                 context,
                 input.target,
-                parse_edits(input.edits, "edit")?,
+                parse_edits(input.edits, WRITE_OP_EDIT)?,
                 input.expected_sha256,
             )
             .await
         }
-        _ => Err(invalid_op("write", &["write", "append", "patch", "edit"])),
+        _ => Err(invalid_op("write", WRITE_OPERATIONS)),
     }
 }
 
 pub(crate) fn validate_write_operation(input: &WriteInput) -> Result<(), CommandError> {
     validate_purpose(&input.purpose)?;
     match input.op.as_str() {
-        "write" | "append" => {
+        WRITE_OP_WRITE | WRITE_OP_APPEND => {
             required_ref(input.content.as_ref(), "content", input.op.as_str())?;
             validate_text_target(&input.target)?;
             Ok(())
         }
-        "patch" => {
-            let edits = parse_edits::<PatchEdit>(input.edits.clone(), "patch")?;
+        WRITE_OP_PATCH => {
+            let edits = parse_edits::<PatchEdit>(input.edits.clone(), WRITE_OP_PATCH)?;
             files::prepare_patch_edits(&edits)?;
             validate_text_target(&input.target)?;
             Ok(())
         }
-        "edit" => {
-            let edits = parse_edits::<LineEditInput>(input.edits.clone(), "edit")?;
+        WRITE_OP_EDIT => {
+            let edits = parse_edits::<LineEditInput>(input.edits.clone(), WRITE_OP_EDIT)?;
             files::prepare_line_edits(&edits)?;
             validate_text_target(&input.target)?;
             Ok(())
         }
-        _ => Err(invalid_op("write", &["write", "append", "patch", "edit"])),
+        _ => Err(invalid_op("write", WRITE_OPERATIONS)),
     }
 }
 
 pub(crate) fn validate_static_write_content(input: &WriteInput) -> Result<(), CommandError> {
     let content = match input.op.as_str() {
-        "write" | "append" => required_ref(input.content.as_ref(), "content", &input.op)?,
+        WRITE_OP_WRITE | WRITE_OP_APPEND => {
+            required_ref(input.content.as_ref(), "content", &input.op)?
+        }
         _ => return Ok(()),
     };
     let metrics = content::compute(content);
@@ -314,7 +320,7 @@ pub(crate) fn validate_static_write_content(input: &WriteInput) -> Result<(), Co
         .map_err(ServiceError::from)
         .map_err(service_error)?;
 
-    if input.op == "write" {
+    if input.op == WRITE_OP_WRITE {
         let target = parse_input_target(&input.target)?;
         let (_, name) = split_parent_name(&target.path)?;
         validate_structured_text(&name, content).map_err(service_error)?;
@@ -329,64 +335,68 @@ pub async fn manage(
 ) -> Result<Value, CommandError> {
     validate_manage_operation(&input)?;
     match input.op.as_str() {
-        "mkdir" => {
+        MANAGE_OP_MKDIR => {
             files::mkdir(
                 state,
                 context,
-                required(input.target, "target", "mkdir")?,
+                required(input.target, "target", MANAGE_OP_MKDIR)?,
                 input.parents,
             )
             .await
         }
-        "mv" => {
+        MANAGE_OP_MV => {
             files::mv(
                 state,
                 context,
-                required(input.source, "source", "mv")?,
-                required(input.destination, "destination", "mv")?,
+                required(input.source, "source", MANAGE_OP_MV)?,
+                required(input.destination, "destination", MANAGE_OP_MV)?,
             )
             .await
         }
-        "cp" => {
+        MANAGE_OP_CP => {
             files::copy(
                 state,
                 context,
-                required(input.source, "source", "cp")?,
-                required(input.destination, "destination", "cp")?,
+                required(input.source, "source", MANAGE_OP_CP)?,
+                required(input.destination, "destination", MANAGE_OP_CP)?,
                 input.recursive,
             )
             .await
         }
-        "rm" => {
+        MANAGE_OP_RM => {
             files::rm(
                 state,
                 context,
-                required(input.target, "target", "rm")?,
+                required(input.target, "target", MANAGE_OP_RM)?,
                 input.recursive,
             )
             .await
         }
-        _ => Err(invalid_op("manage", &["mkdir", "mv", "cp", "rm"])),
+        _ => Err(invalid_op("manage", MANAGE_OPERATIONS)),
     }
 }
 
 pub(crate) fn validate_manage_operation(input: &ManageInput) -> Result<(), CommandError> {
     validate_purpose(&input.purpose)?;
     match input.op.as_str() {
-        "mkdir" => {
-            let target =
-                parse_input_target(required_ref(input.target.as_ref(), "target", "mkdir")?)?;
+        MANAGE_OP_MKDIR => {
+            let target = parse_input_target(required_ref(
+                input.target.as_ref(),
+                "target",
+                MANAGE_OP_MKDIR,
+            )?)?;
             if !input.parents {
                 validate_non_root_target(&target)?;
             }
             Ok(())
         }
-        "rm" => {
-            let target = parse_input_target(required_ref(input.target.as_ref(), "target", "rm")?)?;
+        MANAGE_OP_RM => {
+            let target =
+                parse_input_target(required_ref(input.target.as_ref(), "target", MANAGE_OP_RM)?)?;
             validate_non_root_target(&target)?;
             Ok(())
         }
-        "mv" | "cp" => {
+        MANAGE_OP_MV | MANAGE_OP_CP => {
             let source = parse_input_target(required_ref(
                 input.source.as_ref(),
                 "source",
@@ -406,7 +416,7 @@ pub(crate) fn validate_manage_operation(input: &ManageInput) -> Result<(), Comma
             validate_non_root_target(&destination)?;
             Ok(())
         }
-        _ => Err(invalid_op("manage", &["mkdir", "mv", "cp", "rm"])),
+        _ => Err(invalid_op("manage", MANAGE_OPERATIONS)),
     }
 }
 
@@ -565,6 +575,33 @@ mod tests {
             assert!(error.message.contains("purpose"));
         }
         Ok(())
+    }
+
+    #[test]
+    fn invalid_operation_errors_use_shared_allowed_values() {
+        let error = validate_search_operation(&SearchInput {
+            purpose: "search notes".to_owned(),
+            op: "lookup".to_owned(),
+            target: "daily:/".to_owned(),
+            q: "needle".to_owned(),
+            kind: None,
+            match_mode: None,
+            lines: None,
+            include: None,
+            exclude: None,
+            limit: None,
+            cursor: None,
+        })
+        .expect_err("invalid operation is rejected");
+
+        assert_eq!(
+            error.message,
+            "invalid op for search; allowed values are: find, grep"
+        );
+        assert_eq!(
+            error.data.expect("action data")["next_action"]["choices"],
+            json!(SEARCH_OPERATIONS)
+        );
     }
 
     #[tokio::test]

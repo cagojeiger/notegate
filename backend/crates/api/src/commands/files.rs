@@ -1,6 +1,10 @@
 //! Protocol-neutral file command handlers shared by transport adapters.
 
-use notegate_command::{CommandError, LineEditInput, PatchEdit};
+use notegate_command::{
+    CommandError, LINE_EDIT_OP_DELETE_LINES, LINE_EDIT_OP_INSERT_AFTER_LINE,
+    LINE_EDIT_OP_INSERT_BEFORE_LINE, LINE_EDIT_OP_REPLACE_LINES, LINE_EDIT_OPERATIONS,
+    LineEditInput, PatchEdit,
+};
 use notegate_model::TextStorageFormat;
 use notegate_service::ServiceError;
 use notegate_service::files::{
@@ -710,26 +714,44 @@ pub(super) fn prepare_line_edits(edits: &[LineEditInput]) -> Result<Vec<LineEdit
 
 fn parse_line_edit(input: LineEditInput) -> Result<LineEdit, CommandError> {
     match input.op.as_str() {
-        "insert_before_line" => Ok(LineEdit::InsertBefore {
+        LINE_EDIT_OP_INSERT_BEFORE_LINE => Ok(LineEdit::InsertBefore {
             line: required_i64(input.line, "line")?,
             content: required_string(input.content, "content")?,
         }),
-        "insert_after_line" => Ok(LineEdit::InsertAfter {
+        LINE_EDIT_OP_INSERT_AFTER_LINE => Ok(LineEdit::InsertAfter {
             line: required_i64(input.line, "line")?,
             content: required_string(input.content, "content")?,
         }),
-        "replace_lines" => Ok(LineEdit::ReplaceLines {
+        LINE_EDIT_OP_REPLACE_LINES => Ok(LineEdit::ReplaceLines {
             start_line: required_i64(input.start_line, "start_line")?,
             end_line: required_i64(input.end_line, "end_line")?,
             content: required_string(input.content, "content")?,
         }),
-        "delete_lines" => Ok(LineEdit::DeleteLines {
+        LINE_EDIT_OP_DELETE_LINES => Ok(LineEdit::DeleteLines {
             start_line: required_i64(input.start_line, "start_line")?,
             end_line: required_i64(input.end_line, "end_line")?,
         }),
-        _ => Err(invalid_input_error(
-            "op must be insert_before_line, insert_after_line, replace_lines, or delete_lines",
-        )),
+        _ => Err(invalid_input_error(format!(
+            "op must be {}",
+            choice_list(LINE_EDIT_OPERATIONS)
+        ))),
+    }
+}
+
+fn choice_list(values: &[&str]) -> String {
+    match values {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [first, second] => format!("{first} or {second}"),
+        _ => {
+            let Some((last, rest)) = values.split_last() else {
+                return String::new();
+            };
+            let mut formatted = rest.join(", ");
+            formatted.push_str(", or ");
+            formatted.push_str(last);
+            formatted
+        }
     }
 }
 
@@ -813,6 +835,19 @@ mod tests {
         }])
         .expect_err("content is required");
         assert_eq!(missing.message, "content is required");
+
+        let unknown = prepare_line_edits(&[LineEditInput {
+            op: "merge_lines".to_owned(),
+            line: None,
+            start_line: None,
+            end_line: None,
+            content: None,
+        }])
+        .expect_err("unknown line edit operation is rejected");
+        assert_eq!(
+            unknown.message,
+            "op must be insert_before_line, insert_after_line, replace_lines, or delete_lines"
+        );
     }
 
     #[test]

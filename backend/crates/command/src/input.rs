@@ -2,6 +2,96 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 
+macro_rules! operation_values {
+    (
+        $schema:ident,
+        $values:ident,
+        [$( $variant:ident => $constant:ident = $value:literal ),+ $(,)?]
+    ) => {
+        $(
+            pub const $constant: &str = $value;
+        )+
+
+        pub const $values: &[&str] = &[$($constant),+];
+
+        #[allow(dead_code)]
+        #[derive(JsonSchema)]
+        #[schemars(inline)]
+        pub enum $schema {
+            $(
+                #[schemars(rename = $value)]
+                $variant
+            ),+
+        }
+    };
+}
+
+operation_values!(
+    ReadOperationSchema,
+    READ_OPERATIONS,
+    [
+        Spaces => READ_OP_SPACES = "spaces",
+        Ls => READ_OP_LS = "ls",
+        Tree => READ_OP_TREE = "tree",
+        Stat => READ_OP_STAT = "stat",
+        Read => READ_OP_READ = "read",
+        Changes => READ_OP_CHANGES = "changes",
+    ]
+);
+
+operation_values!(
+    SearchOperationSchema,
+    SEARCH_OPERATIONS,
+    [
+        Find => SEARCH_OP_FIND = "find",
+        Grep => SEARCH_OP_GREP = "grep",
+    ]
+);
+
+operation_values!(
+    WriteOperationSchema,
+    WRITE_OPERATIONS,
+    [
+        Write => WRITE_OP_WRITE = "write",
+        Append => WRITE_OP_APPEND = "append",
+        Patch => WRITE_OP_PATCH = "patch",
+        Edit => WRITE_OP_EDIT = "edit",
+    ]
+);
+
+operation_values!(
+    ManageOperationSchema,
+    MANAGE_OPERATIONS,
+    [
+        Mkdir => MANAGE_OP_MKDIR = "mkdir",
+        Mv => MANAGE_OP_MV = "mv",
+        Cp => MANAGE_OP_CP = "cp",
+        Rm => MANAGE_OP_RM = "rm",
+    ]
+);
+
+pub const LINE_EDIT_OP_INSERT_BEFORE_LINE: &str = "insert_before_line";
+pub const LINE_EDIT_OP_INSERT_AFTER_LINE: &str = "insert_after_line";
+pub const LINE_EDIT_OP_REPLACE_LINES: &str = "replace_lines";
+pub const LINE_EDIT_OP_DELETE_LINES: &str = "delete_lines";
+pub const LINE_EDIT_OPERATIONS: &[&str] = &[
+    LINE_EDIT_OP_INSERT_BEFORE_LINE,
+    LINE_EDIT_OP_INSERT_AFTER_LINE,
+    LINE_EDIT_OP_REPLACE_LINES,
+    LINE_EDIT_OP_DELETE_LINES,
+];
+
+operation_values!(
+    FileUploadOperationSchema,
+    FILE_UPLOAD_OPERATIONS,
+    [
+        BeginUpload => FILE_UPLOAD_OP_BEGIN_UPLOAD = "begin_upload",
+        PrepareParts => FILE_UPLOAD_OP_PREPARE_PARTS = "prepare_parts",
+        CompleteUpload => FILE_UPLOAD_OP_COMPLETE_UPLOAD = "complete_upload",
+        AbortUpload => FILE_UPLOAD_OP_ABORT_UPLOAD = "abort_upload",
+    ]
+);
+
 /// One exact replacement.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -48,46 +138,6 @@ pub struct LineEditInput {
 pub enum WriteEditEntrySchema {
     Patch(PatchEdit),
     Line(LineEditInput),
-}
-
-#[allow(dead_code)]
-#[derive(JsonSchema)]
-#[schemars(rename_all = "snake_case", inline)]
-pub enum ReadOperationSchema {
-    Spaces,
-    Ls,
-    Tree,
-    Stat,
-    Read,
-    Changes,
-}
-
-#[allow(dead_code)]
-#[derive(JsonSchema)]
-#[schemars(rename_all = "snake_case", inline)]
-pub enum SearchOperationSchema {
-    Find,
-    Grep,
-}
-
-#[allow(dead_code)]
-#[derive(JsonSchema)]
-#[schemars(rename_all = "snake_case", inline)]
-pub enum WriteOperationSchema {
-    Write,
-    Append,
-    Patch,
-    Edit,
-}
-
-#[allow(dead_code)]
-#[derive(JsonSchema)]
-#[schemars(rename_all = "snake_case", inline)]
-pub enum ManageOperationSchema {
-    Mkdir,
-    Mv,
-    Cp,
-    Rm,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -218,16 +268,6 @@ pub struct ManageInput {
     pub recursive: bool,
 }
 
-#[allow(dead_code)]
-#[derive(JsonSchema)]
-#[schemars(rename_all = "snake_case", inline)]
-enum FileUploadOperationSchema {
-    BeginUpload,
-    PrepareParts,
-    CompleteUpload,
-    AbortUpload,
-}
-
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FileUploadInput {
@@ -279,7 +319,10 @@ pub struct CompletedPartInput {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::panic)]
+
     use super::*;
+    use schemars::schema_for;
     use serde_json::json;
 
     #[test]
@@ -308,5 +351,43 @@ mod tests {
 
         assert_eq!(input.match_mode.as_deref(), Some("literal"));
         Ok(())
+    }
+
+    #[test]
+    fn direct_command_operation_schemas_use_shared_allowed_values() {
+        assert_schema_enum::<ReadInput>("/properties/op", READ_OPERATIONS);
+        assert_schema_enum::<SearchInput>("/properties/op", SEARCH_OPERATIONS);
+        assert_schema_enum::<WriteInput>("/properties/op", WRITE_OPERATIONS);
+        assert_schema_enum::<ManageInput>("/properties/op", MANAGE_OPERATIONS);
+        assert_schema_enum::<FileUploadInput>("/properties/op", FILE_UPLOAD_OPERATIONS);
+    }
+
+    fn assert_schema_enum<T: JsonSchema>(pointer: &str, expected: &[&str]) {
+        let schema = serde_json::to_value(schema_for!(T)).expect("schema serializes");
+        let actual = string_enum_values(
+            schema
+                .pointer(pointer)
+                .unwrap_or_else(|| panic!("schema path {pointer} exists")),
+        );
+        assert_eq!(actual, expected);
+    }
+
+    fn string_enum_values(schema: &serde_json::Value) -> Vec<&str> {
+        let mut values = Vec::new();
+        collect_string_enum_values(schema, &mut values);
+        values
+    }
+
+    fn collect_string_enum_values<'a>(schema: &'a serde_json::Value, values: &mut Vec<&'a str>) {
+        if let Some(enumerated) = schema.get("enum").and_then(serde_json::Value::as_array) {
+            values.extend(enumerated.iter().filter_map(serde_json::Value::as_str));
+        }
+        for key in ["anyOf", "oneOf", "allOf"] {
+            if let Some(variants) = schema.get(key).and_then(serde_json::Value::as_array) {
+                for variant in variants {
+                    collect_string_enum_values(variant, values);
+                }
+            }
+        }
     }
 }

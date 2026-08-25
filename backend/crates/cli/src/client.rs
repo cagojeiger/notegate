@@ -3,9 +3,10 @@ use std::time::Duration;
 use reqwest::header::{ACCEPT, USER_AGENT};
 use secrecy::{ExposeSecret as _, SecretString};
 use serde_json::Value;
-use url::{Host, Url};
+use url::Url;
 
 use crate::error::CliError;
+use crate::url_policy::{is_origin, uses_secure_or_loopback_transport};
 
 const COMMAND_PATH: &str = "api/commands/v1/";
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
@@ -103,14 +104,7 @@ fn command_base_url(input: &str) -> Result<Url, CliError> {
             "NOTEGATE_BASE_URL must be an absolute HTTP or HTTPS URL",
         )
     })?;
-    if !matches!(url.scheme(), "http" | "https")
-        || !url.has_host()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-        || !matches!(url.path(), "" | "/")
-    {
+    if !is_origin(&url) {
         return Err(CliError::configuration(
             "invalid_base_url",
             "NOTEGATE_BASE_URL must contain only an HTTP or HTTPS origin",
@@ -124,16 +118,6 @@ fn command_base_url(input: &str) -> Result<Url, CliError> {
     }
     url.set_path(COMMAND_PATH);
     Ok(url)
-}
-
-fn uses_secure_or_loopback_transport(url: &Url) -> bool {
-    match (url.scheme(), url.host()) {
-        ("https", Some(_)) => true,
-        ("http", Some(Host::Domain(host))) => host.eq_ignore_ascii_case("localhost"),
-        ("http", Some(Host::Ipv4(host))) => host.is_loopback(),
-        ("http", Some(Host::Ipv6(host))) => host.is_loopback(),
-        _ => false,
-    }
 }
 
 async fn read_bounded(mut response: reqwest::Response) -> Result<Vec<u8>, CliError> {

@@ -2,6 +2,7 @@ mod auth;
 mod client;
 mod credentials;
 mod error;
+mod url_policy;
 
 use std::ffi::OsString;
 use std::fs::File;
@@ -16,9 +17,11 @@ use secrecy::SecretString;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use auth::{AuthManager, AuthOverride, canonical_origin};
 use client::CommandClient;
 pub use error::CliError;
+use url_policy::canonical_origin;
+
+use auth::{AuthManager, AuthOverride};
 
 const API_KEY_ENV: &str = "NOTEGATE_API_KEY";
 const MAX_INPUT_BYTES: usize = 1024 * 1024;

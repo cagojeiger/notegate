@@ -6,8 +6,9 @@
 
 ## 맥락
 
-notegate 백엔드는 `core · model · db · service · search · api` 크레이트로 구성한다. 구조와 테스트 전략은
-PostgreSQL 중심의 단일 제품 백엔드라는 전제에 맞춘다.
+notegate 백엔드는 `core · model · db · service · search · command · api`를 중심으로 구성하고,
+`cli`가 HTTP Command API의 외부 adapter 역할을 한다. 구조와 테스트 전략은 PostgreSQL 중심의
+단일 제품 백엔드라는 전제에 맞춘다.
 
 두 가지 사실이 구조와 테스트 방향을 결정한다.
 
@@ -39,18 +40,26 @@ mock을 안 쓰는 대신 테스트를 두 층으로 나눈다.
 ### 3. 의존 방향
 
 ```text
-          ┌─▶ service ─┐
-api ──────┤            ├─▶ db ──▶ model ──▶ core
-          └─▶ search ──┘
+api transport adapters ──▶ api commands ──┬─▶ service ──▶ db ──▶ model ──▶ core
+          │                    │           └─▶ search ───▶ db
+          └────────────────────┴─▶ command ◀────────────────────── cli
 
 (api는 조립을 위해 db/model도 직접 참조 가능)
 ```
 
 - db는 service나 search를 의존하지 않는다.
 - model은 여러 레이어가 함께 쓰는 순수 데이터 타입과 command/view/cursor DTO를 둔다.
+- command는 transport-neutral 입력, 허용 operation, JSON Schema, recovery와 오류 계약을 소유한다.
+  허용 operation은 한 선언에서 schema와 runtime 검증 값으로 파생한다. 입력 경계에서는 알 수 없는
+  값을 구조화된 `invalid_input` 응답으로 변환할 수 있도록 raw string을 유지한다.
 - service는 DB repository 위의 비즈니스 규칙·권한 체크·validation·domain command orchestration을 담당한다.
 - search는 concrete `FilesRepo` 위에서 `find`/`grep` 권한 확인과 실행, matcher, decrypted body cache, admission과 search telemetry를 소유한다. API application state에는 search client만 두고, 실행 runtime은 public listener와 분리된 private HTTP server state가 소유한다. 같은 image의 `search` process mode로 deployment boundary를 분리할 수 있다. 일반 file-tree 조회인 `tree`는 service의 files 영역에 둔다.
-- api는 REST/MCP/auth/OpenAPI/transport DTO/error mapping과 S3·AuthGate 같은 외부 provider adapter를 담당한다. Service command와 외부 provider 호출을 조합하는 application workflow는 handler에 중복하지 않고 api의 공용 모듈에 둔다.
+- api의 `commands`는 인증된 request context, 공통 input validation과 application dispatch를 담당한다.
+  Command HTTP와 MCP는 인증·protocol envelope·transport error mapping만 소유하고 같은 command 실행기를
+  호출한다. S3·AuthGate 같은 외부 provider adapter와 service command를 조합하는 application workflow는
+  각 handler에 중복하지 않고 api의 공용 모듈에 둔다.
+- cli는 command 입력 타입과 생성 schema를 직접 재사용하되 api 구현 crate에는 의존하지 않는다.
+  인증 facade, OAuth protocol 처리, credential persistence와 URL 보안 정책은 CLI 내부 책임으로 유지한다.
 
 ### 4. 구조 컨벤션 (보조)
 
@@ -58,7 +67,8 @@ api ──────┤            ├─▶ db ──▶ model ──▶ core
   만들지 않는다.
 - db repo 파일명은 구조체 `XxxRepo`에 대응해 `<domain>_repo.rs`로 통일한다.
 - API 표면은 표면별 사용성에 맞춰 조직한다(REST는 리소스별, MCP는 identity와
-  read/search/write/manage 행동 영역과 ordered command sequence별). transport DTO/schema는 api 레이어가 책임진다.
+  read/search/write/manage 행동 영역과 ordered command sequence별). 공통 command DTO/schema는 command가,
+  표면 고유 DTO/schema는 해당 api adapter가 책임진다.
 - 공통 헬퍼는 실제 중복이 있을 때만 모은다(표면 내부 공유는 `support.rs`, 크레이트 전역 공유는
   크레이트 루트).
 
