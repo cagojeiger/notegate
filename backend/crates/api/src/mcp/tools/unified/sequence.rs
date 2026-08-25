@@ -1,5 +1,8 @@
 use axum::http::request::Parts;
-use notegate_command::{ManageInput, ReadInput, SearchInput, WriteInput};
+use notegate_command::{
+    MANAGE_OPERATIONS, ManageInput, READ_OPERATIONS, ReadInput, SEARCH_OPERATIONS, SearchInput,
+    WRITE_OPERATIONS, WriteInput,
+};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
@@ -198,10 +201,18 @@ impl SequenceKind {
         }
     }
 
-    fn operation_help(self) -> &'static str {
+    fn operation_help(self) -> String {
         match self {
-            Self::Read => "read=spaces/ls/tree/stat/read/changes; search=find/grep.",
-            Self::Write => "write=write/append/patch/edit; manage=mkdir/mv/cp/rm.",
+            Self::Read => format!(
+                "read={}; search={}.",
+                READ_OPERATIONS.join("/"),
+                SEARCH_OPERATIONS.join("/")
+            ),
+            Self::Write => format!(
+                "write={}; manage={}.",
+                WRITE_OPERATIONS.join("/"),
+                MANAGE_OPERATIONS.join("/")
+            ),
         }
     }
 }

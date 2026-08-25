@@ -1,6 +1,6 @@
 //! Protocol-neutral directional file-change commands.
 
-use notegate_command::{CommandError, RecoveryAction, ToolCallSpec};
+use notegate_command::{CommandError, READ_OP_CHANGES, RecoveryAction, ToolCallSpec};
 use notegate_service::ServiceError;
 use notegate_service::cursor;
 use notegate_service::files::{
@@ -113,7 +113,7 @@ fn require_newer_cursor(
                 cursor: None,
                 baseline_call: Some(ToolCallSpec::new(
                     "read",
-                    json!({"purpose": purpose, "op": "changes", "target": target, "limit": 1}),
+                    json!({"purpose": purpose, "op": READ_OP_CHANGES, "target": target, "limit": 1}),
                 )),
             },
         )
@@ -302,7 +302,7 @@ fn changes_cursor_error(
             RecoveryAction::CallTool {
                 call: ToolCallSpec::new(
                     "read",
-                    json!({"purpose": purpose, "op": "changes", "target": target}),
+                    json!({"purpose": purpose, "op": READ_OP_CHANGES, "target": target}),
                 ),
                 reason: None,
                 instruction: None,
@@ -315,7 +315,7 @@ fn changes_cursor_error(
                 cursor: None,
                 baseline_call: Some(ToolCallSpec::new(
                     "read",
-                    json!({"purpose": purpose, "op": "changes", "target": target, "limit": 1}),
+                    json!({"purpose": purpose, "op": READ_OP_CHANGES, "target": target, "limit": 1}),
                 )),
             },
         ),
@@ -360,7 +360,7 @@ fn changes_next_action(
         return RecoveryAction::CallTool {
             call: ToolCallSpec::new("read", json!({
                 "purpose": purpose,
-                "op": "changes",
+                "op": READ_OP_CHANGES,
                 "target": target,
                 "limit": limit,
                 "direction": "newer",

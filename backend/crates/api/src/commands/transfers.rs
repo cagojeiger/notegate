@@ -1,7 +1,9 @@
 //! Transport-neutral path-first object upload and download commands.
 
 use notegate_command::{
-    CommandError, FileDownloadInput, FileUploadInput, RecoveryAction, ToolCallSpec, ToolCallStep,
+    CommandError, FILE_UPLOAD_OP_ABORT_UPLOAD, FILE_UPLOAD_OP_BEGIN_UPLOAD,
+    FILE_UPLOAD_OP_COMPLETE_UPLOAD, FILE_UPLOAD_OP_PREPARE_PARTS, FILE_UPLOAD_OPERATIONS,
+    FileDownloadInput, FileUploadInput, RecoveryAction, ToolCallSpec, ToolCallStep,
 };
 use notegate_model::FileEncryptionMode;
 use notegate_model::files::{BeginObjectUpload, PendingObjectUpload};
@@ -29,13 +31,14 @@ pub async fn upload(
 ) -> Result<Value, CommandError> {
     validate_purpose(&input.purpose)?;
     match input.op.as_str() {
-        "begin_upload" => begin_upload(state, context, input).await,
-        "prepare_parts" => prepare_parts(state, context, input).await,
-        "complete_upload" => complete_upload(state, context, input).await,
-        "abort_upload" => abort_upload(state, context, input).await,
-        _ => Err(invalid_input_error(
-            "invalid op for file_upload; allowed values are: begin_upload, prepare_parts, complete_upload, abort_upload",
-        )),
+        FILE_UPLOAD_OP_BEGIN_UPLOAD => begin_upload(state, context, input).await,
+        FILE_UPLOAD_OP_PREPARE_PARTS => prepare_parts(state, context, input).await,
+        FILE_UPLOAD_OP_COMPLETE_UPLOAD => complete_upload(state, context, input).await,
+        FILE_UPLOAD_OP_ABORT_UPLOAD => abort_upload(state, context, input).await,
+        _ => Err(invalid_input_error(format!(
+            "invalid op for file_upload; allowed values are: {}",
+            FILE_UPLOAD_OPERATIONS.join(", ")
+        ))),
     }
 }
 
@@ -56,10 +59,12 @@ async fn begin_upload(
 ) -> Result<Value, CommandError> {
     let purpose = input.purpose.clone();
     let caller = context.caller();
-    let target = required(input.target, "target", "begin_upload")?;
-    let byte_len = input
-        .byte_len
-        .ok_or_else(|| invalid_input_error("op=begin_upload requires byte_len"))?;
+    let target = required(input.target, "target", FILE_UPLOAD_OP_BEGIN_UPLOAD)?;
+    let byte_len = input.byte_len.ok_or_else(|| {
+        invalid_input_error(format!(
+            "op={FILE_UPLOAD_OP_BEGIN_UPLOAD} requires byte_len"
+        ))
+    })?;
     let (resolved, path) = resolve_target(state, caller, &target).await?;
     let (parent_path, name) = split_parent_name(&path)?;
     let parent = state
@@ -126,7 +131,7 @@ fn build_begin_upload_response(
                 "next_action": RecoveryAction::CallTool {
                     call: ToolCallSpec::new("file_upload", json!({
                         "purpose": purpose,
-                        "op": "prepare_parts",
+                        "op": FILE_UPLOAD_OP_PREPARE_PARTS,
                         "upload_id": upload_id,
                         "part_numbers": first_part_numbers,
                     })),
@@ -151,7 +156,7 @@ fn build_begin_upload_response(
                 instruction: "PUT the local file using transfer.method, transfer.url, every transfer.headers entry, and the exact transfer.content_length.".to_owned(),
                 then: ToolCallSpec::new("file_upload", json!({
                         "purpose": purpose,
-                        "op": "complete_upload",
+                        "op": FILE_UPLOAD_OP_COMPLETE_UPLOAD,
                         "upload_id": upload_id,
                 })),
             },
@@ -170,7 +175,11 @@ async fn prepare_parts(
     let part_numbers = input
         .part_numbers
         .filter(|numbers| !numbers.is_empty())
-        .ok_or_else(|| invalid_input_error("op=prepare_parts requires part_numbers"))?;
+        .ok_or_else(|| {
+            invalid_input_error(format!(
+                "op={FILE_UPLOAD_OP_PREPARE_PARTS} requires part_numbers"
+            ))
+        })?;
     let upload = state
         .files
         .object_upload_by_id(caller.account_id(), upload_id)
@@ -218,7 +227,7 @@ fn build_prepare_parts_response(
             repeat: ToolCallStep {
                 call: ToolCallSpec::new("file_upload", json!({
                     "purpose": purpose,
-                    "op": "prepare_parts",
+                    "op": FILE_UPLOAD_OP_PREPARE_PARTS,
                     "upload_id": upload_id,
                 })),
                 when: Some("parts remain unuploaded or a part URL expired".to_owned()),
@@ -227,7 +236,7 @@ fn build_prepare_parts_response(
             then: ToolCallStep {
                 call: ToolCallSpec::new("file_upload", json!({
                     "purpose": purpose,
-                    "op": "complete_upload",
+                    "op": FILE_UPLOAD_OP_COMPLETE_UPLOAD,
                     "upload_id": upload_id,
                 })),
                 when: None,

@@ -1,6 +1,6 @@
 //! Transport-neutral path-first search commands.
 
-use notegate_command::{CommandError, RecoveryAction};
+use notegate_command::{CommandError, RecoveryAction, SEARCH_OP_FIND, SEARCH_OP_GREP};
 use notegate_model::NodeKind;
 use notegate_search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchCapacity,
@@ -159,8 +159,8 @@ fn request_context(context: Option<&RequestContext>) -> Result<&RequestContext, 
 
 fn search_busy_error(capacity: SearchCapacity) -> CommandError {
     let operation = match capacity {
-        SearchCapacity::Find => "find",
-        SearchCapacity::Grep => "grep",
+        SearchCapacity::Find => SEARCH_OP_FIND,
+        SearchCapacity::Grep => SEARCH_OP_GREP,
     };
     CommandError::capacity_busy(format!("{operation} capacity is busy; retry shortly")).with_data(
         json!({
