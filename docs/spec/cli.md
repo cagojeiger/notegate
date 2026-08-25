@@ -1,6 +1,6 @@
 # NoteGate CLI
 
-`notegate-cli`는 사람과 AI agent가 MCP transport 없이 NoteGate의 공통 Command API를 호출하는 JSON CLI다. `me`와 `read`는 User Device credential 또는 Agent API key를 bearer로 사용한다.
+`notegate-cli`는 사람과 AI agent가 MCP transport 없이 NoteGate의 공통 Command API를 호출하는 JSON CLI다. `me`, `read`, `write`, `manage`는 User Device credential 또는 Agent API key를 bearer로 사용한다.
 
 ## 인증과 연결
 
@@ -57,13 +57,24 @@ notegate-cli read \
 notegate-cli read --input-file request.json
 printf '%s' '{"purpose":"list connected spaces","op":"spaces"}' \
   | notegate-cli read --input-file -
+
+notegate-cli write \
+  --input '{"purpose":"create note","op":"write","target":"daily:/notes/example.md","content":"hello","create":true}'
+
+notegate-cli manage \
+  --input '{"purpose":"create notes folder","op":"mkdir","target":"daily:/notes","parents":true}'
 ```
 
-`read` JSON은 MCP와 Command API의 공통 `ReadInput`을 그대로 사용한다. `--schema`는 같은 Rust type에서 생성된 JSON Schema를 출력하므로 별도의 CLI 필드 정의가 없다.
+각 JSON 명령은 MCP와 Command API의 공통 `ReadInput`, `WriteInput`, `ManageInput`을 그대로 사용한다. `--schema`는 해당 Rust type에서 생성된 JSON Schema를 출력하므로 별도의 CLI 필드 정의가 없다.
 
 ```sh
 notegate-cli read --schema
+notegate-cli write --schema
+notegate-cli manage --schema
+
 notegate-cli read --help
+notegate-cli write --help
+notegate-cli manage --help
 ```
 
 ## 출력 계약
@@ -91,7 +102,7 @@ notegate-cli read --help
 
 ## 현재 제외 범위
 
-- `search`, `write`, `manage`, `file_upload`, `file_download`
+- `search`, `file_upload`, `file_download`
 - `run_sequence`
 - API key 영구 저장과 profile
 - 설치용 플랫폼별 binary artifact
