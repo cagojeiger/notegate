@@ -43,7 +43,19 @@ impl CommandClient {
     }
 
     pub async fn read(&self, input: &Value) -> Result<Value, CliError> {
-        let request = self.http.post(self.endpoint("read")?).json(input);
+        self.post("read", input).await
+    }
+
+    pub async fn write(&self, input: &Value) -> Result<Value, CliError> {
+        self.post("write", input).await
+    }
+
+    pub async fn manage(&self, input: &Value) -> Result<Value, CliError> {
+        self.post("manage", input).await
+    }
+
+    async fn post(&self, name: &str, input: &Value) -> Result<Value, CliError> {
+        let request = self.http.post(self.endpoint(name)?).json(input);
         self.send(request).await
     }
 

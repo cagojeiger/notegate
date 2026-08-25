@@ -10,8 +10,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
-use notegate_command::ReadInput;
+use notegate_command::{ManageInput, ReadInput, WriteInput};
+use schemars::JsonSchema;
 use secrecy::SecretString;
+use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use auth::{AuthManager, AuthOverride, canonical_origin};
@@ -31,6 +33,8 @@ const MAX_INPUT_BYTES: usize = 1024 * 1024;
     after_help = "Examples:\n  \
                   notegate-cli --base-url https://notegate.example me\n  \
                   notegate-cli --base-url https://notegate.example read --input '{\"purpose\":\"list spaces\",\"op\":\"spaces\"}'\n  \
+                  notegate-cli write --input '{\"purpose\":\"create note\",\"op\":\"write\",\"target\":\"daily:/note.md\",\"content\":\"hello\",\"create\":true}'\n  \
+                  notegate-cli manage --input '{\"purpose\":\"create folder\",\"op\":\"mkdir\",\"target\":\"daily:/notes\",\"parents\":true}'\n  \
                   notegate-cli read --schema"
 )]
 pub struct Cli {
@@ -58,10 +62,14 @@ pub struct Cli {
 pub enum Command {
     /// Manage the User Device-login credential stored in the OS keychain.
     Auth(AuthArgs),
-    /// Show the authenticated Agent identity and NoteGate server version.
+    /// Show the authenticated identity and NoteGate server version.
     Me,
     /// Run one shared read command with the same JSON input as MCP read.
-    Read(ReadArgs),
+    Read(CommandInputArgs),
+    /// Run one shared write command with the same JSON input as MCP write.
+    Write(CommandInputArgs),
+    /// Run one shared manage command with the same JSON input as MCP manage.
+    Manage(CommandInputArgs),
 }
 
 #[derive(Debug, Args)]
@@ -82,16 +90,16 @@ pub enum AuthCommand {
 
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
-pub struct ReadArgs {
-    /// Inline JSON object matching the shared ReadInput schema.
+pub struct CommandInputArgs {
+    /// Inline JSON object matching this command's shared schema.
     #[arg(long, value_name = "JSON")]
     pub input: Option<String>,
 
-    /// Read the JSON object from PATH, or use '-' for stdin.
+    /// Read the command JSON object from PATH, or use '-' for stdin.
     #[arg(long, value_name = "PATH")]
     pub input_file: Option<PathBuf>,
 
-    /// Print the machine-readable shared ReadInput JSON Schema and exit.
+    /// Print this command's machine-readable shared JSON Schema and exit.
     #[arg(long)]
     pub schema: bool,
 }
@@ -155,19 +163,43 @@ pub async fn execute_with_events(
                 .me()
                 .await
         }
-        Command::Read(args) if args.schema => {
-            serde_json::to_value(schemars::schema_for!(ReadInput)).map_err(|_error| {
-                CliError::protocol(
-                    "schema_serialization_failed",
-                    "could not serialize the shared read schema",
-                )
-            })
-        }
+        Command::Read(args) if args.schema => shared_schema::<ReadInput>("read"),
         Command::Read(args) => {
-            let input = read_input(args)?;
+            let input = command_input::<ReadInput>(
+                args,
+                "read",
+                "missing_read_input",
+                "invalid_read_input",
+            )?;
             command_client(base_url.as_deref(), timeout_seconds)
                 .await?
                 .read(&input)
+                .await
+        }
+        Command::Write(args) if args.schema => shared_schema::<WriteInput>("write"),
+        Command::Write(args) => {
+            let input = command_input::<WriteInput>(
+                args,
+                "write",
+                "missing_write_input",
+                "invalid_write_input",
+            )?;
+            command_client(base_url.as_deref(), timeout_seconds)
+                .await?
+                .write(&input)
+                .await
+        }
+        Command::Manage(args) if args.schema => shared_schema::<ManageInput>("manage"),
+        Command::Manage(args) => {
+            let input = command_input::<ManageInput>(
+                args,
+                "manage",
+                "missing_manage_input",
+                "invalid_manage_input",
+            )?;
+            command_client(base_url.as_deref(), timeout_seconds)
+                .await?
+                .manage(&input)
                 .await
         }
     }
@@ -214,13 +246,27 @@ fn api_key() -> Result<Option<SecretString>, CliError> {
     Ok(Some(SecretString::from(value)))
 }
 
-fn read_input(args: ReadArgs) -> Result<Value, CliError> {
+fn shared_schema<T: JsonSchema>(command: &str) -> Result<Value, CliError> {
+    serde_json::to_value(schemars::schema_for!(T)).map_err(|_error| {
+        CliError::protocol(
+            "schema_serialization_failed",
+            format!("could not serialize the shared {command} schema"),
+        )
+    })
+}
+
+fn command_input<T: DeserializeOwned>(
+    args: CommandInputArgs,
+    command: &str,
+    missing_code: &'static str,
+    invalid_code: &'static str,
+) -> Result<Value, CliError> {
     let raw = match (args.input, args.input_file) {
         (Some(input), None) => bounded_string(input)?,
         (None, Some(path)) => read_input_file(&path)?,
         _ => {
             return Err(CliError::invalid_input(
-                "missing_read_input",
+                missing_code,
                 "provide exactly one of --input, --input-file, or --schema",
             ));
         }
@@ -228,13 +274,13 @@ fn read_input(args: ReadArgs) -> Result<Value, CliError> {
     let value = serde_json::from_str::<Value>(&raw).map_err(|error| {
         CliError::invalid_input(
             "invalid_json",
-            format!("read input is invalid JSON: {error}"),
+            format!("{command} input is invalid JSON: {error}"),
         )
     })?;
-    serde_json::from_value::<ReadInput>(value.clone()).map_err(|error| {
+    serde_json::from_value::<T>(value.clone()).map_err(|error| {
         CliError::invalid_input(
-            "invalid_read_input",
-            format!("read input does not match the shared schema: {error}"),
+            invalid_code,
+            format!("{command} input does not match the shared schema: {error}"),
         )
     })?;
     Ok(value)
@@ -268,7 +314,7 @@ fn read_bounded(reader: impl io::Read, source: &str) -> Result<String, CliError>
     if bytes.len() > MAX_INPUT_BYTES {
         return Err(CliError::invalid_input(
             "input_too_large",
-            "read input exceeded the 1 MiB CLI safety limit",
+            "command input exceeded the 1 MiB CLI safety limit",
         ));
     }
     String::from_utf8(bytes).map_err(|_error| {
@@ -280,7 +326,7 @@ fn bounded_string(value: String) -> Result<String, CliError> {
     if value.len() > MAX_INPUT_BYTES {
         return Err(CliError::invalid_input(
             "input_too_large",
-            "read input exceeded the 1 MiB CLI safety limit",
+            "command input exceeded the 1 MiB CLI safety limit",
         ));
     }
     Ok(value)
@@ -291,47 +337,63 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shared_read_type_rejects_unknown_fields_before_http() {
-        let result = read_input(ReadArgs {
-            input: Some(r#"{"purpose":"inspect","op":"spaces","unexpected":true}"#.to_owned()),
-            input_file: None,
-            schema: false,
-        });
+    fn shared_command_types_reject_unknown_fields_before_http() {
+        let cases = [
+            (
+                command_input::<ReadInput>(
+                    inline_input(r#"{"purpose":"inspect","op":"spaces","unexpected":true}"#),
+                    "read",
+                    "missing_read_input",
+                    "invalid_read_input",
+                ),
+                "invalid_read_input",
+            ),
+            (
+                command_input::<WriteInput>(
+                    inline_input(
+                        r#"{"purpose":"write","op":"write","target":"daily:/note.md","content":"body","unexpected":true}"#,
+                    ),
+                    "write",
+                    "missing_write_input",
+                    "invalid_write_input",
+                ),
+                "invalid_write_input",
+            ),
+            (
+                command_input::<ManageInput>(
+                    inline_input(
+                        r#"{"purpose":"mkdir","op":"mkdir","target":"daily:/notes","unexpected":true}"#,
+                    ),
+                    "manage",
+                    "missing_manage_input",
+                    "invalid_manage_input",
+                ),
+                "invalid_manage_input",
+            ),
+        ];
 
-        assert!(result.is_err());
-        if let Err(error) = result {
-            assert_eq!(error.exit_code(), error::EXIT_INVALID_INPUT);
-            assert_eq!(
-                error.body().get("error").and_then(Value::as_str),
-                Some("invalid_read_input")
-            );
+        for (result, expected_code) in cases {
+            assert!(result.is_err());
+            if let Err(error) = result {
+                assert_eq!(error.exit_code(), error::EXIT_INVALID_INPUT);
+                assert_eq!(
+                    error.body().get("error").and_then(Value::as_str),
+                    Some(expected_code)
+                );
+            }
         }
     }
 
     #[test]
-    fn read_schema_is_derived_from_the_shared_contract() {
-        let result = serde_json::to_value(schemars::schema_for!(ReadInput));
-        assert!(result.is_ok());
-        let properties = result
-            .ok()
-            .and_then(|schema| schema.get("properties").cloned());
-        assert!(
-            properties
-                .as_ref()
-                .and_then(|value| value.get("purpose"))
-                .is_some()
+    fn schemas_are_derived_from_the_shared_command_contracts() {
+        assert_schema_properties::<ReadInput>("read", &["purpose", "op", "target"]);
+        assert_schema_properties::<WriteInput>(
+            "write",
+            &["purpose", "op", "target", "content", "edits"],
         );
-        assert!(
-            properties
-                .as_ref()
-                .and_then(|value| value.get("op"))
-                .is_some()
-        );
-        assert!(
-            properties
-                .as_ref()
-                .and_then(|value| value.get("target"))
-                .is_some()
+        assert_schema_properties::<ManageInput>(
+            "manage",
+            &["purpose", "op", "target", "source", "destination"],
         );
     }
 
@@ -355,5 +417,29 @@ mod tests {
                 .and_then(|error| error.body().get("error").cloned()),
             Some(Value::String("invalid_utf8".to_owned()))
         );
+    }
+
+    fn inline_input(input: &str) -> CommandInputArgs {
+        CommandInputArgs {
+            input: Some(input.to_owned()),
+            input_file: None,
+            schema: false,
+        }
+    }
+
+    fn assert_schema_properties<T: JsonSchema>(command: &str, expected: &[&str]) {
+        let result = shared_schema::<T>(command);
+        assert!(result.is_ok());
+        if let Ok(schema) = result {
+            for property in expected {
+                assert!(
+                    schema
+                        .get("properties")
+                        .and_then(|properties| properties.get(property))
+                        .is_some(),
+                    "missing {command} schema property: {property}"
+                );
+            }
+        }
     }
 }

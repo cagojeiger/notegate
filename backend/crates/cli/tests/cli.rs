@@ -9,7 +9,7 @@ use std::time::Duration;
 use axum::Json;
 use axum::Router;
 use axum::extract::Request;
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Redirect;
 use axum::routing::{get, post};
 use serde_json::{Value, json};
@@ -90,6 +90,110 @@ async fn read_sends_the_shared_json_object() {
     assert_eq!(
         serde_json::from_slice::<Value>(&output.stdout).expect("JSON stdout"),
         json!({"spaces":[]})
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn write_routes_to_the_write_endpoint_with_the_exact_json_object() {
+    let expected = json!({
+        "purpose": "append one audit entry",
+        "op": "append",
+        "target": "daily:/audit.md",
+        "content": "entry",
+        "ensure_newline": true,
+        "expected_sha256": "abc123",
+    });
+    let expected_request = expected.clone();
+    let base_url = spawn(Router::new().route(
+        "/api/commands/v1/write",
+        post(move |headers: HeaderMap, Json(input): Json<Value>| {
+            let expected_request = expected_request.clone();
+            async move {
+                if headers.get(header::AUTHORIZATION)
+                    == Some(&HeaderValue::from_static(
+                        "Bearer ngk_v2_test-secret-that-must-not-be-printed",
+                    ))
+                    && input == expected_request
+                {
+                    (StatusCode::OK, Json(json!({"sha256":"def456"})))
+                } else {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error":"wrong_write_request"})),
+                    )
+                }
+            }
+        }),
+    ))
+    .await;
+
+    let output = cli(&base_url)
+        .args([
+            "write",
+            "--input",
+            r#"{"purpose":"append one audit entry","op":"append","target":"daily:/audit.md","content":"entry","ensure_newline":true,"expected_sha256":"abc123"}"#,
+        ])
+        .output()
+        .expect("run write CLI");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).expect("JSON stdout"),
+        json!({"sha256":"def456"})
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manage_routes_to_the_manage_endpoint_with_the_exact_json_object() {
+    let expected = json!({
+        "purpose": "copy the notes folder",
+        "op": "cp",
+        "source": "daily:/notes",
+        "destination": "daily:/archive/notes",
+        "recursive": true,
+    });
+    let expected_request = expected.clone();
+    let base_url = spawn(Router::new().route(
+        "/api/commands/v1/manage",
+        post(move |Json(input): Json<Value>| {
+            let expected_request = expected_request.clone();
+            async move {
+                if input == expected_request {
+                    (StatusCode::OK, Json(json!({"copied":true})))
+                } else {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error":"wrong_manage_request"})),
+                    )
+                }
+            }
+        }),
+    ))
+    .await;
+
+    let output = cli(&base_url)
+        .args([
+            "manage",
+            "--input",
+            r#"{"purpose":"copy the notes folder","op":"cp","source":"daily:/notes","destination":"daily:/archive/notes","recursive":true}"#,
+        ])
+        .output()
+        .expect("run manage CLI");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).expect("JSON stdout"),
+        json!({"copied":true})
     );
 }
 
@@ -204,35 +308,91 @@ fn auth_status_reports_api_key_precedence_without_exposing_it() {
 }
 
 #[test]
-fn read_schema_and_help_need_no_credentials() {
-    let schema = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
-        .args(["read", "--schema"])
-        .env_remove("NOTEGATE_API_KEY")
-        .env_remove("NOTEGATE_BASE_URL")
-        .output()
-        .expect("run schema command");
-    assert!(schema.status.success());
-    assert!(schema.stderr.is_empty());
-    let schema = serde_json::from_slice::<Value>(&schema.stdout).expect("JSON schema");
-    assert!(
-        schema
-            .get("properties")
-            .and_then(|value| value.get("purpose"))
-            .is_some()
-    );
+fn command_schemas_and_help_need_no_credentials() {
+    for (command, expected_properties, expected_operations) in [
+        (
+            "read",
+            &["purpose", "op", "target"][..],
+            &["spaces", "read"][..],
+        ),
+        (
+            "write",
+            &[
+                "purpose",
+                "op",
+                "target",
+                "content",
+                "edits",
+                "expected_sha256",
+            ][..],
+            &["write", "append", "patch", "edit"][..],
+        ),
+        (
+            "manage",
+            &[
+                "purpose",
+                "op",
+                "target",
+                "source",
+                "destination",
+                "recursive",
+            ][..],
+            &["mkdir", "mv", "cp", "rm"][..],
+        ),
+    ] {
+        let schema = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+            .args([command, "--schema"])
+            .env_remove("NOTEGATE_API_KEY")
+            .env_remove("NOTEGATE_BASE_URL")
+            .output()
+            .expect("run schema command");
+        assert!(
+            schema.status.success(),
+            "{command}: {}",
+            String::from_utf8_lossy(&schema.stderr)
+        );
+        assert!(schema.stderr.is_empty(), "command: {command}");
+        let schema = serde_json::from_slice::<Value>(&schema.stdout).expect("JSON schema");
+        for property in expected_properties {
+            assert!(
+                schema
+                    .get("properties")
+                    .and_then(|properties| properties.get(property))
+                    .is_some(),
+                "missing {command} schema property: {property}"
+            );
+        }
+        let operations = schema
+            .pointer("/properties/op/enum")
+            .and_then(Value::as_array)
+            .expect("operation enum");
+        for operation in expected_operations {
+            assert!(
+                operations
+                    .iter()
+                    .any(|value| value.as_str() == Some(operation)),
+                "missing {command} operation: {operation}"
+            );
+        }
+        assert_eq!(
+            schema.get("additionalProperties").and_then(Value::as_bool),
+            Some(false),
+            "command: {command}"
+        );
 
-    let help = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
-        .args(["read", "--help"])
-        .env_remove("NOTEGATE_API_KEY")
-        .env_remove("NOTEGATE_BASE_URL")
-        .output()
-        .expect("run help");
-    assert!(help.status.success());
-    assert!(help.stderr.is_empty());
-    let help = String::from_utf8(help.stdout).expect("UTF-8 help");
-    assert!(help.contains("--input <JSON>"));
-    assert!(help.contains("--input-file <PATH>"));
-    assert!(help.contains("--schema"));
+        let help = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+            .args([command, "--help"])
+            .env_remove("NOTEGATE_API_KEY")
+            .env_remove("NOTEGATE_BASE_URL")
+            .output()
+            .expect("run help");
+        assert!(help.status.success(), "command: {command}");
+        assert!(help.stderr.is_empty(), "command: {command}");
+        let help = String::from_utf8(help.stdout).expect("UTF-8 help");
+        assert!(help.contains("--input <JSON>"), "command: {command}");
+        assert!(help.contains("--input-file <PATH>"), "command: {command}");
+        assert!(help.contains("--schema"), "command: {command}");
+    }
 
     let top_level_help = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
         .arg("--help")
@@ -246,6 +406,8 @@ fn read_schema_and_help_need_no_credentials() {
     assert!(top_level_help.contains("NOTEGATE_API_KEY"));
     assert!(top_level_help.contains("NOTEGATE_BASE_URL"));
     assert!(top_level_help.contains("never accepted as a command-line argument"));
+    assert!(top_level_help.contains("write"));
+    assert!(top_level_help.contains("manage"));
 
     let version = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
         .arg("--version")
@@ -265,8 +427,12 @@ fn read_schema_and_help_need_no_credentials() {
 fn argument_errors_are_structured_json() {
     for args in [
         &["read"][..],
+        &["write"][..],
+        &["manage"][..],
         &["--timeout-seconds", "nope", "me"],
         &["read", "--input", "{}", "--schema"],
+        &["write", "--input", "{}", "--schema"],
+        &["manage", "--input", "{}", "--input-file", "input.json"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
             .args(args)
@@ -453,6 +619,138 @@ async fn file_and_stdin_inputs_use_the_same_read_contract() {
         serde_json::from_slice::<Value>(&output.stdout).expect("JSON stdout"),
         json!({"source":"stdin"})
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn write_file_and_manage_stdin_inputs_use_their_shared_contracts() {
+    let base_url = spawn(
+        Router::new()
+            .route(
+                "/api/commands/v1/write",
+                post(|Json(input): Json<Value>| async move {
+                    if input
+                        == json!({
+                            "purpose": "replace a note from a file",
+                            "op": "write",
+                            "target": "daily:/note.md",
+                            "content": "replacement",
+                            "create": false,
+                        })
+                    {
+                        (StatusCode::OK, Json(json!({"source":"file"})))
+                    } else {
+                        (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({"error":"wrong_write_input"})),
+                        )
+                    }
+                }),
+            )
+            .route(
+                "/api/commands/v1/manage",
+                post(|Json(input): Json<Value>| async move {
+                    if input
+                        == json!({
+                            "purpose": "create nested folders from stdin",
+                            "op": "mkdir",
+                            "target": "daily:/notes/archive",
+                            "parents": true,
+                        })
+                    {
+                        (StatusCode::OK, Json(json!({"source":"stdin"})))
+                    } else {
+                        (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({"error":"wrong_manage_input"})),
+                        )
+                    }
+                }),
+            ),
+    )
+    .await;
+
+    let input_path = std::env::temp_dir().join(format!(
+        "notegate-cli-write-input-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(
+        &input_path,
+        r#"{"purpose":"replace a note from a file","op":"write","target":"daily:/note.md","content":"replacement","create":false}"#,
+    )
+    .expect("write CLI input file");
+    let file_output = cli(&base_url)
+        .args(["write", "--input-file"])
+        .arg(&input_path)
+        .output()
+        .expect("run write file input CLI");
+    std::fs::remove_file(&input_path).expect("remove CLI input file");
+
+    assert!(
+        file_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&file_output.stderr)
+    );
+    assert!(file_output.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&file_output.stdout).expect("JSON stdout"),
+        json!({"source":"file"})
+    );
+
+    let mut child = cli(&base_url)
+        .args(["manage", "--input-file", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn manage stdin CLI");
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(
+                br#"{"purpose":"create nested folders from stdin","op":"mkdir","target":"daily:/notes/archive","parents":true}"#,
+            )
+            .expect("write manage CLI stdin");
+    }
+    let output = child.wait_with_output().expect("wait for manage CLI");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).expect("JSON stdout"),
+        json!({"source":"stdin"})
+    );
+}
+
+#[test]
+fn write_and_manage_reject_unknown_fields_before_http() {
+    for (command, input, expected_error) in [
+        (
+            "write",
+            r#"{"purpose":"write a note","op":"write","target":"daily:/note.md","content":"body","unexpected":true}"#,
+            "invalid_write_input",
+        ),
+        (
+            "manage",
+            r#"{"purpose":"create a folder","op":"mkdir","target":"daily:/notes","unexpected":true}"#,
+            "invalid_manage_input",
+        ),
+    ] {
+        let output = cli("http://127.0.0.1:9")
+            .args([command, "--input", input])
+            .output()
+            .expect("run invalid shared input");
+
+        assert_eq!(output.status.code(), Some(2), "command: {command}");
+        assert!(output.stdout.is_empty(), "command: {command}");
+        assert_eq!(
+            error_code(&output).as_deref(),
+            Some(expected_error),
+            "command: {command}"
+        );
+    }
 }
 
 #[test]
