@@ -15,11 +15,15 @@ use tower::ServiceExt as _;
 use super::*;
 use crate::rest::test_support::{caller_and_space, state};
 
-fn cli_version_headers() -> HeaderMap {
+fn cli_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
         "x-notegate-cli-version",
         HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+    );
+    headers.insert(
+        "x-notegate-command-protocol",
+        HeaderValue::from_static(notegate_command::COMMAND_PROTOCOL_VERSION),
     );
     headers
 }
@@ -73,7 +77,7 @@ async fn cli_read_uses_the_shared_engine_and_records_the_cli_surface()
 
     let (status, spaces) = cli_request(
         app.clone(),
-        cli_version_headers(),
+        cli_headers(),
         json!({
             "tool": "read",
             "input": {
@@ -88,7 +92,7 @@ async fn cli_read_uses_the_shared_engine_and_records_the_cli_surface()
 
     let (status, error) = cli_request(
         app,
-        cli_version_headers(),
+        cli_headers(),
         json!({
             "tool": "read",
             "input": {
@@ -142,7 +146,7 @@ async fn rejected_cli_me_input_never_records_a_purpose() -> Result<(), Box<dyn s
 
     let (status, body) = cli_request(
         app,
-        cli_version_headers(),
+        cli_headers(),
         json!({
             "tool": "me",
             "input": {"purpose": "must not be persisted"}
@@ -166,8 +170,8 @@ async fn rejected_cli_me_input_never_records_a_purpose() -> Result<(), Box<dyn s
 }
 
 #[tokio::test]
-async fn stale_cli_receives_one_structured_update_action() -> Result<(), Box<dyn std::error::Error>>
-{
+async fn compatible_protocol_accepts_a_different_cli_release()
+-> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -180,11 +184,66 @@ async fn stale_cli_receives_one_structured_update_action() -> Result<(), Box<dyn
         .with_state(state);
     let mut headers = HeaderMap::new();
     headers.insert("x-notegate-cli-version", HeaderValue::from_static("0.0.0"));
+    headers.insert(
+        "x-notegate-command-protocol",
+        HeaderValue::from_static(notegate_command::COMMAND_PROTOCOL_VERSION),
+    );
+
+    let (status, body) = cli_request(app, headers, json!({"tool":"me","input":{}})).await?;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["server_version"], env!("CARGO_PKG_VERSION"));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn missing_or_incompatible_cli_protocol_receives_one_structured_update_action()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state(&db);
+    let (mut caller, _space_id, _root_id) = caller_and_space(&state).await?;
+    caller.channel = Channel::Api;
+    let app = Router::new()
+        .merge(routes())
+        .layer(Extension(caller))
+        .with_state(state);
+    let mut missing_protocol_headers = HeaderMap::new();
+    missing_protocol_headers.insert(
+        "x-notegate-cli-version",
+        HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+    );
+
+    let (status, body) = cli_request(
+        app.clone(),
+        missing_protocol_headers,
+        json!({"tool":"me","input":{}}),
+    )
+    .await?;
+
+    assert_eq!(status, StatusCode::UPGRADE_REQUIRED, "{body}");
+    assert_eq!(body["error"], "cli_update_required");
+    assert_eq!(body["data"]["client_protocol_version"], Value::Null);
+
+    let mut headers = cli_headers();
+    headers.insert(
+        "x-notegate-command-protocol",
+        HeaderValue::from_static("unsupported"),
+    );
 
     let (status, body) = cli_request(app, headers, json!({"tool":"me","input":{}})).await?;
 
     assert_eq!(status, StatusCode::UPGRADE_REQUIRED, "{body}");
     assert_eq!(body["error"], "cli_update_required");
+    assert_eq!(body["kind"], "client_protocol_incompatible");
+    assert_eq!(body["data"]["client_protocol_version"], "unsupported");
+    assert_eq!(
+        body["data"]["server_protocol_version"],
+        notegate_command::COMMAND_PROTOCOL_VERSION
+    );
     assert_eq!(body["data"]["next_action"]["kind"], "run_command");
     assert_eq!(
         body["data"]["next_action"]["command"],
@@ -247,7 +306,7 @@ async fn cli_read_sequence_executes_the_shared_engine_and_records_one_invocation
 
     let (status, body) = cli_request(
         app,
-        cli_version_headers(),
+        cli_headers(),
         json!({
             "tool": "run_read_sequence",
             "input": {

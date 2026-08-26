@@ -6,8 +6,8 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::http::HeaderMap;
 use notegate_command::{
-    CommandError, CommandTool, FileDownloadInput, FileUploadInput, RecoveryAction,
-    RunReadSequenceInput, RunWriteSequenceInput, validate_purpose,
+    COMMAND_PROTOCOL_VERSION, CommandError, CommandTool, FileDownloadInput, FileUploadInput,
+    RecoveryAction, RunReadSequenceInput, RunWriteSequenceInput, validate_purpose,
 };
 use notegate_model::Caller;
 use serde::Deserialize;
@@ -28,6 +28,7 @@ use crate::observability::CommandInvocationMetrics;
 use crate::state::AppState;
 
 const CLI_VERSION_HEADER: &str = "x-notegate-cli-version";
+const COMMAND_PROTOCOL_HEADER: &str = "x-notegate-command-protocol";
 
 pub(super) type RawJsonInput = Result<Json<Value>, JsonRejection>;
 
@@ -75,7 +76,7 @@ pub(super) async fn execute(
     let raw_input = raw_envelope.get("input").cloned().unwrap_or(Value::Null);
     let metrics = CommandInvocationMetrics::start(state.config.metrics_enabled, "cli", tool);
 
-    if let Err(error) = validate_cli_version(headers) {
+    if let Err(error) = validate_command_protocol(headers) {
         return finish(
             &state,
             &caller,
@@ -219,14 +220,20 @@ fn unknown_tool_error(tool: &str) -> CommandError {
     )
 }
 
-fn validate_cli_version(headers: &HeaderMap) -> Result<(), CommandHttpError> {
+fn validate_command_protocol(headers: &HeaderMap) -> Result<(), CommandHttpError> {
     let client_version = headers
         .get(CLI_VERSION_HEADER)
         .and_then(|value| value.to_str().ok());
-    if client_version == Some(env!("CARGO_PKG_VERSION")) {
+    let client_protocol = headers
+        .get(COMMAND_PROTOCOL_HEADER)
+        .and_then(|value| value.to_str().ok());
+    if client_protocol == Some(COMMAND_PROTOCOL_VERSION) {
         return Ok(());
     }
-    Err(CommandHttpError::cli_update_required(client_version))
+    Err(CommandHttpError::cli_update_required(
+        client_version,
+        client_protocol,
+    ))
 }
 
 async fn finish(

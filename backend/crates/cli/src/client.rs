@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use notegate_command::CommandTool;
+use notegate_command::{COMMAND_PROTOCOL_VERSION, CommandTool};
 use reqwest::header::{ACCEPT, USER_AGENT};
 use secrecy::{ExposeSecret as _, SecretString};
 use serde_json::Value;
@@ -11,6 +11,7 @@ use crate::url_policy::{is_origin, uses_secure_or_loopback_transport};
 
 const CLI_PATH: &str = "/cli";
 const CLI_VERSION_HEADER: &str = "x-notegate-cli-version";
+const COMMAND_PROTOCOL_HEADER: &str = "x-notegate-command-protocol";
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
 pub struct CommandClient {
@@ -60,6 +61,7 @@ impl CommandClient {
                 concat!("notegate-cli/", env!("CARGO_PKG_VERSION")),
             )
             .header(CLI_VERSION_HEADER, env!("CARGO_PKG_VERSION"))
+            .header(COMMAND_PROTOCOL_HEADER, COMMAND_PROTOCOL_VERSION)
             .send()
             .await
             .map_err(map_transport_error)?;

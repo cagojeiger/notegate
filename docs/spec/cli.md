@@ -57,7 +57,9 @@ export NOTEGATE_API_KEY='ngk_v2_...'
 - access token 만료 60초 전부터 자동 refresh한다. process 간 file lock을 획득한 뒤 credential을 다시 읽고, write-ahead in-progress marker를 먼저 기록한 다음 refresh token rotation을 한 번만 수행한다. 정상적인 process 종료/crash 뒤 marker가 남으면 다음 실행은 구 token을 재사용하지 않는다. Unix에서는 marker file과 parent directory를 모두 sync하며, 다른 platform의 갑작스러운 전원 손실 durability는 OS와 filesystem 보장 범위를 따른다.
 - refresh 응답이 timeout, body 손상 또는 성공 응답 저장 실패로 불명확하면 자동 재시도하지 않는다. credential을 안전 상태로 표시하거나 삭제하고 `auth login`을 요구한다.
 - HTTP redirect를 따르지 않으므로 bearer credential이 다른 origin으로 전달되지 않는다.
-- 모든 command 요청은 CLI release version을 `X-Notegate-CLI-Version`으로 보낸다. 서버 release와 다르면 command를 실행하지 않고 `cli_update_required`와 `notegate-cli update` action을 반환한다.
+- 모든 command 요청은 진단용 CLI release version을 `X-Notegate-CLI-Version`, 호환성 계약을 `X-Notegate-Command-Protocol`로 보낸다.
+- 서버는 package release가 아니라 Command Protocol로 호환성을 판단한다. 따라서 같은 protocol을 사용하는 서로 다른 patch release는 롤링 배포 중에도 함께 동작한다.
+- Command Protocol이 누락됐거나 지원되지 않으면 command를 실행하지 않고 `cli_update_required`와 `notegate-cli update` action을 반환한다.
 
 진단용으로만 metadata discovery를 우회할 수 있다. 두 환경 변수를 반드시 함께 설정해야 한다.
 

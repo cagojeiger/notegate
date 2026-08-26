@@ -2,7 +2,7 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use notegate_command::{CommandError, CommandErrorClass, RecoveryAction};
+use notegate_command::{COMMAND_PROTOCOL_VERSION, CommandError, CommandErrorClass, RecoveryAction};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -30,18 +30,23 @@ impl CommandHttpError {
         Self::invalid_json_detail(error.to_string())
     }
 
-    pub(super) fn cli_update_required(client_version: Option<&str>) -> Self {
+    pub(super) fn cli_update_required(
+        client_version: Option<&str>,
+        client_protocol_version: Option<&str>,
+    ) -> Self {
         Self {
             status: StatusCode::UPGRADE_REQUIRED,
             body: CommandErrorBody {
                 error: "cli_update_required".to_owned(),
-                kind: "client_version_incompatible".to_owned(),
+                kind: "client_protocol_incompatible".to_owned(),
                 message: "update notegate-cli before retrying".to_owned(),
                 data: Some(json!({
-                    "kind": "client_version_incompatible",
+                    "kind": "client_protocol_incompatible",
                     "code": "cli_update_required",
                     "client_version": client_version,
                     "server_version": env!("CARGO_PKG_VERSION"),
+                    "client_protocol_version": client_protocol_version,
+                    "server_protocol_version": COMMAND_PROTOCOL_VERSION,
                     "retryable": false,
                     "recoverable": true,
                     "next_action": RecoveryAction::RunCommand {
