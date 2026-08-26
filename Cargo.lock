@@ -2926,7 +2926,7 @@ checksum = "38bf9645c8b145698bb0b18a4637dcacbc421ea49bef2317e4fd8065a387cf21"
 
 [[package]]
 name = "notegate-api"
-version = "0.1.78"
+version = "0.1.79"
 dependencies = [
  "aliri",
  "aliri_clock",
@@ -2981,7 +2981,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-cli"
-version = "0.1.78"
+version = "0.1.79"
 dependencies = [
  "axum",
  "clap",
@@ -3001,7 +3001,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-command"
-version = "0.1.78"
+version = "0.1.79"
 dependencies = [
  "schemars 1.2.2",
  "serde",
@@ -3010,7 +3010,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-core"
-version = "0.1.78"
+version = "0.1.79"
 dependencies = [
  "aes-gcm",
  "base64 0.23.1",
@@ -3029,7 +3029,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-db"
-version = "0.1.78"
+version = "0.1.79"
 dependencies = [
  "chrono",
  "notegate-core",
@@ -3048,7 +3048,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-jobs"
-version = "0.1.78"
+version = "0.1.79"
 dependencies = [
  "chrono",
  "futures-util",
@@ -3066,7 +3066,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-model"
-version = "0.1.78"
+version = "0.1.79"
 dependencies = [
  "chrono",
  "notegate-core",
@@ -3077,7 +3077,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-reconciliation"
-version = "0.1.78"
+version = "0.1.79"
 dependencies = [
  "futures-util",
  "metrics",
@@ -3093,7 +3093,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-search"
-version = "0.1.78"
+version = "0.1.79"
 dependencies = [
  "chrono",
  "metrics",
@@ -3111,7 +3111,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-service"
-version = "0.1.78"
+version = "0.1.79"
 dependencies = [
  "base64 0.23.1",
  "chrono",
