@@ -174,7 +174,9 @@ for test_case in \
   case_reused_tag_on_version_change_fails \
   case_invalid_version_fails
 do
-  if ! run_case "$test_case" "$test_case"; then
+  case_log="${tmp_root}/${test_case}.log"
+  if ! run_case "$test_case" "$test_case" >"$case_log" 2>&1; then
+    cat "$case_log" >&2
     echo "FAIL ${test_case}" >&2
     failures=$((failures + 1))
   fi
