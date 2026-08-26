@@ -61,7 +61,7 @@ for (const viewport of [
       [300_001, 5],
       [300_001, 6]
     ] as const) {
-      await page.clock.fastForward(elapsedMs);
+      await page.clock.runFor(elapsedMs);
       await expect.poll(() => count(
         requests,
         `/api/v1/spaces/${space.id}/file-change-sync`
@@ -76,7 +76,7 @@ for (const viewport of [
       await page.context().setOffline(false);
       expect(count(requests, `/api/v1/spaces/${space.id}/file-change-sync`)).toBe(6);
 
-      await page.clock.fastForward(30_001);
+      await page.clock.runFor(30_001);
       await expect.poll(() => count(
         requests,
         `/api/v1/spaces/${space.id}/file-change-sync`
@@ -224,7 +224,7 @@ test("backs off idle usage polling with one owner while the desktop Space Librar
   await page.goto("/");
   await expect.poll(() => count(requests, "/api/v1/me/usage")).toBe(1);
 
-  await page.clock.fastForward(10_000);
+  await page.clock.runFor(10_000);
   await page.getByRole("button", { name: "Open space library" }).click();
   await expect(page.getByRole("heading", { name: /Spaces 1/ })).toBeVisible();
 
@@ -234,7 +234,7 @@ test("backs off idle usage polling with one owner while the desktop Space Librar
     [300_001, 4],
     [300_001, 5]
   ] as const) {
-    await page.clock.fastForward(elapsedMs);
+    await page.clock.runFor(elapsedMs);
     await expect.poll(() => count(requests, "/api/v1/me/usage"))
       .toBe(expectedRequests);
   }
@@ -340,7 +340,7 @@ function count(requests: Map<string, number>, path: string): number {
 
 async function leaveAndReturnAfterStale(page: import("@playwright/test").Page) {
   await setPageVisibility(page, "hidden");
-  await page.clock.fastForward(5_001);
+  await page.clock.runFor(5_001);
   await setPageVisibility(page, "visible");
 }
 
