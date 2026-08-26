@@ -150,7 +150,7 @@ notegate-cli manage --help
 
 기본 timeout은 30초이며 `--timeout-seconds` 또는 `NOTEGATE_TIMEOUT_SECONDS`로 1~300초 사이에서 설정한다. 입력은 1 MiB, 응답은 8 MiB로 제한한다.
 
-CLI/server release mismatch는 exit `4`이며 서버의 구조화 body를 그대로 stderr에 출력한다. CLI를 업데이트한 뒤 같은 command를 다시 실행한다.
+Command Protocol mismatch는 exit `4`이며 서버의 구조화 body를 그대로 stderr에 출력한다. CLI를 업데이트한 뒤 같은 command를 다시 실행한다.
 
 ```json
 {"event":"verification_required","verification_uri":"https://authgate.project-jelly.io/device","verification_uri_complete":"https://authgate.project-jelly.io/device?user_code=BCDF-GHKM","user_code":"BCDF-GHKM","expires_in":300,"interval":5}
