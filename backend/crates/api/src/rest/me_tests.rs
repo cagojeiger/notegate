@@ -58,16 +58,24 @@ async fn command_invocations_require_one_surface_and_keep_pagination_independent
     }
 
     let app = rest_app(state.clone(), caller.clone());
-    let (status, _) = get_json(app, "/v1/me/command-invocations?limit=1".to_owned()).await?;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-
-    let app = rest_app(state.clone(), caller.clone());
-    let (status, _) = get_json(
+    let response = json_response(
         app,
-        "/v1/me/command-invocations?surface=command_api&limit=1".to_owned(),
+        "GET",
+        "/v1/me/command-invocations?limit=1".to_owned(),
+        serde_json::json!({}),
     )
     .await?;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let app = rest_app(state.clone(), caller.clone());
+    let response = json_response(
+        app,
+        "GET",
+        "/v1/me/command-invocations?surface=command_api&limit=1".to_owned(),
+        serde_json::json!({}),
+    )
+    .await?;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let app = rest_app(state.clone(), caller.clone());
     let response = json_response(
