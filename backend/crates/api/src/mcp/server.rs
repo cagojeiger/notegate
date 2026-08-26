@@ -473,7 +473,7 @@ mod tests {
         clippy::unwrap_in_result
     )]
     use super::*;
-    use crate::mcp::tool_identity::KnownMcpTool;
+    use notegate_command::CommandTool;
     use notegate_db::SpaceRepo;
     use rmcp::model::{CallToolResult, ClientInfo, ContentBlock, ServerNotification};
     use rmcp::service::SubscriptionEnd;
@@ -864,7 +864,7 @@ mod tests {
         for tool_name in ["run_read_sequence", "run_write_sequence"] {
             assert_eq!(
                 tools[tool_name].input_schema["properties"]["purpose"]["description"],
-                "Reason for this MCP invocation. Required once at the top level; commands inherit it and must not include purpose; maximum 200 characters."
+                "Reason for this command invocation. Required once at the top level; commands inherit it and must not include purpose; maximum 200 characters."
             );
             assert!(
                 tools[tool_name].input_schema["properties"]["commands"]["description"]
@@ -1049,13 +1049,13 @@ mod tests {
                     .as_str()
                     .expect("operation enum entry is a string");
                 assert_eq!(
-                    crate::mcp::invocation::canonical_op(tool.name.as_ref(), Some(op)),
+                    crate::invocations::canonical_op(tool.name.as_ref(), Some(op)),
                     Some(op),
                     "tool `{}` operation `{op}` must be recorded canonically",
                     tool.name
                 );
 
-                let redacted = crate::mcp::invocation_redaction::redact_input(
+                let redacted = crate::invocations::redaction::redact_input(
                     tool.name.as_ref(),
                     &json!({"purpose": "verify audit policy", "op": op}),
                 );
@@ -1151,9 +1151,9 @@ mod tests {
     }
 
     fn expected_tool_names() -> BTreeSet<&'static str> {
-        KnownMcpTool::ALL
+        CommandTool::ALL
             .into_iter()
-            .map(KnownMcpTool::as_str)
+            .map(CommandTool::as_str)
             .collect()
     }
 
@@ -1454,7 +1454,7 @@ mod tests {
                 serde_json::Value,
             ),
         >(
-            "SELECT tool, op, space_name, input, response FROM mcp_invocations \
+            "SELECT tool, op, space_name, input, response FROM command_invocations \
              WHERE actor_account_id = $1 ORDER BY id DESC LIMIT 1",
         )
         .bind(caller.account_id())
@@ -1484,7 +1484,7 @@ mod tests {
         .expect_err("changes rejects a non-root target");
 
         let failed = sqlx::query_as::<_, (Option<String>, String, Option<String>)>(
-            "SELECT space_name, outcome, error_code FROM mcp_invocations \
+            "SELECT space_name, outcome, error_code FROM command_invocations \
              WHERE actor_account_id = $1 ORDER BY id DESC LIMIT 1",
         )
         .bind(caller.account_id())
@@ -1518,7 +1518,7 @@ mod tests {
                 String,
             ),
         >(
-            "SELECT purpose, input, response, outcome, error_code FROM mcp_invocations \
+            "SELECT purpose, input, response, outcome, error_code FROM command_invocations \
              WHERE actor_account_id = $1 ORDER BY id DESC LIMIT 1",
         )
         .bind(caller.account_id())
@@ -1586,7 +1586,7 @@ mod tests {
                 String,
             ),
         >(
-            "SELECT tool, purpose, input, response, outcome, error_code FROM mcp_invocations \
+            "SELECT tool, purpose, input, response, outcome, error_code FROM command_invocations \
              WHERE actor_account_id = $1 ORDER BY id",
         )
         .bind(caller.account_id())

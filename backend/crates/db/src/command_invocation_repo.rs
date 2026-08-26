@@ -1,25 +1,25 @@
-//! Best-effort MCP invocation history persistence.
+//! Best-effort external command invocation history persistence.
 
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
-use notegate_model::{McpInvocation, McpInvocationCursor};
+use notegate_model::{CommandInvocation, CommandInvocationCursor, CommandInvocationSurface};
 use serde_json::Value;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
-use crate::event_history_query::{EventCursorPosition, UuidFilter, list_event_rows};
 use crate::map_sqlx_error;
 
 #[derive(Debug, Clone)]
-pub struct McpInvocationRepo {
+pub struct CommandInvocationRepo {
     pool: PgPool,
 }
 
 #[derive(Debug)]
-pub struct NewMcpInvocation<'a> {
+pub struct NewCommandInvocation<'a> {
     pub owner_user_id: Uuid,
     pub actor_account_id: Uuid,
     pub caller_kind: &'static str,
+    pub surface: &'static str,
     pub tool: &'a str,
     pub op: Option<&'a str>,
     pub purpose: Option<&'a str>,
@@ -31,20 +31,21 @@ pub struct NewMcpInvocation<'a> {
     pub duration_ms: i64,
 }
 
-impl McpInvocationRepo {
+impl CommandInvocationRepo {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
-    pub async fn insert(&self, invocation: NewMcpInvocation<'_>) -> Result<()> {
+    pub async fn insert(&self, invocation: NewCommandInvocation<'_>) -> Result<()> {
         sqlx::query(
-            "INSERT INTO mcp_invocations \
-             (owner_user_id, actor_account_id, caller_kind, tool, op, purpose, space_name, input, response, outcome, error_code, duration_ms) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+            "INSERT INTO command_invocations \
+             (owner_user_id, actor_account_id, caller_kind, surface, tool, op, purpose, space_name, input, response, outcome, error_code, duration_ms) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
         .bind(invocation.owner_user_id)
         .bind(invocation.actor_account_id)
         .bind(invocation.caller_kind)
+        .bind(invocation.surface)
         .bind(invocation.tool)
         .bind(invocation.op)
         .bind(invocation.purpose)
@@ -63,32 +64,41 @@ impl McpInvocationRepo {
     pub async fn list_by_owner(
         &self,
         owner_user_id: Uuid,
+        surface: CommandInvocationSurface,
         limit: i64,
-        cursor: Option<&McpInvocationCursor>,
-    ) -> Result<Vec<McpInvocation>> {
-        let rows = list_event_rows::<McpInvocationRow>(
-            &self.pool,
-            "mcp_invocations",
-            MCP_INVOCATION_COLUMNS,
-            UuidFilter::new("owner_user_id", owner_user_id),
-            None,
-            limit,
-            cursor.map(|cursor| EventCursorPosition {
-                created_at: cursor.created_at,
-                id: cursor.id,
-            }),
+        cursor: Option<&CommandInvocationCursor>,
+    ) -> Result<Vec<CommandInvocation>> {
+        let cursor_created_at = cursor.map(|cursor| cursor.created_at);
+        let cursor_id = cursor.map(|cursor| cursor.id);
+        let rows = sqlx::query_as::<_, CommandInvocationRow>(
+            "SELECT id, created_at, actor_account_id, caller_kind, surface, tool, op, purpose, \
+                    space_name, input, response, outcome, error_code, duration_ms \
+             FROM command_invocations \
+             WHERE owner_user_id = $1 \
+               AND surface = $2 \
+               AND ($3::timestamptz IS NULL OR (created_at, id) < ($3, $4)) \
+             ORDER BY created_at DESC, id DESC \
+             LIMIT $5",
         )
-        .await?;
-        Ok(rows.into_iter().map(McpInvocation::from).collect())
+        .bind(owner_user_id)
+        .bind(surface.as_str())
+        .bind(cursor_created_at)
+        .bind(cursor_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(rows.into_iter().map(CommandInvocation::from).collect())
     }
 }
 
 #[derive(Debug, FromRow)]
-struct McpInvocationRow {
+struct CommandInvocationRow {
     id: i64,
     created_at: DateTime<Utc>,
     actor_account_id: Uuid,
     caller_kind: String,
+    surface: String,
     tool: String,
     op: Option<String>,
     purpose: Option<String>,
@@ -100,13 +110,14 @@ struct McpInvocationRow {
     duration_ms: i64,
 }
 
-impl From<McpInvocationRow> for McpInvocation {
-    fn from(row: McpInvocationRow) -> Self {
+impl From<CommandInvocationRow> for CommandInvocation {
+    fn from(row: CommandInvocationRow) -> Self {
         Self {
             id: row.id,
             created_at: row.created_at,
             actor_account_id: row.actor_account_id,
             caller_kind: row.caller_kind,
+            surface: row.surface,
             tool: row.tool,
             op: row.op,
             purpose: row.purpose,
@@ -119,5 +130,3 @@ impl From<McpInvocationRow> for McpInvocation {
         }
     }
 }
-
-const MCP_INVOCATION_COLUMNS: &str = "id, created_at, actor_account_id, caller_kind, tool, op, purpose, space_name, input, response, outcome, error_code, duration_ms";

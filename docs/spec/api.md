@@ -25,7 +25,7 @@ MCP      = MCP client가 호출하는 동일 command의 JSON-RPC adapter
 Auth        /auth/*, /.well-known/*
 Web API     /api/v1/*
 Public API  /api/v2/*
-Command API /api/commands/v1/*
+CLI         POST /cli
 System      /health, /ready
 API Docs    /openapi/v2.json, /swagger-ui/v2
 User MCP    /mcp
@@ -66,7 +66,7 @@ OAuth 계열 인증은 user로 처리한다. Browser login은 opaque browser ses
 ```text
 /api/v1/* -> browser session cookie만 허용
 /api/v2/* -> Agent 소유 ngk_v2_ API key만 허용
-/api/commands/v1/* -> Agent 소유 ngk_v2_ API key만 허용
+/cli       -> CLI audience User OAuth 또는 Agent 소유 ngk_v2_ API key 허용
 /mcp      -> user MCP OAuth bearer만 허용
 /mcp/v2   -> Agent 소유 ngk_v2_ API key만 허용
 ```

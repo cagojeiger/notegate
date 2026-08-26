@@ -1,20 +1,23 @@
-//! Fail-closed snapshots for MCP invocation history.
+//! Fail-closed snapshots for command invocation history.
 //!
-//! These helpers never mutate the request or response sent to the MCP client.
-//! They build a separate, bounded copy for persistence and omit every field
-//! that has not been explicitly classified.
+//! These helpers never mutate the request or response sent to an MCP or
+//! Command API caller. They build a separate, bounded copy for persistence and
+//! omit every field that has not been explicitly classified.
 
 use notegate_command::validate_purpose;
-use rmcp::ErrorData;
-use rmcp::model::{CallToolResponse, CallToolResult};
 use serde_json::{Map, Value, json};
 
-use super::tool_identity::KnownMcpTool;
+use notegate_command::CommandTool;
 
 const SAFE_STRING_MAX_CHARS: usize = 2_048;
 const SAFE_INPUT_ARRAY_MAX_ITEMS: usize = 100;
 const SAFE_OUTPUT_ARRAY_MAX_ITEMS: usize = 1_000;
 const SNAPSHOT_MAX_BYTES: usize = 256 * 1_024;
+const SAFE_RECOVERY_FIELDS: FieldSet = "\
+commands completed_parts content create cursor depth destination direction edits encryption_metadata \
+encryption_mode ensure_newline expected_sha256 exclude if_none_match_sha256 include input kind limit \
+lines match max_bytes max_lines media_type name op original_filename parents part_numbers purpose q \
+recursive source start_line target tool upload_id byte_len";
 
 type FieldSet = &'static str;
 type SensitiveFields = &'static [(&'static str, &'static str)];
@@ -57,66 +60,8 @@ target text_at_rest_encryption text_encryption text_storage_format texts then to
 transfer_field transfers_field truncated unchanged updated_at upload_id user when encryption_mode \
 write_lock_changed write_lock_sources write_locked";
 
-pub(super) fn redact_input(tool: &str, input: &Value) -> Value {
+pub(crate) fn redact_input(tool: &str, input: &Value) -> Value {
     bounded_snapshot(redact_tool_input(tool, input, true, false))
-}
-
-pub(super) fn redact_response(
-    tool: &str,
-    input: &Value,
-    result: &Result<CallToolResponse, ErrorData>,
-) -> Value {
-    let snapshot = match result {
-        Err(error) => json!({"kind": "error", "error": redact_error(error)}),
-        Ok(CallToolResponse::Complete(result)) => complete_response(tool, input, result),
-        Ok(CallToolResponse::InputRequired(_)) => unsupported_response("input_required"),
-        Ok(CallToolResponse::Task(_)) => unsupported_response("task"),
-        Ok(_) => unsupported_response("unknown"),
-    };
-    bounded_snapshot(snapshot)
-}
-
-fn complete_response(tool: &str, input: &Value, result: &CallToolResult) -> Value {
-    let mut snapshot = Map::new();
-    snapshot.insert("kind".to_owned(), Value::String("complete".to_owned()));
-    snapshot.insert(
-        "is_error".to_owned(),
-        Value::Bool(result.is_error.unwrap_or(false)),
-    );
-    snapshot.insert(
-        "content_blocks_omitted".to_owned(),
-        json!(result.content.len()),
-    );
-    if let Some(structured) = result.structured_content.as_ref() {
-        snapshot.insert(
-            "result".to_owned(),
-            redact_structured_response(tool, input, structured),
-        );
-    }
-    Value::Object(snapshot)
-}
-
-fn unsupported_response(kind: &str) -> Value {
-    json!({
-        "kind": kind,
-        "details": redaction_marker("unsupported_response_variant", &Value::Null),
-    })
-}
-
-fn redact_error(error: &ErrorData) -> Value {
-    let mut output = Map::new();
-    output.insert("code".to_owned(), json!(error.code.0));
-    output.insert(
-        "message".to_owned(),
-        redaction_marker(
-            "untrusted_error_text",
-            &Value::String(error.message.to_string()),
-        ),
-    );
-    if let Some(data) = error.data.as_ref() {
-        output.insert("data".to_owned(), redact_output_value(data));
-    }
-    Value::Object(output)
 }
 
 fn redact_tool_input(
@@ -129,9 +74,9 @@ fn redact_tool_input(
         return redaction_marker("unrecognized_input_shape", input);
     };
 
-    let known_tool = KnownMcpTool::parse(tool);
+    let known_tool = CommandTool::parse(tool);
 
-    if known_tool == Some(KnownMcpTool::Me) {
+    if known_tool == Some(CommandTool::Me) {
         return select_input_fields(
             input,
             EMPTY,
@@ -142,7 +87,7 @@ fn redact_tool_input(
         );
     }
 
-    if known_tool.is_some_and(KnownMcpTool::is_sequence) {
+    if known_tool.is_some_and(CommandTool::is_sequence) {
         return select_input_fields(
             input,
             EMPTY,
@@ -153,7 +98,7 @@ fn redact_tool_input(
         );
     }
 
-    if known_tool == Some(KnownMcpTool::FileDownload) {
+    if known_tool == Some(CommandTool::FileDownload) {
         return select_input_fields(
             input,
             "target",
@@ -266,7 +211,7 @@ fn classify_unknown_input(
 }
 
 fn known_op_tool(tool: &str) -> bool {
-    KnownMcpTool::parse(tool).is_some_and(KnownMcpTool::accepts_op)
+    CommandTool::parse(tool).is_some_and(CommandTool::accepts_op)
 }
 
 fn field_set_contains(fields: FieldSet, key: &str) -> bool {
@@ -473,7 +418,7 @@ fn redact_object_array(
     )
 }
 
-fn redact_structured_response(tool: &str, input: &Value, value: &Value) -> Value {
+pub(crate) fn redact_structured_response(tool: &str, input: &Value, value: &Value) -> Value {
     let op = input.get("op").and_then(Value::as_str);
     response_fields(tool, op).map_or_else(
         || redaction_marker("unrecognized_response_contract", value),
@@ -541,7 +486,7 @@ fn redact_output_object(value: &Value, allowed: FieldSet) -> Value {
     Value::Object(output)
 }
 
-fn redact_output_value(value: &Value) -> Value {
+pub(crate) fn redact_output_value(value: &Value) -> Value {
     match value {
         Value::Null | Value::Bool(_) | Value::Number(_) => value.clone(),
         Value::String(value) => bounded_string(value),
@@ -570,6 +515,12 @@ fn redact_known_output_fields(object: &Map<String, Value>) -> Value {
 }
 
 fn redact_output_field(key: &str, value: &Value) -> Value {
+    if key == "field" {
+        return redact_recovery_field(value);
+    }
+    if key == "fields" {
+        return redact_recovery_fields(value);
+    }
     if key == "data" {
         return value.as_object().map_or_else(
             || redaction_marker("unrecognized_error_data", value),
@@ -580,6 +531,59 @@ fn redact_output_field(key: &str, value: &Value) -> Value {
         || redact_output_value(value),
         |category| redaction_marker(category, value),
     )
+}
+
+fn redact_recovery_fields(value: &Value) -> Value {
+    let Some(fields) = value.as_array() else {
+        return redaction_marker("unrecognized_recovery_fields", value);
+    };
+    if fields.len() > SAFE_OUTPUT_ARRAY_MAX_ITEMS {
+        return redaction_marker("output_array_too_large", value);
+    }
+
+    Value::Array(
+        fields
+            .iter()
+            .map(|field| match field {
+                Value::String(_) => redact_recovery_field(field),
+                Value::Object(object) => redact_known_output_fields(object),
+                _ => redaction_marker("unrecognized_recovery_field", field),
+            })
+            .collect(),
+    )
+}
+
+fn redact_recovery_field(value: &Value) -> Value {
+    let Some(field) = value.as_str() else {
+        return redaction_marker("unrecognized_recovery_field", value);
+    };
+    if is_safe_recovery_field(field) {
+        Value::String(field.to_owned())
+    } else {
+        redaction_marker("untrusted_recovery_field", value)
+    }
+}
+
+fn is_safe_recovery_field(field: &str) -> bool {
+    if field_set_contains(SAFE_RECOVERY_FIELDS, field) || field == "commands.length" {
+        return true;
+    }
+
+    let Some(rest) = field.strip_prefix("commands[") else {
+        return false;
+    };
+    let Some((index, suffix)) = rest.split_once(']') else {
+        return false;
+    };
+    if index.is_empty() || !index.bytes().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    if suffix.is_empty() {
+        return true;
+    }
+    suffix
+        .strip_prefix('.')
+        .is_some_and(|field| field_set_contains(SAFE_RECOVERY_FIELDS, field))
 }
 
 fn sensitive_output_category(key: &str) -> Option<&'static str> {
@@ -614,7 +618,7 @@ fn redact_purpose(value: &Value) -> Value {
 fn redact_known_tool(value: &Value) -> Value {
     value
         .as_str()
-        .and_then(KnownMcpTool::parse)
+        .and_then(CommandTool::parse)
         .filter(|tool| tool.is_sequence_command())
         .map_or_else(
             || redaction_marker("unrecognized_command_tool", value),
@@ -642,7 +646,7 @@ fn bounded_string(value: &str) -> Value {
     }
 }
 
-fn bounded_snapshot(value: Value) -> Value {
+pub(crate) fn bounded_snapshot(value: Value) -> Value {
     let byte_len = serialized_len(&value);
     if byte_len <= SNAPSHOT_MAX_BYTES {
         value
@@ -656,7 +660,7 @@ fn bounded_snapshot(value: Value) -> Value {
     }
 }
 
-fn redaction_marker(category: &str, value: &Value) -> Value {
+pub(crate) fn redaction_marker(category: &str, value: &Value) -> Value {
     let mut marker = Map::new();
     marker.insert("_redacted".to_owned(), Value::Bool(true));
     marker.insert("category".to_owned(), Value::String(category.to_owned()));
@@ -701,9 +705,11 @@ fn value_type(value: &Value) -> &'static str {
 mod tests {
     #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
+    use rmcp::ErrorData;
     use rmcp::model::CallToolResult;
 
     use super::*;
+    use crate::mcp::redact_mcp_response as redact_response;
 
     fn serialized(value: &Value) -> String {
         serde_json::to_string(value).expect("redacted value serializes")
@@ -1063,6 +1069,45 @@ mod tests {
         ] {
             assert!(!text.contains(secret));
         }
+    }
+
+    #[test]
+    fn sequence_preflight_redacts_user_controlled_recovery_field_names() {
+        let input = json!({
+            "purpose": "read notes",
+            "commands": [{
+                "tool": "read",
+                "op": "spaces",
+                "SECRET_TOKEN_VALUE": true
+            }]
+        });
+        let result = Err(ErrorData::invalid_params(
+            "invalid sequence command",
+            Some(json!({
+                "kind": "invalid_input",
+                "code": "sequence_preflight_failed",
+                "errors": [{
+                    "index": 0,
+                    "code": "sequence_command_unknown_fields",
+                    "next_action": {
+                        "kind": "remove_fields",
+                        "fields": [
+                            "commands[0].SECRET_TOKEN_VALUE",
+                            "commands[0].target"
+                        ]
+                    }
+                }]
+            })),
+        ));
+
+        let redacted = redact_response("run_read_sequence", &input, &result);
+        let text = serialized(&redacted);
+        let fields = &redacted["error"]["data"]["errors"][0]["next_action"]["fields"];
+
+        assert_eq!(fields[0]["_redacted"], true);
+        assert_eq!(fields[0]["category"], "untrusted_recovery_field");
+        assert_eq!(fields[1], "commands[0].target");
+        assert!(!text.contains("SECRET_TOKEN_VALUE"));
     }
 
     #[test]

@@ -264,12 +264,15 @@ export type AuditEventListResponse = {
   page: Page;
 };
 
-export type McpInvocation = {
+export type CommandInvocationSurface = "mcp" | "cli";
+
+export type CommandInvocation = {
   id: number;
   created_at: string;
   actor_account_id: string;
   actor?: AccountRef | null;
   caller_kind: "user" | "agent";
+  surface: CommandInvocationSurface;
   tool: string;
   op: string | null;
   purpose: string | null;
@@ -281,8 +284,8 @@ export type McpInvocation = {
   duration_ms: number;
 };
 
-export type McpInvocationListResponse = {
-  invocations: McpInvocation[];
+export type CommandInvocationListResponse = {
+  command_invocations: CommandInvocation[];
   page: Page;
 };
 

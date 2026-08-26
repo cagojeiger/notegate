@@ -91,6 +91,9 @@ pub enum RecoveryAction {
         transfer_field: String,
         instruction: String,
     },
+    RunCommand {
+        command: String,
+    },
     Done,
 }
 

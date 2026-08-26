@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use notegate_command::CommandTool;
 use reqwest::header::{ACCEPT, USER_AGENT};
 use secrecy::{ExposeSecret as _, SecretString};
 use serde_json::Value;
@@ -8,18 +9,19 @@ use url::Url;
 use crate::error::CliError;
 use crate::url_policy::{is_origin, uses_secure_or_loopback_transport};
 
-const COMMAND_PATH: &str = "api/commands/v1/";
+const CLI_PATH: &str = "/cli";
+const CLI_VERSION_HEADER: &str = "x-notegate-cli-version";
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
 pub struct CommandClient {
     http: reqwest::Client,
-    command_base_url: Url,
+    endpoint: Url,
     bearer: SecretString,
 }
 
 impl CommandClient {
     pub fn new(base_url: &str, bearer: SecretString, timeout: Duration) -> Result<Self, CliError> {
-        let command_base_url = command_base_url(base_url)?;
+        let endpoint = cli_endpoint(base_url)?;
         let http = reqwest::Client::builder()
             .timeout(timeout)
             .redirect(reqwest::redirect::Policy::none())
@@ -33,40 +35,20 @@ impl CommandClient {
 
         Ok(Self {
             http,
-            command_base_url,
+            endpoint,
             bearer,
         })
     }
 
-    pub async fn me(&self) -> Result<Value, CliError> {
-        let request = self.http.get(self.endpoint("me")?);
+    pub async fn invoke(&self, tool: CommandTool, input: &Value) -> Result<Value, CliError> {
+        let request = self
+            .http
+            .post(self.endpoint.clone())
+            .json(&serde_json::json!({
+                "tool": tool.as_str(),
+                "input": input,
+            }));
         self.send(request).await
-    }
-
-    pub async fn read(&self, input: &Value) -> Result<Value, CliError> {
-        self.post("read", input).await
-    }
-
-    pub async fn write(&self, input: &Value) -> Result<Value, CliError> {
-        self.post("write", input).await
-    }
-
-    pub async fn manage(&self, input: &Value) -> Result<Value, CliError> {
-        self.post("manage", input).await
-    }
-
-    async fn post(&self, name: &str, input: &Value) -> Result<Value, CliError> {
-        let request = self.http.post(self.endpoint(name)?).json(input);
-        self.send(request).await
-    }
-
-    fn endpoint(&self, name: &str) -> Result<Url, CliError> {
-        self.command_base_url.join(name).map_err(|_error| {
-            CliError::configuration(
-                "invalid_base_url",
-                "NOTEGATE_BASE_URL could not be joined with the Command API path",
-            )
-        })
     }
 
     async fn send(&self, request: reqwest::RequestBuilder) -> Result<Value, CliError> {
@@ -77,6 +59,7 @@ impl CommandClient {
                 USER_AGENT,
                 concat!("notegate-cli/", env!("CARGO_PKG_VERSION")),
             )
+            .header(CLI_VERSION_HEADER, env!("CARGO_PKG_VERSION"))
             .send()
             .await
             .map_err(map_transport_error)?;
@@ -97,7 +80,7 @@ impl CommandClient {
     }
 }
 
-fn command_base_url(input: &str) -> Result<Url, CliError> {
+fn cli_endpoint(input: &str) -> Result<Url, CliError> {
     let mut url = Url::parse(input).map_err(|_error| {
         CliError::configuration(
             "invalid_base_url",
@@ -116,7 +99,7 @@ fn command_base_url(input: &str) -> Result<Url, CliError> {
             "NOTEGATE_BASE_URL must use HTTPS unless the host is localhost or a loopback IP address",
         ));
     }
-    url.set_path(COMMAND_PATH);
+    url.set_path(CLI_PATH);
     Ok(url)
 }
 
@@ -163,8 +146,8 @@ mod tests {
 
     #[test]
     fn base_url_accepts_https_and_loopback_http_origins() -> Result<(), CliError> {
-        let url = command_base_url("https://notegate.example")?;
-        assert_eq!(url.as_str(), "https://notegate.example/api/commands/v1/");
+        let url = cli_endpoint("https://notegate.example")?;
+        assert_eq!(url.as_str(), "https://notegate.example/cli");
 
         for valid in [
             "https://notegate.example:8443",
@@ -175,7 +158,7 @@ mod tests {
             "http://[::1]:9191",
         ] {
             assert!(
-                command_base_url(valid).is_ok(),
+                cli_endpoint(valid).is_ok(),
                 "safe URL was rejected: {valid}"
             );
         }
@@ -199,7 +182,7 @@ mod tests {
             "https://example.test?token=secret",
             "https://example.test/#fragment",
         ] {
-            let result = command_base_url(invalid);
+            let result = cli_endpoint(invalid);
             assert!(result.is_err(), "unsafe URL was accepted: {invalid}");
             if let Err(error) = result {
                 assert_eq!(error.exit_code(), crate::error::EXIT_INVALID_INPUT);

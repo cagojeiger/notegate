@@ -3,19 +3,23 @@
 use std::future::Future;
 use std::time::Instant;
 
-use notegate_command::validate_purpose;
-use notegate_db::NewMcpInvocation;
-use notegate_model::{Caller, CallerIdentity};
-use notegate_service::files::parse_target;
+use notegate_command::{CommandTool, validate_purpose};
+use notegate_model::Caller;
 use rmcp::ErrorData;
 use rmcp::model::{CallToolResponse, CallToolResult};
-use serde_json::Value;
+use serde_json::{Map, Value, json};
 
-use super::invocation_redaction::{redact_input, redact_response};
-use super::tool_identity::KnownMcpTool;
 use crate::commands;
+use crate::invocations::redaction::{
+    bounded_snapshot, redact_input, redact_output_value, redact_structured_response,
+    redaction_marker,
+};
+use crate::invocations::{
+    InvocationRecord, InvocationSurface, canonical_op, canonical_tool, invocation_space_name,
+    record, sequence_error_code,
+};
 use crate::mcp::contract::command_error;
-use crate::observability::record_mcp_tool_metrics;
+use crate::observability::CommandInvocationMetrics;
 use crate::state::AppState;
 
 pub(crate) async fn execute_call(
@@ -27,8 +31,8 @@ pub(crate) async fn execute_call(
 ) -> Result<CallToolResponse, ErrorData> {
     let raw_op = input.get("op").and_then(Value::as_str);
     let op = canonical_op(tool, raw_op);
-    let known_tool = KnownMcpTool::parse(tool);
-    let raw_purpose = if known_tool == Some(KnownMcpTool::Me) {
+    let known_tool = CommandTool::parse(tool);
+    let raw_purpose = if known_tool == Some(CommandTool::Me) {
         None
     } else {
         input.get("purpose").and_then(Value::as_str)
@@ -38,13 +42,18 @@ pub(crate) async fn execute_call(
         .transpose()
         .map_err(|error| invalid_input_error(error.to_string()));
     let purpose = raw_purpose.filter(|_| purpose_validation.is_ok());
-    let space_name = if known_tool == Some(KnownMcpTool::Read) && op == Some("changes") {
+    let space_name = if known_tool == Some(CommandTool::Read) && op == Some("changes") {
         invocation_space_name(input.get("target").and_then(Value::as_str))
     } else {
         None
     };
 
     let started = Instant::now();
+    let metrics = CommandInvocationMetrics::start(
+        state.config.metrics_enabled,
+        "mcp",
+        metric_tool_name(tool),
+    );
     let result = match purpose_validation {
         Ok(_) => future.await,
         Err(error) => Err(error),
@@ -56,26 +65,22 @@ pub(crate) async fn execute_call(
         "success"
     };
     let elapsed = started.elapsed();
-    record_mcp_tool_metrics(
-        state.config.metrics_enabled,
-        metric_tool_name(tool),
-        outcome,
-        elapsed,
-    );
+    metrics.finish(outcome, elapsed);
 
     if let Some(caller) = caller {
         let redacted_input = redact_input(tool, input);
-        let redacted_response = redact_response(tool, input, &result);
+        let redacted_response = redact_mcp_response(tool, input, &result);
         record(
             state,
             caller,
             InvocationRecord {
+                surface: InvocationSurface::Mcp,
                 tool: canonical_tool(tool),
                 op,
                 purpose,
                 space_name: space_name.as_deref(),
                 input: &redacted_input,
-                response: &redacted_response,
+                response: Some(&redacted_response),
                 error_code: error_code.as_deref(),
                 elapsed_ms: elapsed.as_millis(),
             },
@@ -86,66 +91,66 @@ pub(crate) async fn execute_call(
     result
 }
 
-/// Extract the validated Space-name segment used by the invocation list summary.
-pub(crate) fn invocation_space_name(target: Option<&str>) -> Option<String> {
-    target
-        .and_then(|target| parse_target(target).ok())
-        .map(|target| target.space)
+pub(crate) fn redact_mcp_response(
+    tool: &str,
+    input: &Value,
+    result: &Result<CallToolResponse, ErrorData>,
+) -> Value {
+    let snapshot = match result {
+        Err(error) => json!({"kind": "error", "error": redact_mcp_error(error)}),
+        Ok(CallToolResponse::Complete(result)) => complete_response(tool, input, result),
+        Ok(CallToolResponse::InputRequired(_)) => unsupported_response("input_required"),
+        Ok(CallToolResponse::Task(_)) => unsupported_response("task"),
+        Ok(_) => unsupported_response("unknown"),
+    };
+    bounded_snapshot(snapshot)
+}
+
+fn complete_response(tool: &str, input: &Value, result: &CallToolResult) -> Value {
+    let mut snapshot = Map::new();
+    snapshot.insert("kind".to_owned(), Value::String("complete".to_owned()));
+    snapshot.insert(
+        "is_error".to_owned(),
+        Value::Bool(result.is_error.unwrap_or(false)),
+    );
+    snapshot.insert(
+        "content_blocks_omitted".to_owned(),
+        json!(result.content.len()),
+    );
+    if let Some(structured) = result.structured_content.as_ref() {
+        snapshot.insert(
+            "result".to_owned(),
+            redact_structured_response(tool, input, structured),
+        );
+    }
+    Value::Object(snapshot)
+}
+
+fn unsupported_response(kind: &str) -> Value {
+    json!({
+        "kind": kind,
+        "details": redaction_marker("unsupported_response_variant", &Value::Null),
+    })
+}
+
+fn redact_mcp_error(error: &ErrorData) -> Value {
+    let mut output = Map::new();
+    output.insert("code".to_owned(), json!(error.code.0));
+    output.insert(
+        "message".to_owned(),
+        redaction_marker(
+            "untrusted_error_text",
+            &Value::String(error.message.to_string()),
+        ),
+    );
+    if let Some(data) = error.data.as_ref() {
+        output.insert("data".to_owned(), redact_output_value(data));
+    }
+    Value::Object(output)
 }
 
 fn invalid_input_error(message: impl Into<String>) -> ErrorData {
     command_error(commands::error::invalid_input_error(message))
-}
-
-struct InvocationRecord<'a> {
-    tool: &'a str,
-    op: Option<&'a str>,
-    purpose: Option<&'a str>,
-    space_name: Option<&'a str>,
-    input: &'a Value,
-    response: &'a Value,
-    error_code: Option<&'a str>,
-    elapsed_ms: u128,
-}
-
-async fn record(state: &AppState, caller: &Caller, invocation: InvocationRecord<'_>) {
-    let (owner_user_id, caller_kind) = match &caller.identity {
-        CallerIdentity::User(_) => (caller.account_id(), "user"),
-        CallerIdentity::Agent(agent) => (agent.owner_user_id, "agent"),
-    };
-    let outcome = if invocation.error_code.is_some() {
-        "error"
-    } else {
-        "success"
-    };
-    let duration_ms = i64::try_from(invocation.elapsed_ms).unwrap_or(i64::MAX);
-
-    if let Err(error) = state
-        .mcp_invocations
-        .insert(NewMcpInvocation {
-            owner_user_id,
-            actor_account_id: caller.account_id(),
-            caller_kind,
-            tool: invocation.tool,
-            op: invocation.op,
-            purpose: invocation.purpose,
-            space_name: invocation.space_name,
-            input: invocation.input,
-            response: Some(invocation.response),
-            outcome,
-            error_code: invocation.error_code,
-            duration_ms,
-        })
-        .await
-    {
-        tracing::warn!(
-            tool = invocation.tool,
-            op = invocation.op,
-            outcome,
-            error = %error,
-            "failed to record MCP invocation history"
-        );
-    }
 }
 
 fn call_error_code(tool: &str, result: &Result<CallToolResponse, ErrorData>) -> Option<String> {
@@ -155,7 +160,7 @@ fn call_error_code(tool: &str, result: &Result<CallToolResponse, ErrorData>) -> 
             Some(tool_result_error_code(result))
         }
         Ok(CallToolResponse::Complete(result))
-            if KnownMcpTool::parse(tool).is_some_and(KnownMcpTool::is_sequence) =>
+            if CommandTool::parse(tool).is_some_and(CommandTool::is_sequence) =>
         {
             result
                 .structured_content
@@ -179,54 +184,8 @@ fn tool_result_error_code(result: &CallToolResult) -> String {
     }
 }
 
-fn sequence_error_code(result: &Value) -> Option<String> {
-    if result.get("ok").and_then(Value::as_bool) != Some(false) {
-        return None;
-    }
-
-    result
-        .get("results")
-        .and_then(Value::as_array)
-        .and_then(|results| {
-            results
-                .iter()
-                .find(|item| item.get("ok").and_then(Value::as_bool) == Some(false))
-        })
-        .and_then(|item| {
-            item.pointer("/error/data/code")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .or_else(|| {
-                    item.pointer("/error/code")
-                        .and_then(Value::as_i64)
-                        .map(|code| code.to_string())
-                })
-        })
-}
-
 fn metric_tool_name(tool: &str) -> &'static str {
-    KnownMcpTool::parse(tool).map_or("unknown", KnownMcpTool::as_str)
-}
-
-fn canonical_tool(tool: &str) -> &'static str {
-    metric_tool_name(tool)
-}
-
-pub(super) fn canonical_op<'a>(tool: &str, op: Option<&'a str>) -> Option<&'a str> {
-    match (KnownMcpTool::parse(tool), op?) {
-        (
-            Some(KnownMcpTool::Read),
-            op @ ("spaces" | "ls" | "tree" | "stat" | "read" | "changes"),
-        )
-        | (Some(KnownMcpTool::Search), op @ ("find" | "grep"))
-        | (Some(KnownMcpTool::Write), op @ ("write" | "append" | "patch" | "edit"))
-        | (Some(KnownMcpTool::Manage), op @ ("mkdir" | "mv" | "cp" | "rm"))
-        | (
-            Some(KnownMcpTool::FileUpload),
-            op @ ("begin_upload" | "prepare_parts" | "complete_upload" | "abort_upload"),
-        ) => Some(op),
-        _ => None,
-    }
+    canonical_tool(tool)
 }
 
 fn error_code(error: &ErrorData) -> String {
@@ -249,6 +208,7 @@ mod tests {
     )]
 
     use super::*;
+    use notegate_model::CallerIdentity;
 
     #[test]
     fn invocation_space_name_keeps_only_a_valid_space_segment() {
@@ -394,7 +354,7 @@ mod tests {
             ),
         >(
             "SELECT tool, op, purpose, input, response, outcome, error_code \
-             FROM mcp_invocations WHERE actor_account_id = $1 ORDER BY id",
+             FROM command_invocations WHERE actor_account_id = $1 ORDER BY id",
         )
         .bind(caller.account_id())
         .fetch_all(&state.db)
@@ -606,7 +566,7 @@ mod tests {
             ),
         >(
             "SELECT tool, op, input, response, outcome, error_code \
-             FROM mcp_invocations WHERE actor_account_id = $1 ORDER BY id",
+             FROM command_invocations WHERE actor_account_id = $1 ORDER BY id",
         )
         .bind(caller.account_id())
         .fetch_all(&state.db)
@@ -726,9 +686,9 @@ mod tests {
         })
         .await?;
 
-        let row = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, String)>(
-            "SELECT owner_user_id, actor_account_id, caller_kind \
-             FROM mcp_invocations WHERE purpose = $1",
+        let row = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, String, String)>(
+            "SELECT owner_user_id, actor_account_id, caller_kind, surface \
+             FROM command_invocations WHERE purpose = $1",
         )
         .bind("search the owner's notes")
         .fetch_one(&state.db)
@@ -736,6 +696,7 @@ mod tests {
         assert_eq!(row.0, owner_user_id);
         assert_eq!(row.1, agent_account_id);
         assert_eq!(row.2, "agent");
+        assert_eq!(row.3, "mcp");
 
         db.cleanup().await;
         Ok(())

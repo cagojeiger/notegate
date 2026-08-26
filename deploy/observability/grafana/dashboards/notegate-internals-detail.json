@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Process-local MCP, database-pool, and server-managed text decryption diagnostics for NoteGate.",
+  "description": "Process-local command invocation, database-pool, and server-managed text decryption diagnostics for NoteGate.",
   "editable": false,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -64,7 +64,7 @@
       },
       "id": 1,
       "panels": [],
-      "title": "MCP · Tool Operations",
+      "title": "Command Invocations · MCP and CLI",
       "type": "row"
     },
     {
@@ -72,7 +72,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Meaning: completed MCP tool calls per second in the current rate interval. 0.00 is normal when no MCP tool completed recently; use a wider time range and Rate by Tool and Outcome to confirm historical traffic. A high rate is load, not a failure by itself.",
+      "description": "Meaning: completed MCP and CLI command invocations per second in the current rate interval. 0.00 is normal when no selected surface completed recently; use a wider time range and Rate by Surface, Tool, and Outcome to confirm historical traffic. A high rate is load, not a failure by itself.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -86,7 +86,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 1
       },
@@ -109,14 +109,14 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(notegate_mcp_tool_calls_total{job=\"notegate\", instance=~\"$instance\", tool=~\"$tool\"}[$__rate_interval])) or vector(0)",
+          "expr": "sum(rate(notegate_command_invocations_total{job=\"notegate\", instance=~\"$instance\", surface=~\"$surface\", tool=~\"$tool\"}[$__rate_interval])) or vector(0)",
           "instant": false,
           "legendFormat": "calls",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "MCP Tool Rate",
+      "title": "Command Invocation Rate",
       "type": "stat"
     },
     {
@@ -124,7 +124,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Meaning: share of dispatched MCP tools returning an MCP error; authentication failures before tool dispatch are counted in HTTP RED instead. Sustained non-zero values indicate tool, input, permission, or internal failures. Check Rate by Tool and Outcome to identify the tool, then application logs.",
+      "description": "Meaning: share of selected command invocations returning an error. MCP authentication failures before tool dispatch are counted in HTTP RED instead. Sustained non-zero values indicate tool, input, permission, or internal failures. Check Rate by Surface, Tool, and Outcome to identify the surface and tool, then application logs.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -156,8 +156,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 6,
         "y": 1
       },
       "id": 3,
@@ -179,14 +179,14 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "100 * sum(rate(notegate_mcp_tool_calls_total{job=\"notegate\", instance=~\"$instance\", tool=~\"$tool\", outcome=\"error\"}[$__rate_interval])) / clamp_min(sum(rate(notegate_mcp_tool_calls_total{job=\"notegate\", instance=~\"$instance\", tool=~\"$tool\"}[$__rate_interval])), 1e-9) or vector(0)",
+          "expr": "100 * sum(rate(notegate_command_invocations_total{job=\"notegate\", instance=~\"$instance\", surface=~\"$surface\", tool=~\"$tool\", outcome=\"error\"}[$__rate_interval])) / clamp_min(sum(rate(notegate_command_invocations_total{job=\"notegate\", instance=~\"$instance\", surface=~\"$surface\", tool=~\"$tool\"}[$__rate_interval])), 1e-9) or vector(0)",
           "instant": false,
           "legendFormat": "errors",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "MCP Error Rate",
+      "title": "Command Error Rate",
       "type": "stat"
     },
     {
@@ -194,7 +194,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Meaning: 95% of completed MCP tool calls are faster than this value. A sustained rise relative to baseline indicates a slow tool path. Check p95 Latency by Tool first, then correlate Search Detail, DB Acquire p95, and decryption p95.",
+      "description": "Meaning: 95% of selected completed command invocations are faster than this value. A sustained rise relative to baseline indicates a slow tool path. Check p95 Latency by Surface and Tool first, then correlate Search Detail, DB Acquire p95, and decryption p95.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -236,8 +236,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 12,
         "y": 1
       },
       "id": 4,
@@ -259,14 +259,14 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(notegate_mcp_tool_duration_seconds_bucket{job=\"notegate\", instance=~\"$instance\", tool=~\"$tool\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(notegate_command_invocation_duration_seconds_bucket{job=\"notegate\", instance=~\"$instance\", surface=~\"$surface\", tool=~\"$tool\"}[$__rate_interval])))",
           "instant": false,
           "legendFormat": "p95",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "MCP p95 Latency",
+      "title": "Command p95 Latency",
       "type": "stat"
     },
     {
@@ -274,7 +274,59 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Use this to identify which bounded MCP tool contributes load or errors. A single tool's error series rising points to that tool contract or backend path; broad errors across tools point to shared auth-after-dispatch, DB, or service dependencies. Confirm with logs.",
+      "description": "Meaning: selected MCP and CLI command invocations currently running in this process. A sustained non-zero value without matching completion rate can indicate slow or stuck command handlers.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "id": 31,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(notegate_command_invocations_in_flight{job=\"notegate\", instance=~\"$instance\", surface=~\"$surface\", tool=~\"$tool\"}) or vector(0)",
+          "instant": false,
+          "legendFormat": "in flight",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Command In Flight",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Use this to identify which bounded command surface and tool contributes load or errors. A single tool's error series rising points to that tool contract or backend path; broad errors across surfaces point to shared auth-after-dispatch, DB, or service dependencies. Confirm with logs.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -309,14 +361,14 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (tool, outcome) (rate(notegate_mcp_tool_calls_total{job=\"notegate\", instance=~\"$instance\", tool=~\"$tool\"}[$__rate_interval]))",
+          "expr": "sum by (surface, tool, outcome) (rate(notegate_command_invocations_total{job=\"notegate\", instance=~\"$instance\", surface=~\"$surface\", tool=~\"$tool\"}[$__rate_interval]))",
           "instant": false,
-          "legendFormat": "{{tool}} · {{outcome}}",
+          "legendFormat": "{{surface}} · {{tool}} · {{outcome}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Rate by Tool and Outcome",
+      "title": "Rate by Surface, Tool, and Outcome",
       "type": "timeseries"
     },
     {
@@ -324,7 +376,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Use this after aggregate MCP p95 rises. Search-only latency points to Search Detail; read/write/manage latency with DB acquire growth points to database contention; one isolated tool points to its own handler path.",
+      "description": "Use this after aggregate command p95 rises. Search-only latency points to Search Detail; read/write/manage latency with DB acquire growth points to database contention; one isolated tool points to its own handler path.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -359,14 +411,14 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le, tool) (rate(notegate_mcp_tool_duration_seconds_bucket{job=\"notegate\", instance=~\"$instance\", tool=~\"$tool\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, surface, tool) (rate(notegate_command_invocation_duration_seconds_bucket{job=\"notegate\", instance=~\"$instance\", surface=~\"$surface\", tool=~\"$tool\"}[$__rate_interval])))",
           "instant": false,
-          "legendFormat": "{{tool}}",
+          "legendFormat": "{{surface}} · {{tool}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "p95 Latency by Tool",
+      "title": "p95 Latency by Surface and Tool",
       "type": "timeseries"
     },
     {
@@ -1617,7 +1669,8 @@
   "schemaVersion": 41,
   "tags": [
     "notegate",
-    "mcp",
+    "command-invocations",
+    "cli",
     "database",
     "security",
     "background-jobs",
@@ -1656,16 +1709,45 @@
         "type": "query"
       },
       {
-        "allValue": "me|read|search|write|manage|file_download|file_upload|run_read_sequence|run_write_sequence",
+        "allValue": "mcp|cli",
         "current": {
           "selected": false,
           "text": "All",
           "value": "$__all"
         },
-        "description": "Select one or more bounded MCP tool categories.",
+        "description": "Select MCP, CLI, or both command invocation surfaces.",
         "hide": 0,
         "includeAll": true,
-        "label": "MCP Tool",
+        "label": "Surface",
+        "multi": true,
+        "name": "surface",
+        "options": [
+          {
+            "selected": false,
+            "text": "mcp",
+            "value": "mcp"
+          },
+          {
+            "selected": false,
+            "text": "cli",
+            "value": "cli"
+          }
+        ],
+        "query": "mcp,cli",
+        "skipUrlSync": false,
+        "type": "custom"
+      },
+      {
+        "allValue": "me|read|search|write|manage|file_download|file_upload|run_read_sequence|run_write_sequence|unknown",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "description": "Select one or more bounded command invocation tool categories.",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Command Tool",
         "multi": true,
         "name": "tool",
         "options": [
@@ -1713,9 +1795,14 @@
             "selected": false,
             "text": "run_write_sequence",
             "value": "run_write_sequence"
+          },
+          {
+            "selected": false,
+            "text": "unknown",
+            "value": "unknown"
           }
         ],
-        "query": "me,read,search,write,manage,file_download,file_upload,run_read_sequence,run_write_sequence",
+        "query": "me,read,search,write,manage,file_download,file_upload,run_read_sequence,run_write_sequence,unknown",
         "skipUrlSync": false,
         "type": "custom"
       }

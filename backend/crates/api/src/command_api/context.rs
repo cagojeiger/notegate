@@ -13,8 +13,8 @@ use crate::internal_search::RequestContext;
 pub(super) struct HttpCommandContext(CommandContext);
 
 impl HttpCommandContext {
-    pub(super) fn as_command(&self) -> &CommandContext {
-        &self.0
+    pub(super) fn into_command(self) -> CommandContext {
+        self.0
     }
 }
 
@@ -115,10 +115,10 @@ mod tests {
             .await
             .expect("authenticated command context");
 
-        assert_eq!(context.as_command().caller().account_id(), account_id);
+        assert_eq!(context.0.caller().account_id(), account_id);
         assert_eq!(
             context
-                .as_command()
+                .0
                 .internal_search()
                 .and_then(|value| value.request_id())
                 .and_then(|value| value.to_str().ok()),
@@ -126,7 +126,7 @@ mod tests {
         );
         assert!(
             context
-                .as_command()
+                .0
                 .internal_search()
                 .and_then(|value| value.remaining())
                 .is_some()

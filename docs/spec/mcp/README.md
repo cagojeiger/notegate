@@ -27,7 +27,7 @@ run_write_sequence  ordered fail-fast write/manage
 - sequence tool은 sequence 전체에 하나의 `purpose`를 지정한다.
 - 인증된 호출의 실행 이력은 민감한 원문을 저장하지 않는 별도 snapshot으로 기록한다.
 
-수집 경계, redaction, sequence 집계와 보존 기간은 [`event-logging.md`](../event-logging.md#mcp-invocation-history)를 따른다.
+수집 경계, redaction, sequence 집계와 보존 기간은 [`event-logging.md`](../event-logging.md#command-invocation-history)를 따른다.
 
 ## 버전 확인
 

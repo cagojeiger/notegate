@@ -15,7 +15,7 @@ const BROWSER_SESSION_PURGE_BATCH: i64 = 1_000;
 const OBJECT_STORAGE_HISTORY_PURGE_BATCH: i64 = 1_000;
 const AUDIT_EVENT_PURGE_BATCH: i64 = 1_000;
 const FILE_CHANGE_EVENT_PURGE_BATCH: i64 = 1_000;
-const MCP_INVOCATION_PURGE_BATCH: i64 = 1_000;
+const COMMAND_INVOCATION_PURGE_BATCH: i64 = 1_000;
 const LINK_GRAPH_PROJECTION_PURGE_BATCH: i64 = 1_000;
 
 #[derive(Debug, Clone)]
@@ -304,21 +304,21 @@ impl PurgeRepo {
         .map_err(map_sqlx_error)?
         .get("deleted_count");
 
-        let mcp_invocations_deleted: i64 = sqlx::query(
+        let command_invocations_deleted: i64 = sqlx::query(
             "WITH due AS ( \
-                 SELECT id FROM mcp_invocations \
+                 SELECT id FROM command_invocations \
                  WHERE created_at <= now() - make_interval(days => $1::int) \
                  ORDER BY created_at, id \
                  LIMIT $2 \
              ), deleted AS ( \
-                 DELETE FROM mcp_invocations m USING due \
-                 WHERE m.id = due.id \
-                 RETURNING m.id \
+                 DELETE FROM command_invocations i USING due \
+                 WHERE i.id = due.id \
+                 RETURNING i.id \
              ) \
              SELECT count(*) AS deleted_count FROM deleted",
         )
-        .bind(i32::try_from(limits::MCP_INVOCATION_RETENTION_DAYS).unwrap_or(i32::MAX))
-        .bind(MCP_INVOCATION_PURGE_BATCH)
+        .bind(i32::try_from(limits::COMMAND_INVOCATION_RETENTION_DAYS).unwrap_or(i32::MAX))
+        .bind(COMMAND_INVOCATION_PURGE_BATCH)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?
@@ -334,7 +334,7 @@ impl PurgeRepo {
             object_storage_history_deleted: object_storage_history_deleted.max(0) as u64,
             audit_events_deleted: audit_events_deleted.max(0) as u64,
             file_change_events_deleted: file_change_events_deleted.max(0) as u64,
-            mcp_invocations_deleted: mcp_invocations_deleted.max(0) as u64,
+            command_invocations_deleted: command_invocations_deleted.max(0) as u64,
             link_graph_projections_deleted: link_graph_projections_deleted.max(0) as u64,
             object_deletions_queued: queued_for_spaces + queued_for_nodes,
         })
@@ -351,7 +351,7 @@ pub struct PurgeRun {
     pub object_storage_history_deleted: u64,
     pub audit_events_deleted: u64,
     pub file_change_events_deleted: u64,
-    pub mcp_invocations_deleted: u64,
+    pub command_invocations_deleted: u64,
     pub link_graph_projections_deleted: u64,
     pub object_deletions_queued: u64,
 }

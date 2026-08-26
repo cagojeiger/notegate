@@ -119,18 +119,20 @@ async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::
 }
 
 #[tokio::test]
-async fn purge_deletes_expired_mcp_invocations_in_bounded_batches()
+async fn purge_deletes_expired_command_invocations_in_bounded_batches()
 -> Result<(), Box<dyn std::error::Error>> {
     let _guard = PURGE_TEST_MUTEX.lock().await;
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let user = insert_user_account(&db.pool, "mcp-purger", "mcp-purger@example.test").await?;
+    let user =
+        insert_user_account(&db.pool, "command-purger", "command-purger@example.test").await?;
 
     sqlx::query(
-        "INSERT INTO mcp_invocations \
-         (created_at, owner_user_id, actor_account_id, caller_kind, tool, op, purpose, input, outcome, duration_ms) \
-         SELECT now() - interval '91 days', $1, $1, 'user', 'search', 'find', \
+        "INSERT INTO command_invocations \
+         (created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, op, purpose, input, outcome, duration_ms) \
+         SELECT now() - interval '91 days', $1, $1, 'user', \
+                CASE WHEN value % 2 = 0 THEN 'mcp' ELSE 'cli' END, 'search', 'find', \
                 'expired invocation ' || value, '{}'::jsonb, 'success', 1 \
          FROM generate_series(1, 1001) AS value",
     )
@@ -138,9 +140,9 @@ async fn purge_deletes_expired_mcp_invocations_in_bounded_batches()
     .execute(&db.pool)
     .await?;
     sqlx::query(
-        "INSERT INTO mcp_invocations \
-         (created_at, owner_user_id, actor_account_id, caller_kind, tool, op, purpose, input, outcome, duration_ms) \
-         VALUES (now() - interval '89 days', $1, $1, 'user', 'read', 'read', \
+        "INSERT INTO command_invocations \
+         (created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, op, purpose, input, outcome, duration_ms) \
+         VALUES (now() - interval '89 days', $1, $1, 'user', 'cli', 'read', 'read', \
                  'recent invocation', '{}'::jsonb, 'success', 1)",
     )
     .bind(user)
@@ -148,12 +150,12 @@ async fn purge_deletes_expired_mcp_invocations_in_bounded_batches()
     .await?;
 
     let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
-    assert_eq!(first.mcp_invocations_deleted, 1_000);
+    assert_eq!(first.command_invocations_deleted, 1_000);
     let second = PurgeRepo::new(db.pool.clone()).run_once().await?;
-    assert_eq!(second.mcp_invocations_deleted, 1);
+    assert_eq!(second.command_invocations_deleted, 1);
 
     let remaining: Vec<String> = sqlx::query_scalar(
-        "SELECT purpose FROM mcp_invocations WHERE owner_user_id = $1 ORDER BY id",
+        "SELECT purpose FROM command_invocations WHERE owner_user_id = $1 ORDER BY id",
     )
     .bind(user)
     .fetch_all(&db.pool)

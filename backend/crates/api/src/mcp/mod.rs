@@ -1,6 +1,6 @@
 mod contract;
 mod invocation;
-mod invocation_redaction;
 pub mod server;
-mod tool_identity;
 pub mod tools;
+#[cfg(test)]
+pub(crate) use invocation::redact_mcp_response;

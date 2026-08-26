@@ -6,17 +6,12 @@ pub use notegate_command::CompletedPartInput;
 pub use notegate_command::{
     FileDownloadInput, FileUploadInput, ManageInput, ReadInput, SearchInput, WriteInput,
 };
-use notegate_command::{
-    ManageOperationSchema, ReadOperationSchema, SearchOperationSchema, WriteEditEntrySchema,
-    WriteOperationSchema,
-};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
 use serde_json::Value;
 
 use super::adapter;
 use crate::commands::{self, CommandContext};
-use crate::mcp::contract::{McpAction, command_error};
 use crate::state::AppState;
 
 mod sequence;
@@ -87,52 +82,6 @@ async fn execute_manage(
     input: ManageInput,
 ) -> Result<Json<Value>, ErrorData> {
     adapter::result(commands::executor::manage(state, context, input).await)
-}
-
-fn validate_read_operation(input: &ReadInput) -> Result<(), ErrorData> {
-    commands::executor::validate_read_operation(input).map_err(command_error)
-}
-
-fn validate_search_operation(input: &SearchInput) -> Result<(), ErrorData> {
-    commands::executor::validate_search_operation(input).map_err(command_error)
-}
-
-fn validate_write_operation(input: &WriteInput) -> Result<(), ErrorData> {
-    commands::executor::validate_write_operation(input).map_err(command_error)
-}
-
-fn validate_static_write_content(input: &WriteInput) -> Result<(), ErrorData> {
-    commands::executor::validate_static_write_content(input).map_err(command_error)
-}
-
-fn validate_manage_operation(input: &ManageInput) -> Result<(), ErrorData> {
-    commands::executor::validate_manage_operation(input).map_err(command_error)
-}
-
-fn required<T>(
-    value: Option<T>,
-    field: &'static str,
-    context: &'static str,
-) -> Result<T, ErrorData> {
-    commands::error::required_input(value, field, context).map_err(command_error)
-}
-
-fn invalid_input_error(message: impl Into<String>) -> ErrorData {
-    command_error(commands::error::invalid_input_error(message))
-}
-
-fn actionable_input_error(
-    code: &'static str,
-    message: impl Into<String>,
-    hint: &'static str,
-    next_action: McpAction,
-) -> ErrorData {
-    command_error(commands::error::actionable_input_error(
-        code,
-        message,
-        hint,
-        next_action,
-    ))
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 ## 기본 원칙
 
 - Secret, bearer token, OAuth code, PKCE verifier, API key plaintext, browser session token, OAuth refresh token은 log/error/audit payload에 기록하지 않는다.
-- MCP invocation history는 allowlist와 redaction을 적용한 별도 snapshot만 저장하고 owner user의 browser self-review에만 노출한다. 수집 경계, 제외 항목과 보존 정책은 [`event-logging.md`](./event-logging.md#mcp-invocation-history)가 소유한다.
+- Command invocation history는 MCP·Command API 모두 allowlist와 redaction을 적용한 별도 snapshot만 저장하고 owner user의 browser self-review에만 노출한다. 수집 경계, 제외 항목과 보존 정책은 [`event-logging.md`](./event-logging.md#command-invocation-history)가 소유한다.
 - User PII는 평문 저장하지 않는다.
 - API key plaintext는 저장하지 않고 HMAC hash만 저장한다.
 - Browser session cookie token은 저장하지 않고 HMAC hash만 저장한다.

@@ -1,11 +1,11 @@
 import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query";
 import { History, RefreshCw } from "lucide-react";
 
-import type { AuditEventListResponse, BackgroundJobListResponse, FileChangeEventListResponse, McpInvocationListResponse } from "../../api/types";
+import type { AuditEventListResponse, BackgroundJobListResponse, CommandInvocationListResponse, FileChangeEventListResponse } from "../../api/types";
 import { Button, EmptyState } from "../../shared/ui";
 import { formatEventTime, formatEventTimeCompact } from "./eventDisplay";
 
-export type EventListResponse = AuditEventListResponse | BackgroundJobListResponse | FileChangeEventListResponse | McpInvocationListResponse;
+export type EventListResponse = AuditEventListResponse | BackgroundJobListResponse | CommandInvocationListResponse | FileChangeEventListResponse;
 export type EventHistoryQuery<T extends EventListResponse> = UseInfiniteQueryResult<InfiniteData<T, unknown>, Error>;
 
 export function RefreshButton({

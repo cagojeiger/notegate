@@ -1,6 +1,8 @@
-# Command API
+# CLI transport
 
-Command API는 `notegate-cli` 같은 HTTP client가 NoteGate의 공통 path-first command engine을 직접 호출하는 transport다. MCP와 입력·업무 검증·권한·복구 action을 공유하지만 JSON-RPC envelope나 MCP sequence를 제공하지 않는다.
+`POST /cli`는 `notegate-cli`가 MCP와 같은 command contract를 JSON HTTP로 호출하는 단일 transport endpoint다. MCP와 CLI는 도구 이름, input schema, `purpose`, 업무 검증, sequence 실행, recovery action을 공통 계층에서 파생한다. 차이는 MCP의 JSON-RPC envelope와 CLI의 HTTP envelope뿐이다.
+
+별도의 URL API version은 두지 않는다. CLI binary와 NoteGate server는 같은 release version으로 동작하며, 호환되지 않는 조합은 실행 전에 구조화 오류로 중단한다.
 
 ## 인증
 
@@ -8,43 +10,56 @@ Agent가 소유한 `ngk_v2_` API key와 AuthGate Device Flow가 발급한 User O
 
 ```http
 Authorization: Bearer ngk_v2_...
+X-Notegate-CLI-Version: <CLI release version>
 ```
 
-User OAuth token의 `aud`는 서버의 `NOTEGATE_CLI_OAUTH_CLIENT_ID`와 정확히 일치해야 한다. 로컬 서버는 `notegate-cli-local`, 운영 서버는 `notegate-cli`처럼 AuthGate에 별도로 등록한 client를 사용한다. 검증된 User는 `Channel::Api`로 처리하며 NoteGate에 이미 등록된 활성 계정이어야 한다.
+User OAuth token의 `aud`는 서버의 `NOTEGATE_CLI_OAUTH_CLIENT_ID`와 정확히 일치해야 한다. Browser session cookie, MCP resource audience token과 legacy `ngk_v1_` key는 허용하지 않는다. 반대로 User MCP는 계속 `NOTEGATE_RESOURCE_URL` audience만 허용하고 Public V2는 Agent `ngk_v2_` key만 허용한다. 모든 응답은 `Cache-Control: private, no-store`다.
 
-Browser session cookie, MCP resource audience token과 legacy `ngk_v1_` key는 허용하지 않는다. 반대로 User MCP는 계속 `NOTEGATE_RESOURCE_URL` audience만 허용하고 Public V2는 Agent `ngk_v2_` key만 허용한다. 모든 응답은 `Cache-Control: private, no-store`다.
+`X-Notegate-CLI-Version`은 필수다. 서버 release와 다르거나 누락되면 `426 Upgrade Required`, `error=cli_update_required`, `next_action={"kind":"run_command","command":"notegate-cli update"}`를 반환하며 command를 실행하지 않는다.
 
-## Endpoint
+## Endpoint와 envelope
 
-| Method | Path | 공통 command |
-|---|---|---|
-| `GET` | `/api/commands/v1/me` | identity |
-| `POST` | `/api/commands/v1/read` | read |
-| `POST` | `/api/commands/v1/search` | search |
-| `POST` | `/api/commands/v1/write` | write |
-| `POST` | `/api/commands/v1/manage` | manage |
-| `POST` | `/api/commands/v1/file_upload` | file upload lifecycle |
-| `POST` | `/api/commands/v1/file_download` | presigned download |
-
-`run_sequence`는 제공하지 않는다. CLI가 여러 명령을 실행할 때 각 endpoint를 명시적으로 호출한다.
-
-## 요청과 성공 응답
-
-`me`를 제외한 요청은 공통 command input과 동일한 JSON object이며 `purpose`가 필수다.
+```http
+POST /cli
+Content-Type: application/json
+```
 
 ```json
 {
-  "purpose": "연결된 Space 목록 확인",
-  "op": "spaces",
-  "limit": 20
+  "tool": "read",
+  "input": {
+    "purpose": "연결된 Space 목록 확인",
+    "op": "spaces",
+    "limit": 20
+  }
 }
 ```
 
-성공 시 공통 command 결과를 별도 envelope 없이 JSON으로 반환한다. Path, pagination, Text/File, search와 write-lock semantics는 [`files-commands.md`](./files-commands.md)를 따른다.
+허용되는 `tool`은 MCP와 정확히 같다.
+
+| Tool | 공통 input |
+|---|---|
+| `me` | 빈 object `{}` |
+| `read` | `ReadInput` |
+| `search` | `SearchInput` |
+| `write` | `WriteInput` |
+| `manage` | `ManageInput` |
+| `file_download` | `FileDownloadInput` |
+| `file_upload` | `FileUploadInput` |
+| `run_read_sequence` | `RunReadSequenceInput` |
+| `run_write_sequence` | `RunWriteSequenceInput` |
+
+`me`만 `purpose` 예외다. 다른 모든 직접 도구는 자기 input에 `purpose`가 필요하다. Sequence는 top-level `purpose`를 한 번만 받고, 내부 command에는 `purpose`나 `args` wrapper를 넣지 않는다.
+
+- `run_read_sequence`: read/search 1..20개, 최대 4개 병렬 실행, 결과는 입력 순서
+- `run_write_sequence`: write/manage 1..20개, 입력 순서 직렬 실행, 첫 실패 후 중단, rollback 없음
+- 두 sequence 모두 모든 command의 정적으로 검증 가능한 오류를 실행 전에 모아 반환한다.
+
+성공 시 공통 command 결과를 추가 envelope 없이 반환한다. Path, pagination, Text/File, search와 write-lock semantics는 [`files-commands.md`](./files-commands.md)를 따른다.
 
 ## 오류
 
-HTTP status는 오류 종류를 나타내고 JSON body는 LLM과 CLI가 재시도 여부 및 수정 방법을 결정하는 구조화 정보를 보존한다.
+HTTP status는 transport 결과를 나타내고 JSON body는 MCP와 같은 안정 code와 recovery metadata를 보존한다.
 
 ```json
 {
@@ -57,18 +72,23 @@ HTTP status는 오류 종류를 나타내고 JSON body는 LLM과 CLI가 재시�
     "recoverable": true,
     "next_action": {
       "kind": "add_fields",
-      "fields": [
-        { "field": "target" }
-      ]
+      "fields": [{"field": "target"}]
     }
   }
 }
 ```
 
-`error`는 가장 구체적인 안정 code이고 `kind`는 상위 오류 분류다. `data.code`는 `error`와 같은 code를 유지하며 recovery metadata와 함께 공통 command 결과를 그대로 보존한다. 클라이언트는 자연어 `message` 대신 `error`, `kind`, `data.retryable`, `data.next_action`으로 분기한다. 잘못된 JSON, 허용되지 않은 HTTP method, body limit, timeout과 rate limit도 JSON 오류로 정규화한다.
+클라이언트는 자연어 `message` 대신 `error`, `kind`, `data.retryable`, `data.next_action`으로 분기한다. 잘못된 JSON, 허용되지 않은 method, body limit, timeout과 rate limit도 JSON 오류로 정규화한다.
+
+## 호출 이력과 메트릭
+
+인증을 통과해 `/cli`에 도달한 요청은 `surface=cli`인 command invocation 한 행으로 best-effort 기록한다. CLI argument/local file 오류와 서버에 도달하지 못한 network 실패는 포함하지 않는다. Sequence는 top-level 한 행으로 기록하며 내부 command별 행을 만들지 않는다.
+
+Prometheus command metric은 MCP와 같은 family를 사용하고 `surface=cli`로 분리한다. 기록 범위, redaction과 retention은 [`event-logging.md`](./event-logging.md#command-invocation-history), metric 계약은 [`observability.md`](./observability.md#command-invocation-metrics)를 따른다.
 
 ## 운영 한계
 
 - Public V2와 같은 Agent API rate-limit budget을 사용한다.
 - 모든 요청은 공통 ingress body limit와 deadline을 적용받는다.
 - 실제 File bytes는 JSON body를 통과하지 않고 presigned URL로 object storage와 직접 전송한다.
+- 호출 이력 저장 실패는 이미 수행된 command 결과를 실패로 바꾸지 않는다.

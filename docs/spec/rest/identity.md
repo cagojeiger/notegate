@@ -64,4 +64,4 @@ Account, Agent, Agent API key, connection limit은 각 리소스 API에서 별�
 
 ## Current user event history
 
-`GET /api/v1/me/audit-events`는 caller의 audit event 이력을, `GET /api/v1/me/mcp-invocations`는 caller 소유 범위의 MCP 호출 이력을 반환한다. 계약은 `events.md`에 둔다.
+`GET /api/v1/me/audit-events`는 caller의 audit event 이력을, `GET /api/v1/me/command-invocations`는 caller 소유 범위의 MCP·Command API 호출 이력을 반환한다. 계약은 `events.md`에 둔다.

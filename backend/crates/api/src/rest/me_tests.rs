@@ -8,7 +8,7 @@
 )]
 
 use axum::http::{StatusCode, header::CACHE_CONTROL};
-use notegate_db::{NewMcpInvocation, test_support::TestDb};
+use notegate_db::{NewCommandInvocation, test_support::TestDb};
 use uuid::Uuid;
 
 use super::test_support::{
@@ -16,7 +16,7 @@ use super::test_support::{
 };
 
 #[tokio::test]
-async fn mcp_invocations_returns_only_the_current_users_paginated_history()
+async fn command_invocations_require_one_surface_and_keep_pagination_independent()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -31,16 +31,19 @@ async fn mcp_invocations_returns_only_the_current_users_paginated_history()
         "result": {"space": "Research", "events": []}
     });
 
-    for (purpose, response) in [
-        ("first purpose", None),
-        ("second purpose", Some(&recorded_response)),
+    for (surface, purpose, response) in [
+        ("mcp", "older MCP purpose", None),
+        ("cli", "older CLI purpose", None),
+        ("mcp", "newer MCP purpose", None),
+        ("cli", "newer CLI purpose", Some(&recorded_response)),
     ] {
         state
-            .mcp_invocations
-            .insert(NewMcpInvocation {
+            .command_invocations
+            .insert(NewCommandInvocation {
                 owner_user_id: owner,
                 actor_account_id: owner,
                 caller_kind: "user",
+                surface,
                 tool: "read",
                 op: Some("changes"),
                 purpose: Some(purpose),
@@ -58,7 +61,27 @@ async fn mcp_invocations_returns_only_the_current_users_paginated_history()
     let response = json_response(
         app,
         "GET",
-        "/v1/me/mcp-invocations?limit=1".to_owned(),
+        "/v1/me/command-invocations?limit=1".to_owned(),
+        serde_json::json!({}),
+    )
+    .await?;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let app = rest_app(state.clone(), caller.clone());
+    let response = json_response(
+        app,
+        "GET",
+        "/v1/me/command-invocations?surface=command_api&limit=1".to_owned(),
+        serde_json::json!({}),
+    )
+    .await?;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let app = rest_app(state.clone(), caller.clone());
+    let response = json_response(
+        app,
+        "GET",
+        "/v1/me/command-invocations?surface=mcp&limit=1".to_owned(),
         serde_json::json!({}),
     )
     .await?;
@@ -68,31 +91,87 @@ async fn mcp_invocations_returns_only_the_current_users_paginated_history()
     );
     let (status, first) = decode_response(response).await?;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(first["invocations"][0]["purpose"], "second purpose");
-    assert_eq!(first["invocations"][0]["space_name"], "Research");
-    assert_eq!(first["invocations"][0]["input"], input);
-    assert_eq!(first["invocations"][0]["response"], recorded_response);
     assert_eq!(
-        first["invocations"][0]["actor"]["display_name"],
+        first["command_invocations"][0]["purpose"],
+        "newer MCP purpose"
+    );
+    assert_eq!(first["command_invocations"][0]["surface"], "mcp");
+    assert_eq!(first["command_invocations"][0]["space_name"], "Research");
+    assert_eq!(first["command_invocations"][0]["input"], input);
+    assert_eq!(
+        first["command_invocations"][0]["response"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        first["command_invocations"][0]["actor"]["display_name"],
         "REST Test Owner"
     );
     assert_eq!(first["page"]["returned"], 1);
     assert_eq!(first["page"]["has_more"], true);
 
-    let cursor = first["page"]["next_cursor"].as_str().expect("next cursor");
-    let app = rest_app(state, caller);
+    let mcp_cursor = first["page"]["next_cursor"]
+        .as_str()
+        .expect("MCP next cursor");
+
+    let app = rest_app(state.clone(), caller.clone());
+    let (status, _) = get_json(
+        app,
+        format!("/v1/me/command-invocations?surface=cli&limit=1&cursor={mcp_cursor}"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let app = rest_app(state.clone(), caller.clone());
     let (status, second) = get_json(
         app,
-        format!("/v1/me/mcp-invocations?limit=1&cursor={cursor}"),
+        format!("/v1/me/command-invocations?surface=mcp&limit=1&cursor={mcp_cursor}"),
     )
     .await?;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(second["invocations"][0]["purpose"], "first purpose");
     assert_eq!(
-        second["invocations"][0]["response"],
+        second["command_invocations"][0]["purpose"],
+        "older MCP purpose"
+    );
+    assert_eq!(second["command_invocations"][0]["surface"], "mcp");
+    assert_eq!(
+        second["command_invocations"][0]["response"],
         serde_json::Value::Null
     );
     assert_eq!(second["page"]["has_more"], false);
+
+    let app = rest_app(state.clone(), caller.clone());
+    let (status, cli_first) = get_json(
+        app,
+        "/v1/me/command-invocations?surface=cli&limit=1".to_owned(),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        cli_first["command_invocations"][0]["purpose"],
+        "newer CLI purpose"
+    );
+    assert_eq!(cli_first["command_invocations"][0]["surface"], "cli");
+    assert_eq!(
+        cli_first["command_invocations"][0]["response"],
+        recorded_response
+    );
+    let cli_cursor = cli_first["page"]["next_cursor"]
+        .as_str()
+        .expect("CLI next cursor");
+
+    let app = rest_app(state, caller);
+    let (status, cli_second) = get_json(
+        app,
+        format!("/v1/me/command-invocations?surface=cli&limit=1&cursor={cli_cursor}"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        cli_second["command_invocations"][0]["purpose"],
+        "older CLI purpose"
+    );
+    assert_eq!(cli_second["command_invocations"][0]["surface"], "cli");
+    assert_eq!(cli_second["page"]["has_more"], false);
 
     db.cleanup().await;
     Ok(())

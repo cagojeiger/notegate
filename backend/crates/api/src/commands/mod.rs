@@ -12,6 +12,7 @@ pub(crate) mod files;
 pub(crate) mod identity;
 pub(crate) mod resolve;
 pub(crate) mod search;
+pub(crate) mod sequence;
 pub(crate) mod spaces;
 pub(crate) mod support;
 pub(crate) mod transfers;

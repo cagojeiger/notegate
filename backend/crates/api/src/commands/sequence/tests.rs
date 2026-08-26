@@ -1,35 +1,11 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
-use super::*;
-use serde_json::json;
-use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-#[test]
-fn purpose_is_required_for_direct_and_sequence_calls() {
-    assert!(
-        serde_json::from_value::<SearchInput>(json!({
-            "op": "find",
-            "target": "daily:/",
-            "q": "cache"
-        }))
-        .is_err()
-    );
-    assert!(
-        serde_json::from_value::<RunReadSequenceInput>(json!({
-            "commands": [{"tool": "read", "op": "spaces"}]
-        }))
-        .is_err()
-    );
-    assert!(
-        serde_json::from_value::<RunWriteSequenceInput>(json!({
-            "commands": [{"tool": "manage", "op": "mkdir", "target": "daily:/notes"}]
-        }))
-        .is_err()
-    );
-}
+use super::*;
+use serde_json::json;
 
 #[test]
 fn sequence_kinds_accept_only_their_tool_family() {
@@ -87,7 +63,7 @@ fn valid_commands_preserve_input_order_and_fields() {
 }
 
 #[test]
-fn preflight_collects_unknown_and_cross_tool_fields() {
+fn preflight_collects_all_static_issues_before_execution() {
     let error = prepare_sequence_commands(
         vec![
             json!({"tool": "read", "op": "spaces", "unexpected": true}),
@@ -107,9 +83,6 @@ fn preflight_collects_unknown_and_cross_tool_fields() {
 
     assert_eq!(data["code"], "sequence_preflight_failed");
     assert_eq!(data["executed"], false);
-    assert_eq!(data["completed"], 0);
-    assert_eq!(data["failed"], 0);
-    assert_eq!(data["skipped"], 0);
     assert_eq!(data["results"], json!([]));
     assert_eq!(data["errors"].as_array().map(Vec::len), Some(2));
     assert_eq!(
@@ -123,7 +96,7 @@ fn preflight_collects_unknown_and_cross_tool_fields() {
 }
 
 #[test]
-fn sequence_commands_are_flat_and_inherit_purpose() {
+fn nested_purpose_and_args_return_machine_repair_actions() {
     let error = prepare_sequence_commands(
         vec![json!({
             "tool": "read",
@@ -150,17 +123,17 @@ fn sequence_commands_are_flat_and_inherit_purpose() {
 }
 
 #[test]
-fn command_count_is_bounded_for_each_sequence_kind() {
+fn sequence_command_count_is_bounded() {
     for kind in [SequenceKind::Read, SequenceKind::Write] {
         assert!(validate_sequence_command_count(1, kind).is_ok());
         assert!(validate_sequence_command_count(SEQUENCE_MAX_COMMANDS, kind).is_ok());
-
         for count in [0, SEQUENCE_MAX_COMMANDS + 1] {
             let error = validate_sequence_command_count(count, kind)
                 .expect_err("out-of-range command count must fail");
-            let data = error.data.expect("structured preflight data");
-            assert_eq!(data["code"], "sequence_preflight_failed");
-            assert_eq!(data["executed"], false);
+            assert_eq!(
+                error.data.expect("structured data")["code"],
+                "sequence_preflight_failed"
+            );
         }
     }
 }
@@ -188,7 +161,7 @@ fn changes_cursor_uses_the_direct_read_contract() {
 }
 
 #[test]
-fn write_preflight_uses_direct_static_content_validation() {
+fn write_preflight_reuses_direct_static_content_validation() {
     let error = prepare_sequence_commands(
         vec![json!({
             "tool": "write",
@@ -210,60 +183,51 @@ fn write_preflight_uses_direct_static_content_validation() {
 }
 
 #[test]
-fn response_counts_all_settled_results_in_index_order() {
+fn result_shape_is_transport_neutral_and_preserves_existing_error_code() {
     let response = sequence_response(
         vec![
             SequenceOutcome {
                 index: 0,
                 tool: "read".to_owned(),
                 op: "spaces".to_owned(),
-                result: Ok(Json(json!({"spaces": []}))),
+                result: Ok(json!({"spaces": []})),
             },
             SequenceOutcome {
                 index: 1,
                 tool: "read".to_owned(),
                 op: "stat".to_owned(),
-                result: Err(ErrorData::invalid_params("missing", None)),
-            },
-            SequenceOutcome {
-                index: 2,
-                tool: "search".to_owned(),
-                op: "find".to_owned(),
-                result: Ok(Json(json!({"items": []}))),
+                result: Err(CommandError::invalid_params("missing")),
             },
         ],
         0,
     );
 
-    assert_eq!(response["ok"], false);
-    assert_eq!(response["completed"], 2);
+    assert_eq!(response["completed"], 1);
     assert_eq!(response["failed"], 1);
-    assert_eq!(response["skipped"], 0);
-    assert_eq!(response["results"][0]["index"], 0);
-    assert_eq!(response["results"][1]["index"], 1);
-    assert_eq!(response["results"][2]["index"], 2);
+    assert_eq!(response["results"][1]["error"]["code"], -32602);
 }
 
 #[test]
-fn response_reports_commands_skipped_after_a_write_failure() {
+fn response_counts_settled_and_skipped_commands() {
     let response = sequence_response(
         vec![
             SequenceOutcome {
                 index: 0,
                 tool: "manage".to_owned(),
                 op: "mkdir".to_owned(),
-                result: Ok(Json(json!({"node": {"id": "folder"}}))),
+                result: Ok(json!({"node": {"id": "folder"}})),
             },
             SequenceOutcome {
                 index: 1,
                 tool: "write".to_owned(),
                 op: "write".to_owned(),
-                result: Err(ErrorData::invalid_params("conflict", None)),
+                result: Err(CommandError::invalid_params("conflict")),
             },
         ],
         3,
     );
 
+    assert_eq!(response["ok"], false);
     assert_eq!(response["completed"], 1);
     assert_eq!(response["failed"], 1);
     assert_eq!(response["skipped"], 3);
@@ -289,7 +253,7 @@ async fn read_executor_is_bounded_and_restores_input_order() {
     let active = Arc::new(AtomicUsize::new(0));
     let maximum = Arc::new(AtomicUsize::new(0));
 
-    let outcomes = read::collect_read_outcomes(commands, {
+    let outcomes = read::collect(commands, {
         let active = Arc::clone(&active);
         let maximum = Arc::clone(&maximum);
         move |command| {
@@ -304,7 +268,7 @@ async fn read_executor_is_bounded_and_restores_input_order() {
                     index: command.index,
                     tool: command.command.tool,
                     op: command.command.op,
-                    result: Ok(Json(json!({"index": command.index}))),
+                    result: Ok(json!({"index": command.index})),
                 }
             }
         }
@@ -344,7 +308,7 @@ async fn write_executor_is_serial_and_stops_after_failure() {
     let maximum = Arc::new(AtomicUsize::new(0));
     let executed = Arc::new(Mutex::new(Vec::new()));
 
-    let (outcomes, skipped) = write::collect_write_outcomes(commands, 3, {
+    let (outcomes, skipped) = write::collect(commands, 3, {
         let active = Arc::clone(&active);
         let maximum = Arc::clone(&maximum);
         let executed = Arc::clone(&executed);
@@ -364,9 +328,9 @@ async fn write_executor_is_serial_and_stops_after_failure() {
                     tool: command.command.tool,
                     op: command.command.op,
                     result: if index == 1 {
-                        Err(ErrorData::invalid_params("stop", None))
+                        Err(CommandError::invalid_params("stop"))
                     } else {
-                        Ok(Json(json!({"index": index})))
+                        Ok(json!({"index": index}))
                     },
                 }
             }

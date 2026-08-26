@@ -7,6 +7,8 @@ mod input;
 mod purpose;
 mod recovery;
 mod runtime;
+mod sequence;
+mod tool;
 
 pub use input::{
     CompletedPartInput, FILE_UPLOAD_OP_ABORT_UPLOAD, FILE_UPLOAD_OP_BEGIN_UPLOAD,
@@ -23,3 +25,8 @@ pub use input::{
 pub use purpose::{PURPOSE_MAX_CHARS, PurposeValidationError, validate_purpose};
 pub use recovery::{RecoveryAction, RecoveryErrorData, RequiredField, ToolCallSpec, ToolCallStep};
 pub use runtime::{CommandError, CommandErrorClass};
+pub use sequence::{
+    RunReadSequenceInput, RunWriteSequenceInput, SEQUENCE_MAX_COMMANDS, SequenceCommand,
+    SequenceKind,
+};
+pub use tool::CommandTool;

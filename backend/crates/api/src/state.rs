@@ -6,7 +6,7 @@ use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{
     AccountRepo, AgentRepo, ApiKeyRepo, AuditEventRepo, BackgroundJobRepo, BrowserSessionRepo,
-    ConnectionRepo, FilesRepo, LinkGraphRepo, McpInvocationRepo, PgPool, SpaceRepo, UsageRepo,
+    CommandInvocationRepo, ConnectionRepo, FilesRepo, LinkGraphRepo, PgPool, SpaceRepo, UsageRepo,
 };
 use notegate_search::SearchRuntime;
 use notegate_service::accounts::AccountService;
@@ -114,7 +114,7 @@ pub struct AppState {
     pub accounts: AccountRepo,
     pub browser_sessions: BrowserSessionRepo,
     pub(crate) metadata_writes: MetadataWriteBuffer,
-    pub(crate) mcp_invocations: McpInvocationRepo,
+    pub(crate) command_invocations: CommandInvocationRepo,
     pub(crate) metrics: Option<MetricsHandle>,
     pub(crate) search_metrics_runtime: Option<SearchRuntime>,
     pub(crate) read_db_metrics: Option<(PgPool, u32)>,
@@ -181,11 +181,11 @@ impl AppState {
             pii_crypto.clone(),
             config.default_user_tier,
         );
-        let mcp_invocations = McpInvocationRepo::new(db.clone());
+        let command_invocations = CommandInvocationRepo::new(db.clone());
         let account_lifecycle = AccountService::new(
             account_repo.clone(),
             AuditEventRepo::new(db.clone()),
-            mcp_invocations.clone(),
+            command_invocations.clone(),
             BackgroundJobRepo::new(db.clone()),
         );
         let connections = ConnectionService::new(ConnectionRepo::new(db.clone()));
@@ -228,7 +228,7 @@ impl AppState {
             accounts: account_repo,
             browser_sessions,
             metadata_writes: MetadataWriteBuffer::default(),
-            mcp_invocations,
+            command_invocations,
             metrics: None,
             search_metrics_runtime: None,
             read_db_metrics: None,

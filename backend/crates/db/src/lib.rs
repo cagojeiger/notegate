@@ -16,6 +16,7 @@ pub mod audit_event_repo;
 mod audit_events;
 pub mod background_job_repo;
 pub mod browser_session_repo;
+pub mod command_invocation_repo;
 pub mod connection_repo;
 mod event_history_query;
 mod file_change_event_repo;
@@ -26,7 +27,6 @@ pub mod key_epoch_repo;
 pub mod link_graph_repo;
 mod link_graph_state;
 pub mod link_graph_work_repo;
-pub mod mcp_invocation_repo;
 pub mod metadata_write_repo;
 pub mod object_storage_repo;
 pub mod postgres_pool;
@@ -46,6 +46,7 @@ pub use api_key_repo::ApiKeyRepo;
 pub use audit_event_repo::AuditEventRepo;
 pub use background_job_repo::BackgroundJobRepo;
 pub use browser_session_repo::BrowserSessionRepo;
+pub use command_invocation_repo::{CommandInvocationRepo, NewCommandInvocation};
 pub use connection_repo::ConnectionRepo;
 pub use file_change_event_repo::FileChangeSyncRows;
 pub use files_repo::{FilesRepo, TextMutationKind};
@@ -61,7 +62,6 @@ pub use link_graph_work_repo::{
     LinkGraphProjectSource, LinkGraphProjectionTarget, LinkGraphSpaceRequestOutcome,
     LinkGraphWorkRepo,
 };
-pub use mcp_invocation_repo::{McpInvocationRepo, NewMcpInvocation};
 pub use metadata_write_repo::{MediaTypeObservation, MetadataWriteRepo};
 pub use object_storage_repo::{CleanupCandidate, ObjectStorageRepo};
 pub use postgres_pool::{PgPools, connect};
