@@ -67,13 +67,30 @@ tool catalog.
 
 ## Use the CLI
 
-The first `notegate-cli` slice calls the shared Command API with an Agent API key:
+Install the official macOS or Linux binary from the latest GitHub Release. The
+installer verifies the platform asset checksum and does not register a
+background service.
+
+```sh
+curl -fsSL https://github.com/cagojeiger/notegate/releases/latest/download/notegate-cli-installer.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+notegate-cli update --check
+```
+
+`notegate-cli` calls the shared Command API with either a User Device login or
+an Agent API key:
 
 ```sh
 export NOTEGATE_BASE_URL='https://<notegate-host>'
+
+# User credential
+notegate-cli auth login
+notegate-cli me
+
+# Or Agent credential
 export NOTEGATE_API_KEY='ngk_v2_...'
-cargo run --package notegate-cli -- me
-cargo run --package notegate-cli -- read --schema
+notegate-cli me
+notegate-cli read --schema
 ```
 
 See the [CLI contract](docs/spec/cli.md) for JSON input, output, exit codes, and current scope.

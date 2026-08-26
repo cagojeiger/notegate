@@ -2,6 +2,38 @@
 
 `notegate-cli`는 사람과 AI agent가 MCP transport 없이 NoteGate의 공통 Command API를 호출하는 JSON CLI다. `me`, `read`, `write`, `manage`는 User Device credential 또는 Agent API key를 bearer로 사용한다.
 
+## 설치와 업데이트
+
+공식 설치는 GitHub Release의 foreground shell installer를 사용한다. background daemon, launchd, systemd 등록은 하지 않는다.
+
+```sh
+curl -fsSL https://github.com/cagojeiger/notegate/releases/latest/download/notegate-cli-installer.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+
+# 설치 디렉터리 지정
+curl -fsSL https://github.com/cagojeiger/notegate/releases/latest/download/notegate-cli-installer.sh | sh -s -- --bin-dir "$HOME/bin"
+```
+
+Installer는 shell rc 파일을 수정하지 않는다. 출력 JSON의 `path_on_path`가 `false`이면 `hint`에 나온 directory를 PATH에 추가해야 한다.
+
+Release에는 네 platform의 단일 executable asset, 각 asset의 `.sha256`, `notegate-cli-manifest.json`, installer가 포함된다. Manifest는 `releases/download/v<version>/notegate-cli-manifest.json` 경로로 version-addressable하다.
+
+| Target | Asset |
+|---|---|
+| macOS arm64 | `notegate-cli-aarch64-apple-darwin` |
+| macOS x64 | `notegate-cli-x86_64-apple-darwin` |
+| Linux arm64 | `notegate-cli-aarch64-unknown-linux-gnu` |
+| Linux x64 | `notegate-cli-x86_64-unknown-linux-gnu` |
+
+Installer는 `~/.local/bin/notegate-cli`에 설치하고 같은 directory에 `notegate-cli-install-receipt.json` receipt를 쓴다. `notegate-cli update`는 이 receipt가 현재 실행 파일과 일치할 때만 같은 directory 안에서 checksum 검증 후 atomic replace를 수행한다.
+
+```sh
+notegate-cli update --check
+notegate-cli update
+```
+
+`update --check` 성공 출력은 `up_to_date` 또는 `update_available` JSON이다. `update` 성공 출력은 `updated` JSON이다. 수동 복사, source build, package manager 설치처럼 공식 installer receipt가 없는 실행 파일은 `unmanaged_install` configuration error를 반환한다.
+
 ## 인증과 연결
 
 ```sh
@@ -72,6 +104,7 @@ notegate-cli manage \
 notegate-cli read --schema
 notegate-cli write --schema
 notegate-cli manage --schema
+notegate-cli update --help
 
 notegate-cli read --help
 notegate-cli write --help
@@ -85,6 +118,7 @@ notegate-cli manage --help
 - 서버 오류 JSON은 `next_action`을 포함해 수정하지 않고 stderr로 전달한다.
 - CLI configuration, local input, network와 protocol 오류도 stderr에 JSON으로 출력한다.
 - help와 version은 clap의 일반 text 형식을 사용하고, argument parser 오류는 `invalid_arguments` JSON으로 출력한다.
+- `update`는 NoteGate server나 AuthGate credential을 사용하지 않는다. GitHub Release manifest와 artifact checksum만 사용한다.
 
 | Exit code | 의미 |
 |---:|---|
@@ -106,6 +140,5 @@ notegate-cli manage --help
 - `search`, `file_upload`, `file_download`
 - `run_sequence`
 - API key 영구 저장과 profile
-- 설치용 플랫폼별 binary artifact
 
 Command API의 서버 계약은 [`command-api.md`](./command-api.md)를 따른다.
