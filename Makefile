@@ -1,4 +1,4 @@
-.PHONY: fmt check test clippy build cli-build frontend-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics split-up split-test split-test-isolation split-logs split-down
+.PHONY: fmt check test clippy build cli-build frontend-check workflow-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics split-up split-test split-test-isolation split-logs split-down
 
 fmt:
 	cargo fmt --all --check
@@ -26,7 +26,12 @@ frontend-check:
 	pnpm --filter web test
 	pnpm --filter web build
 
-release-check: fmt check test clippy build frontend-check
+workflow-check:
+	actionlint
+	find deploy frontend -type f -name '*.sh' -print0 | xargs -0 shellcheck
+	deploy/ci/resolve-release-version.test.sh
+
+release-check: fmt check test clippy build frontend-check workflow-check
 	git diff --check
 
 dev-db:

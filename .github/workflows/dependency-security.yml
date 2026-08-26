@@ -2,15 +2,6 @@ name: Dependency Security
 
 on:
   pull_request:
-  push:
-    branches: [main]
-    paths:
-      - Cargo.lock
-      - Cargo.toml
-      - "backend/**/Cargo.toml"
-      - rust-toolchain.toml
-      - .cargo/audit.toml
-      - .github/workflows/dependency-security.yml
   schedule:
     - cron: "0 0 * * 1"
   workflow_dispatch:
