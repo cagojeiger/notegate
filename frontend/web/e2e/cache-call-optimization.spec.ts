@@ -61,7 +61,7 @@ for (const viewport of [
       [300_001, 5],
       [300_001, 6]
     ] as const) {
-      await page.clock.fastForward(elapsedMs);
+      await page.clock.runFor(elapsedMs);
       await expect.poll(() => count(
         requests,
         `/api/v1/spaces/${space.id}/file-change-sync`
@@ -76,7 +76,7 @@ for (const viewport of [
       await page.context().setOffline(false);
       expect(count(requests, `/api/v1/spaces/${space.id}/file-change-sync`)).toBe(6);
 
-      await page.clock.fastForward(30_001);
+      await page.clock.runFor(30_001);
       await expect.poll(() => count(
         requests,
         `/api/v1/spaces/${space.id}/file-change-sync`
@@ -234,7 +234,7 @@ test("backs off idle usage polling with one owner while the desktop Space Librar
     [300_001, 4],
     [300_001, 5]
   ] as const) {
-    await page.clock.fastForward(elapsedMs);
+    await page.clock.runFor(elapsedMs);
     await expect.poll(() => count(requests, "/api/v1/me/usage"))
       .toBe(expectedRequests);
   }
