@@ -408,6 +408,18 @@ fn command_schemas_and_help_need_no_credentials() {
     assert!(top_level_help.contains("never accepted as a command-line argument"));
     assert!(top_level_help.contains("write"));
     assert!(top_level_help.contains("manage"));
+    assert!(top_level_help.contains("update"));
+
+    let update_help = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+        .args(["update", "--help"])
+        .env_remove("NOTEGATE_API_KEY")
+        .env_remove("NOTEGATE_BASE_URL")
+        .output()
+        .expect("run update help");
+    assert!(update_help.status.success());
+    assert!(update_help.stderr.is_empty());
+    let update_help = String::from_utf8(update_help.stdout).expect("UTF-8 help");
+    assert!(update_help.contains("--check"));
 
     let version = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
         .arg("--version")
@@ -420,6 +432,25 @@ fn command_schemas_and_help_need_no_credentials() {
     assert_eq!(
         String::from_utf8(version.stdout).expect("UTF-8 version"),
         format!("notegate-cli {}\n", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn update_reports_unmanaged_install_without_credentials_or_base_url() {
+    let output = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+        .args(["update", "--check"])
+        .env_remove("NOTEGATE_API_KEY")
+        .env_remove("NOTEGATE_BASE_URL")
+        .output()
+        .expect("run unmanaged update check");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(error_code(&output).as_deref(), Some("unmanaged_install"));
+    let error = serde_json::from_slice::<Value>(&output.stderr).expect("JSON stderr");
+    assert_eq!(
+        error.pointer("/data/retryable").and_then(Value::as_bool),
+        Some(false)
     );
 }
 

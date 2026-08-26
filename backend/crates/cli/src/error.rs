@@ -1,5 +1,6 @@
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+use std::fmt;
 
 pub const EXIT_INVALID_INPUT: u8 = 2;
 pub const EXIT_AUTH: u8 = 3;
@@ -112,6 +113,14 @@ impl CliError {
         }
     }
 }
+
+impl fmt::Display for CliError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", self.body)
+    }
+}
+
+impl std::error::Error for CliError {}
 
 #[cfg(test)]
 mod tests {

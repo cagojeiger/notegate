@@ -2,6 +2,7 @@ mod auth;
 mod client;
 mod credentials;
 mod error;
+mod update;
 mod url_policy;
 
 use std::ffi::OsString;
@@ -38,6 +39,7 @@ const MAX_INPUT_BYTES: usize = 1024 * 1024;
                   notegate-cli --base-url https://notegate.example read --input '{\"purpose\":\"list spaces\",\"op\":\"spaces\"}'\n  \
                   notegate-cli write --input '{\"purpose\":\"create note\",\"op\":\"write\",\"target\":\"daily:/note.md\",\"content\":\"hello\",\"create\":true}'\n  \
                   notegate-cli manage --input '{\"purpose\":\"create folder\",\"op\":\"mkdir\",\"target\":\"daily:/notes\",\"parents\":true}'\n  \
+                  notegate-cli update --check\n  \
                   notegate-cli read --schema"
 )]
 pub struct Cli {
@@ -73,6 +75,8 @@ pub enum Command {
     Write(CommandInputArgs),
     /// Run one shared manage command with the same JSON input as MCP manage.
     Manage(CommandInputArgs),
+    /// Check for or apply an official notegate-cli update.
+    Update(UpdateArgs),
 }
 
 #[derive(Debug, Args)]
@@ -89,6 +93,13 @@ pub enum AuthCommand {
     Status,
     /// Revoke the refresh token once, then delete the local credential.
     Logout,
+}
+
+#[derive(Debug, Args)]
+pub struct UpdateArgs {
+    /// Only report whether a newer official release is available.
+    #[arg(long)]
+    pub check: bool,
 }
 
 #[derive(Debug, Args)]
@@ -205,6 +216,7 @@ pub async fn execute_with_events(
                 .manage(&input)
                 .await
         }
+        Command::Update(args) => update::run(args, Duration::from_secs(timeout_seconds)).await,
     }
 }
 

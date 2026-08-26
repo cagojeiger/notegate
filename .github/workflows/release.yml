@@ -42,12 +42,16 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
-      - name: Guard duplicate tag
+      - name: Validate existing tag
         run: |
           tag="${{ steps.ver.outputs.tag }}"
           if git rev-parse "$tag" >/dev/null 2>&1; then
-            echo "::error::tag $tag already exists; bump VERSION before merging"
-            exit 1
+            tagged_commit=$(git rev-list -n 1 "$tag")
+            if [ "$tagged_commit" != "$GITHUB_SHA" ]; then
+              echo "::error::tag $tag already points to a different commit; bump VERSION before merging"
+              exit 1
+            fi
+            echo "::notice::tag $tag already points to this commit; resuming release"
           fi
 
   build:
@@ -104,9 +108,72 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  cli:
+    name: Build CLI ${{ matrix.target }}
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-apple-darwin
+            runner: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build notegate-cli
+        run: cargo build --locked --release -p notegate-cli --target ${{ matrix.target }}
+
+      - name: Smoke test notegate-cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="notegate-cli ${{ needs.version.outputs.version }}"
+          actual="$(target/${{ matrix.target }}/release/notegate-cli --version)"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::expected '${expected}', got '${actual}'"
+            exit 1
+          fi
+
+      - name: Package notegate-cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="notegate-cli-${{ matrix.target }}"
+          mkdir -p /tmp/cli-assets
+          cp "target/${{ matrix.target }}/release/notegate-cli" "/tmp/cli-assets/${asset}"
+          chmod 755 "/tmp/cli-assets/${asset}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "/tmp/cli-assets/${asset}" | awk '{print $1}' > "/tmp/cli-assets/${asset}.sha256"
+          else
+            shasum -a 256 "/tmp/cli-assets/${asset}" | awk '{print $1}' > "/tmp/cli-assets/${asset}.sha256"
+          fi
+
+      - name: Upload CLI asset
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-${{ matrix.target }}
+          path: /tmp/cli-assets/*
+          if-no-files-found: error
+          retention-days: 1
+
   release:
     name: Release
-    needs: [version, build]
+    needs: [version, build, cli]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -119,6 +186,13 @@ jobs:
         with:
           path: /tmp/digests
           pattern: digest-*
+          merge-multiple: true
+
+      - name: Download CLI assets
+        uses: actions/download-artifact@v8
+        with:
+          path: /tmp/cli-assets
+          pattern: cli-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
@@ -149,11 +223,76 @@ jobs:
           version="${{ needs.version.outputs.version }}"
           docker buildx imagetools inspect "${REGISTRY}/${IMAGE}:${version}"
 
-      - name: Tag and create GitHub Release
+      - name: Prepare CLI release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.version.outputs.version }}"
+          source_dir="/tmp/cli-assets"
+          release_dir="/tmp/cli-release"
+          mkdir -p "$release_dir"
+          targets=(
+            "x86_64-unknown-linux-gnu"
+            "aarch64-unknown-linux-gnu"
+            "x86_64-apple-darwin"
+            "aarch64-apple-darwin"
+          )
+          manifest_tmp="${release_dir}/notegate-cli-manifest.json.tmp"
+          {
+            printf '{\n'
+            printf '  "schema_version": 1,\n'
+            printf '  "version": "%s",\n' "$version"
+            printf '  "repository": "%s",\n' "${GITHUB_REPOSITORY}"
+            printf '  "assets": {\n'
+          } > "$manifest_tmp"
+          first=1
+          for target in "${targets[@]}"; do
+            asset="notegate-cli-${target}"
+            if [ ! -s "${source_dir}/${asset}" ]; then
+              echo "::error::missing CLI asset ${asset}"
+              exit 1
+            fi
+            if [ ! -s "${source_dir}/${asset}.sha256" ]; then
+              echo "::error::missing CLI checksum ${asset}.sha256"
+              exit 1
+            fi
+            cp "${source_dir}/${asset}" "${release_dir}/${asset}"
+            cp "${source_dir}/${asset}.sha256" "${release_dir}/${asset}.sha256"
+            size=$(stat -c%s "${release_dir}/${asset}")
+            sha=$(awk '{print $1}' "${release_dir}/${asset}.sha256")
+            actual_sha=$(sha256sum "${release_dir}/${asset}" | awk '{print $1}')
+            if [ "${#sha}" -ne 64 ] || [ "$sha" != "$actual_sha" ]; then
+              echo "::error::invalid CLI checksum for ${asset}"
+              exit 1
+            fi
+            if [ "$first" -eq 0 ]; then
+              printf ',\n' >> "$manifest_tmp"
+            fi
+            first=0
+            printf '    "%s": {"name": "%s", "sha256": "%s", "size": %s}' \
+              "$target" "$asset" "$sha" "$size" >> "$manifest_tmp"
+          done
+          {
+            printf '\n  }\n'
+            printf '}\n'
+          } >> "$manifest_tmp"
+          mv "$manifest_tmp" "${release_dir}/notegate-cli-manifest.json"
+          python3 -m json.tool "${release_dir}/notegate-cli-manifest.json" >/dev/null
+          cp deploy/cli/install.sh "${release_dir}/notegate-cli-installer.sh"
+          chmod 755 "${release_dir}/notegate-cli-installer.sh"
+
+      - name: Create or resume GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           tag="${{ needs.version.outputs.tag }}"
-          git tag "$tag"
-          git push origin "$tag"
-          gh release create "$tag" --title "$tag" --generate-notes
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" /tmp/cli-release/* --clobber
+          else
+            gh release create "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "$tag" \
+              --generate-notes \
+              /tmp/cli-release/*
+          fi
