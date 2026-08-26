@@ -37,8 +37,6 @@ notegate-cli update
 ## 인증과 연결
 
 ```sh
-export NOTEGATE_BASE_URL='https://<notegate-host>'
-
 # User credential
 notegate-cli auth login
 
@@ -50,7 +48,8 @@ export NOTEGATE_API_KEY='ngk_v2_...'
 - 로컬 NoteGate는 `notegate-cli-local`, 운영 NoteGate는 `notegate-cli` client를 광고하므로 같은 production AuthGate 계정을 사용해도 token audience와 저장 credential이 분리된다.
 - `NOTEGATE_API_KEY`는 Agent가 소유한 `ngk_v2_` key여야 하며, 설정되어 있으면 일반 command에서 User credential보다 항상 우선한다.
 - API key는 shell history와 process list 노출을 막기 위해 command-line option으로 받지 않는다.
-- `--base-url`은 `NOTEGATE_BASE_URL`보다 우선한다.
+- 기본 NoteGate origin은 `https://notegate.project-jelly.io`다. 다른 배포나 로컬 서버는 `NOTEGATE_BASE_URL` 또는 `--base-url`로 지정한다.
+- 연결 우선순위는 `--base-url` > `NOTEGATE_BASE_URL` > 기본 운영 origin이다.
 - 원격 origin은 HTTPS만 허용한다. 로컬 개발용 HTTP는 `localhost`와 loopback IP에서만 허용한다.
 - User access/refresh token은 versioned bundle로 OS keychain에 저장한다. keychain key는 `issuer + client_id`이고 bundle은 NoteGate `base_url`을 포함한다.
 - access token 만료 60초 전부터 자동 refresh한다. process 간 file lock을 획득한 뒤 credential을 다시 읽고, write-ahead in-progress marker를 먼저 기록한 다음 refresh token rotation을 한 번만 수행한다. 정상적인 process 종료/crash 뒤 marker가 남으면 다음 실행은 구 token을 재사용하지 않는다. Unix에서는 marker file과 parent directory를 모두 sync하며, 다른 platform의 갑작스러운 전원 손실 durability는 OS와 filesystem 보장 범위를 따른다.

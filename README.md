@@ -81,8 +81,6 @@ notegate-cli update --check
 an Agent API key:
 
 ```sh
-export NOTEGATE_BASE_URL='https://<notegate-host>'
-
 # User credential
 notegate-cli auth login
 notegate-cli me
@@ -91,6 +89,9 @@ notegate-cli me
 export NOTEGATE_API_KEY='ngk_v2_...'
 notegate-cli me
 notegate-cli read --schema
+
+# Local or self-hosted NoteGate override
+export NOTEGATE_BASE_URL='http://localhost:9191'
 ```
 
 See the [CLI contract](docs/spec/cli.md) for JSON input, output, exit codes, and current scope.
