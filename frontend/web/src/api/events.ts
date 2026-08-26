@@ -5,7 +5,8 @@ import type {
   BackgroundJobListResponse,
   FileChangeEventListResponse,
   FileChangeSyncResponse,
-  McpInvocationListResponse
+  CommandInvocationListResponse,
+  CommandInvocationSurface
 } from "./types";
 
 const DEFAULT_EVENT_LIMIT = 50;
@@ -17,10 +18,14 @@ export function listAuditEvents(client: ApiClient, cursor?: string | null): Prom
   return client.get<AuditEventListResponse>(`/api/v1/me/audit-events?${params}`);
 }
 
-export function listMcpInvocations(client: ApiClient, cursor?: string | null): Promise<McpInvocationListResponse> {
-  const params = new URLSearchParams({ limit: String(DEFAULT_EVENT_LIMIT) });
+export function listCommandInvocations(
+  client: ApiClient,
+  surface: CommandInvocationSurface,
+  cursor?: string | null
+): Promise<CommandInvocationListResponse> {
+  const params = new URLSearchParams({ surface, limit: String(DEFAULT_EVENT_LIMIT) });
   if (cursor) params.set("cursor", cursor);
-  return client.get<McpInvocationListResponse>(`/api/v1/me/mcp-invocations?${params}`);
+  return client.get<CommandInvocationListResponse>(`/api/v1/me/command-invocations?${params}`);
 }
 
 export function listBackgroundJobs(client: ApiClient, cursor?: string | null): Promise<BackgroundJobListResponse> {

@@ -178,7 +178,7 @@ fn data_plane_routes(state: AppState) -> Router<AppState> {
     let agent_apis = apply_rate_limit(
         Router::new()
             .nest("/api/v2", public_v2_routes(state.clone()))
-            .nest("/api/commands/v1", command_api_routes(state.clone())),
+            .merge(command_api_routes(state.clone())),
         limits.rate_limits.public_v2,
     );
     let user_mcp = apply_rate_limit(
@@ -227,10 +227,7 @@ async fn enforce_machine_api_contract(request: Request<Body>, next: Next) -> Res
 }
 
 fn is_machine_api_path(path: &str) -> bool {
-    path == "/api/v2"
-        || path.starts_with("/api/v2/")
-        || path == "/api/commands/v1"
-        || path.starts_with("/api/commands/v1/")
+    path == "/api/v2" || path.starts_with("/api/v2/") || path == "/cli"
 }
 
 fn normalize_machine_api_error(response: Response) -> Response {
@@ -408,9 +405,7 @@ fn public_v2_routes(state: AppState) -> Router<AppState> {
 }
 
 fn command_api_routes(state: AppState) -> Router<AppState> {
-    crate::command_api::routes()
-        .fallback(api_not_found)
-        .layer(from_fn_with_state(state, require_command_api_auth))
+    crate::command_api::routes().layer(from_fn_with_state(state, require_command_api_auth))
 }
 
 /// Liveness: the process is up. No dependency checks.
@@ -656,13 +651,7 @@ mod tests {
             .await?;
         assert_eq!(health.status(), StatusCode::OK);
 
-        for path in [
-            "/api/v1/me",
-            "/api/commands/v1/me",
-            "/auth/login",
-            "/mcp",
-            "/mcp/v2",
-        ] {
+        for path in ["/api/v1/me", "/cli", "/auth/login", "/mcp", "/mcp/v2"] {
             let response = app
                 .clone()
                 .oneshot(Request::builder().uri(path).body(Body::empty())?)
@@ -880,9 +869,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn command_api_contract_normalizes_extractor_errors() {
+    async fn cli_contract_normalizes_extractor_errors() {
         let app = apply_machine_api_contract(Router::new().route(
-            "/api/commands/v1/read",
+            "/cli",
             post(|Json(_item_id): Json<uuid::Uuid>| async { "ok" }),
         ));
 
@@ -890,7 +879,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/api/commands/v1/read")
+                    .uri("/cli")
                     .header(CONTENT_TYPE, "application/json")
                     .body(Body::from(r#""not-a-uuid""#))
                     .unwrap(),
@@ -968,9 +957,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn command_api_contract_preserves_retry_after_on_rate_limit() {
+    async fn cli_contract_preserves_retry_after_on_rate_limit() {
         let app = apply_machine_api_contract(apply_data_plane_limits(
-            Router::new().route("/api/commands/v1/me", get(|| async { "ok" })),
+            Router::new().route("/cli", post(|| async { "ok" })),
             DataPlaneLimits {
                 rate_limits: HttpRateLimitsConfig {
                     ingress: HttpRateLimitConfig {
@@ -987,7 +976,8 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/commands/v1/me")
+                    .method("POST")
+                    .uri("/cli")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -996,7 +986,8 @@ mod tests {
         let second = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/commands/v1/me")
+                    .method("POST")
+                    .uri("/cli")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -1183,7 +1174,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn command_api_shares_public_v2_rate_limit() {
+    async fn cli_shares_public_v2_rate_limit() {
         let limit = HttpRateLimitConfig {
             requests_per_second: 1,
             burst: 1,
@@ -1191,7 +1182,7 @@ mod tests {
         let app = apply_rate_limit(
             Router::new()
                 .route("/api/v2/ping", get(|| async { "v2" }))
-                .route("/api/commands/v1/me", get(|| async { "command" })),
+                .route("/cli", post(|| async { "command" })),
             limit,
         );
 
@@ -1208,7 +1199,8 @@ mod tests {
         let second = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/commands/v1/me")
+                    .method("POST")
+                    .uri("/cli")
                     .body(Body::empty())
                     .unwrap(),
             )

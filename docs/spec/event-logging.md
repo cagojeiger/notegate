@@ -14,13 +14,16 @@ audit_events
 
 file_change_events
   file-tree/file content change 이력
+
+command_invocations
+  MCP와 Command API의 read·mutation·실패 호출 이력
 ```
 
-MCP 호출 자체는 domain mutation stream과 다른 `mcp_invocations`에 기록한다. 이 표는 read와 실패 호출도 포함하는 실행 이력이며 현재 state나 mutation history의 source of truth가 아니다.
+외부 command 호출 자체는 domain mutation stream과 다른 `command_invocations`에 기록한다. 이 표는 MCP와 Command API의 read와 실패 호출도 포함하는 실행 이력이며 현재 state나 mutation history의 source of truth가 아니다.
 
-두 stream은 성공적으로 commit된 domain mutation의 이력이다. 현재 state의 source of truth는 normalized domain table이다.
+두 mutation stream(`audit_events`, `file_change_events`)은 성공적으로 commit된 domain mutation의 이력이다. 현재 state의 source of truth는 normalized domain table이다. `command_invocations`는 실행 관찰 이력이며 이 mutation 보장에 포함되지 않는다.
 
-Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-events`, MCP 실행 이력은 `GET /api/v1/me/mcp-invocations`로 조회하고, file change history는 `GET /api/v1/spaces/{space_id}/file-change-events`, UI forward sync는 `GET /api/v1/spaces/{space_id}/file-change-sync`로 조회한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
+Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-events`, command 실행 이력은 `GET /api/v1/me/command-invocations`로 조회하고, file change history는 `GET /api/v1/spaces/{space_id}/file-change-events`, UI forward sync는 `GET /api/v1/spaces/{space_id}/file-change-sync`로 조회한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
 
 ## Common rules
 
@@ -48,17 +51,19 @@ file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 
 이 보장은 operation history가 현재 domain state와 어긋나지 않게 하기 위한 기본 계약이다.
 
-`mcp_invocations`는 domain transaction 밖에서 best-effort로 저장한다. 기록 실패는 이미 수행된 read/mutation 결과를 실패로 바꾸지 않으며 warning log를 남긴다. 인증을 통과해 서버의 `tools/call` handler에 도달한 요청은 tool별 입력 역직렬화 전에 기록 경계를 통과하므로 성공, 업무 오류, `purpose` 오류, tool argument schema 오류, unknown tool을 모두 실행 이력에 포함한다. JSON-RPC `tools/call` 자체로 역직렬화되지 못한 요청, 인증 전에 거부된 요청, client에서 schema 검증으로 차단되어 전송되지 않은 요청은 caller를 확정할 수 없거나 서버에 도달하지 않으므로 포함하지 않는다.
+`command_invocations`는 domain transaction 밖에서 best-effort로 저장한다. 기록 실패는 이미 수행된 read/mutation 결과를 실패로 바꾸지 않으며 warning log를 남긴다. 인증을 통과한 MCP `tools/call`과 `POST /cli` 요청은 command별 입력 역직렬화 전에 기록 경계를 통과하므로 성공, 업무 오류, `purpose` 오류와 argument schema 오류를 실행 이력에 포함한다. Unknown tool도 포함한다. JSON-RPC `tools/call` 또는 CLI envelope로 해석되지 못한 요청, 인증 전에 거부된 요청, client에서 schema 검증으로 차단되어 전송되지 않은 요청은 caller를 확정할 수 없거나 command 경계에 도달하지 않으므로 포함하지 않는다.
 
-## MCP invocation history
+## Command invocation history
 
 이 문서에서 `redaction`은 민감한 원문 값을 제거하거나 redaction marker로 대체하는 처리를 뜻한다. 허용되지 않은 field를 통째로 제외하는 것은 `omission`이다. 일부 문자를 남기는 `masking`과 범위가 모호한 `sanitization`은 이 기능의 용어로 사용하지 않는다.
 
-`mcp_invocations`는 `owner_user_id`, 실제 `actor_account_id`, user/agent 구분, 정규화된 `tool`과 optional `op`, `purpose`, redacted `input`/`response` JSON object, success/error, 안정적인 error code, 실행 시간을 저장한다. `read op=changes`는 어느 Space의 변경 stream을 조회했는지 목록에서 바로 확인할 수 있도록 검증된 `space_name` snapshot도 함께 저장한다. `me`는 purpose 예외이므로 NULL이다. 유효한 다른 tool의 purpose는 1..200자의 짧은 호출 이유이며, purpose 검증 실패 행에서는 summary purpose가 NULL이고 `input.purpose`는 원문 대신 redaction marker다. Unknown tool/op의 원문은 별도 summary column에 저장하지 않는다.
+`command_invocations`는 `owner_user_id`, 실제 `actor_account_id`, user/agent 구분, 호출 경계인 `surface`, 정규화된 `tool`과 optional `op`, `purpose`, redacted `input`/`response` JSON object, success/error, 안정적인 error code, 실행 시간을 저장한다. `surface`는 MCP `tools/call`이면 `mcp`, `POST /cli`이면 `cli`다. Browser History는 두 surface를 독립 tab으로 표시한다.
+
+`read op=changes`는 어느 Space의 변경 stream을 조회했는지 목록에서 바로 확인할 수 있도록 검증된 `space_name` snapshot도 함께 저장한다. `me`는 purpose 예외이므로 NULL이다. 유효한 다른 command의 purpose는 1..200자의 짧은 호출 이유이며, purpose 검증 실패 행에서는 summary purpose가 NULL이고 `input.purpose`는 원문 대신 redaction marker다. Unknown MCP tool/op의 원문은 별도 summary column에 저장하지 않는다.
 
 `input`과 `response`는 실제 실행/응답 객체와 분리된 저장 전용 복사본이다. Tool/op별 allowlist는 purpose, target/path, 구조적 flag/count/hash처럼 분석에 필요한 값만 유지한다. Text `content`, patch/edit 문자열과 `diff`, grep 일치 줄, 검색어, 모든 cursor, 원본 파일명과 암호화 metadata, multipart ETag, presigned URL/header, PII와 자유 형식 오류 문구는 `{"_redacted":true,"category":"..."}` marker로 대체한다. 알려지지 않은 field의 이름과 값은 저장하지 않고 `_omitted_field_count`만 남긴다. 각 snapshot은 redaction 후 256 KiB를 넘으면 전체를 크기 marker로 대체한다.
 
-`response`는 protocol `ErrorData` 또는 MCP `structured_content`에서 만들며 RMCP가 같은 JSON을 복제하는 wire `content[].text`와 `_meta`는 저장하지 않는다. Sequence tool은 하나의 MCP 호출로 한 행을 만들고 commands/results에 재귀 redaction을 적용하며 내부 command별 행은 만들지 않는다. Response snapshot이 없는 행은 `response=NULL`이고 모든 행은 90일 retention을 따른다. MCP 조회 tool은 없으며 user browser의 History > MCP에서 자기 소유 범위만 조회한다.
+MCP `response`는 protocol `ErrorData` 또는 `structured_content`에서 만들며 RMCP가 같은 JSON을 복제하는 wire `content[].text`와 `_meta`는 저장하지 않는다. CLI response와 구조화 오류는 같은 저장 전용 JSON 정책으로 정규화한다. Sequence tool은 한 invocation row만 만들고 commands/results에 재귀 redaction을 적용하며 내부 command별 행은 만들지 않는다. Response snapshot이 없는 행은 `response=NULL`이고 모든 행은 90일 retention을 따른다. 호출 이력 조회용 MCP/CLI command는 없으며 user browser의 History > MCP 또는 History > CLI에서 자기 소유 범위만 조회한다.
 
 ## Audit event sources
 
@@ -280,7 +285,7 @@ Retention policy:
 ```text
 audit_events: 365 days
 file_change_events: 90 days
-mcp_invocations: 90 days
+command_invocations: 90 days
 ```
 
-각 event table은 retention 조회/삭제를 위한 `created_at` index를 둔다. Purge worker는 `audit_events` 365일, `file_change_events`와 `mcp_invocations` 90일을 초과한 행을 테이블별 bounded batch로 삭제한다.
+각 event table은 retention 조회/삭제를 위한 `created_at` index를 둔다. Purge worker는 `audit_events` 365일, `file_change_events`와 `command_invocations` 90일을 초과한 행을 테이블별 bounded batch로 삭제한다.

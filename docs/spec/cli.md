@@ -1,6 +1,8 @@
 # NoteGate CLI
 
-`notegate-cli`는 사람과 AI agent가 MCP transport 없이 NoteGate의 공통 Command API를 호출하는 JSON CLI다. `me`, `read`, `write`, `manage`는 User Device credential 또는 Agent API key를 bearer로 사용한다.
+`notegate-cli`는 사람과 AI agent가 MCP transport 없이 같은 command contract를 호출하는 JSON CLI다. MCP와 동일한 9개 도구 이름과 input schema를 `POST /cli`로 전달하며 User Device credential 또는 Agent API key를 bearer로 사용한다.
+
+서버에 도달한 각 command는 MCP와 같은 redaction·결과·보존 정책의 호출 이력으로 기록된다. History UI는 `surface=cli`를 MCP와 별도 tab으로 보여준다. CLI argument 오류, local file 오류와 서버에 도달하지 못한 network 실패는 이 이력에 포함되지 않는다.
 
 ## 설치와 업데이트
 
@@ -55,6 +57,7 @@ export NOTEGATE_API_KEY='ngk_v2_...'
 - access token 만료 60초 전부터 자동 refresh한다. process 간 file lock을 획득한 뒤 credential을 다시 읽고, write-ahead in-progress marker를 먼저 기록한 다음 refresh token rotation을 한 번만 수행한다. 정상적인 process 종료/crash 뒤 marker가 남으면 다음 실행은 구 token을 재사용하지 않는다. Unix에서는 marker file과 parent directory를 모두 sync하며, 다른 platform의 갑작스러운 전원 손실 durability는 OS와 filesystem 보장 범위를 따른다.
 - refresh 응답이 timeout, body 손상 또는 성공 응답 저장 실패로 불명확하면 자동 재시도하지 않는다. credential을 안전 상태로 표시하거나 삭제하고 `auth login`을 요구한다.
 - HTTP redirect를 따르지 않으므로 bearer credential이 다른 origin으로 전달되지 않는다.
+- 모든 command 요청은 CLI release version을 `X-Notegate-CLI-Version`으로 보낸다. 서버 release와 다르면 command를 실행하지 않고 `cli_update_required`와 `notegate-cli update` action을 반환한다.
 
 진단용으로만 metadata discovery를 우회할 수 있다. 두 환경 변수를 반드시 함께 설정해야 한다.
 
@@ -95,14 +98,30 @@ notegate-cli write \
 
 notegate-cli manage \
   --input '{"purpose":"create notes folder","op":"mkdir","target":"daily:/notes","parents":true}'
+
+notegate-cli search \
+  --input '{"purpose":"find notes","op":"find","target":"daily:/","q":"notes"}'
+
+notegate-cli file_download \
+  --input '{"purpose":"download report","target":"daily:/report.pdf"}'
+
+notegate-cli run_read_sequence \
+  --input '{"purpose":"inspect notes","commands":[{"tool":"read","op":"spaces"},{"tool":"search","op":"find","target":"daily:/","q":"notes"}]}'
 ```
 
-각 JSON 명령은 MCP와 Command API의 공통 `ReadInput`, `WriteInput`, `ManageInput`을 그대로 사용한다. `--schema`는 해당 Rust type에서 생성된 JSON Schema를 출력하므로 별도의 CLI 필드 정의가 없다.
+CLI command surface는 `me`, `read`, `search`, `write`, `manage`, `file_download`, `file_upload`, `run_read_sequence`, `run_write_sequence`다. 각 JSON 명령은 MCP가 사용하는 동일한 공통 Rust input type을 그대로 사용한다. `--schema`는 그 type에서 생성된 JSON Schema를 출력하므로 별도의 CLI 필드 정의가 없다.
+
+Sequence도 MCP와 같은 계약을 사용한다. `purpose`는 top-level에 한 번만 넣고 각 `commands[]`는 `tool`, `op`와 operation field를 가진 flat object다. `run_read_sequence`는 read/search를 최대 4개 병렬 실행하고 결과를 입력 순서로 반환한다. `run_write_sequence`는 write/manage를 순서대로 실행하며 첫 실패 뒤 남은 command를 건너뛴다.
 
 ```sh
 notegate-cli read --schema
+notegate-cli search --schema
 notegate-cli write --schema
 notegate-cli manage --schema
+notegate-cli file_download --schema
+notegate-cli file_upload --schema
+notegate-cli run_read_sequence --schema
+notegate-cli run_write_sequence --schema
 notegate-cli update --help
 
 notegate-cli read --help
@@ -129,6 +148,8 @@ notegate-cli manage --help
 
 기본 timeout은 30초이며 `--timeout-seconds` 또는 `NOTEGATE_TIMEOUT_SECONDS`로 1~300초 사이에서 설정한다. 입력은 1 MiB, 응답은 8 MiB로 제한한다.
 
+CLI/server release mismatch는 exit `4`이며 서버의 구조화 body를 그대로 stderr에 출력한다. CLI를 업데이트한 뒤 같은 command를 다시 실행한다.
+
 ```json
 {"event":"verification_required","verification_uri":"https://authgate.project-jelly.io/device","verification_uri_complete":"https://authgate.project-jelly.io/device?user_code=BCDF-GHKM","user_code":"BCDF-GHKM","expires_in":300,"interval":5}
 {"event":"login_succeeded","base_url":"http://localhost:9191","issuer":"https://authgate.project-jelly.io","client_id":"notegate-cli-local","expires_at":1787530000}
@@ -136,8 +157,6 @@ notegate-cli manage --help
 
 ## 현재 제외 범위
 
-- `search`, `file_upload`, `file_download`
-- `run_sequence`
 - API key 영구 저장과 profile
 
 Command API의 서버 계약은 [`command-api.md`](./command-api.md)를 따른다.

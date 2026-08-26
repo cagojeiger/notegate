@@ -12,7 +12,7 @@ agents
 api_keys
 audit_events
 file_change_events
-mcp_invocations
+command_invocations
 spaces
 space_usage
 background_jobs
@@ -208,15 +208,16 @@ file_change_events
 
 `file_change_events`는 space 안의 파일/폴더/문서 변경을 기록하며 space 전체 조회와 node별 조회를 위한 index를 둔다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
-`mcp_invocations`는 domain event와 분리된 MCP 실행 이력이다. 저장 대상과 redaction, 크기 제한, retention 계약은 `docs/spec/event-logging.md`가 소유한다.
+`command_invocations`는 domain event와 분리된 MCP·CLI 실행 이력이다. 저장 대상과 redaction, 크기 제한, retention 계약은 `docs/spec/event-logging.md`가 소유한다.
 
 ```text
-mcp_invocations
+command_invocations
   id bigserial pk
   created_at timestamptz not null default now()
   owner_user_id uuid not null
   actor_account_id uuid not null
   caller_kind text check ('user','agent')
+  surface text check ('mcp','cli')
   tool text not null
   op text null
   purpose text null
@@ -228,13 +229,16 @@ mcp_invocations
   duration_ms bigint not null check >= 0
 ```
 
-DB는 기록 경계에서 발생한 실패도 저장할 수 있도록 `purpose`, `op`, `response`에 NULL을 허용한다. Column별 의미와 정규화 규칙은 `docs/spec/event-logging.md`를 따른다.
+DB는 기록 경계에서 발생한 실패도 저장할 수 있도록 `purpose`, `op`, `response`에 NULL을 허용한다. `surface`는 서버가 판정한 호출 경계이며 client 신원을 뜻하지 않는다. Column별 의미와 정규화 규칙은 `docs/spec/event-logging.md`를 따른다.
 
 Event history DB 제약:
 
 ```text
 audit_events.source: 'rest', 'mcp', 'system'
 metadata: JSON object
+command_invocations.surface: 'mcp' 또는 'cli'
+command_invocations.input: JSON object
+command_invocations.response: NULL 또는 JSON object
 created_at: DB timestamp 기준
 ```
 
@@ -252,9 +256,9 @@ file_change_events_space_id_idx(space_id, id)
 file_change_events_actor_time_idx(actor_account_id, created_at desc, id desc)
 file_change_events_retention_idx(created_at)
 
-mcp_invocations_owner_time_idx(owner_user_id, created_at desc, id desc)
-mcp_invocations_actor_time_idx(actor_account_id, created_at desc, id desc)
-mcp_invocations_retention_idx(created_at)
+command_invocations_owner_surface_time_idx(owner_user_id, surface, created_at desc, id desc)
+command_invocations_actor_time_idx(actor_account_id, created_at desc, id desc)
+command_invocations_retention_idx(created_at)
 ```
 
 ## Space and connection tables

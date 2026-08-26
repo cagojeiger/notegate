@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use notegate_model::{
     AccountRef as ModelAccountRef, AuditEvent, BackgroundJob, BackgroundJobAttempt,
-    BackgroundJobDetail, McpInvocation,
+    BackgroundJobDetail, CommandInvocation,
 };
 use notegate_service::files::FileChangeEvent;
 use serde::Serialize;
@@ -52,14 +52,16 @@ pub(crate) struct AuditEventListResponse {
     pub page: crate::page::Page,
 }
 
-/// MCP invocation history entry returned by `GET /api/v1/me/mcp-invocations`.
+/// External command invocation history entry returned by
+/// `GET /api/v1/me/command-invocations`.
 #[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct McpInvocationOut {
+pub(crate) struct CommandInvocationOut {
     pub id: i64,
     pub created_at: DateTime<Utc>,
     pub actor_account_id: Uuid,
     pub actor: Option<AccountRef>,
     pub caller_kind: String,
+    pub surface: String,
     pub tool: String,
     pub op: Option<String>,
     pub purpose: Option<String>,
@@ -71,9 +73,9 @@ pub(crate) struct McpInvocationOut {
     pub duration_ms: i64,
 }
 
-impl McpInvocationOut {
+impl CommandInvocationOut {
     pub(crate) fn from_invocation(
-        invocation: &McpInvocation,
+        invocation: &CommandInvocation,
         refs: &HashMap<Uuid, ModelAccountRef>,
     ) -> Self {
         Self {
@@ -82,6 +84,7 @@ impl McpInvocationOut {
             actor_account_id: invocation.actor_account_id,
             actor: refs.get(&invocation.actor_account_id).map(AccountRef::from),
             caller_kind: invocation.caller_kind.clone(),
+            surface: invocation.surface.clone(),
             tool: invocation.tool.clone(),
             op: invocation.op.clone(),
             purpose: invocation.purpose.clone(),
@@ -96,8 +99,8 @@ impl McpInvocationOut {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct McpInvocationListResponse {
-    pub invocations: Vec<McpInvocationOut>,
+pub(crate) struct CommandInvocationListResponse {
+    pub command_invocations: Vec<CommandInvocationOut>,
     pub page: crate::page::Page,
 }
 

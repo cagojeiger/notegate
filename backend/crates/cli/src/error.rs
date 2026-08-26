@@ -71,7 +71,10 @@ impl CliError {
     }
 
     pub fn server(status: StatusCode, body: Value) -> Self {
-        let exit_code = if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+        let exit_code = if body.get("error").and_then(Value::as_str) == Some("cli_update_required")
+        {
+            EXIT_COMMAND_REJECTED
+        } else if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
             EXIT_AUTH
         } else if matches!(
             status,
@@ -144,5 +147,23 @@ mod tests {
             assert_eq!(error.exit_code(), exit_code);
             assert_eq!(error.body(), &body);
         }
+    }
+
+    #[test]
+    fn update_required_is_a_structured_command_rejection_regardless_of_status() {
+        let body = json!({
+            "error": "cli_update_required",
+            "kind": "client_version_incompatible",
+            "message": "update notegate-cli before retrying",
+            "data": {
+                "client_version": "0.1.79",
+                "server_version": "0.1.80",
+                "next_action": {"kind": "run_command", "command": "notegate-cli update"},
+            },
+        });
+
+        let error = CliError::server(StatusCode::UNAUTHORIZED, body.clone());
+        assert_eq!(error.exit_code(), EXIT_COMMAND_REJECTED);
+        assert_eq!(error.body(), &body);
     }
 }

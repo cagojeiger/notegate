@@ -10,6 +10,7 @@ mod file_change;
 mod file_preview;
 mod identity;
 mod internal_search;
+mod invocations;
 mod mcp;
 mod metadata_write_behind;
 mod object_storage;

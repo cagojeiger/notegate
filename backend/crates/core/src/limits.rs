@@ -195,8 +195,8 @@ pub const OBJECT_STORAGE_HISTORY_RETENTION_DAYS: i64 = 90;
 pub const AUDIT_EVENT_RETENTION_DAYS: i64 = 365;
 /// Days a file change event is retained before the purge run deletes it.
 pub const FILE_CHANGE_EVENT_RETENTION_DAYS: i64 = 90;
-/// Days an MCP invocation summary is retained before the purge run deletes it.
-pub const MCP_INVOCATION_RETENTION_DAYS: i64 = 90;
+/// Days an external command invocation summary is retained before the purge run deletes it.
+pub const COMMAND_INVOCATION_RETENTION_DAYS: i64 = 90;
 
 // --- API pagination limits ---
 
@@ -224,10 +224,10 @@ pub const API_KEYS_MAX_LIMIT: i64 = 100;
 pub const AUDIT_EVENTS_DEFAULT_LIMIT: i64 = 50;
 /// Maximum `GET /me/audit-events` page size.
 pub const AUDIT_EVENTS_MAX_LIMIT: i64 = 100;
-/// Default `GET /me/mcp-invocations` page size.
-pub const MCP_INVOCATIONS_DEFAULT_LIMIT: i64 = 50;
-/// Maximum `GET /me/mcp-invocations` page size.
-pub const MCP_INVOCATIONS_MAX_LIMIT: i64 = 100;
+/// Default command-invocation history page size.
+pub const COMMAND_INVOCATIONS_DEFAULT_LIMIT: i64 = 50;
+/// Maximum command-invocation history page size.
+pub const COMMAND_INVOCATIONS_MAX_LIMIT: i64 = 100;
 /// Default `GET /me/jobs` page size.
 pub const BACKGROUND_JOBS_DEFAULT_LIMIT: i64 = 50;
 /// Maximum `GET /me/jobs` page size.

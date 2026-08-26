@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createMockApiClient } from "../test/apiClient";
-import { drainFileChanges, getBackgroundJob, listAuditEvents, listBackgroundJobs, listFileChangeEvents, listMcpInvocations } from "./events";
+import { drainFileChanges, getBackgroundJob, listAuditEvents, listBackgroundJobs, listCommandInvocations, listFileChangeEvents } from "./events";
 
 describe("events api", () => {
   it("lists audit events with pagination", async () => {
@@ -13,13 +13,21 @@ describe("events api", () => {
     expect(client.get).toHaveBeenCalledWith("/api/v1/me/audit-events?limit=50&cursor=cursor-1");
   });
 
-  it("lists MCP invocations with pagination", async () => {
+  it("lists command invocations with required independent surfaces", async () => {
     const client = createMockApiClient();
-    client.get.mockResolvedValue({ invocations: [] });
+    client.get.mockResolvedValue({ command_invocations: [] });
 
-    await listMcpInvocations(client, "cursor-mcp-1");
+    await listCommandInvocations(client, "mcp", "cursor-mcp-1");
+    await listCommandInvocations(client, "cli");
 
-    expect(client.get).toHaveBeenCalledWith("/api/v1/me/mcp-invocations?limit=50&cursor=cursor-mcp-1");
+    expect(client.get).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/me/command-invocations?surface=mcp&limit=50&cursor=cursor-mcp-1"
+    );
+    expect(client.get).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/me/command-invocations?surface=cli&limit=50"
+    );
   });
 
   it("lists jobs with pagination and loads one job", async () => {

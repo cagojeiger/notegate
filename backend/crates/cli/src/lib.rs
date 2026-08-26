@@ -12,7 +12,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
-use notegate_command::{ManageInput, ReadInput, WriteInput};
+use notegate_command::{
+    CommandTool, FileDownloadInput, FileUploadInput, ManageInput, ReadInput, RunReadSequenceInput,
+    RunWriteSequenceInput, SearchInput, WriteInput,
+};
 use schemars::JsonSchema;
 use secrecy::SecretString;
 use serde::de::DeserializeOwned;
@@ -38,8 +41,10 @@ const MAX_INPUT_BYTES: usize = 1024 * 1024;
     after_help = "Examples:\n  \
                   notegate-cli me\n  \
                   notegate-cli read --input '{\"purpose\":\"list spaces\",\"op\":\"spaces\"}'\n  \
+                  notegate-cli search --input '{\"purpose\":\"find notes\",\"op\":\"find\",\"target\":\"daily:/\",\"q\":\"notes\"}'\n  \
                   notegate-cli write --input '{\"purpose\":\"create note\",\"op\":\"write\",\"target\":\"daily:/note.md\",\"content\":\"hello\",\"create\":true}'\n  \
                   notegate-cli manage --input '{\"purpose\":\"create folder\",\"op\":\"mkdir\",\"target\":\"daily:/notes\",\"parents\":true}'\n  \
+                  notegate-cli run_read_sequence --input-file requests.json\n  \
                   notegate-cli update --check\n  \
                   notegate-cli read --schema"
 )]
@@ -75,15 +80,36 @@ pub enum Command {
     /// Manage the User Device-login credential stored in the OS keychain.
     Auth(AuthArgs),
     /// Show the authenticated identity and NoteGate server version.
-    Me,
+    Me(SchemaArgs),
     /// Run one shared read command with the same JSON input as MCP read.
     Read(CommandInputArgs),
+    /// Run one shared search command with the same JSON input as MCP search.
+    Search(CommandInputArgs),
     /// Run one shared write command with the same JSON input as MCP write.
     Write(CommandInputArgs),
     /// Run one shared manage command with the same JSON input as MCP manage.
     Manage(CommandInputArgs),
+    /// Prepare a File download with the same JSON input as MCP file_download.
+    #[command(name = "file_download")]
+    FileDownload(CommandInputArgs),
+    /// Run the File upload lifecycle with the same JSON input as MCP file_upload.
+    #[command(name = "file_upload")]
+    FileUpload(CommandInputArgs),
+    /// Run independent read/search commands with one shared purpose.
+    #[command(name = "run_read_sequence")]
+    RunReadSequence(CommandInputArgs),
+    /// Run ordered write/manage commands with one shared purpose.
+    #[command(name = "run_write_sequence")]
+    RunWriteSequence(CommandInputArgs),
     /// Check for or apply an official notegate-cli update.
     Update(UpdateArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct SchemaArgs {
+    /// Print this tool's machine-readable shared JSON Schema and exit.
+    #[arg(long)]
+    pub schema: bool,
 }
 
 #[derive(Debug, Args)]
@@ -124,6 +150,10 @@ pub struct CommandInputArgs {
     #[arg(long)]
     pub schema: bool,
 }
+
+#[derive(Debug, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct MeInput {}
 
 pub async fn execute(cli: Cli) -> Result<Value, CliError> {
     execute_with_events(cli, |_event| Ok(())).await
@@ -176,7 +206,8 @@ pub async fn execute_with_events(
                 Ok(result)
             }
         },
-        Command::Me => command_client(base_url, timeout_seconds).await?.me().await,
+        Command::Me(args) if args.schema => shared_schema::<MeInput>("me"),
+        Command::Me(_) => invoke_tool(base_url, timeout_seconds, CommandTool::Me, &json!({})).await,
         Command::Read(args) if args.schema => shared_schema::<ReadInput>("read"),
         Command::Read(args) => {
             let input = command_input::<ReadInput>(
@@ -185,10 +216,17 @@ pub async fn execute_with_events(
                 "missing_read_input",
                 "invalid_read_input",
             )?;
-            command_client(base_url, timeout_seconds)
-                .await?
-                .read(&input)
-                .await
+            invoke_tool(base_url, timeout_seconds, CommandTool::Read, &input).await
+        }
+        Command::Search(args) if args.schema => shared_schema::<SearchInput>("search"),
+        Command::Search(args) => {
+            let input = command_input::<SearchInput>(
+                args,
+                "search",
+                "missing_search_input",
+                "invalid_search_input",
+            )?;
+            invoke_tool(base_url, timeout_seconds, CommandTool::Search, &input).await
         }
         Command::Write(args) if args.schema => shared_schema::<WriteInput>("write"),
         Command::Write(args) => {
@@ -198,10 +236,7 @@ pub async fn execute_with_events(
                 "missing_write_input",
                 "invalid_write_input",
             )?;
-            command_client(base_url, timeout_seconds)
-                .await?
-                .write(&input)
-                .await
+            invoke_tool(base_url, timeout_seconds, CommandTool::Write, &input).await
         }
         Command::Manage(args) if args.schema => shared_schema::<ManageInput>("manage"),
         Command::Manage(args) => {
@@ -211,13 +246,80 @@ pub async fn execute_with_events(
                 "missing_manage_input",
                 "invalid_manage_input",
             )?;
-            command_client(base_url, timeout_seconds)
-                .await?
-                .manage(&input)
-                .await
+            invoke_tool(base_url, timeout_seconds, CommandTool::Manage, &input).await
+        }
+        Command::FileDownload(args) if args.schema => {
+            shared_schema::<FileDownloadInput>("file_download")
+        }
+        Command::FileDownload(args) => {
+            let input = command_input::<FileDownloadInput>(
+                args,
+                "file_download",
+                "missing_file_download_input",
+                "invalid_file_download_input",
+            )?;
+            invoke_tool(base_url, timeout_seconds, CommandTool::FileDownload, &input).await
+        }
+        Command::FileUpload(args) if args.schema => shared_schema::<FileUploadInput>("file_upload"),
+        Command::FileUpload(args) => {
+            let input = command_input::<FileUploadInput>(
+                args,
+                "file_upload",
+                "missing_file_upload_input",
+                "invalid_file_upload_input",
+            )?;
+            invoke_tool(base_url, timeout_seconds, CommandTool::FileUpload, &input).await
+        }
+        Command::RunReadSequence(args) if args.schema => {
+            shared_schema::<RunReadSequenceInput>("run_read_sequence")
+        }
+        Command::RunReadSequence(args) => {
+            let input = command_input::<RunReadSequenceInput>(
+                args,
+                "run_read_sequence",
+                "missing_run_read_sequence_input",
+                "invalid_run_read_sequence_input",
+            )?;
+            invoke_tool(
+                base_url,
+                timeout_seconds,
+                CommandTool::RunReadSequence,
+                &input,
+            )
+            .await
+        }
+        Command::RunWriteSequence(args) if args.schema => {
+            shared_schema::<RunWriteSequenceInput>("run_write_sequence")
+        }
+        Command::RunWriteSequence(args) => {
+            let input = command_input::<RunWriteSequenceInput>(
+                args,
+                "run_write_sequence",
+                "missing_run_write_sequence_input",
+                "invalid_run_write_sequence_input",
+            )?;
+            invoke_tool(
+                base_url,
+                timeout_seconds,
+                CommandTool::RunWriteSequence,
+                &input,
+            )
+            .await
         }
         Command::Update(args) => update::run(args, Duration::from_secs(timeout_seconds)).await,
     }
+}
+
+async fn invoke_tool(
+    base_url: &str,
+    timeout_seconds: u64,
+    tool: CommandTool,
+    input: &Value,
+) -> Result<Value, CliError> {
+    command_client(base_url, timeout_seconds)
+        .await?
+        .invoke(tool, input)
+        .await
 }
 
 async fn command_client(base_url: &str, timeout_seconds: u64) -> Result<CommandClient, CliError> {
@@ -336,7 +438,29 @@ fn bounded_string(value: String) -> Result<String, CliError> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
+    use clap::CommandFactory;
+
     use super::*;
+
+    #[test]
+    fn cli_tool_subcommands_match_the_shared_mcp_surface() {
+        let command = Cli::command();
+        let cli_tools = command
+            .get_subcommands()
+            .map(|subcommand| subcommand.get_name())
+            .filter(|name| !matches!(*name, "auth" | "update"))
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+        let shared_tools = CommandTool::ALL
+            .into_iter()
+            .map(CommandTool::as_str)
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(cli_tools, shared_tools);
+    }
 
     #[test]
     fn shared_command_types_reject_unknown_fields_before_http() {

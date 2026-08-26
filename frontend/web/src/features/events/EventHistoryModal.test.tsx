@@ -35,12 +35,13 @@ describe("EventHistoryModal", () => {
 
     expect(screen.queryByRole("tab", { name: "Audit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "MCP" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "CLI" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Changes" })).toBeInTheDocument();
 
     await screen.findByText("No changes yet.");
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/v1/me/audit-events"))).toBe(false);
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/v1/me/mcp-invocations"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/v1/me/command-invocations"))).toBe(false);
   });
 
   it("does not call the audit endpoint when the account loses audit access", async () => {
@@ -96,20 +97,32 @@ describe("EventHistoryModal", () => {
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain("/api/v1/me/audit-events?limit=50&cursor=audit-cursor-1");
   });
 
-  it("shows MCP purposes and loads the next page from the server cursor", async () => {
+  it("keeps MCP and CLI histories on independent queries and cursors", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const path = String(input);
-      if (path.includes("/api/v1/me/mcp-invocations") && path.includes("cursor=mcp-cursor-1")) {
+      if (path.includes("surface=mcp") && path.includes("cursor=mcp-cursor-1")) {
         return jsonResponse({
-          invocations: [mcpInvocation(2, "read", "read", "Review the selected note", "error")],
+          command_invocations: [commandInvocation(2, "read", "read", "Review an older MCP note", "success", "mcp")],
           page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
         });
       }
-      if (path.includes("/api/v1/me/mcp-invocations")) {
+      if (path.includes("surface=mcp")) {
         return jsonResponse({
-          invocations: [mcpInvocation(3, "read", "changes", "Review recent changes", "success", "Research")],
+          command_invocations: [commandInvocation(3, "read", "changes", "Review recent changes", "success", "mcp", "Research")],
           page: { limit: 50, returned: 1, has_more: true, next_cursor: "mcp-cursor-1" }
+        });
+      }
+      if (path.includes("surface=cli") && path.includes("cursor=cli-cursor-1")) {
+        return jsonResponse({
+          command_invocations: [commandInvocation(4, "search", "find", "Find an older CLI note", "success", "cli")],
+          page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
+        });
+      }
+      if (path.includes("surface=cli")) {
+        return jsonResponse({
+          command_invocations: [commandInvocation(5, "read", "read", "Review the selected note", "error", "cli")],
+          page: { limit: 50, returned: 1, has_more: true, next_cursor: "cli-cursor-1" }
         });
       }
       return jsonResponse({ events: [], page });
@@ -121,12 +134,23 @@ describe("EventHistoryModal", () => {
       </ApiProvider>
     );
 
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "Changes",
+      "Audit",
+      "MCP",
+      "CLI",
+      "Jobs"
+    ]);
+
     await user.click(screen.getByRole("tab", { name: "MCP" }));
     expect(await screen.findByText("Review recent changes")).toBeInTheDocument();
+    expect(screen.getByTitle("MCP transport")).toHaveTextContent("MCP");
     expect(screen.getByText("read · changes")).toBeInTheDocument();
     expect(screen.getByText("Space Research")).toBeInTheDocument();
     expect(screen.getByText("12 ms")).toBeInTheDocument();
     expect(screen.getByText("Success")).toBeInTheDocument();
+    expect(screen.queryByText(/"target": "Research:\/"/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/"kind": "complete"/)).not.toBeInTheDocument();
     await user.click(screen.getByText("Input"));
     expect(screen.getByText(/"target": "Research:\/"/)).toBeInTheDocument();
     await user.click(screen.getByText("Response"));
@@ -135,19 +159,31 @@ describe("EventHistoryModal", () => {
 
     await user.click(screen.getByRole("button", { name: "Load more" }));
 
-    expect(await screen.findByText("Review the selected note")).toBeInTheDocument();
-    expect(screen.getByText("Error · tool_error")).toBeInTheDocument();
+    expect(await screen.findByText("Review an older MCP note")).toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
-      "/api/v1/me/mcp-invocations?limit=50&cursor=mcp-cursor-1"
+      "/api/v1/me/command-invocations?surface=mcp&limit=50&cursor=mcp-cursor-1"
+    );
+
+    await user.click(screen.getByRole("tab", { name: "CLI" }));
+    expect(await screen.findByText("Review the selected note")).toBeInTheDocument();
+    expect(screen.getByTitle("CLI transport")).toHaveTextContent("CLI");
+    expect(screen.getByText("Error · tool_error")).toBeInTheDocument();
+    expect(screen.queryByText("Review recent changes")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+
+    expect(await screen.findByText("Find an older CLI note")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
+      "/api/v1/me/command-invocations?surface=cli&limit=50&cursor=cli-cursor-1"
     );
   });
 
-  it("distinguishes legacy MCP calls without a recorded response", async () => {
+  it("distinguishes legacy calls without a recorded response", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
-      if (String(input).includes("/api/v1/me/mcp-invocations")) {
+      if (String(input).includes("/api/v1/me/command-invocations")) {
         return jsonResponse({
-          invocations: [mcpInvocation(1, "read", "spaces", "List spaces", "success", null, null)],
+          command_invocations: [commandInvocation(1, "read", "spaces", "List spaces", "success", "mcp", null, null)],
           page
         });
       }
@@ -356,12 +392,13 @@ function fileChangeEvent(id: number, op_type: string) {
   };
 }
 
-function mcpInvocation(
+function commandInvocation(
   id: number,
   tool: string,
   op: string | null,
   purpose: string | null,
   outcome: "success" | "error",
+  surface: "mcp" | "cli" = "mcp",
   spaceName: string | null = null,
   response: Record<string, unknown> | null = {
     kind: "complete",
@@ -375,6 +412,7 @@ function mcpInvocation(
     actor_account_id: "account-1",
     actor: { id: "account-1", kind: "user", display_name: "REST Test Owner" },
     caller_kind: "user",
+    surface,
     tool,
     op,
     purpose,

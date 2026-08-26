@@ -1,8 +1,9 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
-import { getBackgroundJob, listAuditEvents, listBackgroundJobs, listFileChangeEvents, listMcpInvocations } from "../../api/events";
+import { getBackgroundJob, listAuditEvents, listBackgroundJobs, listCommandInvocations, listFileChangeEvents } from "../../api/events";
 import { queryKeys } from "../../api/queryKeys";
+import type { CommandInvocationSurface } from "../../api/types";
 
 export function useAuditEventsQuery() {
   const client = useApiClient();
@@ -14,11 +15,11 @@ export function useAuditEventsQuery() {
   });
 }
 
-export function useMcpInvocationsQuery() {
+export function useCommandInvocationsQuery(surface: CommandInvocationSurface) {
   const client = useApiClient();
   return useInfiniteQuery({
-    queryKey: queryKeys.mcpInvocations,
-    queryFn: ({ pageParam }) => listMcpInvocations(client, pageParam),
+    queryKey: queryKeys.commandInvocations(surface),
+    queryFn: ({ pageParam }) => listCommandInvocations(client, surface, pageParam),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => (lastPage.page.has_more ? lastPage.page.next_cursor : undefined)
   });

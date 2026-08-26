@@ -296,7 +296,7 @@ api_key_retention_days = 30
 object_storage_history_retention_days = 90
 audit_event_retention_days = 365
 file_change_event_retention_days = 90
-mcp_invocation_retention_days = 90
+command_invocation_retention_days = 90
 purge_batch_spaces = 100
 purge_batch_nodes = 1000
 purge_batch_accounts = 100
@@ -304,5 +304,5 @@ purge_batch_api_keys = 1000
 purge_batch_object_storage_history = 1000
 purge_batch_audit_events = 1000
 purge_batch_file_change_events = 1000
-purge_batch_mcp_invocations = 1000
+purge_batch_command_invocations = 1000
 ```

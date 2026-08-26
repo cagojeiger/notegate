@@ -5,12 +5,12 @@ pub mod agent;
 pub mod api_key;
 pub mod audit_event;
 pub mod background_job;
+pub mod command_invocation;
 pub mod event_history;
 pub mod file_change_event;
 pub mod files;
 pub mod identity;
 pub mod link_graph;
-pub mod mcp_invocation;
 pub mod node;
 pub mod search;
 pub mod space;
@@ -25,6 +25,10 @@ pub use background_job::{
     BackgroundJob, BackgroundJobAttempt, BackgroundJobCursor, BackgroundJobDetail,
     BackgroundJobPage, ListBackgroundJobs,
 };
+pub use command_invocation::{
+    CommandInvocation, CommandInvocationCursor, CommandInvocationPage, CommandInvocationSurface,
+    ListCommandInvocations,
+};
 pub use event_history::EventCursor;
 pub use file_change_event::{
     FileChangeEvent, FileChangeEventCursor, FileChangeEventIdCursor, FileChangeEventPage,
@@ -34,9 +38,6 @@ pub use identity::{Caller, CallerIdentity, Channel, ResolveAttrs};
 pub use link_graph::{
     IncomingLinkCursor, LinkReference, LinkReferenceKind, LinkReferencePage, ListLinkReferences,
     NodeLinkGraphState, NodeLinkGraphStatus, OutgoingLinkCursor,
-};
-pub use mcp_invocation::{
-    ListMcpInvocations, McpInvocation, McpInvocationCursor, McpInvocationPage,
 };
 pub use node::{Node, NodeKind, NodeSummary};
 pub use space::{

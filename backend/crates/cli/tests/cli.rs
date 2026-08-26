@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::Request;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Redirect;
 use axum::routing::{get, post};
@@ -20,24 +19,29 @@ const TEST_KEY: &str = "ngk_v2_test-secret-that-must-not-be-printed";
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn me_sends_the_api_key_and_prints_only_success_json() {
     let base_url = spawn(Router::new().route(
-        "/api/commands/v1/me",
-        get(|request: Request| async move {
-            if request.headers().get(header::AUTHORIZATION)
-                == Some(&HeaderValue::from_static(
-                    "Bearer ngk_v2_test-secret-that-must-not-be-printed",
-                ))
-            {
-                (
-                    StatusCode::OK,
-                    Json(json!({"account_kind":"agent","server_version":"0.1.77"})),
-                )
-            } else {
-                (
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({"error":"unauthorized"})),
-                )
-            }
-        }),
+        "/cli",
+        post(
+            |headers: HeaderMap, Json(envelope): Json<Value>| async move {
+                if headers.get(header::AUTHORIZATION)
+                    == Some(&HeaderValue::from_static(
+                        "Bearer ngk_v2_test-secret-that-must-not-be-printed",
+                    ))
+                    && headers.get("x-notegate-cli-version")
+                        == Some(&HeaderValue::from_static(env!("CARGO_PKG_VERSION")))
+                    && envelope == json!({"tool":"me","input":{}})
+                {
+                    (
+                        StatusCode::OK,
+                        Json(json!({"account_kind":"agent","server_version":"0.1.77"})),
+                    )
+                } else {
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({"error":"unauthorized"})),
+                    )
+                }
+            },
+        ),
     ))
     .await;
 
@@ -58,9 +62,14 @@ async fn me_sends_the_api_key_and_prints_only_success_json() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn read_sends_the_shared_json_object() {
     let base_url = spawn(Router::new().route(
-        "/api/commands/v1/read",
-        post(|Json(input): Json<Value>| async move {
-            if input == json!({"purpose":"list spaces","op":"spaces"}) {
+        "/cli",
+        post(|Json(envelope): Json<Value>| async move {
+            if envelope
+                == json!({
+                    "tool": "read",
+                    "input": {"purpose":"list spaces","op":"spaces"},
+                })
+            {
                 (StatusCode::OK, Json(json!({"spaces":[]})))
             } else {
                 (
@@ -105,15 +114,15 @@ async fn write_routes_to_the_write_endpoint_with_the_exact_json_object() {
     });
     let expected_request = expected.clone();
     let base_url = spawn(Router::new().route(
-        "/api/commands/v1/write",
-        post(move |headers: HeaderMap, Json(input): Json<Value>| {
+        "/cli",
+        post(move |headers: HeaderMap, Json(envelope): Json<Value>| {
             let expected_request = expected_request.clone();
             async move {
                 if headers.get(header::AUTHORIZATION)
                     == Some(&HeaderValue::from_static(
                         "Bearer ngk_v2_test-secret-that-must-not-be-printed",
                     ))
-                    && input == expected_request
+                    && envelope == json!({"tool":"write","input":expected_request})
                 {
                     (StatusCode::OK, Json(json!({"sha256":"def456"})))
                 } else {
@@ -159,11 +168,11 @@ async fn manage_routes_to_the_manage_endpoint_with_the_exact_json_object() {
     });
     let expected_request = expected.clone();
     let base_url = spawn(Router::new().route(
-        "/api/commands/v1/manage",
-        post(move |Json(input): Json<Value>| {
+        "/cli",
+        post(move |Json(envelope): Json<Value>| {
             let expected_request = expected_request.clone();
             async move {
-                if input == expected_request {
+                if envelope == json!({"tool":"manage","input":expected_request}) {
                     (StatusCode::OK, Json(json!({"copied":true})))
                 } else {
                     (
@@ -198,6 +207,106 @@ async fn manage_routes_to_the_manage_endpoint_with_the_exact_json_object() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_remaining_mcp_tool_uses_the_same_cli_envelope() {
+    let cases = [
+        (
+            "search",
+            json!({
+                "purpose": "find project notes",
+                "op": "find",
+                "target": "daily:/",
+                "q": "project",
+            }),
+        ),
+        (
+            "file_download",
+            json!({
+                "purpose": "download one report",
+                "target": "daily:/report.pdf",
+            }),
+        ),
+        (
+            "file_upload",
+            json!({
+                "purpose": "begin uploading one report",
+                "op": "begin_upload",
+                "target": "daily:/report.pdf",
+                "byte_len": 1024,
+                "media_type": "application/pdf",
+            }),
+        ),
+        (
+            "run_read_sequence",
+            json!({
+                "purpose": "inspect related project notes",
+                "commands": [
+                    {"tool": "read", "op": "spaces"},
+                    {
+                        "tool": "search",
+                        "op": "find",
+                        "target": "daily:/",
+                        "q": "project"
+                    }
+                ],
+            }),
+        ),
+        (
+            "run_write_sequence",
+            json!({
+                "purpose": "create the project notes folder",
+                "commands": [
+                    {
+                        "tool": "manage",
+                        "op": "mkdir",
+                        "target": "daily:/projects",
+                        "parents": true
+                    }
+                ],
+            }),
+        ),
+    ];
+
+    for (tool, input) in cases {
+        let serialized_input = serde_json::to_string(&input).expect("serialize input");
+        let expected_envelope = json!({"tool": tool, "input": input});
+        let response = expected_envelope.clone();
+        let base_url = spawn(Router::new().route(
+            "/cli",
+            post(move |Json(envelope): Json<Value>| {
+                let response = response.clone();
+                async move {
+                    if envelope == response {
+                        (StatusCode::OK, Json(envelope))
+                    } else {
+                        (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({"error":"wrong_cli_envelope"})),
+                        )
+                    }
+                }
+            }),
+        ))
+        .await;
+        let output = cli(&base_url)
+            .args([tool, "--input", &serialized_input])
+            .output()
+            .expect("run symmetric CLI tool");
+
+        assert!(
+            output.status.success(),
+            "{tool}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty(), "tool: {tool}");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).expect("JSON stdout"),
+            expected_envelope,
+            "tool: {tool}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn server_error_stays_structured_on_stderr_with_a_stable_exit_code() {
     let body = json!({
         "error": "required_field_missing",
@@ -210,7 +319,7 @@ async fn server_error_stays_structured_on_stderr_with_a_stable_exit_code() {
     });
     let response_body = body.clone();
     let base_url = spawn(Router::new().route(
-        "/api/commands/v1/read",
+        "/cli",
         post(move || {
             let response_body = response_body.clone();
             async move { (StatusCode::BAD_REQUEST, Json(response_body)) }
@@ -240,7 +349,7 @@ async fn server_timeout_is_unavailable_and_preserves_the_error_body() {
     });
     let response_body = body.clone();
     let base_url = spawn(Router::new().route(
-        "/api/commands/v1/read",
+        "/cli",
         post(move || {
             let response_body = response_body.clone();
             async move { (StatusCode::REQUEST_TIMEOUT, Json(response_body)) }
@@ -258,6 +367,39 @@ async fn server_timeout_is_unavailable_and_preserves_the_error_body() {
         .expect("run CLI");
 
     assert_eq!(output.status.code(), Some(5));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stderr).expect("JSON stderr"),
+        body
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cli_update_required_preserves_the_structured_recovery_contract() {
+    let body = json!({
+        "error": "cli_update_required",
+        "kind": "client_version_incompatible",
+        "message": "update notegate-cli before retrying",
+        "data": {
+            "client_version": env!("CARGO_PKG_VERSION"),
+            "server_version": "0.1.80",
+            "retryable": false,
+            "next_action": {"kind":"run_command","command":"notegate-cli update"},
+        },
+    });
+    let response_body = body.clone();
+    let base_url = spawn(Router::new().route(
+        "/cli",
+        post(move || {
+            let response_body = response_body.clone();
+            async move { (StatusCode::UPGRADE_REQUIRED, Json(response_body)) }
+        }),
+    ))
+    .await;
+
+    let output = cli(&base_url).arg("me").output().expect("run stale CLI");
+
+    assert_eq!(output.status.code(), Some(4));
     assert!(output.stdout.is_empty());
     assert_eq!(
         serde_json::from_slice::<Value>(&output.stderr).expect("JSON stderr"),
@@ -367,11 +509,32 @@ fn command_schemas_and_help_need_no_credentials() {
             .contains("https://notegate.project-jelly.io")
     );
 
+    let me_schema = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+        .args(["me", "--schema"])
+        .env_remove("NOTEGATE_API_KEY")
+        .env_remove("NOTEGATE_BASE_URL")
+        .output()
+        .expect("run me schema command");
+    assert!(me_schema.status.success());
+    assert!(me_schema.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&me_schema.stdout)
+            .expect("me JSON schema")
+            .get("additionalProperties")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+
     for (command, expected_properties, expected_operations) in [
         (
             "read",
             &["purpose", "op", "target"][..],
-            &["spaces", "read"][..],
+            Some(&["spaces", "read"][..]),
+        ),
+        (
+            "search",
+            &["purpose", "op", "target", "q", "match"][..],
+            Some(&["find", "grep"][..]),
         ),
         (
             "write",
@@ -383,7 +546,7 @@ fn command_schemas_and_help_need_no_credentials() {
                 "edits",
                 "expected_sha256",
             ][..],
-            &["write", "append", "patch", "edit"][..],
+            Some(&["write", "append", "patch", "edit"][..]),
         ),
         (
             "manage",
@@ -395,7 +558,20 @@ fn command_schemas_and_help_need_no_credentials() {
                 "destination",
                 "recursive",
             ][..],
-            &["mkdir", "mv", "cp", "rm"][..],
+            Some(&["mkdir", "mv", "cp", "rm"][..]),
+        ),
+        ("file_download", &["purpose", "target"][..], None),
+        (
+            "file_upload",
+            &["purpose", "op", "target", "upload_id", "completed_parts"][..],
+            Some(
+                &[
+                    "begin_upload",
+                    "prepare_parts",
+                    "complete_upload",
+                    "abort_upload",
+                ][..],
+            ),
         ),
     ] {
         let schema = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
@@ -420,17 +596,19 @@ fn command_schemas_and_help_need_no_credentials() {
                 "missing {command} schema property: {property}"
             );
         }
-        let operations = schema
-            .pointer("/properties/op/enum")
-            .and_then(Value::as_array)
-            .expect("operation enum");
-        for operation in expected_operations {
-            assert!(
-                operations
-                    .iter()
-                    .any(|value| value.as_str() == Some(operation)),
-                "missing {command} operation: {operation}"
-            );
+        if let Some(expected_operations) = expected_operations {
+            let operations = schema
+                .pointer("/properties/op/enum")
+                .and_then(Value::as_array)
+                .expect("operation enum");
+            for operation in expected_operations {
+                assert!(
+                    operations
+                        .iter()
+                        .any(|value| value.as_str() == Some(operation)),
+                    "missing {command} operation: {operation}"
+                );
+            }
         }
         assert_eq!(
             schema.get("additionalProperties").and_then(Value::as_bool),
@@ -452,6 +630,45 @@ fn command_schemas_and_help_need_no_credentials() {
         assert!(help.contains("--schema"), "command: {command}");
     }
 
+    for command in ["run_read_sequence", "run_write_sequence"] {
+        let schema = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+            .args([command, "--schema"])
+            .env_remove("NOTEGATE_API_KEY")
+            .env_remove("NOTEGATE_BASE_URL")
+            .output()
+            .expect("run sequence schema command");
+        assert!(
+            schema.status.success(),
+            "{command}: {}",
+            String::from_utf8_lossy(&schema.stderr)
+        );
+        let schema = serde_json::from_slice::<Value>(&schema.stdout).expect("JSON schema");
+        assert!(schema.pointer("/properties/purpose").is_some());
+        assert!(schema.pointer("/properties/commands").is_some());
+        assert_eq!(
+            schema
+                .pointer("/properties/commands/minItems")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/commands/maxItems")
+                .and_then(Value::as_u64),
+            Some(20)
+        );
+
+        let help = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+            .args([command, "--help"])
+            .output()
+            .expect("run sequence help");
+        assert!(help.status.success(), "command: {command}");
+        let help = String::from_utf8(help.stdout).expect("UTF-8 help");
+        assert!(help.contains("--input <JSON>"), "command: {command}");
+        assert!(help.contains("--input-file <PATH>"), "command: {command}");
+        assert!(help.contains("--schema"), "command: {command}");
+    }
+
     let top_level_help = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
         .arg("--help")
         .env_remove("NOTEGATE_API_KEY")
@@ -464,8 +681,19 @@ fn command_schemas_and_help_need_no_credentials() {
     assert!(top_level_help.contains("NOTEGATE_API_KEY"));
     assert!(top_level_help.contains("NOTEGATE_BASE_URL"));
     assert!(top_level_help.contains("never accepted as a command-line argument"));
-    assert!(top_level_help.contains("write"));
-    assert!(top_level_help.contains("manage"));
+    for tool in [
+        "me",
+        "read",
+        "search",
+        "write",
+        "manage",
+        "file_download",
+        "file_upload",
+        "run_read_sequence",
+        "run_write_sequence",
+    ] {
+        assert!(top_level_help.contains(tool), "missing tool: {tool}");
+    }
     assert!(top_level_help.contains("update"));
 
     let update_help = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
@@ -516,8 +744,13 @@ fn update_reports_unmanaged_install_without_credentials_or_base_url() {
 fn argument_errors_are_structured_json() {
     for args in [
         &["read"][..],
+        &["search"][..],
         &["write"][..],
         &["manage"][..],
+        &["file_download"][..],
+        &["file_upload"][..],
+        &["run_read_sequence"][..],
+        &["run_write_sequence"][..],
         &["--timeout-seconds", "nope", "me"],
         &["read", "--input", "{}", "--schema"],
         &["write", "--input", "{}", "--schema"],
@@ -572,8 +805,8 @@ async fn redirect_is_not_followed_and_never_forwards_the_api_key() {
     .await;
     let location = format!("{redirected_base}/stolen");
     let base_url = spawn(Router::new().route(
-        "/api/commands/v1/me",
-        get(move || {
+        "/cli",
+        post(move || {
             let location = location.clone();
             async move { Redirect::temporary(&location) }
         }),
@@ -590,8 +823,8 @@ async fn redirect_is_not_followed_and_never_forwards_the_api_key() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn timeout_is_retryable_without_secret_leakage() {
     let slow_base_url = spawn(Router::new().route(
-        "/api/commands/v1/me",
-        get(|| async {
+        "/cli",
+        post(|| async {
             tokio::time::sleep(Duration::from_secs(2)).await;
             Json(json!({"too_late":true}))
         }),
@@ -608,11 +841,9 @@ async fn timeout_is_retryable_without_secret_leakage() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn oversized_response_guides_request_reduction_without_secret_leakage() {
-    let oversized_base_url = spawn(Router::new().route(
-        "/api/commands/v1/me",
-        get(|| async { vec![b'x'; 8 * 1024 * 1024 + 1] }),
-    ))
-    .await;
+    let oversized_base_url =
+        spawn(Router::new().route("/cli", post(|| async { vec![b'x'; 8 * 1024 * 1024 + 1] })))
+            .await;
     let oversized = cli(&oversized_base_url)
         .arg("me")
         .output()
@@ -643,9 +874,14 @@ async fn oversized_response_guides_request_reduction_without_secret_leakage() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn file_and_stdin_inputs_use_the_same_read_contract() {
     let base_url = spawn(Router::new().route(
-        "/api/commands/v1/read",
-        post(|Json(input): Json<Value>| async move {
-            if input == json!({"purpose":"list spaces from stdin","op":"spaces"}) {
+        "/cli",
+        post(|Json(envelope): Json<Value>| async move {
+            if envelope
+                == json!({
+                    "tool": "read",
+                    "input": {"purpose":"list spaces from stdin","op":"spaces"},
+                })
+            {
                 (StatusCode::OK, Json(json!({"source":"stdin"})))
             } else {
                 (
@@ -712,50 +948,42 @@ async fn file_and_stdin_inputs_use_the_same_read_contract() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn write_file_and_manage_stdin_inputs_use_their_shared_contracts() {
-    let base_url = spawn(
-        Router::new()
-            .route(
-                "/api/commands/v1/write",
-                post(|Json(input): Json<Value>| async move {
-                    if input
-                        == json!({
-                            "purpose": "replace a note from a file",
-                            "op": "write",
-                            "target": "daily:/note.md",
-                            "content": "replacement",
-                            "create": false,
-                        })
-                    {
-                        (StatusCode::OK, Json(json!({"source":"file"})))
-                    } else {
-                        (
-                            StatusCode::BAD_REQUEST,
-                            Json(json!({"error":"wrong_write_input"})),
-                        )
-                    }
-                }),
-            )
-            .route(
-                "/api/commands/v1/manage",
-                post(|Json(input): Json<Value>| async move {
-                    if input
-                        == json!({
-                            "purpose": "create nested folders from stdin",
-                            "op": "mkdir",
-                            "target": "daily:/notes/archive",
-                            "parents": true,
-                        })
-                    {
-                        (StatusCode::OK, Json(json!({"source":"stdin"})))
-                    } else {
-                        (
-                            StatusCode::BAD_REQUEST,
-                            Json(json!({"error":"wrong_manage_input"})),
-                        )
-                    }
-                }),
-            ),
-    )
+    let base_url = spawn(Router::new().route(
+        "/cli",
+        post(|Json(envelope): Json<Value>| async move {
+            if envelope
+                == json!({
+                    "tool": "write",
+                    "input": {
+                        "purpose": "replace a note from a file",
+                        "op": "write",
+                        "target": "daily:/note.md",
+                        "content": "replacement",
+                        "create": false,
+                    },
+                })
+            {
+                (StatusCode::OK, Json(json!({"source":"file"})))
+            } else if envelope
+                == json!({
+                    "tool": "manage",
+                    "input": {
+                        "purpose": "create nested folders from stdin",
+                        "op": "mkdir",
+                        "target": "daily:/notes/archive",
+                        "parents": true,
+                    },
+                })
+            {
+                (StatusCode::OK, Json(json!({"source":"stdin"})))
+            } else {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error":"wrong_command_input"})),
+                )
+            }
+        }),
+    ))
     .await;
 
     let input_path = std::env::temp_dir().join(format!(

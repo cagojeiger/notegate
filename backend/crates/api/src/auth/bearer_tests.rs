@@ -69,6 +69,18 @@ const TEST_API_KEY: &str = "ngk_v2_00000000-0000-0000-0000-000000000000_test-sec
 const TEST_LEGACY_API_KEY: &str = "ngk_v1_00000000-0000-0000-0000-000000000000_test-secret";
 const MCP_INITIALIZE_REQUEST: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#;
 
+fn cli_request() -> axum::http::request::Builder {
+    Request::builder()
+        .method("POST")
+        .uri("/cli")
+        .header(CONTENT_TYPE, "application/json")
+        .header("x-notegate-cli-version", env!("CARGO_PKG_VERSION"))
+}
+
+fn cli_body(tool: &str, input: Value) -> Body {
+    Body::from(json!({"tool": tool, "input": input}).to_string())
+}
+
 #[derive(Debug, Serialize)]
 struct TestClaims {
     sub: String,
@@ -830,11 +842,7 @@ async fn v2_routes_require_api_keys() -> Result<(), Box<dyn std::error::Error>> 
 async fn command_routes_require_bearer_auth() -> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/commands/v1/me")
-                .body(Body::empty())?,
-        )
+        .oneshot(cli_request().body(cli_body("me", json!({})))?)
         .await?;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -860,10 +868,9 @@ async fn command_routes_accept_agent_api_keys() -> Result<(), Box<dyn std::error
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let response = app
         .oneshot(
-            Request::builder()
-                .uri("/api/commands/v1/me")
+            cli_request()
                 .header("authorization", format!("Bearer {TEST_API_KEY}"))
-                .body(Body::empty())?,
+                .body(cli_body("me", json!({})))?,
         )
         .await?;
 
@@ -900,10 +907,9 @@ async fn command_routes_accept_cli_oauth_for_registered_users()
 
     let response = app
         .oneshot(
-            Request::builder()
-                .uri("/api/commands/v1/me")
+            cli_request()
                 .header("authorization", format!("Bearer {oauth}"))
-                .body(Body::empty())?,
+                .body(cli_body("me", json!({})))?,
         )
         .await?;
 
@@ -929,10 +935,9 @@ async fn command_unregistered_user_error_is_transport_neutral()
 
     let response = app
         .oneshot(
-            Request::builder()
-                .uri("/api/commands/v1/me")
+            cli_request()
                 .header("authorization", format!("Bearer {oauth}"))
-                .body(Body::empty())?,
+                .body(cli_body("me", json!({})))?,
         )
         .await?;
 
@@ -969,10 +974,9 @@ async fn command_routes_reject_legacy_keys_and_mcp_audience_bearers()
         let response = app
             .clone()
             .oneshot(
-                Request::builder()
-                    .uri("/api/commands/v1/me")
+                cli_request()
                     .header("authorization", format!("Bearer {bearer}"))
-                    .body(Body::empty())?,
+                    .body(cli_body("me", json!({})))?,
             )
             .await?;
 
@@ -1006,10 +1010,9 @@ async fn command_api_key_shape_does_not_depend_on_jwks() -> Result<(), Box<dyn s
 
     let response = app
         .oneshot(
-            Request::builder()
-                .uri("/api/commands/v1/me")
+            cli_request()
                 .header("authorization", "Bearer ngk_malformed")
-                .body(Body::empty())?,
+                .body(cli_body("me", json!({})))?,
         )
         .await?;
 
@@ -1023,17 +1026,14 @@ async fn command_routes_preserve_recovery_errors_and_no_store()
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let response = app
         .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/commands/v1/read")
+            cli_request()
                 .header("authorization", format!("Bearer {TEST_API_KEY}"))
-                .header(CONTENT_TYPE, "application/json")
-                .body(Body::from(
+                .body(cli_body(
+                    "read",
                     json!({
                         "purpose": "read a text node",
                         "op": "read"
-                    })
-                    .to_string(),
+                    }),
                 ))?,
         )
         .await?;

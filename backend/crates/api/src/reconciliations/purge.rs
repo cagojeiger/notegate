@@ -45,7 +45,7 @@ impl Reconciler for PurgeReconciler {
                 object_storage_history_deleted = run.object_storage_history_deleted,
                 audit_events_deleted = run.audit_events_deleted,
                 file_change_events_deleted = run.file_change_events_deleted,
-                mcp_invocations_deleted = run.mcp_invocations_deleted,
+                command_invocations_deleted = run.command_invocations_deleted,
                 link_graph_projections_deleted = run.link_graph_projections_deleted,
                 object_deletions_queued = run.object_deletions_queued,
             );

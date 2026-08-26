@@ -14,7 +14,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use chrono::Utc;
-use notegate_model::{Caller, ListAuditEvents, ListBackgroundJobs, ListMcpInvocations};
+use notegate_model::{
+    Caller, CommandInvocationSurface, ListAuditEvents, ListBackgroundJobs, ListCommandInvocations,
+};
 use notegate_service::usage::{CurrentUserUsage, QuotaUsage};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -26,7 +28,7 @@ use crate::identity::me::{MeOutput, build_me};
 use crate::page::Page;
 use crate::rest::dto::{
     AuditEventListResponse, AuditEventOut, BackgroundJobDetailResponse, BackgroundJobListResponse,
-    BackgroundJobOut, CommandAvailability, McpInvocationListResponse, McpInvocationOut,
+    BackgroundJobOut, CommandAvailability, CommandInvocationListResponse, CommandInvocationOut,
 };
 use crate::state::AppState;
 
@@ -35,13 +37,20 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/me", get(get_me).delete(delete_me))
         .route("/v1/me/usage", get(get_usage))
         .route("/v1/me/audit-events", get(list_audit_events))
-        .route("/v1/me/mcp-invocations", get(list_mcp_invocations))
+        .route("/v1/me/command-invocations", get(list_command_invocations))
         .route("/v1/me/jobs", get(list_background_jobs))
         .route("/v1/me/jobs/{job_id}", get(get_background_job))
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ListEventsQuery {
+    limit: Option<i64>,
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListCommandInvocationsQuery {
+    surface: CommandInvocationSurface,
     limit: Option<i64>,
     cursor: Option<String>,
 }
@@ -202,26 +211,28 @@ pub(crate) async fn list_audit_events(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/me/mcp-invocations",
+    path = "/api/v1/me/command-invocations",
     tag = "events",
     params(
+        ("surface" = String, Query, description = "Invocation surface: mcp or cli"),
         ("limit" = Option<i64>, Query, description = "Page size"),
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
-    responses((status = 200, description = "List current user's MCP invocation history", body = McpInvocationListResponse)),
+    responses((status = 200, description = "List current user's external command invocation history", body = CommandInvocationListResponse)),
     security(("browser_session" = []))
 )]
-pub(crate) async fn list_mcp_invocations(
+pub(crate) async fn list_command_invocations(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Query(query): Query<ListEventsQuery>,
+    Query(query): Query<ListCommandInvocationsQuery>,
 ) -> Result<Response, ApiError> {
     let page = state
         .account_lifecycle
-        .list_mcp_invocations(
+        .list_command_invocations(
             caller.account.kind,
             caller.account_id(),
-            ListMcpInvocations {
+            ListCommandInvocations {
+                surface: query.surface,
                 limit: query.limit,
                 cursor: query.cursor,
             },
@@ -233,13 +244,13 @@ pub(crate) async fn list_mcp_invocations(
         .map(|invocation| invocation.actor_account_id)
         .collect::<Vec<_>>();
     let refs = state.accounts.find_account_refs(&actor_ids).await?;
-    let invocations = page
+    let command_invocations = page
         .items
         .iter()
-        .map(|invocation| McpInvocationOut::from_invocation(invocation, &refs))
+        .map(|invocation| CommandInvocationOut::from_invocation(invocation, &refs))
         .collect();
-    let mut response = Json(McpInvocationListResponse {
-        invocations,
+    let mut response = Json(CommandInvocationListResponse {
+        command_invocations,
         page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     })
     .into_response();

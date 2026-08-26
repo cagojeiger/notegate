@@ -2,7 +2,7 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use notegate_command::{CommandError, CommandErrorClass};
+use notegate_command::{CommandError, CommandErrorClass, RecoveryAction};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -23,13 +23,55 @@ pub(super) struct CommandHttpError {
 
 impl CommandHttpError {
     pub(super) fn invalid_json(error: JsonRejection) -> Self {
+        Self::invalid_json_detail(error.body_text())
+    }
+
+    pub(super) fn invalid_schema(error: serde_json::Error) -> Self {
+        Self::invalid_json_detail(error.to_string())
+    }
+
+    pub(super) fn cli_update_required(client_version: Option<&str>) -> Self {
+        Self {
+            status: StatusCode::UPGRADE_REQUIRED,
+            body: CommandErrorBody {
+                error: "cli_update_required".to_owned(),
+                kind: "client_version_incompatible".to_owned(),
+                message: "update notegate-cli before retrying".to_owned(),
+                data: Some(json!({
+                    "kind": "client_version_incompatible",
+                    "code": "cli_update_required",
+                    "client_version": client_version,
+                    "server_version": env!("CARGO_PKG_VERSION"),
+                    "retryable": false,
+                    "recoverable": true,
+                    "next_action": RecoveryAction::RunCommand {
+                        command: "notegate-cli update".to_owned(),
+                    },
+                })),
+            },
+        }
+    }
+
+    fn invalid_json_detail(detail: String) -> Self {
         CommandError::invalid_params("request body is invalid")
             .with_data(json!({
                 "kind": "invalid_input",
                 "code": "invalid_json",
-                "detail": error.body_text(),
+                "detail": detail,
             }))
             .into()
+    }
+
+    pub(super) fn error_code(&self) -> &str {
+        &self.body.error
+    }
+
+    pub(super) fn kind(&self) -> &str {
+        &self.body.kind
+    }
+
+    pub(super) fn data(&self) -> Option<&Value> {
+        self.body.data.as_ref()
     }
 
     #[cfg(test)]

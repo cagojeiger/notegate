@@ -6,20 +6,11 @@ pub use notegate_command::{
 };
 use rmcp::ErrorData;
 use rmcp::model::ErrorCode;
-use serde_json::{Value, json};
 
 /// Retryable dependency/maintenance failure shared by MCP tools.
 pub const TEMPORARY_UNAVAILABLE_ERROR_CODE: ErrorCode = ErrorCode(-32001);
 /// Process-local capacity rejection shared by MCP tools.
 pub const CAPACITY_BUSY_ERROR_CODE: ErrorCode = ErrorCode(-32002);
-
-pub fn error_json(error: ErrorData) -> Value {
-    json!({
-        "code": error.code.0,
-        "message": error.message,
-        "data": error.data,
-    })
-}
 
 /// Convert the transport-neutral command failure into the unchanged MCP error
 /// envelope at the protocol boundary.

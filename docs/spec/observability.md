@@ -43,6 +43,33 @@ notegate_http_requests_in_flight
   lifecycle, so a monitoring outage does not leave samples accumulating until the
   next scrape.
 
+## Command invocation metrics
+
+MCP tool dispatch and Command API requests share one bounded command-invocation
+metric family. The Command API surface is labelled `cli` because it is the
+machine JSON surface used by `notegate-cli`.
+
+```text
+notegate_command_invocations_total
+  labels: surface, tool, outcome
+
+notegate_command_invocation_duration_seconds
+  labels: surface, tool, outcome
+
+notegate_command_invocations_in_flight
+  labels: surface, tool
+```
+
+- `surface` is `mcp` or `cli`.
+- `tool` is one of `me`, `read`, `search`, `write`, `manage`,
+  `file_download`, `file_upload`, `run_read_sequence`,
+  `run_write_sequence`, or `unknown`.
+- `outcome` is `success` or `error`.
+- MCP records only calls that reach tool dispatch. Authentication failures before
+  dispatch remain visible through HTTP RED metrics.
+- Duration is recorded in seconds using the HTTP RED bucket layout from 5 ms
+  through 30 s.
+
 ## Resource utilization metrics
 
 ```text

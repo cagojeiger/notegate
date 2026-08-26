@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum KnownMcpTool {
+pub enum CommandTool {
     Me,
     Read,
     Search,
@@ -11,9 +11,8 @@ pub(super) enum KnownMcpTool {
     RunWriteSequence,
 }
 
-impl KnownMcpTool {
-    #[cfg(test)]
-    pub(super) const ALL: [Self; 9] = [
+impl CommandTool {
+    pub const ALL: [Self; 9] = [
         Self::Me,
         Self::Read,
         Self::Search,
@@ -25,7 +24,7 @@ impl KnownMcpTool {
         Self::RunWriteSequence,
     ];
 
-    pub(super) fn parse(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "me" => Some(Self::Me),
             "read" => Some(Self::Read),
@@ -40,7 +39,7 @@ impl KnownMcpTool {
         }
     }
 
-    pub(super) const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Me => "me",
             Self::Read => "read",
@@ -54,18 +53,30 @@ impl KnownMcpTool {
         }
     }
 
-    pub(super) const fn accepts_op(self) -> bool {
+    pub const fn accepts_op(self) -> bool {
         matches!(
             self,
             Self::Read | Self::Search | Self::Write | Self::Manage | Self::FileUpload
         )
     }
 
-    pub(super) const fn is_sequence(self) -> bool {
+    pub const fn is_sequence(self) -> bool {
         matches!(self, Self::RunReadSequence | Self::RunWriteSequence)
     }
 
-    pub(super) const fn is_sequence_command(self) -> bool {
+    pub const fn is_sequence_command(self) -> bool {
         matches!(self, Self::Read | Self::Search | Self::Write | Self::Manage)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_names_round_trip_through_the_shared_registry() {
+        for tool in CommandTool::ALL {
+            assert_eq!(CommandTool::parse(tool.as_str()), Some(tool));
+        }
     }
 }

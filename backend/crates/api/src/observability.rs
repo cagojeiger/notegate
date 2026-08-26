@@ -64,7 +64,7 @@ pub(crate) fn install(
             SEARCH_DURATION_BUCKETS_SECONDS,
         )?
         .set_buckets_for_metric(
-            Matcher::Full("notegate_mcp_tool_duration".to_owned()),
+            Matcher::Full("notegate_command_invocation_duration".to_owned()),
             HTTP_DURATION_BUCKETS_SECONDS,
         )?
         .set_buckets_for_metric(
@@ -180,13 +180,17 @@ fn describe_metrics() {
         "Grep decrypted-body cache lookups by bounded result"
     );
     metrics::describe_counter!(
-        "notegate_mcp_tool_calls",
-        "Completed MCP tool calls by bounded tool and outcome"
+        "notegate_command_invocations",
+        "Completed command invocations by bounded surface, tool, and outcome"
     );
     metrics::describe_histogram!(
-        "notegate_mcp_tool_duration",
+        "notegate_command_invocation_duration",
         Unit::Seconds,
-        "MCP tool execution duration in seconds"
+        "Command invocation duration in seconds"
+    );
+    metrics::describe_gauge!(
+        "notegate_command_invocations_in_flight",
+        "Command invocations currently in flight by bounded surface and tool"
     );
     metrics::describe_histogram!(
         "notegate_db_pool_acquire_duration",
@@ -286,28 +290,59 @@ pub(crate) fn record_metadata_items(
     .increment(count);
 }
 
-pub(crate) fn record_mcp_tool_metrics(
-    enabled: bool,
+pub(crate) struct CommandInvocationMetrics {
+    surface: &'static str,
     tool: &'static str,
-    outcome: &'static str,
-    duration: Duration,
-) {
-    if !enabled {
-        return;
+    in_flight: Option<Gauge>,
+}
+
+impl CommandInvocationMetrics {
+    pub(crate) fn start(enabled: bool, surface: &'static str, tool: &'static str) -> Self {
+        let in_flight = enabled.then(|| {
+            let gauge = metrics::gauge!(
+                "notegate_command_invocations_in_flight",
+                "surface" => surface,
+                "tool" => tool,
+            );
+            gauge.increment(1.0);
+            gauge
+        });
+
+        Self {
+            surface,
+            tool,
+            in_flight,
+        }
     }
 
-    metrics::counter!(
-        "notegate_mcp_tool_calls",
-        "tool" => tool,
-        "outcome" => outcome
-    )
-    .increment(1);
-    metrics::histogram!(
-        "notegate_mcp_tool_duration",
-        "tool" => tool,
-        "outcome" => outcome
-    )
-    .record(duration.as_secs_f64());
+    pub(crate) fn finish(self, outcome: &'static str, duration: Duration) {
+        if self.in_flight.is_none() {
+            return;
+        }
+
+        metrics::counter!(
+            "notegate_command_invocations",
+            "surface" => self.surface,
+            "tool" => self.tool,
+            "outcome" => outcome
+        )
+        .increment(1);
+        metrics::histogram!(
+            "notegate_command_invocation_duration",
+            "surface" => self.surface,
+            "tool" => self.tool,
+            "outcome" => outcome
+        )
+        .record(duration.as_secs_f64());
+    }
+}
+
+impl Drop for CommandInvocationMetrics {
+    fn drop(&mut self) {
+        if let Some(in_flight) = &self.in_flight {
+            in_flight.decrement(1.0);
+        }
+    }
 }
 
 pub(crate) fn record_search_deadline(operation: &'static str, phase: &'static str) {
@@ -701,7 +736,7 @@ mod tests {
             )
             .unwrap()
             .set_buckets_for_metric(
-                Matcher::Full("notegate_mcp_tool_duration".to_owned()),
+                Matcher::Full("notegate_command_invocation_duration".to_owned()),
                 HTTP_DURATION_BUCKETS_SECONDS,
             )
             .unwrap()
@@ -831,18 +866,10 @@ mod tests {
                 .increment(32);
             metrics::counter!("notegate_search_cache_lookups", "result" => "hit").increment(3);
             record_search_deadline("grep", "during_execution");
-            metrics::counter!(
-                "notegate_mcp_tool_calls",
-                "tool" => "search",
-                "outcome" => "success"
-            )
-            .increment(1);
-            metrics::histogram!(
-                "notegate_mcp_tool_duration",
-                "tool" => "search",
-                "outcome" => "success"
-            )
-            .record(0.015);
+            CommandInvocationMetrics::start(true, "mcp", "search")
+                .finish("success", Duration::from_millis(15));
+            CommandInvocationMetrics::start(true, "cli", "read")
+                .finish("error", Duration::from_millis(20));
             record_metadata_flush(true, "success", Duration::from_millis(2));
             record_metadata_items(true, "api_key", "flushed", 3);
             metrics::histogram!(
@@ -920,10 +947,23 @@ mod tests {
         assert!(body.contains(
             "notegate_search_deadline_exceeded_total{operation=\"grep\",phase=\"during_execution\"} 1"
         ));
+        assert!(body.contains(
+            "notegate_command_invocations_total{surface=\"mcp\",tool=\"search\",outcome=\"success\"} 1"
+        ));
+        assert!(body.contains(
+            "notegate_command_invocations_total{surface=\"cli\",tool=\"read\",outcome=\"error\"} 1"
+        ));
+        assert!(body.contains("notegate_command_invocation_duration_seconds_bucket"));
         assert!(
-            body.contains("notegate_mcp_tool_calls_total{tool=\"search\",outcome=\"success\"} 1")
+            body.contains(
+                "notegate_command_invocations_in_flight{surface=\"mcp\",tool=\"search\"} 0"
+            )
         );
-        assert!(body.contains("notegate_mcp_tool_duration_seconds_bucket"));
+        assert!(
+            body.contains(
+                "notegate_command_invocations_in_flight{surface=\"cli\",tool=\"read\"} 0"
+            )
+        );
         assert!(body.contains("notegate_db_pool_acquire_duration_seconds_bucket"));
         assert!(body.contains("notegate_db_pool_acquire_timeouts_total 1"));
         assert!(body.contains(
