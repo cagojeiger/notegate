@@ -42,12 +42,16 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
-      - name: Guard duplicate tag
+      - name: Validate existing tag
         run: |
           tag="${{ steps.ver.outputs.tag }}"
           if git rev-parse "$tag" >/dev/null 2>&1; then
-            echo "::error::tag $tag already exists; bump VERSION before merging"
-            exit 1
+            tagged_commit=$(git rev-list -n 1 "$tag")
+            if [ "$tagged_commit" != "$GITHUB_SHA" ]; then
+              echo "::error::tag $tag already points to a different commit; bump VERSION before merging"
+              exit 1
+            fi
+            echo "::notice::tag $tag already points to this commit; resuming release"
           fi
 
   build:
@@ -256,6 +260,11 @@ jobs:
             cp "${source_dir}/${asset}.sha256" "${release_dir}/${asset}.sha256"
             size=$(stat -c%s "${release_dir}/${asset}")
             sha=$(awk '{print $1}' "${release_dir}/${asset}.sha256")
+            actual_sha=$(sha256sum "${release_dir}/${asset}" | awk '{print $1}')
+            if [ "${#sha}" -ne 64 ] || [ "$sha" != "$actual_sha" ]; then
+              echo "::error::invalid CLI checksum for ${asset}"
+              exit 1
+            fi
             if [ "$first" -eq 0 ]; then
               printf ',\n' >> "$manifest_tmp"
             fi
@@ -268,14 +277,22 @@ jobs:
             printf '}\n'
           } >> "$manifest_tmp"
           mv "$manifest_tmp" "${release_dir}/notegate-cli-manifest.json"
+          python3 -m json.tool "${release_dir}/notegate-cli-manifest.json" >/dev/null
           cp deploy/cli/install.sh "${release_dir}/notegate-cli-installer.sh"
           chmod 755 "${release_dir}/notegate-cli-installer.sh"
 
-      - name: Tag and create GitHub Release
+      - name: Create or resume GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           tag="${{ needs.version.outputs.tag }}"
-          git tag "$tag"
-          git push origin "$tag"
-          gh release create "$tag" --title "$tag" --generate-notes /tmp/cli-release/*
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" /tmp/cli-release/* --clobber
+          else
+            gh release create "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "$tag" \
+              --generate-notes \
+              /tmp/cli-release/*
+          fi

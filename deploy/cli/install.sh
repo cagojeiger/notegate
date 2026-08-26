@@ -41,6 +41,12 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+sanitized_bin_dir="$(printf '%s' "$BIN_DIR" | LC_ALL=C tr -d '\001-\037\177')"
+if [ "$sanitized_bin_dir" != "$BIN_DIR" ]; then
+  echo "install.sh: --bin-dir must not contain control characters" >&2
+  exit 2
+fi
+
 detect_target() {
   os="$(uname -s)"
   arch="$(uname -m)"
@@ -90,8 +96,11 @@ checksum_file() {
 
 candidate_version() {
   output="$("$1" --version)"
-  version="$(printf '%s\n' "$output" | awk '/^notegate-cli [0-9]+\.[0-9]+\.[0-9]+$/ {print $2}')"
-  if [ -z "$version" ]; then
+  if ! version="$(printf '%s\n' "$output" | awk '
+    NR == 1 && /^notegate-cli [0-9]+\.[0-9]+\.[0-9]+$/ { version = $2; next }
+    { exit 1 }
+    END { if (NR == 1 && version != "") print version; else exit 1 }
+  ')"; then
     echo "install.sh: downloaded notegate-cli candidate returned an invalid version: $output" >&2
     exit 1
   fi
@@ -155,8 +164,8 @@ case ":${PATH}:" in
 esac
 
 if [ "$path_on_path" = true ]; then
-  printf '{"status":"installed","path":"%s","target":"%s","version":"%s","path_on_path":true,"hint":null}\n' "$INSTALL_PATH" "$TARGET" "$VERSION"
+  printf '{"status":"installed","path":"%s","target":"%s","version":"%s","path_on_path":true,"hint":null}\n' "$escaped_path" "$TARGET" "$VERSION"
 else
   hint="$(json_escape "add ${BIN_DIR} to PATH before running notegate-cli")"
-  printf '{"status":"installed","path":"%s","target":"%s","version":"%s","path_on_path":false,"hint":"%s"}\n' "$INSTALL_PATH" "$TARGET" "$VERSION" "$hint"
+  printf '{"status":"installed","path":"%s","target":"%s","version":"%s","path_on_path":false,"hint":"%s"}\n' "$escaped_path" "$TARGET" "$VERSION" "$hint"
 fi

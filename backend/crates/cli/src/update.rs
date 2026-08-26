@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 use fd_lock::RwLock;
@@ -11,6 +10,8 @@ use reqwest::redirect::{Attempt, Policy};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
+use tokio::process::Command;
+use tokio::time::timeout;
 
 use crate::{CliError, UpdateArgs};
 
@@ -22,6 +23,7 @@ const RECEIPT_SCHEMA_VERSION: u32 = 1;
 const RECEIPT_MANAGED_BY: &str = "notegate-cli-installer";
 const MANIFEST_MAX_BYTES: usize = 256 * 1024;
 const ARTIFACT_MAX_BYTES: usize = 100 * 1024 * 1024;
+const CANDIDATE_SMOKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) async fn run(args: UpdateArgs, timeout: Duration) -> Result<Value, CliError> {
     let current_exe = std::env::current_exe().map_err(|_error| {
@@ -153,9 +155,8 @@ async fn run_with_settings(settings: UpdateSettings) -> Result<Value, CliError> 
 
     reject_symlink(&settings.current_exe)?;
     let temp_path = write_candidate(parent, &bytes)?;
-    smoke_check_candidate(&temp_path, &manifest.version)?;
+    smoke_check_candidate(&temp_path, &manifest.version, CANDIDATE_SMOKE_TIMEOUT).await?;
     replace_binary(&temp_path, &settings.current_exe)?;
-    sync_directory(parent)?;
     write_receipt(
         &settings.receipt_path,
         &InstallReceipt {
@@ -547,10 +548,22 @@ fn is_trusted_update_host(url: &Url) -> bool {
         || host.ends_with(".github.com")
 }
 
-fn smoke_check_candidate(path: &Path, version: &str) -> Result<(), CliError> {
-    let output = Command::new(path)
-        .arg("--version")
-        .output()
+async fn smoke_check_candidate(
+    path: &Path,
+    version: &str,
+    smoke_timeout: Duration,
+) -> Result<(), CliError> {
+    let mut command = Command::new(path);
+    command.arg("--version").kill_on_drop(true);
+    let output = timeout(smoke_timeout, command.output())
+        .await
+        .map_err(|_elapsed| {
+            let _ = fs::remove_file(path);
+            CliError::protocol(
+                "candidate_smoke_check_failed",
+                "the downloaded notegate-cli candidate timed out during its --version check",
+            )
+        })?
         .map_err(|error| {
             let _ = fs::remove_file(path);
             CliError::protocol(
@@ -758,8 +771,10 @@ mod tests {
     use axum::Router;
     use axum::body::Bytes;
     use axum::extract::State;
+    use axum::response::Redirect;
     use axum::routing::get;
     use std::error::Error;
+    use std::process::Command as StdCommand;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::net::TcpListener;
@@ -878,7 +893,7 @@ mod tests {
             result.get("status").and_then(Value::as_str),
             Some("updated")
         );
-        let output = Command::new(&install_path).arg("--version").output()?;
+        let output = StdCommand::new(&install_path).arg("--version").output()?;
         assert!(output.status.success());
         assert_eq!(
             String::from_utf8(output.stdout)?,
@@ -969,6 +984,113 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn check_only_reports_available_update_without_downloading_artifact()
+    -> Result<(), Box<dyn Error>> {
+        let dir = test_dir("check-available")?;
+        let (install_path, receipt_path, target) = managed_script_install(&dir)?;
+        let artifact_name = format!("notegate-cli-{target}");
+        let artifact = b"not downloaded".to_vec();
+        let manifest = manifest_bytes(
+            &target,
+            "9.9.9",
+            &artifact_name,
+            sha256_hex(&artifact),
+            artifact.len(),
+        )?;
+        let (server, artifact_requests) =
+            spawn_counted_test_server(artifact_name.clone(), artifact, manifest).await?;
+
+        let result = run_with_settings(UpdateSettings {
+            current_exe: install_path.clone(),
+            receipt_path,
+            manifest_url: format!("{server}/notegate-cli-manifest.json"),
+            asset_base_url: Some(format!("{server}/")),
+            check_only: true,
+            timeout: Duration::from_secs(5),
+        })
+        .await
+        .map_err(|_error| std::io::Error::other("update check should succeed"))?;
+
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("update_available")
+        );
+        assert_eq!(
+            result.get("update_available").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(result.get("updated").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            result.get("latest_version").and_then(Value::as_str),
+            Some("9.9.9")
+        );
+        assert_eq!(
+            result.get("artifact").and_then(Value::as_str),
+            Some(artifact_name.as_str())
+        );
+        assert_eq!(artifact_requests.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            candidate_version_output(&install_path)?,
+            "notegate-cli 0.1.77\n"
+        );
+        let _ = fs::remove_dir_all(dir);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn check_only_reports_up_to_date_without_downloading_artifact()
+    -> Result<(), Box<dyn Error>> {
+        let dir = test_dir("check-current")?;
+        let (install_path, receipt_path, target) = managed_script_install(&dir)?;
+        let artifact_name = format!("notegate-cli-{target}");
+        let artifact = b"not downloaded".to_vec();
+        let manifest = manifest_bytes(
+            &target,
+            env!("CARGO_PKG_VERSION"),
+            &artifact_name,
+            sha256_hex(&artifact),
+            artifact.len(),
+        )?;
+        let (server, artifact_requests) =
+            spawn_counted_test_server(artifact_name, artifact, manifest).await?;
+
+        let result = run_with_settings(UpdateSettings {
+            current_exe: install_path.clone(),
+            receipt_path,
+            manifest_url: format!("{server}/notegate-cli-manifest.json"),
+            asset_base_url: Some(format!("{server}/")),
+            check_only: true,
+            timeout: Duration::from_secs(5),
+        })
+        .await
+        .map_err(|_error| std::io::Error::other("update check should succeed"))?;
+
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("up_to_date")
+        );
+        assert_eq!(
+            result.get("update_available").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(result.get("updated").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            result.get("latest_version").and_then(Value::as_str),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        assert!(result.get("artifact").is_none());
+        assert_eq!(artifact_requests.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            candidate_version_output(&install_path)?,
+            "notegate-cli 0.1.77\n"
+        );
+        let _ = fs::remove_dir_all(dir);
+        Ok(())
+    }
+
     #[tokio::test]
     async fn download_bound_rejects_streams_without_trusting_content_length()
     -> Result<(), Box<dyn Error>> {
@@ -992,6 +1114,75 @@ mod tests {
             error.body().get("error").and_then(Value::as_str),
             Some("update_download_too_large")
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn redirect_policy_allows_loopback_and_rejects_untrusted_hosts()
+    -> Result<(), Box<dyn Error>> {
+        async fn redirect_to_final(State(final_url): State<String>) -> Redirect {
+            Redirect::temporary(&final_url)
+        }
+        async fn redirect_to_untrusted() -> Redirect {
+            Redirect::temporary("https://example.com/notegate-cli")
+        }
+        async fn serve_final() -> &'static [u8] {
+            b"redirected"
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let final_url = format!("http://{address}/final");
+        let app = Router::new()
+            .route("/loopback", get(redirect_to_final))
+            .route("/untrusted", get(redirect_to_untrusted))
+            .route("/final", get(serve_final))
+            .with_state(final_url);
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let client = reqwest::Client::builder()
+            .redirect(safe_redirect_policy())
+            .build()?;
+        let loopback = safe_download_url(&format!("http://{address}/loopback"), "test URL")?;
+        assert_eq!(
+            download_bounded(&client, loopback, 32).await?,
+            b"redirected"
+        );
+
+        let untrusted = safe_download_url(&format!("http://{address}/untrusted"), "test URL")?;
+        let error = download_bounded(&client, untrusted, 32)
+            .await
+            .err()
+            .ok_or_else(|| std::io::Error::other("untrusted redirect should fail"))?;
+        assert_eq!(
+            error.body().get("error").and_then(Value::as_str),
+            Some("update_download_rejected")
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn candidate_smoke_check_times_out_and_removes_the_candidate()
+    -> Result<(), Box<dyn Error>> {
+        let dir = test_dir("candidate-timeout")?;
+        let candidate = dir.join("notegate-cli");
+        fs::write(&candidate, "#!/bin/sh\nsleep 30\n")?;
+        make_executable(&candidate)?;
+
+        let error = smoke_check_candidate(&candidate, "9.9.9", Duration::from_millis(50))
+            .await
+            .err()
+            .ok_or_else(|| std::io::Error::other("candidate timeout should fail"))?;
+
+        assert_eq!(
+            error.body().get("error").and_then(Value::as_str),
+            Some("candidate_smoke_check_failed")
+        );
+        assert!(!candidate.exists());
+        let _ = fs::remove_dir_all(dir);
         Ok(())
     }
 
@@ -1093,7 +1284,7 @@ mod tests {
     }
 
     fn candidate_version_output(path: &Path) -> Result<String, Box<dyn Error>> {
-        let output = Command::new(path).arg("--version").output()?;
+        let output = StdCommand::new(path).arg("--version").output()?;
         if !output.status.success() {
             return Err(std::io::Error::other("candidate --version failed").into());
         }
@@ -1112,23 +1303,37 @@ mod tests {
         artifact: Vec<u8>,
         manifest: Vec<u8>,
     ) -> Result<String, Box<dyn Error>> {
+        let (server, _artifact_requests) =
+            spawn_counted_test_server(artifact_name, artifact, manifest).await?;
+        Ok(server)
+    }
+
+    async fn spawn_counted_test_server(
+        artifact_name: String,
+        artifact: Vec<u8>,
+        manifest: Vec<u8>,
+    ) -> Result<(String, Arc<AtomicUsize>), Box<dyn Error>> {
         #[derive(Clone)]
         struct TestState {
             artifact_name: String,
             artifact: Arc<Vec<u8>>,
             manifest: Arc<Vec<u8>>,
+            artifact_requests: Arc<AtomicUsize>,
         }
         async fn serve_manifest(State(state): State<TestState>) -> Bytes {
             Bytes::from((*state.manifest).clone())
         }
         async fn serve_artifact(State(state): State<TestState>) -> Bytes {
             let _ = &state.artifact_name;
+            state.artifact_requests.fetch_add(1, Ordering::Relaxed);
             Bytes::from((*state.artifact).clone())
         }
+        let artifact_requests = Arc::new(AtomicUsize::new(0));
         let state = TestState {
             artifact_name: artifact_name.clone(),
             artifact: Arc::new(artifact),
             manifest: Arc::new(manifest),
+            artifact_requests: Arc::clone(&artifact_requests),
         };
         let app = Router::new()
             .route("/notegate-cli-manifest.json", get(serve_manifest))
@@ -1139,7 +1344,7 @@ mod tests {
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
-        Ok(format!("http://{address}"))
+        Ok((format!("http://{address}"), artifact_requests))
     }
 
     fn test_dir(label: &str) -> Result<PathBuf, Box<dyn Error>> {
