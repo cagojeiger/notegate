@@ -288,6 +288,7 @@ fn auth_status_reports_api_key_precedence_without_exposing_it() {
     let output = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
         .args(["--base-url", "https://notegate.example", "auth", "status"])
         .env("NOTEGATE_API_KEY", TEST_KEY)
+        .env("NOTEGATE_BASE_URL", "https://ignored.example")
         .env_remove("NOTEGATE_AUTHGATE_URL")
         .env_remove("NOTEGATE_CLI_CLIENT_ID")
         .output()
@@ -304,11 +305,68 @@ fn auth_status_reports_api_key_precedence_without_exposing_it() {
         status.get("source").and_then(Value::as_str),
         Some("environment")
     );
+    assert_eq!(
+        status.get("base_url").and_then(Value::as_str),
+        Some("https://notegate.example")
+    );
+    assert!(!combined_output(&output).contains(TEST_KEY));
+}
+
+#[test]
+fn auth_status_uses_production_base_url_by_default() {
+    let output = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+        .args(["auth", "status"])
+        .env("NOTEGATE_API_KEY", TEST_KEY)
+        .env_remove("NOTEGATE_BASE_URL")
+        .env_remove("NOTEGATE_AUTHGATE_URL")
+        .env_remove("NOTEGATE_CLI_CLIENT_ID")
+        .output()
+        .expect("run auth status with the default base URL");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let status = serde_json::from_slice::<Value>(&output.stdout).expect("JSON stdout");
+    assert_eq!(
+        status.get("base_url").and_then(Value::as_str),
+        Some("https://notegate.project-jelly.io")
+    );
+    assert!(!combined_output(&output).contains(TEST_KEY));
+}
+
+#[test]
+fn auth_status_uses_environment_base_url_over_default() {
+    let output = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+        .args(["auth", "status"])
+        .env("NOTEGATE_API_KEY", TEST_KEY)
+        .env("NOTEGATE_BASE_URL", "https://self-hosted.example")
+        .env_remove("NOTEGATE_AUTHGATE_URL")
+        .env_remove("NOTEGATE_CLI_CLIENT_ID")
+        .output()
+        .expect("run auth status with an environment base URL");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let status = serde_json::from_slice::<Value>(&output.stdout).expect("JSON stdout");
+    assert_eq!(
+        status.get("base_url").and_then(Value::as_str),
+        Some("https://self-hosted.example")
+    );
     assert!(!combined_output(&output).contains(TEST_KEY));
 }
 
 #[test]
 fn command_schemas_and_help_need_no_credentials() {
+    let top_level_help = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+        .arg("--help")
+        .env_remove("NOTEGATE_BASE_URL")
+        .output()
+        .expect("run top-level help");
+    assert!(top_level_help.status.success());
+    assert!(
+        String::from_utf8_lossy(&top_level_help.stdout)
+            .contains("https://notegate.project-jelly.io")
+    );
+
     for (command, expected_properties, expected_operations) in [
         (
             "read",
@@ -786,19 +844,6 @@ fn write_and_manage_reject_unknown_fields_before_http() {
 
 #[test]
 fn local_input_and_key_errors_are_structured_and_redacted() {
-    let missing_base_url = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
-        .arg("me")
-        .env("NOTEGATE_API_KEY", TEST_KEY)
-        .env_remove("NOTEGATE_BASE_URL")
-        .output()
-        .expect("run missing base URL CLI");
-    assert_eq!(missing_base_url.status.code(), Some(2));
-    assert_eq!(
-        error_code(&missing_base_url).as_deref(),
-        Some("missing_base_url")
-    );
-    assert!(!combined_output(&missing_base_url).contains(TEST_KEY));
-
     let invalid_json = cli("http://127.0.0.1:9")
         .args(["read", "--input", "{"])
         .output()
