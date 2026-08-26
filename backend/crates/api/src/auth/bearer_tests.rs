@@ -75,6 +75,10 @@ fn cli_request() -> axum::http::request::Builder {
         .uri("/cli")
         .header(CONTENT_TYPE, "application/json")
         .header("x-notegate-cli-version", env!("CARGO_PKG_VERSION"))
+        .header(
+            "x-notegate-command-protocol",
+            notegate_command::COMMAND_PROTOCOL_VERSION,
+        )
 }
 
 fn cli_body(tool: &str, input: Value) -> Body {
