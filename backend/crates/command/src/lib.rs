@@ -3,6 +3,12 @@
 //! MCP, the HTTP Command API, and the CLI share these request and recovery
 //! types so their public JSON stays aligned.
 
+/// Compatibility version for the shared Command API contract.
+///
+/// Package versions remain useful for diagnostics, but compatible CLI and
+/// server releases communicate as long as this protocol version matches.
+pub const COMMAND_PROTOCOL_VERSION: &str = "1";
+
 mod input;
 mod purpose;
 mod recovery;

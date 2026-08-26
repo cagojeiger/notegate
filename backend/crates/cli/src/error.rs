@@ -153,11 +153,13 @@ mod tests {
     fn update_required_is_a_structured_command_rejection_regardless_of_status() {
         let body = json!({
             "error": "cli_update_required",
-            "kind": "client_version_incompatible",
+            "kind": "client_protocol_incompatible",
             "message": "update notegate-cli before retrying",
             "data": {
                 "client_version": "0.1.79",
                 "server_version": "0.1.80",
+                "client_protocol_version": "0",
+                "server_protocol_version": "1",
                 "next_action": {"kind": "run_command", "command": "notegate-cli update"},
             },
         });

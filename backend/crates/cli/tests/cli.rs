@@ -28,6 +28,10 @@ async fn me_sends_the_api_key_and_prints_only_success_json() {
                     ))
                     && headers.get("x-notegate-cli-version")
                         == Some(&HeaderValue::from_static(env!("CARGO_PKG_VERSION")))
+                    && headers.get("x-notegate-command-protocol")
+                        == Some(&HeaderValue::from_static(
+                            notegate_command::COMMAND_PROTOCOL_VERSION,
+                        ))
                     && envelope == json!({"tool":"me","input":{}})
                 {
                     (
@@ -378,11 +382,13 @@ async fn server_timeout_is_unavailable_and_preserves_the_error_body() {
 async fn cli_update_required_preserves_the_structured_recovery_contract() {
     let body = json!({
         "error": "cli_update_required",
-        "kind": "client_version_incompatible",
+        "kind": "client_protocol_incompatible",
         "message": "update notegate-cli before retrying",
         "data": {
             "client_version": env!("CARGO_PKG_VERSION"),
             "server_version": "0.1.80",
+            "client_protocol_version": "0",
+            "server_protocol_version": notegate_command::COMMAND_PROTOCOL_VERSION,
             "retryable": false,
             "next_action": {"kind":"run_command","command":"notegate-cli update"},
         },

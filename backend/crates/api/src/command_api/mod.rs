@@ -14,8 +14,8 @@ use self::context::HttpCommandContext;
 use self::error::CommandHttpError;
 use crate::state::AppState;
 
-/// The unversioned CLI transport. Command schemas are release-matched with the
-/// CLI binary and are shared with MCP through `notegate-command`.
+/// The unversioned CLI transport. Command schemas use an explicit compatibility
+/// protocol and are shared with MCP through `notegate-command`.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new().route("/cli", post(invoke))
 }
