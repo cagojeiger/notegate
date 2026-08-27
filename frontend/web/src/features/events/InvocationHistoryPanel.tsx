@@ -46,6 +46,8 @@ function CommandInvocationRow({ invocation }: { invocation: CommandInvocation })
   const duration = invocation.duration_ms < 1_000
     ? `${invocation.duration_ms} ms`
     : `${(invocation.duration_ms / 1_000).toFixed(2)} s`;
+  const purpose = invocation.purpose
+    ?? (invocation.tool === "me" ? "Checked caller identity" : "Purpose not recorded");
 
   return (
     <li className="group relative flex gap-3 border-b border-seam py-2 last:border-b-0">
@@ -55,8 +57,8 @@ function CommandInvocationRow({ invocation }: { invocation: CommandInvocation })
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-3">
-          <div className="truncate text-workbench font-medium text-text" title={invocation.purpose ?? undefined}>
-            {invocation.purpose ?? "Checked caller identity"}
+          <div className="truncate text-workbench font-medium text-text" title={purpose}>
+            {purpose}
           </div>
           <EventTime value={invocation.created_at} />
         </div>
