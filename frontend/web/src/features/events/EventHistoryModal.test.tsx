@@ -203,6 +203,33 @@ describe("EventHistoryModal", () => {
     expect(screen.getByText("Not recorded. This call predates response logging.")).toBeInTheDocument();
   });
 
+  it("distinguishes caller identity from a missing purpose", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      if (String(input).includes("/api/v1/me/command-invocations")) {
+        return jsonResponse({
+          command_invocations: [
+            commandInvocation(2, "me", null, null, "success", "mcp"),
+            commandInvocation(1, "read", "read", null, "error", "mcp")
+          ],
+          page: { ...page, returned: 2 }
+        });
+      }
+      return jsonResponse({ events: [], page });
+    });
+
+    render(
+      <ApiProvider authCacheKey="browser-session:0">
+        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+      </ApiProvider>
+    );
+
+    await user.click(screen.getByRole("tab", { name: "MCP" }));
+
+    expect(await screen.findByText("Checked caller identity")).toBeInTheDocument();
+    expect(screen.getByText("Purpose not recorded")).toBeInTheDocument();
+  });
+
   it("shows queue jobs and loads attempt history only when expanded", async () => {
     const user = userEvent.setup();
     const job = backgroundJob("job-1", "running");
