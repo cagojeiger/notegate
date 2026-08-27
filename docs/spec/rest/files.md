@@ -128,9 +128,17 @@ PDF preview는 file detail 전용이다. Markdown image batch endpoint는 PDF를
 
 Permission: `read`.
 
-`GET /files/{node_id}/docx-preview-url`은 10 MiB 이하이고 `encryption_mode=none`인 검증된 DOCX package에 임시 presigned GET URL을 반환한다. Upload 완료 시 의심되는 DOCX는 전체 package를 한 번 검증해 server-owned `detected_media_type`으로 저장한다. 기능 도입 전에 ZIP으로 감지됐거나 감지값이 없는 기존 DOCX 후보는 첫 preview 요청에서 같은 검증을 수행해 감지값을 교정한다. Object key는 완료 후 불변이므로 검증된 DOCX 감지값은 image/PDF와 같이 재사용하며 preview마다 object를 다시 읽지 않는다. Client 선언 `media_type`과 `.docx` 원본 파일명은 DOCX 후보를 고르는 힌트일 뿐 최종 허용 판정이 아니며, 응답과 presigned URL의 `Content-Type`은 실제 package 검증 결과인 `application/vnd.openxmlformats-officedocument.wordprocessingml.document`다. 응답은 `Cache-Control: private, no-store`, object URL은 `Content-Disposition: inline`과 `Cache-Control: private, no-store, max-age=0`을 서명한다.
+`GET /files/{node_id}/docx-preview-url`은 다음 조건을 만족하는 DOCX package에 임시 presigned GET URL을 반환한다.
 
-검증은 ZIP container와 `[Content_Types].xml`, `_rels/.rels`, `word/document.xml`을 확인하고 `/word/document.xml`의 exact DOCX main content-type override와 root `officeDocument` relationship을 요구한다. 구조 검증을 먼저 완료한 뒤 허용된 모든 non-directory entry를 실제 EOF까지 읽어 CRC와 확장량을 검증한다. HTML, 일반 ZIP, 다른 OOXML 형식, 손상되거나 구조만 흉내 낸 ZIP, client-encrypted File은 `404`다. Markdown image batch endpoint에서도 DOCX는 `unsupported`로 유지한다.
+- 10 MiB 이하
+- `encryption_mode=none`
+- 전체 package 검증 완료
+
+Upload 완료 시 DOCX 후보를 검증하고 server-owned `detected_media_type`을 저장한다. DOCX preview 요청에서 감지값이 없거나 DOCX가 아닌 값이면 같은 검증을 수행해 감지값을 갱신한다. Object key는 완료 후 불변이므로 검증된 감지값을 이후 preview에 재사용한다. Client 선언 `media_type`과 `.docx` 파일명은 후보 판정에만 사용한다.
+
+검증은 ZIP container, `[Content_Types].xml`, `_rels/.rels`, `word/document.xml`, exact DOCX main content-type override와 root `officeDocument` relationship을 확인한다. 구조 검증 뒤 모든 허용 non-directory entry를 EOF까지 읽어 CRC와 확장량을 검증한다.
+
+성공 응답과 presigned URL의 `Content-Type`은 `application/vnd.openxmlformats-officedocument.wordprocessingml.document`다. 응답은 `Cache-Control: private, no-store`, object URL은 `Content-Disposition: inline`과 `Cache-Control: private, no-store, max-age=0`을 사용한다. 검증을 통과하지 못한 package와 client-encrypted File은 `404`, Markdown image batch의 DOCX 결과는 `unsupported`다.
 
 압축 package는 frontend parsing 전에 다음 resource/security 상한을 통과해야 한다.
 
@@ -143,7 +151,7 @@ Permission: `read`.
 
 DOCX package 검증은 API process별 최대 2개만 blocking worker에서 동시에 실행한다. 용량이 찬 경우 검증 결과를 unsupported로 저장하지 않고 일시적 unavailable로 처리하여 이후 다시 시도할 수 있게 한다.
 
-이 상한은 압축 폭탄의 확장량과 서버 검증 비용을 제한하지만 Word와 동일한 렌더링 충실도를 보장하거나 DOCX parser 자체의 모든 취약성을 제거하지는 않는다. Frontend renderer는 오류 시 fail closed하며, 일반 external hyperlink는 package 단계에서 허용하되 unsafe href를 제거하고 `altChunk` rendering은 사용하지 않는다.
+이 상한은 압축 폭탄의 확장량과 서버 검증 비용을 제한한다. Frontend renderer는 오류 시 fail closed하고, external hyperlink의 unsafe href를 제거하며, `altChunk`를 rendering하지 않는다. 렌더링 결과는 Word와 동일한 충실도를 보장하지 않는다.
 
 ## Audio preview
 

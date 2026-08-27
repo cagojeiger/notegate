@@ -99,7 +99,7 @@ waits and `notegate_db_pool_acquire_timeouts_total` counts acquisition timeouts.
 
 ## Background job metrics
 
-API process 안의 background runtime은 기존 application listener의 `/metrics`에 metric을 함께 제공한다. `NOTEGATE_METRICS_ENABLED=true`일 때만 기록과 노출을 활성화한다.
+Background runtime은 active process listener의 `/metrics`에 metric을 함께 제공한다. `NOTEGATE_METRICS_ENABLED=true`일 때만 기록과 노출을 활성화한다.
 
 ```text
 notegate_background_jobs
@@ -159,18 +159,9 @@ notegate_metadata_write_items_total
 
 ## Cardinality and data policy
 
-Metric labels must be bounded and must not contain:
+Metric labels use only bounded domains declared for each family in this document. Allowed values come from fixed enums such as process mode, method, status class, outcome, state, operation and stage, or from bounded code-registered catalogs such as route templates, tool names, job kinds and reconciler kinds. New metrics define their label domains here before implementation.
 
-- request paths or query strings;
-- search queries, include/exclude patterns, or cursors;
-- account, user, agent, Space, node, upload, or request identifiers;
-- background job ID, claim token, payload, or worker ID;
-- filenames, content, error messages, or exception text.
-
-New metrics must define their label domains in this document before implementation.
-Unbounded diagnostic values belong in structured logs or traces, not Prometheus labels.
-The global `process_mode` label is bounded to the five process modes above; request and trace IDs must
-never be added as metric labels.
+Labels do not derive from user, request or content data. IDs, raw paths and query strings, search input and cursors, filenames, content and payloads, and error or exception text belong in structured logs or traces. Request and trace IDs are not metric labels.
 
 ## Reconciliation 메트릭
 

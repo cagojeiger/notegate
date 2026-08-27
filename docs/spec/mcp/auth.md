@@ -1,18 +1,13 @@
 # MCP Auth
 
-MCP는 bearer 인증만 사용하며 사용자와 Agent의 transport endpoint를 분리한다. 두 endpoint는
-같은 tool schema와 service invariant를 사용한다.
+MCP는 bearer 인증만 사용한다. Endpoint별 credential과 caller mapping은 다음과 같고, 두 endpoint는 같은 tool schema와 service invariant를 사용한다.
 
-```text
-/mcp     + OAuth/AuthGate bearer -> user account
-/mcp/v2  + ngk_v2_ Agent API key -> agent account
-```
+| Endpoint | Credential | Caller |
+|---|---|---|
+| `/mcp` | OAuth/AuthGate bearer | User account |
+| `/mcp/v2` | `ngk_v2_` Agent API key | Agent account |
 
-`/mcp`는 Agent API key를 허용하지 않는다. OAuth 인증 실패 응답은 protected-resource metadata를 포함한
-`WWW-Authenticate` challenge를 반환한다.
-
-`/mcp/v2`는 `ngk_v2_` Agent API key만 허용하고 OAuth bearer와 browser session cookie를 허용하지 않는다. 인증 실패 응답은
-`Bearer realm="notegate-agent-mcp-v2"` challenge를 반환한다.
+`/mcp`의 인증 실패 응답은 protected-resource metadata를 포함한 `WWW-Authenticate` challenge를 반환한다. `/mcp/v2`의 인증 실패 응답은 `Bearer realm="notegate-agent-mcp-v2"` challenge를 반환한다. Endpoint에 매핑되지 않은 credential은 인증되지 않는다.
 
 ```text
 missing/malformed token         -> 401

@@ -74,7 +74,7 @@ No-op 변경               0               0                0
 
 원본 변경, counter 증감, file change event 기록은 모두 성공하거나 모두 rollback되어야 한다.
 
-File node 또는 File을 포함한 subtree 복사는 지원하지 않는다.
+복사 대상과 형식은 [`files-commands.md`](./files-commands.md#copy-semantics)의 공통 command 계약을 따른다.
 
 ## Quota enforcement
 

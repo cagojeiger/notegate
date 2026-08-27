@@ -13,7 +13,7 @@
 - 동시성 guard는 `expected_sha256`, 조건부 읽기는 `if_none_match_sha256`를 사용한다.
 - MCP JSON payload는 encrypted Text와 binary File bytes를 운반하지 않는다. File bytes는 `file_upload` 또는 `file_download`가 발급한 presigned URL로 직접 전송한다.
 - MCP는 space create/delete/rename을 제공하지 않는다.
-- `run_write_sequence`의 완료된 mutation은 rollback하지 않는다. File tool은 sequence에 포함할 수 없다.
+- `run_write_sequence`의 완료된 mutation은 그대로 유지된다. File tool은 sequence에 포함할 수 없다.
 - 모든 입력은 알 수 없는 필드를 거부한다. sequence의 `commands[]`는 `tool`별 branch가 해당 직접 tool의 op와 필드만 노출한다.
 - `target`의 Space name은 exact match이며 대소문자를 구분한다. Space name을 모르면 `read op=spaces`로 목록을 먼저 조회한다.
 - Space name exact match가 실패하면 server는 case-insensitive 후보를 error `data.suggestions`에 넣을 수 있지만, 자동으로 다른 Space로 resolve하지 않는다.
@@ -321,7 +321,7 @@ type RunReadSequenceInput = {
 
 ### `run_write_sequence`
 
-`write`와 `manage` command만 받는다. 입력 순서대로 한 번에 하나씩 실행하며 첫 runtime 실패에서 중단한다. 완료된 mutation은 rollback하지 않고 실행하지 않은 command 수를 `skipped`로 반환한다.
+`write`와 `manage` command만 받는다. 입력 순서대로 한 번에 하나씩 실행하며 첫 runtime 실패에서 중단한다. 완료된 mutation은 유지되고 실행하지 않은 command 수는 `skipped`로 반환된다.
 
 ```ts
 type RunWriteSequenceInput = {

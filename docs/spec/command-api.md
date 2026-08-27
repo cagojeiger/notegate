@@ -6,7 +6,12 @@
 
 ## 인증
 
-Agent가 소유한 `ngk_v2_` API key와 AuthGate Device Flow가 발급한 User OAuth access token을 허용한다.
+`POST /cli`는 다음 두 credential을 caller로 변환한다.
+
+| Credential | Caller | 검증 기준 |
+|---|---|---|
+| AuthGate Device Flow의 User OAuth access token | User | `aud=NOTEGATE_CLI_OAUTH_CLIENT_ID` |
+| Agent가 소유한 `ngk_v2_` API key | Agent | active key와 account |
 
 ```http
 Authorization: Bearer ngk_v2_...
@@ -14,11 +19,11 @@ X-Notegate-CLI-Version: <CLI release version>
 X-Notegate-Command-Protocol: 1
 ```
 
-User OAuth token의 `aud`는 서버의 `NOTEGATE_CLI_OAUTH_CLIENT_ID`와 정확히 일치해야 한다. Browser session cookie, MCP resource audience token과 legacy `ngk_v1_` key는 허용하지 않는다. 반대로 User MCP는 계속 `NOTEGATE_RESOURCE_URL` audience만 허용하고 Public V2는 Agent `ngk_v2_` key만 허용한다. 모든 응답은 `Cache-Control: private, no-store`다.
+각 API surface의 credential 경계는 [`api.md`](./api.md#identity-mapping)를 따른다. `POST /cli` 응답은 모두 `Cache-Control: private, no-store`다.
 
-공식 CLI는 `X-Notegate-CLI-Version`을 진단용으로 항상 전송하지만 서버는 package version의 정확한 일치를 요구하지 않는다. `X-Notegate-Command-Protocol`은 필수이며, 현재 지원 version은 `1`이다. 이 header가 누락됐거나 지원되지 않으면 `426 Upgrade Required`, `error=cli_update_required`, `kind=client_protocol_incompatible`, `next_action={"kind":"run_command","command":"notegate-cli update"}`를 반환하며 command를 실행하지 않는다.
+현재 Command Protocol은 `1`이다. 공식 CLI는 필수 `X-Notegate-Command-Protocol: 1`과 진단용 `X-Notegate-CLI-Version`을 전송한다. Package version은 호환 판정에 사용하지 않는다.
 
-Patch release는 가능한 한 같은 Command Protocol을 유지한다. Protocol을 올릴 때는 rolling deployment에서 구·신 파드가 공존하는 기간을 고려해 호환 기간 또는 명시적인 배포 절차를 함께 정의해야 한다.
+지원하지 않는 protocol은 command 실행 전에 `426 Upgrade Required`, `error=cli_update_required`, `kind=client_protocol_incompatible`, `next_action={"kind":"run_command","command":"notegate-cli update"}`로 종료한다. Protocol 변경은 rolling deployment의 호환 기간 또는 배포 순서를 함께 정의한다.
 
 ## Endpoint와 envelope
 
@@ -55,7 +60,7 @@ Content-Type: application/json
 `me`만 `purpose` 예외다. 다른 모든 직접 도구는 자기 input에 `purpose`가 필요하다. Sequence는 top-level `purpose`를 한 번만 받고, 내부 command에는 `purpose`나 `args` wrapper를 넣지 않는다.
 
 - `run_read_sequence`: read/search 1..20개, 최대 4개 병렬 실행, 결과는 입력 순서
-- `run_write_sequence`: write/manage 1..20개, 입력 순서 직렬 실행, 첫 실패 후 중단, rollback 없음
+- `run_write_sequence`: write/manage 1..20개, 입력 순서 직렬 실행, 첫 실패 후 중단, 완료된 mutation 유지
 - 두 sequence 모두 모든 command의 정적으로 검증 가능한 오류를 실행 전에 모아 반환한다.
 
 성공 시 공통 command 결과를 추가 envelope 없이 반환한다. Path, pagination, Text/File, search와 write-lock semantics는 [`files-commands.md`](./files-commands.md)를 따른다.
@@ -85,7 +90,7 @@ HTTP status는 transport 결과를 나타내고 JSON body는 MCP와 같은 안�
 
 ## 호출 이력과 메트릭
 
-인증을 통과해 `/cli`에 도달한 요청은 `surface=cli`인 command invocation 한 행으로 best-effort 기록한다. CLI argument/local file 오류와 서버에 도달하지 못한 network 실패는 포함하지 않는다. Sequence는 top-level 한 행으로 기록하며 내부 command별 행을 만들지 않는다.
+인증을 통과해 `/cli`에 도달한 요청은 `surface=cli`인 command invocation 한 행으로 best-effort 기록한다. Sequence도 top-level 한 행으로 기록한다. CLI argument·local file 오류와 서버 도달 전 network 실패는 client-local 결과다.
 
 Prometheus command metric은 MCP와 같은 family를 사용하고 `surface=cli`로 분리한다. 기록 범위, redaction과 retention은 [`event-logging.md`](./event-logging.md#command-invocation-history), metric 계약은 [`observability.md`](./observability.md#command-invocation-metrics)를 따른다.
 
@@ -93,5 +98,5 @@ Prometheus command metric은 MCP와 같은 family를 사용하고 `surface=cli`�
 
 - Public V2와 같은 Agent API rate-limit budget을 사용한다.
 - 모든 요청은 공통 ingress body limit와 deadline을 적용받는다.
-- 실제 File bytes는 JSON body를 통과하지 않고 presigned URL로 object storage와 직접 전송한다.
+- File bytes는 presigned URL로 object storage와 직접 전송한다.
 - 호출 이력 저장 실패는 이미 수행된 command 결과를 실패로 바꾸지 않는다.

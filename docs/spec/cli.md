@@ -76,9 +76,9 @@ notegate-cli auth status
 notegate-cli auth logout
 ```
 
-- `auth login`은 기존 User credential이 있으면 덮어쓰지 않고 `already_authenticated`를 반환한다. 먼저 `auth logout`으로 기존 refresh token을 폐기해야 한다.
+- `auth login`은 저장된 User credential이 있으면 덮어쓰지 않고 `already_authenticated`를 반환한다. 먼저 `auth logout`으로 저장된 refresh token을 폐기한다.
 - 같은 OAuth client의 인증 작업이 이미 lock을 보유하고 있으면 기다리지 않고 retryable `login_in_progress`를 반환한다. 진행 중인 인증이 끝난 뒤 `auth status`로 결과를 확인한다.
-- 이전 refresh 결과가 불명확한 상태라면 `auth login`이 같은 credential lock 아래에서 구 local bundle과 marker를 삭제하고 새 Device Flow를 시작한다. 불명확한 구 refresh token을 revoke/refresh 요청에 다시 보내지 않는다.
+- Refresh 결과가 불명확한 상태라면 `auth login`이 같은 credential lock 아래에서 local bundle과 marker를 삭제하고 새 Device Flow를 시작한다. 해당 refresh token은 revoke/refresh 요청에 다시 보내지 않는다.
 - 새 login credential의 keychain write 뒤 profile index commit과 보상 삭제가 모두 실패하면 `credential_store_state_unknown`을 반환한다. 이때 위의 explicit AuthGate URL/client ID 두 override를 설정한 `auth logout`으로 issuer+client key를 직접 정리한 뒤 다시 로그인한다.
 - `auth status`는 network 요청이나 refresh 없이 local 상태만 읽는다. `NOTEGATE_API_KEY`가 있으면 실제 일반 command 우선순위에 맞춰 `credential=agent_api_key`, `source=environment`를 표시하며 값은 출력하지 않는다.
 - `auth logout`은 User refresh token revoke를 한 번 시도한 후 결과와 무관하게 local User credential을 삭제한다. `NOTEGATE_API_KEY`는 환경 변수이므로 삭제하지 않으며, 설정되어 있으면 결과에 unset 안내를 포함한다.
@@ -156,9 +156,5 @@ Command Protocol mismatch는 exit `4`이며 서버의 구조화 body를 그대�
 {"event":"verification_required","verification_uri":"https://authgate.project-jelly.io/device","verification_uri_complete":"https://authgate.project-jelly.io/device?user_code=BCDF-GHKM","user_code":"BCDF-GHKM","expires_in":300,"interval":5}
 {"event":"login_succeeded","base_url":"http://localhost:9191","issuer":"https://authgate.project-jelly.io","client_id":"notegate-cli-local","expires_at":1787530000}
 ```
-
-## 현재 제외 범위
-
-- API key 영구 저장과 profile
 
 Command API의 서버 계약은 [`command-api.md`](./command-api.md)를 따른다.
