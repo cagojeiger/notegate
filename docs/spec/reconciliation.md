@@ -43,22 +43,12 @@ backend/crates/api/src/reconciliations/
   object_storage.rs    S3-compatible object cleanup adapter
 ```
 
-Object storage cleanup은 전역 singleton reconciliation으로 실행하지만, provider 호출 전의 행 단위 claim과 `retry_after` lease를 유지한다. 이 안전장치는 롤링 배포 중 구버전 worker와의 경합, provider 호출 후 DB 갱신 전 종료, 재시도 backoff를 처리한다. 한 번에 100개를 모두 처리하면 lock을 해제하고 1초 후 다시 선점해 남은 backlog를 이어서 처리한다.
+Object storage cleanup은 전역 singleton reconciliation으로 실행하지만, provider 호출 전의 행 단위 claim과 `retry_after` lease를 유지한다. 이 안전장치는 롤링 배포 중 worker 간 경합, provider 호출 후 DB 갱신 전 종료, 재시도 backoff를 처리한다. 한 번에 100개를 모두 처리하면 lock을 해제하고 1초 후 다시 선점해 남은 backlog를 이어서 처리한다.
 
 행 단위 claim으로 replica가 작업을 나눠 처리하는 queue consumer는 이 runtime 대상이 아니다. Process별 상태를 관리하는 metrics upkeep과 metadata write-behind도 전역 singleton으로 만들지 않는다.
 
 ## 관측
 
-```text
-notegate_reconciliation_active{kind}
-notegate_reconciliation_runs_total{kind,outcome}
-notegate_reconciliation_duration_seconds{kind,outcome}
-notegate_reconciliation_last_completed_timestamp_seconds{kind}
-notegate_reconciliation_last_success_timestamp_seconds{kind}
-```
+Reconciliation runtime은 kind별 활성 상태, 실행 결과, 실행 시간과 최근 완료·성공 시각을 노출한다. Metric 이름, label domain과 fleet 집계 방법은 [Observability의 Reconciliation 메트릭](observability.md#reconciliation-메트릭)을 따른다.
 
-등록된 kind는 실행 전에도 `active=0`으로 노출한다. Fleet 실행 수는 replica별 counter 증가량을 합산하고, percentile은 replica별 histogram bucket을 `kind`, `le` 기준으로 먼저 합산한 뒤 계산한다. `lock_held`는 다른 replica가 동일 kind를 실행 중이라는 정상적인 조정 결과일 수 있으며, 같은 kind의 `active` 합계가 `1`을 초과하면 단일 실행 불변식 위반이다.
-
-Last-completed는 advisory lock을 획득한 실행이 종료될 때 결과와 관계없이 갱신한다. `ContinueAfter`를 반환한 bounded pass도 성공한 실행이므로 last-success는 마지막 완전 수렴 시각이 아니라 마지막 성공 pass 시각이다. 두 gauge는 process-local이므로 Pod 교체를 포함하는 fleet 조회는 등록 주기보다 긴 범위의 `max_over_time`을 사용하고 replica 중 최댓값을 선택한다.
-
-Metric label에는 node ID, Space ID, payload 또는 오류 본문을 넣지 않는다. 구조화 로그는 진단에 필요한 제한된 오류 정보를 기록할 수 있지만 문서 본문이나 job payload는 기록하지 않는다.
+`lock_held`는 다른 replica가 동일 kind를 실행 중인 정상적인 조정 결과다. 같은 kind의 `active` 합계가 `1`을 초과하면 단일 실행 불변식 위반이다. `ContinueAfter`를 반환한 bounded pass도 성공한 실행이며, 완전 수렴 여부는 업무별 backlog 또는 freshness metric으로 판단한다.

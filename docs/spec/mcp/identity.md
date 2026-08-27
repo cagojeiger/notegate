@@ -26,4 +26,4 @@ Agent caller:
 }
 ```
 
-`server_version`은 실행 중인 바이너리의 Cargo package version이다. 최신 MCP 응답의 `_meta.io.modelcontextprotocol/serverInfo.version`과 같은 값을 사용한다. 구형 client에서는 `initialize.serverInfo.version`으로도 같은 값을 확인할 수 있다.
+`server_version`은 실행 중인 바이너리의 Cargo package version이다. 같은 값은 응답 `_meta.io.modelcontextprotocol/serverInfo.version`과 initialize 기반 protocol의 `initialize.serverInfo.version`에 사용된다.

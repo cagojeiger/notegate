@@ -99,7 +99,7 @@ File은 binary/object content node다. MCP `file_upload`/`file_download`는 pres
 
 ## Search semantics
 
-Search는 MCP command semantics다. Browser V1과 Public V2 REST는 search endpoint를 제공하지 않는다. 세부 traversal, cursor, memory budget은 `search.md`를 따른다.
+Command API와 MCP는 같은 path-first Search semantics를 사용한다. Browser V1과 Public V2는 tree/text resource API를 사용한다. 세부 traversal, cursor와 memory budget은 [`search.md`](./search.md)를 따른다.
 
 ```text
 find        folder/text/file node name/kind/scope 검색

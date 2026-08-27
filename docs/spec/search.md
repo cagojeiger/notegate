@@ -1,17 +1,16 @@
 # Search
 
-Search는 MCP의 path-first command다. Browser V1과 Public V2 REST는 search endpoint를 제공하지 않는다.
+Search는 Command API와 MCP의 path-first command다.
 
-Runtime의 `find`/`grep` 구현은 `notegate-search` crate가 소유한다. 일반 file-tree 조회인 `tree`는 `FilesService`에 남긴다.
+`notegate-search` crate는 `find`와 `grep`을 소유하고, `FilesService`는 일반 file-tree 조회인 `tree`를 소유한다.
 
 ## Execution boundary
 
-Public API/MCP state는 검색 엔진, admission 또는 복호화 body cache를 소유하지 않는다. `find`와
-`grep`은 private HTTP client를 통해 `SearchRuntime`으로 전달되고, runtime이 `SearchService`,
-`SearchAdmission`, body cache와 search telemetry를 함께 소유한다.
+`find`와 `grep`은 private HTTP client를 통해 `SearchRuntime`으로 전달된다. Runtime은
+`SearchService`, `SearchAdmission`, 복호화 body cache와 search telemetry를 소유한다.
 
 ```text
-MCP search
+MCP/CLI search
   -> SearchClient
   -> signed private HTTP
   -> SearchRuntime
@@ -21,23 +20,21 @@ MCP search
        -> PostgreSQL primary/read pool
 ```
 
-기본 `all`과 local `api` mode도 public listener와 search listener를 다른 socket으로 띄운다.
+기본 `all`과 local `api` mode는 public listener와 search listener를 다른 socket으로 띄운다.
 `search` mode는 private search listener만 띄우므로 같은 image를 별도 search pod로 배포할 수 있다.
-API pod에 `search_service_url`을 지정하면 local search listener를 만들지 않고 해당 내부 service를
-호출한다. Public listener에는 private search route를 등록하지 않는다.
+API pod에 `search_service_url`을 지정하면 해당 내부 service를 호출한다. Private search route는 search
+listener에만 등록한다.
 
-Search storage access는 `notegate-search` 내부 `store` 경계가 소유한다. 현재 구현은
-`PostgresSearchStore` 하나이며 기존 `FilesRepo`의 권한, scope, candidate, body와 result hydration
-연산을 그대로 위임한다. 권한 판정은 항상 primary pool을 사용한다. `read_database_url`이 설정되면
-scope, candidate, body와 result hydration만 별도 read pool을 사용하고, 설정되지 않으면 primary
-pool을 공유한다. 이 분리는 권한 철회가 replica lag 때문에 늦게 반영되는 것을 막지만, 변경 직후
-검색 결과 자체는 read replica의 지연만큼 이전 상태일 수 있다. SQLite 구현과 snapshot lifecycle은
-이 계약에 포함되지 않는다. 별도 read pool은 local search listener를 소유한 process에서만 생성한다.
+Search storage access는 `notegate-search` 내부 `store` 경계가 소유한다. `PostgresSearchStore`는
+`FilesRepo`에 권한, scope, candidate, body와 result hydration 연산을 위임한다. 권한 판정은 primary
+pool을 사용한다. `read_database_url`이 설정되면 scope, candidate, body와 result hydration은 별도
+read pool을 사용하고, 설정되지 않으면 primary pool을 공유한다. 따라서 권한 철회는 primary 기준으로
+판정하고 검색 결과는 read replica의 지연을 반영할 수 있다. 별도 read pool은 local search listener를
+소유한 process에서만 생성한다.
 
-API `/ready`는 원격 search service를 동기적으로 probe하지 않는다. 검색 장애 때문에 읽기·쓰기까지
-같이 service endpoint에서 제거되는 연쇄 장애를 피하기 위한 의도적인 부분 가용성 계약이다. Search
-pod는 자신의 `/ready`로 DB/schema 준비 상태를 알리고, API는 연결 실패를 retryable
-`search_unavailable`로 반환한다. 운영에서는 이 오류율과 search pod readiness를 함께 경보한다.
+API `/ready`는 API가 소유한 dependency만 검사한다. Search pod는 자신의 `/ready`로 DB/schema 준비
+상태를 알린다. API가 Search에 연결하지 못하면 retryable `search_unavailable`을 반환한다. 운영에서는
+이 오류율과 Search pod readiness를 함께 경보한다.
 
 Private request signature는 timestamp, HTTP method, path와 정확한 body bytes를 묶는다. 허용 clock
 skew는 60초다. Response도 request timestamp, status, path와 body를 묶어 서명한다. 양쪽 key는
@@ -64,18 +61,22 @@ Search deadline은 `notegate_search_deadline_exceeded_total{operation,phase}` co
 ### Runtime contract
 
 Private Search HTTP는 독립 제품 API가 아니라 같은 NoteGate release의 process role 사이 계약이다.
-이번 release의 `/internal/v1`을 계약 기준선으로 삼으며 이전 private contract와의 호환은 제공하지 않는다.
-Public MCP/REST 입력은 계속 unknown field를 거부하지만, HMAC 인증된 private find/grep command는 이후
-release가 추가한 unknown field를 Search process가 무시한다. 필수 필드 누락과 기존 필드의 잘못된 type은
-계속 거부한다. API client도 Search response에 추가된 unknown field를 무시한다.
+`/internal/v1`이 현재 process 간 계약이다.
 
-`/internal/v1`에서 기존 필드의 삭제, rename, type/의미 변경과 기존 enum 의미 변경은 허용하지 않는다.
-호환되지 않는 의미 변경은 새 version path가 필요하다. 배포는 새 Search role을 먼저 전환하고, readiness를
-확인한 뒤 새 API role이 새 선택 필드를 전송하는 expand-activate 순서를 따른다.
+- Command API와 MCP의 public command input은 unknown field를 거부한다.
+- HMAC 인증된 private find/grep command와 Search response는 unknown field를 무시한다.
+- 필수 필드 누락과 필드 type 오류는 거부한다.
+- `/internal/v1` 안에서 필드의 이름, type, 의미와 enum 의미는 안정적으로 유지한다.
+- 호환되지 않는 변경은 새 version path로 정의한다.
+
+선택 필드는 expand-activate 순서로 배포한다.
+
+1. 새 필드를 수용하는 Search role을 배포한다.
+2. Search readiness를 확인한다.
+3. 새 필드를 전송하는 API role을 배포한다.
 
 서명된 private response의 HTTP status와 error kind는 다음 계약을 따른다. API client는 status와 body가
-모순되거나 `200 OK`가 아닌 성공 status를 받으면 해당 body를 신뢰하지 않고 `search_unavailable`로
-처리한다. Canonical status가 아닌 과거 status는 허용하지 않는다.
+모순되거나 성공 응답의 status가 `200 OK`가 아니면 `search_unavailable`로 처리한다.
 
 | Private error kind | HTTP status | Public error code |
 | --- | ---: | --- |
@@ -329,7 +330,9 @@ body cache miss:
   Arc<str>로 cache 저장
 ```
 
-본문 변경 transaction이 `content_sha256`을 갱신하면 다음 candidate scan은 새 key를 사용하므로 이전 body를 재사용하지 않는다. 이전 key의 entry는 별도 전체 무효화 없이 capacity, TTL, TTI 정책으로 제거한다. Candidate scan 직후 write가 경합한 현재 요청은 scan 시점의 이전 body를 사용할 수 있으며, 다음 요청부터 새 SHA를 관측한다. Search pagination과 동일하게 단일 요청을 가로지르는 tree/content 변경 일관성은 best-effort다.
+본문 변경 transaction은 `content_sha256`을 갱신하고 다음 candidate scan은 새 cache key를 사용한다.
+이전 key의 entry는 capacity, TTL과 TTI 정책으로 제거한다. 단일 요청 중 발생한 tree/content 변경은
+best-effort로 관측한다.
 
 기본 정책:
 

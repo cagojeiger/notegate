@@ -121,7 +121,7 @@ background_job_attempts
 ## 실행 규칙
 
 - Worker는 자신에게 등록된 `job_kind`만 선점한다. 처리할 수 없는 kind 때문에 polling loop가 계속 깨어나면 안 된다.
-- `NOTEGATE_PROCESS_MODE`는 `all`, `api`, `worker`, `reconciler`, `search` 중 하나다. 기본값 `all`은 기존 단일 process 배포를 유지하되 search는 별도 private listener를 사용한다.
+- `NOTEGATE_PROCESS_MODE`는 `all`, `api`, `worker`, `reconciler`, `search` 중 하나다. 기본값 `all`은 API, queue consumer와 reconciliation runtime을 한 process에서 실행하고 search는 private listener에서 제공한다.
 - `api` mode는 데이터·control HTTP와 metadata write-behind만 실행한다. `worker` mode는 queue consumer와 control HTTP, `reconciler` mode는 fixed-schedule convergence와 control HTTP만 실행한다. `search` mode는 background job을 실행하지 않는다.
 - Process mode는 실행 책임만 분리한다. 모든 mode는 같은 binary와 전체 `Config` 계약을 사용한다.
 - 기본 동시 실행 수는 process당 4이고 최대 64다.
@@ -184,27 +184,7 @@ SELECT background_job_backlog(NULL);
 
 ## 관측
 
-Background job metric은 worker listener의 `/metrics`에 노출된다. `all` mode에서는 같은 API listener를 사용한다. `NOTEGATE_METRICS_ENABLED=true`일 때만 route와 주기적 queue snapshot 갱신이 활성화된다.
-
-```text
-notegate_background_jobs{kind,state}
-notegate_background_job_oldest_ready_age_seconds{kind}
-notegate_background_jobs_in_flight{kind}
-notegate_background_job_attempts_total{kind,outcome}
-notegate_background_job_transitions_total{kind,transition}
-notegate_background_job_state_transition_errors_total{kind,operation}
-notegate_background_job_queue_errors_total{operation}
-notegate_background_job_duration_seconds{kind}
-notegate_reconciliation_active{kind}
-notegate_reconciliation_runs_total{kind,outcome}
-notegate_reconciliation_duration_seconds{kind,outcome}
-notegate_reconciliation_last_completed_timestamp_seconds{kind}
-notegate_reconciliation_last_success_timestamp_seconds{kind}
-```
-
-Metric label에는 job ID, Space ID, node ID, payload, error message를 넣지 않는다.
-
-Queue 상태와 kind별 oldest-ready age는 PostgreSQL의 운영 대상 작업을 읽은 전역 값이다. 90일간 보관되는 `succeeded` 이력은 snapshot에서 세지 않는다. Worker replica마다 같은 전역 값이 노출되므로 Prometheus에서 replica를 합산하지 않고 `max`로 집계한다. In-flight, attempt, duration, transition, state-transition error, queue error metric은 process-local 값이다. Queue error의 `operation`은 `listen`, `wake_query`, `claim`, `heartbeat` 중 하나다. Duration은 handler 실행부터 최종 queue state 저장까지의 attempt wall time이다.
+Background job runtime은 해당 process의 `/metrics`에 queue 상태, backlog age, 실행·전이·오류와 duration을 노출한다. `NOTEGATE_METRICS_ENABLED=true`일 때만 기록과 주기적 queue snapshot 갱신을 활성화한다. Metric 이름, label domain과 fleet 집계 방법은 [Observability](observability.md#background-job-metrics)를 따른다. Reconciliation metric은 [Reconciliation 메트릭](observability.md#reconciliation-메트릭)을 따른다.
 
 History에 보여줄 job은 enqueue envelope에 `history_visibility=visible`, `history_owner_account_id`, 선택적 `context_kind/context_id/context_label`을 기록한다. 이 공통 metadata가 있는 job은 종류와 관계없이 해당 account의 History에 나타난다. 기본값은 `hidden`이며 History에 표시할 필요가 없는 운영·유지보수 job은 제외된다. `context_*`는 Space에 한정되지 않는 표시 문맥이고, Worker의 claim·retry·lease 처리에는 이 metadata를 사용하지 않는다.
 

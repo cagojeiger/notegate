@@ -4,15 +4,15 @@
 
 ## Deployment and rollback
 
-Migration은 forward-only다. `all`과 `api` process가 startup에서 pending migration을 적용하고,
-다른 process mode는 현재 binary가 아는 migration의 적용 여부와 checksum을 read-only로 검증한다.
+Migration은 forward-only로 운영한다.
 
-Rolling deployment에서 구버전 replica가 계속 동작해야 하는 migration은 필요한 compatibility view나
-default를 migration 자체에 포함하고 회귀 테스트로 검증한다. 이는 이미 실행 중인 구버전 replica와의
-일시적 공존만 보장한다. 새 migration이 적용된 뒤 구버전 `all`/`api` binary를 재시작하면 SQLx가
-해당 binary에 없는 migration을 감지해 startup을 거부할 수 있다. Application rollback이 DB schema를
-자동으로 되돌리지는 않으므로, migration 포함 release는 forward fix를 기본 복구 경로로 사용하고
-완전한 rollback이 필요하면 배포 전에 검증한 database restore 절차를 사용한다.
+- `all`과 `api` process는 startup에서 pending migration을 적용한다.
+- `worker`, `reconciler`와 `search` process는 현재 binary가 아는 migration의 적용 여부와 checksum을
+  read-only로 검증한다.
+- Rolling deployment용 migration은 배포 중 공존하는 binary가 사용할 compatibility view나 default를
+  포함하고 회귀 테스트로 검증한다.
+- Migration이 포함된 release는 forward fix로 복구한다.
+- Schema 복원이 필요한 rollback은 배포 전에 검증한 database restore 절차로 수행한다.
 
 ## Entity overview
 

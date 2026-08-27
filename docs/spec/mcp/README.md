@@ -1,6 +1,6 @@
 # MCP tools
 
-MCP는 User·Agent client용 target-first path API다. Tool은 파일 시스템 명령처럼 동작하되, Space lifecycle은 다루지 않는다. 독립 조회는 `run_read_sequence`, 순차 mutation은 `run_write_sequence`로 묶을 수 있다.
+MCP는 User·Agent client용 target-first path API다. Tool은 파일 시스템 명령처럼 동작하고 Space lifecycle은 REST/dashboard가 담당한다. 독립 조회는 `run_read_sequence`, 순차 mutation은 `run_write_sequence`로 묶을 수 있다.
 
 ```text
 target = space:/absolute/path
@@ -31,16 +31,20 @@ run_write_sequence  ordered fail-fast write/manage
 
 ## 버전 확인
 
-- 이 checkout의 source release version은 repository root의 [`VERSION`](../../../VERSION)이 정본이다.
-- 최신 MCP client는 `server/discover`의 `supportedVersions`로 지원 protocol을 확인한다. 실행 중인 서버 버전은 응답 `_meta.io.modelcontextprotocol/serverInfo.version` 또는 `me.server_version`으로 확인한다.
-- MCP `2026-07-28` 요청은 `_meta.io.modelcontextprotocol/protocolVersion`을 포함하며, Streamable HTTP에서는 같은 값을 `MCP-Protocol-Version` header에도 보낸다. 이 값은 NoteGate release version과 별개다.
-- 구형 client의 `initialize.protocolVersion`과 `initialize.serverInfo.version`은 `2025-11-25` 이전 protocol을 위한 호환 경로다.
+NoteGate release version과 MCP protocol version은 독립적이다.
 
-문서/소스와 실행 중인 서버가 다른지 조사할 때는 `VERSION`, `me.server_version`, 현재 client에 노출된 tool 이름을 함께 기록한다. 서버 버전은 최신인데 tool 목록이 다르면 client/connector의 schema cache와 구독 상태를 확인한다.
+| 대상 | 확인 방법 |
+|---|---|
+| Source release | repository root의 [`VERSION`](../../../VERSION) |
+| 실행 중인 server release | 응답 `_meta.io.modelcontextprotocol/serverInfo.version` 또는 `me.server_version` |
+| MCP `2026-07-28` | `server/discover.supportedVersions`, 응답 `_meta.io.modelcontextprotocol/protocolVersion`, Streamable HTTP의 `MCP-Protocol-Version` |
+| initialize 기반 protocol | `initialize.protocolVersion`, `initialize.serverInfo.version` |
+
+문서/소스와 실행 중인 서버를 비교할 때는 `VERSION`, `me.server_version`, client에 노출된 tool 목록을 함께 확인한다. Tool 목록이 다르면 client/connector의 schema cache와 구독 상태를 확인한다.
 
 ## Tool 목록 갱신
 
-서버는 MCP `2026-07-28`과 `tools.listChanged=true`를 지원한다. 일반 MCP POST는 세션 없는 JSON request/response를 유지하고, 갱신을 구독한 client의 `subscriptions/listen` 요청만 장기 SSE 응답으로 유지한다.
+MCP `2026-07-28`은 `tools.listChanged=true`를 제공한다. 일반 MCP POST는 stateless JSON request/response이고, `subscriptions/listen`은 tool 목록 변경을 전달하는 장기 SSE 응답이다.
 
 구독이 성립하면 서버는 최초 `notifications/tools/list_changed`를 전송한다.
 
@@ -49,8 +53,15 @@ run_write_sequence  ordered fail-fast write/manage
 - `tools/list`의 `ttlMs`는 5분이고 `cacheScope=public`이다.
 - 알림 구독을 지원하지 않는 client는 연결을 다시 만들고 `tools/list`를 재호출한다.
 
-MCP는 space create/delete/rename, agent 관리, API key 관리를 제공하지 않는다. 이 작업은 REST/dashboard user-only API에서 한다.
+REST/dashboard user API가 Space lifecycle, agent와 API key 관리를 담당한다.
 
 변경 기록은 `read op=changes` 하나의 Space-root mutation stream이다. 다른 paginated read와 동일하게 `cursor`와 `page.next_cursor`를 사용하며, `direction`은 최신에서 과거로 읽는 `older`(기본값) 또는 checkpoint 이후를 적용 순서로 읽는 `newer`다.
 
-정본 tool contract는 [`tools.md`](./tools.md)를 따른다.
+## 세부 계약
+
+- 인증: [`auth.md`](./auth.md)
+- caller identity: [`identity.md`](./identity.md)
+- Space scope: [`spaces.md`](./spaces.md)
+- Tool input/output: [`tools.md`](./tools.md)
+- File entry point: [`files.md`](./files.md)
+- Search entry point: [`search.md`](./search.md)
