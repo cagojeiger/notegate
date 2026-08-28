@@ -544,11 +544,9 @@ impl AuthManager {
                 self.clear_uncertain_marker(&key)?;
                 return Err(login_required());
             }
-            self.clear_uncertain_marker(&key)?;
-            return Err(CliError::unavailable(
-                "refresh_rejected",
-                "AuthGate rejected the token refresh; the request was not retried",
-            ));
+            // AuthGate may consume the old token before a later issuance step fails.
+            // Without a complete rotated bundle, the old token must not be reused.
+            return self.mark_ambiguous_refresh(current);
         }
         let token = match serde_json::from_slice::<TokenResponse>(&body) {
             Ok(token) => match validate_token_response(token) {
@@ -1333,6 +1331,52 @@ mod tests {
             store.load(&bundle.key()).unwrap().unwrap().refresh_state,
             RefreshState::Uncertain
         );
+    }
+
+    #[tokio::test]
+    async fn oauth_refresh_error_is_marked_and_never_retried() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let server_hits = Arc::clone(&hits);
+        let base = spawn(Router::new().route(
+            "/oauth/token",
+            post(move |Form(form): Form<HashMap<String, String>>| {
+                server_hits.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    assert_eq!(
+                        form.get("refresh_token").map(String::as_str),
+                        Some("old-refresh")
+                    );
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "server_error"})),
+                    )
+                }
+            }),
+        ))
+        .await;
+        let store = Arc::new(MemoryStore::default());
+        let bundle = bundle_for(&base, "old-access", "old-refresh", 0);
+        store.create(&bundle).unwrap();
+        let lock_dir = test_lock_dir("refresh-oauth-error");
+        let marker_path = lock_dir.join(format!("{}.refresh-uncertain", key_digest(&bundle.key())));
+        let manager = AuthManager::new(Duration::from_secs(5), store.clone(), lock_dir).unwrap();
+
+        for _ in 0..2 {
+            let error = manager
+                .access_token("http://localhost:9191")
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.body().get("error").and_then(Value::as_str),
+                Some("refresh_outcome_unknown")
+            );
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            store.load(&bundle.key()).unwrap().unwrap().refresh_state,
+            RefreshState::Uncertain
+        );
+        assert!(marker_path.exists());
     }
 
     #[tokio::test]

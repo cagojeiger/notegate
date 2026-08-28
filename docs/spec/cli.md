@@ -160,7 +160,7 @@ notegate-cli manage --help
 - HTTP redirect를 따르지 않으므로 bearer credential이 다른 origin으로 전달되지 않는다.
 - access token 만료 60초 전부터 자동 refresh한다. process 간 file lock을 획득한 뒤 credential을 다시 읽고, write-ahead in-progress marker를 먼저 기록한 다음 refresh token rotation을 한 번만 수행한다.
 - 정상적인 process 종료/crash 뒤 marker가 남으면 다음 실행은 구 token을 재사용하지 않는다. Unix에서는 marker file과 parent directory를 모두 sync하며, 다른 platform의 갑작스러운 전원 손실 durability는 OS와 filesystem 보장 범위를 따른다.
-- refresh 응답이 timeout, body 손상 또는 성공 응답 저장 실패로 불명확하면 자동 재시도하지 않는다. credential을 안전 상태로 표시하거나 삭제하고 `auth login`을 요구한다.
+- refresh 응답이 timeout, body 손상, 성공 응답 저장 실패 또는 `invalid_grant` 외 OAuth 오류로 불명확하면 자동 재시도하지 않는다. credential을 안전 상태로 표시하거나 삭제하고 `auth login`을 요구한다.
 - 같은 OAuth client의 인증 작업이 lock을 보유하면 `auth login`은 retryable `login_in_progress`를 반환한다. 작업 종료 뒤 `auth status`로 결과를 확인한다.
 - Refresh 결과가 불명확한 상태라면 `auth login`이 같은 credential lock 아래에서 local bundle과 marker를 삭제하고 새 Device Flow를 시작한다. 해당 refresh token은 revoke/refresh 요청에 다시 보내지 않는다.
 - 새 login credential의 keychain write 뒤 profile index commit과 보상 삭제가 모두 실패하면 `credential_store_state_unknown`을 반환한다. 이때 위의 explicit AuthGate URL/client ID 두 override를 설정한 `auth logout`으로 issuer+client key를 직접 정리한 뒤 다시 로그인한다.
