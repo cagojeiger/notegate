@@ -5,9 +5,11 @@ use notegate_model::NodeKind;
 use notegate_model::files::NodeView;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct PathNodeSummary {
+    pub node_id: Uuid,
     pub path: String,
     pub name: String,
     pub kind: NodeKind,
@@ -47,6 +49,7 @@ impl From<NodeView> for PathNodeSummary {
 impl From<&NodeView> for PathNodeSummary {
     fn from(view: &NodeView) -> Self {
         let mut summary = Self {
+            node_id: view.node.id,
             path: view.path.clone(),
             name: view.node.name.clone(),
             kind: view.node.kind,
@@ -132,6 +135,7 @@ mod tests {
     fn folder_summary_contains_only_common_path_first_fields() {
         let view = view(NodeKind::Folder);
         let expected = json!({
+            "node_id": view.node.id,
             "path": "/entry",
             "name": "entry",
             "kind": "folder",

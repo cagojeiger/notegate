@@ -127,6 +127,7 @@ MCP `read`, `search`, `write`, `manage` 결과가 반환하는 path-first node s
 
 ```ts
 type McpNodeSummary = {
+  node_id: string
   path: string
   name: string
   kind: NodeKind
@@ -234,6 +235,12 @@ type McpTextReadResult =
       returned_lines: number
       truncated: boolean
       next_start_line: number | null
+      hint?: string
+      next_action?: {
+        kind: "call_tool"
+        tool: "read"
+        input: object
+      }
     }
   | {
       space: string

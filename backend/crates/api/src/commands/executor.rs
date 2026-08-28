@@ -4,8 +4,8 @@ use notegate_command::{
     CommandError, LineEditInput, MANAGE_OP_CP, MANAGE_OP_MKDIR, MANAGE_OP_MV, MANAGE_OP_RM,
     MANAGE_OPERATIONS, ManageInput, PatchEdit, READ_OP_CHANGES, READ_OP_LS, READ_OP_READ,
     READ_OP_SPACES, READ_OP_STAT, READ_OP_TREE, READ_OPERATIONS, ReadInput, RecoveryAction,
-    SEARCH_OP_FIND, SEARCH_OP_GREP, SEARCH_OPERATIONS, SearchInput, WRITE_OP_APPEND, WRITE_OP_EDIT,
-    WRITE_OP_PATCH, WRITE_OP_WRITE, WRITE_OPERATIONS, WriteInput,
+    SEARCH_OP_FIND, SEARCH_OP_GREP, SEARCH_OPERATIONS, SearchInput, ToolCallSpec, WRITE_OP_APPEND,
+    WRITE_OP_EDIT, WRITE_OP_PATCH, WRITE_OP_WRITE, WRITE_OPERATIONS, WriteInput,
 };
 use notegate_core::validation::validate_space_name;
 use notegate_search::{validate_find_input, validate_grep_input};
@@ -64,16 +64,19 @@ pub async fn read(
             .await
         }
         READ_OP_READ => {
-            files::read(
+            let target = required_ref(input.target.as_ref(), "target", READ_OP_READ)?.to_owned();
+            let mut result = files::read(
                 state,
                 context,
-                required(input.target, "target", READ_OP_READ)?,
+                target,
                 input.start_line,
                 input.max_lines,
                 input.max_bytes,
-                input.if_none_match_sha256,
+                input.if_none_match_sha256.clone(),
             )
-            .await
+            .await?;
+            add_read_continuation(&mut result, &input);
+            Ok(result)
         }
         READ_OP_CHANGES => {
             events::call(
@@ -88,6 +91,49 @@ pub async fn read(
             .await
         }
         _ => Err(invalid_op("read", READ_OPERATIONS)),
+    }
+}
+
+fn add_read_continuation(result: &mut Value, input: &ReadInput) {
+    if result.get("truncated").and_then(Value::as_bool) != Some(true) {
+        return;
+    }
+    let Some(next_start_line) = result.get("next_start_line").and_then(Value::as_i64) else {
+        return;
+    };
+    let Some(target) = input.target.as_deref() else {
+        return;
+    };
+    let mut continuation = json!({
+        "purpose": input.purpose,
+        "op": READ_OP_READ,
+        "target": target,
+        "start_line": next_start_line,
+    });
+    if let Some(continuation) = continuation.as_object_mut() {
+        if let Some(max_lines) = input.max_lines {
+            continuation.insert("max_lines".to_owned(), json!(max_lines));
+        }
+        if let Some(max_bytes) = input.max_bytes {
+            continuation.insert("max_bytes".to_owned(), json!(max_bytes));
+        }
+    }
+    if let Some(result) = result.as_object_mut() {
+        result.insert(
+            "hint".to_owned(),
+            json!("Content is partial. Follow next_action until truncated is false before treating it as the complete document."),
+        );
+        result.insert(
+            "next_action".to_owned(),
+            json!(RecoveryAction::CallTool {
+                call: ToolCallSpec::new("read", continuation),
+                reason: Some("Continue reading the remaining document content.".to_owned()),
+                instruction: Some(
+                    "Append the returned content exactly as received and repeat while truncated is true."
+                        .to_owned(),
+                ),
+            }),
+        );
     }
 }
 
@@ -498,6 +544,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn full_text_read_contract_matches_service_limits() {
+        assert_eq!(
+            notegate_command::FULL_TEXT_READ_MAX_LINES,
+            notegate_core::limits::READ_MAX_LINES
+        );
+        assert_eq!(
+            notegate_command::FULL_TEXT_READ_MAX_LINES as usize,
+            notegate_core::limits::TEXT_MAX_LINES
+        );
+        assert_eq!(
+            notegate_command::FULL_TEXT_READ_MAX_BYTES,
+            notegate_core::limits::READ_MAX_BYTES
+        );
+        assert_eq!(
+            notegate_command::FULL_TEXT_READ_MAX_BYTES,
+            notegate_core::limits::TEXT_MAX_BYTES
+        );
+    }
+
+    #[test]
     fn read_change_fields_are_rejected_outside_changes() {
         let error = validate_read_operation(&ReadInput {
             purpose: "inspect tree".to_owned(),
@@ -664,8 +730,36 @@ mod tests {
         .await
         .expect("write with create=true succeeds");
         assert_eq!(written["node"]["path"], "/docs/notes/log.md");
+        let written_node_id = written["node"]["node_id"].clone();
+        assert!(written_node_id.is_string());
         assert_eq!(written["byte_len"], 5);
         assert!(written["content_sha256"].is_string());
+
+        let listed = read(
+            &state,
+            &context,
+            serde_json::from_value(json!({
+                "purpose": "list the notes folder",
+                "op": "ls",
+                "target": "rest-test:/docs/notes"
+            }))?,
+        )
+        .await
+        .expect("list succeeds");
+        assert_eq!(listed["items"][0]["node_id"], written_node_id);
+
+        let stated = read(
+            &state,
+            &context,
+            serde_json::from_value(json!({
+                "purpose": "inspect the log node",
+                "op": "stat",
+                "target": "rest-test:/docs/notes/log.md"
+            }))?,
+        )
+        .await
+        .expect("stat succeeds");
+        assert_eq!(stated["node"]["node_id"], written_node_id);
 
         let appended = write(
             &state,
@@ -698,6 +792,74 @@ mod tests {
         assert_eq!(read_back["content_sha256"], appended["content_sha256"]);
         assert_eq!(read_back["byte_len"], 11);
         assert_eq!(read_back["truncated"], false);
+
+        db.cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn truncated_read_returns_an_actionable_continuation()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space_id, caller.account_id(), None, None, Some(true))
+            .await?;
+        let context = CommandContext::new(caller, None);
+        let content = (1..=201)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        write(
+            &state,
+            &context,
+            serde_json::from_value(json!({
+                "purpose": "create a paginated document",
+                "op": "write",
+                "target": "rest-test:/long.md",
+                "content": content,
+                "create": true
+            }))?,
+        )
+        .await
+        .expect("write succeeds");
+
+        let result = read(
+            &state,
+            &context,
+            serde_json::from_value(json!({
+                "purpose": "read the paginated document",
+                "op": "read",
+                "target": "rest-test:/long.md"
+            }))?,
+        )
+        .await
+        .expect("read succeeds");
+
+        assert_eq!(result["truncated"], true);
+        assert_eq!(result["next_start_line"], 201);
+        assert_eq!(result["next_action"]["kind"], "call_tool");
+        assert_eq!(result["next_action"]["tool"], "read");
+        assert_eq!(
+            result["next_action"]["input"]["purpose"],
+            "read the paginated document"
+        );
+        assert_eq!(result["next_action"]["input"]["op"], "read");
+        assert_eq!(
+            result["next_action"]["input"]["target"],
+            "rest-test:/long.md"
+        );
+        assert_eq!(result["next_action"]["input"]["start_line"], 201);
+        assert!(
+            result["hint"]
+                .as_str()
+                .is_some_and(|hint| hint.contains("partial"))
+        );
 
         db.cleanup().await;
         Ok(())
