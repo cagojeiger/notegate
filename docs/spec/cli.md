@@ -80,6 +80,8 @@ notegate-cli read \
   --input '{"purpose":"list connected spaces","op":"spaces"}'
 
 notegate-cli read --input-file request.json
+notegate-cli read --all \
+  --input '{"purpose":"read the complete note","op":"read","target":"daily:/notes/example.md"}'
 printf '%s' '{"purpose":"list connected spaces","op":"spaces"}' \
   | notegate-cli read --input-file -
 
@@ -100,6 +102,8 @@ notegate-cli run_read_sequence \
 ```
 
 CLI command surface는 `me`, `read`, `search`, `write`, `manage`, `file_download`, `file_upload`, `run_read_sequence`, `run_write_sequence`다. 각 JSON 명령은 MCP가 사용하는 동일한 공통 Rust input type을 그대로 사용한다. `--schema`는 그 type에서 생성된 JSON Schema를 출력하므로 별도의 CLI 필드 정의가 없다.
+
+`read --all`은 `op=read` 전용 CLI 안전 옵션이다. 공통 command contract의 Text 상한을 한 번에 요청하고 `truncated`, byte 길이, 줄 수와 SHA-256을 모두 검증한 뒤에만 성공한다. CLI와 서버의 상한이 달라 완전성을 확인할 수 없으면 실패한다. `start_line`, `max_lines`, `max_bytes`, `if_none_match_sha256`와 함께 사용할 수 없다. 일반 범위 읽기가 `truncated=true`를 반환하면 `next_action`을 따라 마지막 page까지 읽어야 한다.
 
 Sequence도 MCP와 같은 계약을 사용한다. `purpose`는 top-level에 한 번만 넣고 각 `commands[]`는 `tool`, `op`와 operation field를 가진 flat object다.
 

@@ -8,6 +8,10 @@
 /// Package versions remain useful for diagnostics, but compatible CLI and
 /// server releases communicate as long as this protocol version matches.
 pub const COMMAND_PROTOCOL_VERSION: &str = "1";
+/// Maximum line count a complete Text read must request in one command.
+pub const FULL_TEXT_READ_MAX_LINES: i64 = 5_000;
+/// Maximum byte count a complete Text read must request in one command.
+pub const FULL_TEXT_READ_MAX_BYTES: usize = 1_048_576;
 
 mod input;
 mod purpose;

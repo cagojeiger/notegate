@@ -434,7 +434,7 @@ fn response_fields(tool: &str, op: Option<&str>) -> Option<FieldSet> {
         ("read", Some("stat")) => Some("space node"),
         ("read", Some("read")) => Some(
             "space path unchanged content_returned content content_sha256 byte_len line_count \
-             start_line end_line returned_lines truncated next_start_line",
+             start_line end_line returned_lines truncated next_start_line hint next_action",
         ),
         ("read", Some("changes")) => Some(
             "space path scope direction order events page checkpoint_cursor resync_required \
@@ -783,8 +783,21 @@ mod tests {
             "start_line": 1,
             "end_line": 1,
             "returned_lines": 1,
-            "truncated": false,
-            "next_start_line": null,
+            "truncated": true,
+            "next_start_line": 2,
+            "hint": "SECRET_READ_HINT",
+            "next_action": {
+                "kind": "call_tool",
+                "tool": "read",
+                "input": {
+                    "purpose": "continue reading",
+                    "op": "read",
+                    "target": "daily:/note.md",
+                    "start_line": 2
+                },
+                "reason": "SECRET_READ_REASON",
+                "instruction": "SECRET_READ_INSTRUCTION"
+            },
             "future_payload": "SECRET_FUTURE"
         }))
         .into());
@@ -794,8 +807,15 @@ mod tests {
 
         assert_eq!(redacted["result"]["path"], "/note.md");
         assert_eq!(redacted["result"]["content"]["_redacted"], true);
+        assert_eq!(redacted["result"]["next_action"]["kind"], "call_tool");
+        assert_eq!(redacted["result"]["next_action"]["tool"], "read");
+        assert_eq!(redacted["result"]["next_action"]["input"]["start_line"], 2);
+        assert_eq!(redacted["result"]["hint"]["category"], "untrusted_text");
         assert_eq!(redacted["result"]["_omitted_field_count"], 1);
         assert!(!text.contains("SECRET_BODY"));
+        assert!(!text.contains("SECRET_READ_HINT"));
+        assert!(!text.contains("SECRET_READ_REASON"));
+        assert!(!text.contains("SECRET_READ_INSTRUCTION"));
         assert!(!text.contains("SECRET_FUTURE"));
         assert!(!text.contains("content\\\":\\\"SECRET_BODY"));
     }

@@ -1,7 +1,9 @@
 mod auth;
+mod checksum;
 mod client;
 mod credentials;
 mod error;
+mod full_read;
 mod update;
 mod url_policy;
 
@@ -82,7 +84,7 @@ pub enum Command {
     /// Show the authenticated identity and NoteGate server version.
     Me(SchemaArgs),
     /// Run one shared read command with the same JSON input as MCP read.
-    Read(CommandInputArgs),
+    Read(ReadCommandArgs),
     /// Run one shared search command with the same JSON input as MCP search.
     Search(CommandInputArgs),
     /// Run one shared write command with the same JSON input as MCP write.
@@ -151,6 +153,16 @@ pub struct CommandInputArgs {
     pub schema: bool,
 }
 
+#[derive(Debug, Args)]
+pub struct ReadCommandArgs {
+    #[command(flatten)]
+    pub input: CommandInputArgs,
+
+    /// Read and verify the complete Text. Cannot be combined with range fields.
+    #[arg(long)]
+    pub all: bool,
+}
+
 #[derive(Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct MeInput {}
@@ -208,15 +220,22 @@ pub async fn execute_with_events(
         },
         Command::Me(args) if args.schema => shared_schema::<MeInput>("me"),
         Command::Me(_) => invoke_tool(base_url, timeout_seconds, CommandTool::Me, &json!({})).await,
-        Command::Read(args) if args.schema => shared_schema::<ReadInput>("read"),
+        Command::Read(args) if args.input.schema => shared_schema::<ReadInput>("read"),
         Command::Read(args) => {
-            let input = command_input::<ReadInput>(
-                args,
+            let mut input = command_input::<ReadInput>(
+                args.input,
                 "read",
                 "missing_read_input",
                 "invalid_read_input",
             )?;
-            invoke_tool(base_url, timeout_seconds, CommandTool::Read, &input).await
+            if args.all {
+                full_read::prepare_input(&mut input)?;
+            }
+            let result = invoke_tool(base_url, timeout_seconds, CommandTool::Read, &input).await?;
+            if args.all {
+                full_read::verify_response(&result)?;
+            }
+            Ok(result)
         }
         Command::Search(args) if args.schema => shared_schema::<SearchInput>("search"),
         Command::Search(args) => {

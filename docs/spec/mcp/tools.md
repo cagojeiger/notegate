@@ -102,6 +102,10 @@ Event는 `event_id ASC` 순서대로 적용하고 해당 page를 모두 반영�
 
 Node summary의 `write_locked`는 대상에 직접 설정된 잠금, `effective_write_locked`는 직접 또는 상속 잠금의 적용 여부다. `op=stat`은 현재 쓰기를 막는 직접 잠금 source를 `write_lock_sources[]`의 `node_id`, `name`, `path`로 함께 반환한다.
 
+`ls`, `tree`, `stat`과 mutation 결과의 공통 node summary는 안정적인 `node_id`와 현재 `path`를 함께 반환한다. `changes.events[].node_id`는 이 값과 연결한다.
+
+`op=read`가 `truncated=true`를 반환하면 응답의 `next_action`에 같은 Text의 `next_start_line`부터 이어 읽는 입력이 포함된다. 반환된 `content`를 그대로 이어 붙이고 `truncated=false`가 될 때까지 반복한 뒤에만 완전한 문서로 취급한다.
+
 필수 입력은 `spaces`의 `purpose, op`, 나머지 read operation의 `purpose, op, target`이다.
 
 ## `search`

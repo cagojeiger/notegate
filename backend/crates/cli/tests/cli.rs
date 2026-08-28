@@ -12,6 +12,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Redirect;
 use axum::routing::{get, post};
 use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
 use tokio::net::TcpListener;
 
 const TEST_KEY: &str = "ngk_v2_test-secret-that-must-not-be-printed";
@@ -104,6 +105,160 @@ async fn read_sends_the_shared_json_object() {
         serde_json::from_slice::<Value>(&output.stdout).expect("JSON stdout"),
         json!({"spaces":[]})
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn read_all_requests_and_verifies_the_complete_text() {
+    let content = "hello\nworld";
+    let content_sha256 = sha256_hex(content.as_bytes());
+    let response = json!({
+        "space": "daily",
+        "path": "/note.md",
+        "content": content,
+        "content_sha256": content_sha256,
+        "byte_len": content.len(),
+        "line_count": 2,
+        "start_line": 1,
+        "end_line": 2,
+        "returned_lines": 2,
+        "truncated": false,
+        "next_start_line": null,
+    });
+    let expected_response = response.clone();
+    let base_url = spawn(Router::new().route(
+        "/cli",
+        post(move |Json(envelope): Json<Value>| {
+            let response = response.clone();
+            async move {
+                if envelope
+                    == json!({
+                        "tool": "read",
+                        "input": {
+                            "purpose": "read the complete note",
+                            "op": "read",
+                            "target": "daily:/note.md",
+                            "start_line": 1,
+                            "max_lines": 5000,
+                            "max_bytes": 1048576,
+                        },
+                    })
+                {
+                    (StatusCode::OK, Json(response))
+                } else {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error":"wrong_full_read_input"})),
+                    )
+                }
+            }
+        }),
+    ))
+    .await;
+
+    let output = cli(&base_url)
+        .args([
+            "read",
+            "--all",
+            "--input",
+            r#"{"purpose":"read the complete note","op":"read","target":"daily:/note.md"}"#,
+        ])
+        .output()
+        .expect("run full read CLI");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).expect("JSON stdout"),
+        expected_response
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn read_all_rejects_an_incomplete_success_response() {
+    let content = "hello";
+    let content_sha256 = sha256_hex(content.as_bytes());
+    let base_url = spawn(Router::new().route(
+        "/cli",
+        post(move || {
+            let content_sha256 = content_sha256.clone();
+            async move {
+                (
+                    StatusCode::OK,
+                    Json(json!({
+                        "space": "daily",
+                        "path": "/note.md",
+                        "content": content,
+                        "content_sha256": content_sha256,
+                        "byte_len": content.len(),
+                        "line_count": 2,
+                        "start_line": 1,
+                        "end_line": 1,
+                        "returned_lines": 1,
+                        "truncated": true,
+                        "next_start_line": 2,
+                    })),
+                )
+            }
+        }),
+    ))
+    .await;
+
+    let output = cli(&base_url)
+        .args([
+            "read",
+            "--all",
+            "--input",
+            r#"{"purpose":"read the complete note","op":"read","target":"daily:/note.md"}"#,
+        ])
+        .output()
+        .expect("run incomplete full read CLI");
+
+    assert_eq!(output.status.code(), Some(5));
+    assert!(output.stdout.is_empty());
+    let error = serde_json::from_slice::<Value>(&output.stderr).expect("JSON stderr");
+    assert_eq!(
+        error.get("error").and_then(Value::as_str),
+        Some("incomplete_full_read")
+    );
+    assert_eq!(
+        error.pointer("/data/retryable").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        error.pointer("/data/recoverable").and_then(Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
+fn read_all_rejects_non_read_operations_and_explicit_ranges_locally() {
+    for input in [
+        r#"{"purpose":"list spaces","op":"spaces"}"#,
+        r#"{"purpose":"read a range","op":"read","target":"daily:/note.md","max_lines":100}"#,
+        r#"{"purpose":"read conditionally","op":"read","target":"daily:/note.md","if_none_match_sha256":"hash"}"#,
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_notegate-cli"))
+            .args(["read", "--all", "--input", input])
+            .env_remove("NOTEGATE_API_KEY")
+            .output()
+            .expect("run invalid full read CLI");
+
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        let error = serde_json::from_slice::<Value>(&output.stderr).expect("JSON stderr");
+        assert!(matches!(
+            error.get("error").and_then(Value::as_str),
+            Some(
+                "full_read_requires_read_operation"
+                    | "full_read_range_conflict"
+                    | "full_read_conditional_conflict"
+            )
+        ));
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -634,6 +789,9 @@ fn command_schemas_and_help_need_no_credentials() {
         assert!(help.contains("--input <JSON>"), "command: {command}");
         assert!(help.contains("--input-file <PATH>"), "command: {command}");
         assert!(help.contains("--schema"), "command: {command}");
+        if command == "read" {
+            assert!(help.contains("--all"));
+        }
     }
 
     for command in ["run_read_sequence", "run_write_sequence"] {
@@ -1142,6 +1300,13 @@ fn combined_output(output: &std::process::Output) -> String {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     )
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 async fn spawn(app: Router) -> String {
