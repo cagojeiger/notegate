@@ -435,6 +435,14 @@ async fn search_runtime_uses_replica_content_but_primary_access_policy()
         .execute(&authority_db.pool)
         .await?;
     }
+    sqlx::query(
+        "INSERT INTO text_objects (node_id, space_id, content_text, created_by_account_id, updated_by_account_id) VALUES ($1, $2, '', $3, $3)",
+    )
+    .bind(query_node.node.node.id)
+    .bind(space_id)
+    .bind(caller.account_id())
+    .execute(&authority_db.pool)
+    .await?;
     authority_state
         .files
         .write_text(
