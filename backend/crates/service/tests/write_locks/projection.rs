@@ -7,6 +7,92 @@ use notegate_service::files::{
 use crate::write_lock_support::{Fixture, TestResult, assert_write_locked};
 
 #[tokio::test]
+async fn private_lock_source_and_descendants_are_browser_only() -> TestResult {
+    use notegate_model::{AccountKind, Channel};
+    use notegate_service::files::{SyncFileChanges, UpdateNodeExternalAccessPolicy};
+
+    let Some(fixture) = Fixture::setup("private-lock-projection").await? else {
+        return Ok(());
+    };
+    let folder = fixture.folder(fixture.root_id, "private").await?;
+    let child = fixture.text(folder, "public.md").await?;
+    fixture
+        .files
+        .update_node_external_access_policy(
+            AccountKind::User,
+            fixture.owner,
+            fixture.space_id,
+            UpdateNodeExternalAccessPolicy {
+                node_id: folder,
+                enabled: false,
+            },
+        )
+        .await?;
+    let baseline = fixture
+        .files
+        .sync_file_changes(
+            fixture.owner,
+            fixture.space_id,
+            SyncFileChanges {
+                after_id: None,
+                limit: Some(1),
+            },
+        )
+        .await?;
+    fixture
+        .files
+        .write_text(
+            fixture.owner,
+            fixture.space_id,
+            WriteText {
+                target: WriteTarget::Existing { node_id: child },
+                body: WriteTextBody::Plain("changed public child".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    for channel in [Channel::Browser, Channel::Api, Channel::Mcp] {
+        let page = fixture
+            .files
+            .for_channel(channel)
+            .sync_file_changes(
+                fixture.owner,
+                fixture.space_id,
+                SyncFileChanges {
+                    after_id: Some(baseline.next_after_id),
+                    limit: Some(10),
+                },
+            )
+            .await?;
+        assert!(page.next_after_id > baseline.next_after_id);
+        assert_eq!(page.resync_required, channel != Channel::Browser);
+        assert_eq!(page.items.is_empty(), channel != Channel::Browser);
+    }
+    fixture.set_lock(folder, true).await?;
+    for channel in [Channel::Browser, Channel::Api, Channel::Mcp] {
+        let result = fixture
+            .files
+            .for_channel(channel)
+            .stat(fixture.owner, fixture.space_id, child)
+            .await;
+        if channel != Channel::Browser {
+            assert!(matches!(
+                result,
+                Err(notegate_service::ServiceError::NotFound(_))
+            ));
+            continue;
+        }
+        let view = result?;
+        assert_eq!(view.write_lock_sources.len(), 1);
+        let source = view.write_lock_sources.first().expect("inherited lock");
+        assert_eq!(source.node_id, folder);
+        assert!(!source.external_access_enabled);
+    }
+    fixture.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn inherited_lock_is_reported_without_blocking_reads() -> TestResult {
     let Some(fixture) = Fixture::setup("read-projection").await? else {
         return Ok(());

@@ -233,6 +233,7 @@ function restoreRestNodeForSpace(value: unknown, spaceId: string): RestNode | nu
     typeof node.metadata === "object" &&
     !Array.isArray(node.metadata) &&
     typeof node.has_children === "boolean" &&
+    typeof node.external_access_enabled === "boolean" &&
     isAccountRef(node.created_by) &&
     isAccountRef(node.updated_by) &&
     typeof node.created_at === "string" &&
@@ -243,7 +244,6 @@ function restoreRestNodeForSpace(value: unknown, spaceId: string): RestNode | nu
   const writeLocked = typeof node.write_locked === "boolean" ? node.write_locked : false;
   return {
     ...node,
-    search_enabled: typeof node.search_enabled === "boolean" ? node.search_enabled : true,
     write_locked: writeLocked,
     effective_write_locked: typeof node.effective_write_locked === "boolean"
       ? node.effective_write_locked

@@ -51,7 +51,7 @@ const spaces: Space[] = [
     sort_order: 2000,
     navigation_pinned: false,
     user_mcp_enabled: false,
-    default_search_enabled: false,
+    default_external_access_enabled: false,
     features: { text_encryption: false, write_lock: false },
     root_node_id: "private-root",
     created_at: "2026-07-02T00:00:00Z",
@@ -166,8 +166,8 @@ describe("SpaceLibrary", () => {
 
     expect(screen.getByRole("heading", { name: "Spaces 2" })).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "All spaces" })).toBeInTheDocument();
-    expect(screen.getByTitle("Search default on")).toBeInTheDocument();
-    expect(screen.getByTitle("Search default off")).toBeInTheDocument();
+    expect(screen.getByTitle("MCP & API access default on")).toBeInTheDocument();
+    expect(screen.getByTitle("MCP & API access default off")).toBeInTheDocument();
     expect(screen.getByTitle("User MCP access on")).toBeInTheDocument();
     expect(screen.getByTitle("User MCP access off")).toBeInTheDocument();
 
@@ -180,7 +180,7 @@ describe("SpaceLibrary", () => {
     expect(screen.getByRole("button", { name: "Inspect Daily" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Inspect Private" })).toHaveAttribute("aria-pressed", "false");
 
-    await user.click(screen.getByTitle("Search default off"));
+    await user.click(screen.getByTitle("MCP & API access default off"));
     expect(screen.getByRole("button", { name: "Inspect Private" })).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -199,11 +199,11 @@ describe("SpaceLibrary", () => {
 
     await user.click(screen.getByRole("button", { name: "Inspect Private" }));
     expect(screen.getByRole("switch", { name: "User MCP access" })).not.toBeChecked();
-    expect(screen.getByRole("switch", { name: "Include in search" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "MCP & API access" })).not.toBeChecked();
     expect(screen.getByRole("switch", { name: "Text encryption" })).toBeDisabled();
 
     await user.click(screen.getByRole("switch", { name: "User MCP access" }));
-    await user.click(screen.getByRole("switch", { name: "Include in search" }));
+    await user.click(screen.getByRole("switch", { name: "MCP & API access" }));
 
     expect(mocks.inspectorMutate).toHaveBeenNthCalledWith(1, {
       spaceId: "private",
@@ -211,7 +211,7 @@ describe("SpaceLibrary", () => {
     });
     expect(mocks.inspectorMutate).toHaveBeenNthCalledWith(2, {
       spaceId: "private",
-      default_search_enabled: true
+      default_external_access_enabled: true
     });
   });
 
@@ -225,7 +225,7 @@ describe("SpaceLibrary", () => {
       "Controls whether User MCP can list and access this space. Agent MCP access is configured separately. Pinning does not affect MCP access."
     );
     expect(screen.getByRole("button", { name: "About New item defaults" })).toHaveAccessibleDescription(
-      "These settings apply only to new items created in this space. Search applies to every new item, while encryption applies only to new documents. Existing items are unchanged."
+      "These settings apply only to new items created in this space. MCP & API access applies to every new item, while encryption applies only to new documents. Existing items are unchanged."
     );
     expect(screen.getByRole("button", { name: "About Link index" })).toHaveAccessibleDescription(
       "Rebuilds Markdown link relationships for this Space in the background."

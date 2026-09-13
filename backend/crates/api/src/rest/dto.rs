@@ -204,7 +204,7 @@ pub struct SpaceOut {
     pub user_mcp_enabled: bool,
     pub permission: String,
     pub root_node_id: Uuid,
-    pub default_search_enabled: bool,
+    pub default_external_access_enabled: bool,
     pub default_text_encryption_enabled: bool,
     pub features: SpaceFeaturesOut,
     pub created_at: DateTime<Utc>,
@@ -227,7 +227,7 @@ impl From<&SpaceView> for SpaceOut {
             user_mcp_enabled: view.space.user_mcp_enabled_at.is_some(),
             permission: view.permission.as_str().to_owned(),
             root_node_id: view.root_node_id,
-            default_search_enabled: view.space.default_search_enabled,
+            default_external_access_enabled: view.space.default_external_access_enabled,
             default_text_encryption_enabled: view.space.default_text_encryption_enabled,
             features: SpaceFeaturesOut {
                 text_encryption: view.features.text_encryption,
@@ -271,7 +271,7 @@ mod tests {
             kind,
             sort_order: 0,
             metadata: json!({"pinned": true}),
-            search_enabled: true,
+            external_access_enabled: true,
             write_locked: false,
             created_by_account_id: Uuid::new_v4(),
             updated_by_account_id: Uuid::new_v4(),
@@ -322,7 +322,7 @@ mod tests {
 
         assert_eq!(out.kind, "folder");
         assert_eq!(out.path, "/docs/note.md");
-        assert!(out.search_enabled);
+        assert!(out.external_access_enabled);
         assert!(out.content_sha256.is_none());
         assert!(out.byte_len.is_none());
         assert!(out.line_count.is_none());
@@ -366,6 +366,7 @@ mod tests {
             node_id: source_id,
             name: "locked".to_owned(),
             path: "/locked".to_owned(),
+            external_access_enabled: true,
         });
 
         let out = NodeOut::from_view(&view, &HashMap::new());
@@ -375,6 +376,45 @@ mod tests {
         assert_eq!(out.write_lock_sources.len(), 1);
         assert_eq!(out.write_lock_sources[0].node_id, source_id);
         assert_eq!(out.write_lock_sources[0].path, "/locked");
+    }
+
+    #[test]
+    fn external_outputs_hide_private_lock_sources_without_hiding_the_lock() {
+        let mut view = base_view(NodeKind::Text);
+        let private = WriteLockSource {
+            node_id: Uuid::new_v4(),
+            name: "private".to_owned(),
+            path: "/private".to_owned(),
+            external_access_enabled: false,
+        };
+        view.write_lock_sources.push(private.clone());
+        for visible_source in [false, true] {
+            if visible_source {
+                view.write_lock_sources.push(WriteLockSource {
+                    node_id: view.node.id,
+                    name: view.node.name.clone(),
+                    path: view.path.clone(),
+                    external_access_enabled: true,
+                });
+            }
+            let api = crate::public_v2::TestNodeOut::from(&view);
+            let mcp = crate::commands::files::stat_node_json(&view);
+            assert!(api.effective_write_locked);
+            assert_eq!(mcp["effective_write_locked"], true);
+            assert_eq!(api.write_lock_sources.len(), usize::from(visible_source));
+            assert_eq!(
+                mcp["write_lock_sources"].as_array().unwrap().len(),
+                usize::from(visible_source)
+            );
+            assert!(
+                !serde_json::to_string(&api.write_lock_sources)
+                    .unwrap()
+                    .contains(&private.node_id.to_string())
+            );
+            assert!(!mcp["write_lock_sources"].to_string().contains("private"));
+            let browser = NodeOut::from_view(&view, &HashMap::new());
+            assert_eq!(browser.write_lock_sources[0].node_id, private.node_id);
+        }
     }
 
     #[test]

@@ -75,6 +75,7 @@ const UPLOAD_COLUMNS: &str = "id, object_key, space_id, parent_node_id, node_id,
 
 pub async fn insert(
     pool: &PgPool,
+    external_only: bool,
     registration: &ObjectUploadRegistration,
     space_id: Uuid,
     requested_by: Uuid,
@@ -85,8 +86,21 @@ pub async fn insert(
 
     // Serialize against other Space mutations and reject invalid destinations
     // or staging that already exceeds the effective tier quota.
-    let (_gate, effective_limits) =
-        checks::lock_space_with_limits(&mut tx, space_id, limits).await?;
+    let locked = checks::lock_space_context(&mut tx, space_id, limits).await?;
+    let effective_limits = locked.limits;
+    checks::require_external_access(
+        &mut tx,
+        space_id,
+        input.parent_node_id,
+        false,
+        external_only,
+    )
+    .await?;
+    if external_only && !locked.default_external_access_enabled {
+        return Err(Error::conflict(
+            "MCP & API access is disabled for new items",
+        ));
+    }
     create::prepare_create(
         &mut tx,
         space_id,
@@ -246,15 +260,28 @@ pub async fn request_expiry(
     Ok(result.rows_affected() == 1)
 }
 
-pub async fn attach(
-    pool: &PgPool,
-    id: Uuid,
-    space_id: Uuid,
-    requested_by: Uuid,
-    detected_media_type: Option<&str>,
-    node_metadata: Option<&Value>,
-    limits: Limits,
-) -> Result<(Node, FileObject)> {
+pub struct AttachUploadArgs<'a> {
+    pub pool: &'a PgPool,
+    pub external_only: bool,
+    pub id: Uuid,
+    pub space_id: Uuid,
+    pub requested_by: Uuid,
+    pub detected_media_type: Option<&'a str>,
+    pub node_metadata: Option<&'a Value>,
+    pub limits: Limits,
+}
+
+pub async fn attach(args: AttachUploadArgs<'_>) -> Result<(Node, FileObject)> {
+    let AttachUploadArgs {
+        pool,
+        external_only,
+        id,
+        space_id,
+        requested_by,
+        detected_media_type,
+        node_metadata,
+        limits,
+    } = args;
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
     let upload = sqlx::query_as::<_, ObjectUploadRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {UPLOAD_COLUMNS} FROM object_storage_objects \
@@ -280,6 +307,10 @@ pub async fn attach(
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+        if external_only && (!node.external_access_enabled || node.deleted_at.is_some()) {
+            return Err(Error::not_found("node not found"));
+        }
+        checks::require_external_access(&mut tx, space_id, node_id, false, external_only).await?;
         let file = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {FILE_COLUMNS} FROM file_objects WHERE node_id = $1 AND space_id = $2"
         )))
@@ -302,6 +333,12 @@ pub async fn attach(
         .cloned()
         .unwrap_or_else(|| Value::Object(Default::default()));
     let locked = checks::lock_space_context(&mut tx, space_id, limits).await?;
+    checks::require_external_access(&mut tx, space_id, parent_id, false, external_only).await?;
+    if external_only && !locked.default_external_access_enabled {
+        return Err(Error::conflict(
+            "MCP & API access is disabled for new items",
+        ));
+    }
     create::prepare_reserved_file_create(&mut tx, space_id, parent_id, &upload.name, locked.limits)
         .await?;
     space_usage::apply_quota_delta(
@@ -314,14 +351,14 @@ pub async fn attach(
 
     let node = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO nodes \
-         (space_id, parent_id, name, kind, metadata, search_enabled, created_by_account_id, updated_by_account_id) \
+         (space_id, parent_id, name, kind, metadata, external_access_enabled, created_by_account_id, updated_by_account_id) \
          VALUES ($1, $2, $3, 'file', $4, $5, $6, $6) RETURNING {NODE_COLUMNS}"
     )))
     .bind(space_id)
     .bind(parent_id)
     .bind(&upload.name)
     .bind(&node_metadata)
-    .bind(locked.default_search_enabled)
+    .bind(locked.default_external_access_enabled)
     .bind(requested_by)
     .fetch_one(&mut *tx)
     .await

@@ -9,6 +9,7 @@ pub mod policy;
 pub mod target;
 pub mod validation;
 
+mod access;
 mod events;
 mod format;
 mod mutate;
@@ -25,7 +26,7 @@ pub use notegate_model::files::{
     EditText, FileStats, FileView, LineEdit, ListNodesRequest, MoveNode, NodeListCursor,
     NodeListPage, NodeListSort, NodeReveal, NodeSummaryView, NodeView, PatchMode, PatchResult,
     PatchText, PendingObjectUpload, ReadContent, ReadResult, ReadText, ReadTextBody, StoredContent,
-    TextStats, TextView, UpdateNode, UpdateNodeSearchPolicy, UpdateNodeWriteLock,
+    TextStats, TextView, UpdateNode, UpdateNodeExternalAccessPolicy, UpdateNodeWriteLock,
     UpdateTextEncryption, WriteLockSource, WriteTarget, WriteText, WriteTextBody,
 };
 pub use notegate_model::search::{TreePage, TreeRequest};
@@ -53,11 +54,25 @@ use crate::error::{ServiceError, ServiceResult};
 #[derive(Debug, Clone)]
 pub struct FilesService {
     store: FilesRepo,
+    channel: Channel,
 }
 
 impl FilesService {
     pub fn new(store: FilesRepo) -> Self {
-        Self { store }
+        Self {
+            store,
+            channel: Channel::Browser,
+        }
+    }
+
+    pub fn for_channel(&self, channel: Channel) -> Self {
+        Self {
+            store: self
+                .store
+                .clone()
+                .with_external_access_only(channel != Channel::Browser),
+            channel,
+        }
     }
 }
 
@@ -121,10 +136,13 @@ impl FilesService {
     }
 
     pub(super) async fn load_node(&self, space_id: Uuid, node_id: Uuid) -> ServiceResult<Node> {
-        self.store
+        let node = self
+            .store
             .find_node(space_id, node_id)
             .await?
-            .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))
+            .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))?;
+        self.require_node_access(&node).await?;
+        Ok(node)
     }
 
     pub(super) async fn load_text(
@@ -133,6 +151,7 @@ impl FilesService {
         node_id: Uuid,
     ) -> ServiceResult<(Node, TextObject)> {
         if let Some(text) = self.store.find_text(space_id, node_id).await? {
+            self.require_node_access(&text.0).await?;
             return Ok(text);
         }
 

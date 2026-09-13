@@ -8,7 +8,7 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { deleteNode, moveNode, updateNodeSearchPolicy, updateNodeWriteLock } from "../../api/nodes";
+import { deleteNode, moveNode, updateNodeExternalAccessPolicy, updateNodeWriteLock } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import { updateTextEncryption } from "../../api/text";
 import type { ChildrenResponse, RestNode } from "../../api/types";
@@ -18,7 +18,7 @@ import {
   createUpdateNodeWriteLockMutationOptions,
   useDeleteNodeMutation,
   useMoveNodeMutation,
-  useUpdateNodeSearchPolicyMutation,
+  useUpdateNodeExternalAccessPolicyMutation,
   useUpdateNodeWriteLockMutation,
   useUpdateTextEncryptionMutation
 } from "./useWorkbenchNodeQueries";
@@ -33,7 +33,7 @@ vi.mock("../../api/nodes", () => ({
   moveNode: vi.fn(),
   revealNode: vi.fn(),
   updateNode: vi.fn(),
-  updateNodeSearchPolicy: vi.fn(),
+  updateNodeExternalAccessPolicy: vi.fn(),
   updateNodeWriteLock: vi.fn()
 }));
 
@@ -42,16 +42,16 @@ vi.mock("../../api/text", () => ({
 }));
 
 describe("workbench node mutations", () => {
-  it("updates search policy through its dedicated endpoint", async () => {
+  it("updates external access policy through its dedicated endpoint", async () => {
     const queryClient = createTestQueryClient();
     const current = node("text-1", "space-1", "text");
     const updated = {
       ...current,
-      search_enabled: false
+      external_access_enabled: false
     };
-    vi.mocked(updateNodeSearchPolicy).mockResolvedValue(updated);
+    vi.mocked(updateNodeExternalAccessPolicy).mockResolvedValue(updated);
     const onUpdated = vi.fn();
-    const result = renderMutationHook(queryClient, () => useUpdateNodeSearchPolicyMutation(onUpdated));
+    const result = renderMutationHook(queryClient, () => useUpdateNodeExternalAccessPolicyMutation(onUpdated));
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -60,7 +60,7 @@ describe("workbench node mutations", () => {
       });
     });
 
-    expect(updateNodeSearchPolicy).toHaveBeenCalledWith(
+    expect(updateNodeExternalAccessPolicy).toHaveBeenCalledWith(
       expect.anything(),
       current.space_id,
       current.id,

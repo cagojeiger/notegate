@@ -8,7 +8,6 @@ describe("workbenchStorage", () => {
   it("restores compatible nodes and rejects nodes from the wrong space or malformed snapshots", () => {
     const first = node("node-1");
     const legacyFirst: Partial<RestNode> = { ...first };
-    delete legacyFirst.search_enabled;
     delete legacyFirst.write_locked;
     delete legacyFirst.effective_write_locked;
     delete legacyFirst.write_lock_sources;
@@ -25,12 +24,29 @@ describe("workbenchStorage", () => {
     expect(state.activeGroupIndex).toBe(2);
     expect(state.editorGroups).toMatchObject([
       {
-        node: { ...first, search_enabled: true, write_locked: false, write_lock_sources: [] },
+        node: { ...first, external_access_enabled: true, write_locked: false, write_lock_sources: [] },
         mode: "edit"
       },
       { node: null, mode: "preview" },
       { node: null, mode: "preview" }
     ]);
+  });
+
+  it("rejects cached nodes without an explicit external-access policy", () => {
+    const legacyNode: Partial<RestNode> & { search_enabled: boolean } = {
+      ...node("node-1"),
+      search_enabled: false
+    };
+    delete legacyNode.external_access_enabled;
+    saveSnapshot([{ node: legacyNode, mode: "preview" }]);
+
+    expect(restoreSpaceWorkbench("space-1", 0).editorGroups[0]?.node).toBeNull();
+  });
+
+  it("preserves disabled external access in a compatible snapshot", () => {
+    saveSnapshot([{ node: { ...node("node-1"), external_access_enabled: false }, mode: "preview" }]);
+
+    expect(restoreSpaceWorkbench("space-1", 0).editorGroups[0]?.node?.external_access_enabled).toBe(false);
   });
 
   it("derives effective write-lock state when restoring an older snapshot", () => {

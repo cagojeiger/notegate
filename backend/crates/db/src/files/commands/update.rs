@@ -8,7 +8,7 @@ use notegate_core::security::PiiCrypto;
 use notegate_core::{Error, Result};
 use notegate_model::Node;
 use notegate_model::files::{
-    StoredContent, UpdateNode, UpdateNodeSearchPolicy, UpdateTextEncryption, WriteTextBody,
+    StoredContent, UpdateNode, UpdateNodeExternalAccessPolicy, UpdateTextEncryption, WriteTextBody,
 };
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
@@ -20,6 +20,7 @@ use crate::file_change_events;
 
 pub async fn update_node(
     pool: &PgPool,
+    external_only: bool,
     space_id: Uuid,
     command: &UpdateNode,
     updated_by: Uuid,
@@ -27,6 +28,14 @@ pub async fn update_node(
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     checks::lock_space(&mut tx, space_id).await?;
+    checks::require_external_access(
+        &mut tx,
+        space_id,
+        command.node_id,
+        command.name.is_some(),
+        external_only,
+    )
+    .await?;
 
     let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
     let node_kind = current.kind.clone();
@@ -90,9 +99,9 @@ pub async fn update_node(
             parent_node_id: row.parent_id,
             name_changed,
             sort_order_changed,
-            search_enabled_changed: false,
+            external_access_enabled_changed: false,
             text_encryption_changed: false,
-            search_enabled: row.search_enabled,
+            external_access_enabled: row.external_access_enabled,
             text_encryption_enabled: None,
         },
     )
@@ -102,10 +111,10 @@ pub async fn update_node(
     row.into_node()
 }
 
-pub async fn update_node_search_policy(
+pub async fn update_node_external_access_policy(
     pool: &PgPool,
     space_id: Uuid,
-    command: &UpdateNodeSearchPolicy,
+    command: &UpdateNodeExternalAccessPolicy,
     updated_by: Uuid,
 ) -> Result<Node> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
@@ -115,10 +124,10 @@ pub async fn update_node_search_policy(
 
     if current.parent_id.is_none() {
         return Err(Error::conflict(
-            "search policy cannot be changed on the root node",
+            "external access policy cannot be changed on the root node",
         ));
     }
-    if command.enabled == current.search_enabled {
+    if command.enabled == current.external_access_enabled {
         tx.commit().await.map_err(map_sqlx_error)?;
         return current.into_node();
     }
@@ -126,7 +135,7 @@ pub async fn update_node_search_policy(
 
     let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE nodes \
-         SET search_enabled = $3, updated_by_account_id = $4, updated_at = now() \
+         SET external_access_enabled = $3, updated_by_account_id = $4, updated_at = now() \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
     )))
     .bind(space_id)
@@ -148,9 +157,9 @@ pub async fn update_node_search_policy(
             parent_node_id: row.parent_id,
             name_changed: false,
             sort_order_changed: false,
-            search_enabled_changed: true,
+            external_access_enabled_changed: true,
             text_encryption_changed: false,
-            search_enabled: row.search_enabled,
+            external_access_enabled: row.external_access_enabled,
             text_encryption_enabled: None,
         },
     )
@@ -240,9 +249,9 @@ pub async fn update_text_encryption(
             parent_node_id: row.parent_id,
             name_changed: false,
             sort_order_changed: false,
-            search_enabled_changed: false,
+            external_access_enabled_changed: false,
             text_encryption_changed: true,
-            search_enabled: row.search_enabled,
+            external_access_enabled: row.external_access_enabled,
             text_encryption_enabled: Some(command.enabled),
         },
     )

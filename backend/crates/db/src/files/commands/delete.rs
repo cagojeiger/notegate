@@ -29,6 +29,7 @@ struct SubtreeUsage {
 /// Soft-delete `node_id` and its live subtree, attributing it to `deleted_by`.
 pub async fn soft_delete_node(
     pool: &PgPool,
+    external_only: bool,
     space_id: Uuid,
     node_id: Uuid,
     deleted_by: Uuid,
@@ -37,6 +38,7 @@ pub async fn soft_delete_node(
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     let gate = checks::lock_space(&mut tx, space_id).await?;
+    checks::require_external_access(&mut tx, space_id, node_id, true, external_only).await?;
 
     let node = checks::live_node(&mut tx, space_id, node_id)
         .await?

@@ -3,7 +3,7 @@
 //! `GET /paths/resolve?path=`, `GET /nodes`, `GET /nodes/{id}`,
 //! `GET /nodes/{id}/children` (paginated), `GET /nodes/{id}/reveal`,
 //! `POST /nodes` (create folder/text), `PATCH /nodes/{id}`
-//! (rename / reorder), `PUT /nodes/{id}/search-policy`, `PUT /nodes/{id}/write-lock`,
+//! (rename / reorder), `PUT /nodes/{id}/external-access-policy`, `PUT /nodes/{id}/write-lock`,
 //! `GET /nodes/{id}/metadata`,
 //! `POST /nodes/{id}/move`, and `DELETE /nodes/{id}`.
 //! All handlers delegate to the files service,
@@ -31,7 +31,8 @@ use crate::state::AppState;
 use notegate_service::files::{
     BatchChildrenRequest, BatchChildrenResult, ChildrenRequest, CreateFolder, CreateText,
     DeleteNode, ListFileChangeEvents, ListNodesRequest, MoveNode, NodeListSort, SyncFileChanges,
-    UpdateNode, UpdateNodeSearchPolicy, UpdateNodeWriteLock, WriteTarget, WriteText, WriteTextBody,
+    UpdateNode, UpdateNodeExternalAccessPolicy, UpdateNodeWriteLock, WriteTarget, WriteText,
+    WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
@@ -51,8 +52,8 @@ pub fn routes() -> Router<AppState> {
             get(get_node).patch(update).delete(delete),
         )
         .route(
-            "/v1/spaces/{space_id}/nodes/{node_id}/search-policy",
-            axum::routing::put(update_search_policy),
+            "/v1/spaces/{space_id}/nodes/{node_id}/external-access-policy",
+            axum::routing::put(update_external_access_policy),
         )
         .route(
             "/v1/spaces/{space_id}/nodes/{node_id}/write-lock",
@@ -737,7 +738,7 @@ pub(crate) struct UpdateNodeBody {
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct UpdateNodeSearchPolicyBody {
+pub(crate) struct UpdateNodeExternalAccessPolicyBody {
     enabled: bool,
 }
 
@@ -783,26 +784,26 @@ pub(crate) async fn update(
 
 #[utoipa::path(
     put,
-    path = "/api/v1/spaces/{space_id}/nodes/{node_id}/search-policy",
+    path = "/api/v1/spaces/{space_id}/nodes/{node_id}/external-access-policy",
     tag = "nodes",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
-    request_body = UpdateNodeSearchPolicyBody,
-    responses((status = 200, description = "Update node search policy", body = NodeOut)),
+    request_body = UpdateNodeExternalAccessPolicyBody,
+    responses((status = 200, description = "Update node external access policy", body = NodeOut)),
     security(("browser_session" = []))
 )]
-pub(crate) async fn update_search_policy(
+pub(crate) async fn update_external_access_policy(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
-    Json(body): Json<UpdateNodeSearchPolicyBody>,
+    Json(body): Json<UpdateNodeExternalAccessPolicyBody>,
 ) -> Result<Json<NodeOut>, ApiError> {
     let view = state
         .files
-        .update_node_search_policy(
+        .update_node_external_access_policy(
             caller.account.kind,
             caller.account_id(),
             space_id,
-            UpdateNodeSearchPolicy {
+            UpdateNodeExternalAccessPolicy {
                 node_id,
                 enabled: body.enabled,
             },
@@ -968,7 +969,8 @@ mod update_request_tests {
     #[test]
     fn generic_update_rejects_policy_fields() {
         assert!(
-            serde_json::from_value::<UpdateNodeBody>(json!({ "search_enabled": false })).is_err()
+            serde_json::from_value::<UpdateNodeBody>(json!({ "external_access_enabled": false }))
+                .is_err()
         );
         assert!(
             serde_json::from_value::<UpdateNodeBody>(json!({ "text_encryption_enabled": true }))

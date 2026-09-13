@@ -20,7 +20,7 @@ import {
   useDeleteNodeMutation,
   useMoveNodeMutation,
   useUpdateNodeMutation,
-  useUpdateNodeSearchPolicyMutation,
+  useUpdateNodeExternalAccessPolicyMutation,
   useUpdateNodeWriteLockMutation,
   useUpdateTextEncryptionMutation
 } from "./useWorkbenchQueries";
@@ -62,7 +62,7 @@ export function useWorkbenchNodeCommandActions({
     openInActiveGroup(node);
   });
   const updateNodeMutation = useUpdateNodeMutation(updateGroupsNode);
-  const updateNodeSearchPolicyMutation = useUpdateNodeSearchPolicyMutation(updateGroupsNode);
+  const updateNodeExternalAccessPolicyMutation = useUpdateNodeExternalAccessPolicyMutation(updateGroupsNode);
   const updateNodeWriteLockMutation = useUpdateNodeWriteLockMutation(updateGroupsNode);
   const updateTextEncryptionMutation = useUpdateTextEncryptionMutation(updateGroupsNode);
   const moveNodeMutation = useMoveNodeMutation(updateGroupsNode);
@@ -174,15 +174,15 @@ export function useWorkbenchNodeCommandActions({
     );
   }
 
-  function setNodeSearchEnabled(searchEnabled: boolean) {
+  function setNodeExternalAccessEnabled(searchEnabled: boolean) {
     if (
       !canManageActiveSpace
       || !inspectedNode
       || inspectedNode.parent_id === null
       || inspectedNode.effective_write_locked
-      || updateNodeSearchPolicyMutation.isPending
+      || updateNodeExternalAccessPolicyMutation.isPending
     ) return;
-    updateNodeSearchPolicyMutation.mutate({
+    updateNodeExternalAccessPolicyMutation.mutate({
       node: inspectedNode,
       enabled: searchEnabled
     });
@@ -226,10 +226,10 @@ export function useWorkbenchNodeCommandActions({
     promptMoveNode,
     moveNodeToFolder,
     confirmDeleteNode,
-    setNodeSearchEnabled,
+    setNodeExternalAccessEnabled,
     setNodeWriteLocked,
     setTextEncryptionEnabled,
-    nodeSearchPolicyPending: updateNodeSearchPolicyMutation.isPending,
+    nodeExternalAccessPolicyPending: updateNodeExternalAccessPolicyMutation.isPending,
     nodeWriteLockPending: updateNodeWriteLockMutation.isPending,
     textEncryptionPending: updateTextEncryptionMutation.isPending,
     downloadFileNode

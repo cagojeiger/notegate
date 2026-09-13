@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   startRecording: vi.fn(),
   startUpload: vi.fn(),
   updateNode: vi.fn(),
-  updateNodeSearchPolicy: vi.fn(),
+  updateNodeExternalAccessPolicy: vi.fn(),
   updateNodeWriteLock: vi.fn(),
   updateTextEncryption: vi.fn()
 }));
@@ -42,8 +42,8 @@ vi.mock("./useWorkbenchQueries", () => {
     useDeleteNodeMutation: () => ({ mutateAsync: mocks.deleteNode }),
     useMoveNodeMutation: () => ({ mutate: mocks.moveNode, mutateAsync: mocks.moveNode }),
     useUpdateNodeMutation: () => ({ mutateAsync: mocks.updateNode }),
-    useUpdateNodeSearchPolicyMutation: () => ({
-      mutate: mocks.updateNodeSearchPolicy,
+    useUpdateNodeExternalAccessPolicyMutation: () => ({
+      mutate: mocks.updateNodeExternalAccessPolicy,
       isPending: false
     }),
     useUpdateNodeWriteLockMutation: () => ({
@@ -68,7 +68,7 @@ describe("useWorkbenchNodeCommandActions", () => {
     mocks.startRecording.mockReset().mockResolvedValue(undefined);
     mocks.startUpload.mockReset();
     mocks.updateNode.mockReset();
-    mocks.updateNodeSearchPolicy.mockReset();
+    mocks.updateNodeExternalAccessPolicy.mockReset();
     mocks.updateNodeWriteLock.mockReset();
     mocks.updateTextEncryption.mockReset();
   });
@@ -195,14 +195,14 @@ describe("useWorkbenchNodeCommandActions", () => {
       result.current.moveNodeToFolder(lockedText, unlockedFolder);
       result.current.moveNodeToFolder(unlockedFolder, lockedFolder);
       result.current.confirmDeleteNode(lockedText);
-      result.current.setNodeSearchEnabled(false);
+      result.current.setNodeExternalAccessEnabled(false);
       result.current.setTextEncryptionEnabled(true);
     });
 
     expect(setDialog).not.toHaveBeenCalled();
     expect(mocks.startUpload).not.toHaveBeenCalled();
     expect(mocks.moveNode).not.toHaveBeenCalled();
-    expect(mocks.updateNodeSearchPolicy).not.toHaveBeenCalled();
+    expect(mocks.updateNodeExternalAccessPolicy).not.toHaveBeenCalled();
     expect(mocks.updateTextEncryption).not.toHaveBeenCalled();
   });
 
@@ -244,12 +244,12 @@ describe("useWorkbenchNodeCommandActions", () => {
     });
 
     act(() => {
-      result.current.setNodeSearchEnabled(false);
+      result.current.setNodeExternalAccessEnabled(false);
       result.current.setNodeWriteLocked(true);
     });
 
     expect(setDialog).not.toHaveBeenCalled();
-    expect(mocks.updateNodeSearchPolicy).toHaveBeenCalledWith({
+    expect(mocks.updateNodeExternalAccessPolicy).toHaveBeenCalledWith({
       node: inspectedFolder,
       enabled: false
     });

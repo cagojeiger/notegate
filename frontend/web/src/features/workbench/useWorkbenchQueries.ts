@@ -4,7 +4,7 @@ export {
   useMoveNodeMutation,
   useRevealNode,
   useUpdateNodeMutation,
-  useUpdateNodeSearchPolicyMutation,
+  useUpdateNodeExternalAccessPolicyMutation,
   useUpdateNodeWriteLockMutation,
   useUpdateTextEncryptionMutation
 } from "./useWorkbenchNodeQueries";

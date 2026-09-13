@@ -21,7 +21,7 @@ export function makeRootNode(space: Space): RestNode {
     path: "/",
     sort_order: 0,
     metadata: {},
-    search_enabled: true,
+    external_access_enabled: true,
     write_locked: false,
     effective_write_locked: false,
     write_lock_sources: [],

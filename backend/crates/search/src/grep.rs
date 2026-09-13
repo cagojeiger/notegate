@@ -317,6 +317,12 @@ impl SearchService {
                 .stage(operation, SearchStage::Hydrate, async {
                     if !items.is_empty() {
                         let node_ids: Vec<_> = items.iter().map(|item| item.node.node.id).collect();
+                        let allowed = self
+                            .store
+                            .accessible_live_node_ids(space_id, &node_ids)
+                            .await?;
+                        items.retain(|item| allowed.contains(&item.node.node.id));
+                        let node_ids: Vec<_> = items.iter().map(|item| item.node.node.id).collect();
                         let mut write_lock_sources =
                             super::view::write_lock_sources_many(&self.store, space_id, &node_ids)
                                 .await?;
@@ -380,7 +386,7 @@ mod tests {
                 kind: NodeKind::Text,
                 sort_order: 0,
                 metadata: serde_json::Value::Null,
-                search_enabled: true,
+                external_access_enabled: true,
                 write_locked: false,
                 created_by_account_id: uuid::Uuid::new_v4(),
                 updated_by_account_id: uuid::Uuid::new_v4(),

@@ -59,6 +59,9 @@ async fn begin_upload(
 ) -> Result<Value, CommandError> {
     let purpose = input.purpose.clone();
     let caller = context.caller();
+    let mut scoped = state.clone();
+    scoped.files = state.files.for_channel(caller.channel);
+    let state = &scoped;
     let target = required(input.target, "target", FILE_UPLOAD_OP_BEGIN_UPLOAD)?;
     let byte_len = input.byte_len.ok_or_else(|| {
         invalid_input_error(format!(
@@ -171,6 +174,9 @@ async fn prepare_parts(
 ) -> Result<Value, CommandError> {
     let purpose = input.purpose.clone();
     let caller = context.caller();
+    let mut scoped = state.clone();
+    scoped.files = state.files.for_channel(caller.channel);
+    let state = &scoped;
     let upload_id = upload_id(&input)?;
     let part_numbers = input
         .part_numbers
@@ -252,6 +258,9 @@ async fn complete_upload(
     input: FileUploadInput,
 ) -> Result<Value, CommandError> {
     let caller = context.caller();
+    let mut scoped = state.clone();
+    scoped.files = state.files.for_channel(caller.channel);
+    let state = &scoped;
     let upload_id = upload_id(&input)?;
     let upload = state
         .files
@@ -284,6 +293,9 @@ async fn abort_upload(
     input: FileUploadInput,
 ) -> Result<Value, CommandError> {
     let caller = context.caller();
+    let mut scoped = state.clone();
+    scoped.files = state.files.for_channel(caller.channel);
+    let state = &scoped;
     let upload_id = upload_id(&input)?;
     let upload = state
         .files
@@ -325,6 +337,9 @@ async fn prepare_download(
     target: String,
 ) -> Result<Value, CommandError> {
     let caller = context.caller();
+    let mut scoped = state.clone();
+    scoped.files = state.files.for_channel(caller.channel);
+    let state = &scoped;
     let (resolved, path) = resolve_target(state, caller, &target).await?;
     let node = state
         .files

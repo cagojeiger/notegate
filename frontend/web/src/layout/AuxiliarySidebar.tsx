@@ -1,4 +1,4 @@
-import { ChevronRight, LockKeyhole, Search } from "lucide-react";
+import { ChevronRight, LockKeyhole, Plug } from "lucide-react";
 import { useId, useState } from "react";
 
 import type { RestNode } from "../api/types";
@@ -19,10 +19,10 @@ type AuxiliarySidebarProps = {
   canSyncLinks: boolean;
   textEncryptionAvailable: boolean;
   writeLockAvailable: boolean;
-  searchPolicyPending: boolean;
+  externalAccessPolicyPending: boolean;
   writeLockPending: boolean;
   textEncryptionPending: boolean;
-  onSearchEnabledChange: (enabled: boolean) => void;
+  onExternalAccessEnabledChange: (enabled: boolean) => void;
   onWriteLockedChange: (enabled: boolean) => void;
   onTextEncryptionEnabledChange: (enabled: boolean) => void;
   onOpenLinkedNode: (nodeId: string, sourceNodeId: string) => void;
@@ -37,10 +37,10 @@ export function AuxiliarySidebar({
   canSyncLinks,
   textEncryptionAvailable,
   writeLockAvailable,
-  searchPolicyPending,
+  externalAccessPolicyPending,
   writeLockPending,
   textEncryptionPending,
-  onSearchEnabledChange,
+  onExternalAccessEnabledChange,
   onWriteLockedChange,
   onTextEncryptionEnabledChange,
   onOpenLinkedNode,
@@ -133,7 +133,7 @@ export function AuxiliarySidebar({
           <section className="p-3">
             <SectionHeader
               title="Settings"
-              help="Changes apply immediately. A direct lock protects this item and anything inside it; inherited locks must be removed at their source. Search and stored text encryption are independent settings. The space root cannot be locked."
+              help="Changes apply immediately. A direct lock protects this item and anything inside it; inherited locks must be removed at their source. MCP & API access requires this item and every parent folder to allow access; browser access is unchanged. Stored text encryption is independent. The space root cannot be locked."
             />
             {activeNode ? (
               <div className="space-y-2">
@@ -157,16 +157,16 @@ export function AuxiliarySidebar({
                   onChange={onWriteLockedChange}
                 />
                 <SettingToggle
-                  icon={<Search size={16} />}
-                  label="Include in search"
-                  checked={activeNode.search_enabled}
+                  icon={<Plug size={16} />}
+                  label="MCP & API access"
+                  checked={activeNode.external_access_enabled}
                   disabled={
                     !canManageActiveSpace
                     || activeNode.parent_id === null
-                    || searchPolicyPending
+                    || externalAccessPolicyPending
                     || changesLocked
                   }
-                  onChange={onSearchEnabledChange}
+                  onChange={onExternalAccessEnabledChange}
                 />
                 {activeNode.kind === "text" ? (
                   <SettingToggle

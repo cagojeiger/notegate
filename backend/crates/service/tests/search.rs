@@ -26,8 +26,8 @@ use notegate_search::{
     SearchService,
 };
 use notegate_service::files::{
-    CreateFolder, CreateText, FilesService, TreeRequest, UpdateNodeSearchPolicy, WriteTarget,
-    WriteText, WriteTextBody,
+    CreateFolder, CreateText, FilesService, TreeRequest, UpdateNodeExternalAccessPolicy,
+    WriteTarget, WriteText, WriteTextBody,
 };
 use uuid::Uuid;
 
@@ -58,7 +58,7 @@ async fn enable_default_text_encryption(
                 sort_order: None,
                 navigation_pinned: None,
                 user_mcp_enabled: None,
-                default_search_enabled: None,
+                default_external_access_enabled: None,
                 default_text_encryption_enabled: Some(true),
             },
         )
@@ -121,14 +121,19 @@ async fn write_doc(
 }
 
 #[tokio::test]
-async fn search_policy_excludes_only_the_selected_node() -> Result<(), Box<dyn std::error::Error>> {
+async fn external_access_policy_excludes_private_subtrees() -> Result<(), Box<dyn std::error::Error>>
+{
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
     let (ws_repo, files, search) = services(&db);
-    let owner =
-        insert_user_account(&db.pool, "search-policy", "search-policy@example.test").await?;
-    let (ws, root) = setup_space(&ws_repo, owner, "search-policy").await;
+    let owner = insert_user_account(
+        &db.pool,
+        "external-access-policy",
+        "external-access-policy@example.test",
+    )
+    .await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "external-access-policy").await;
 
     let hidden_folder = mkdir(&files, owner, ws, root, "hidden-folder").await;
     let visible_text = write_doc(
@@ -150,11 +155,11 @@ async fn search_policy_excludes_only_the_selected_node() -> Result<(), Box<dyn s
 
     for node_id in [hidden_folder, hidden_text] {
         files
-            .update_node_search_policy(
+            .update_node_external_access_policy(
                 AccountKind::User,
                 owner,
                 ws,
-                UpdateNodeSearchPolicy {
+                UpdateNodeExternalAccessPolicy {
                     node_id,
                     enabled: false,
                 },
@@ -196,8 +201,7 @@ async fn search_policy_excludes_only_the_selected_node() -> Result<(), Box<dyn s
             },
         )
         .await?;
-    assert_eq!(child_find.items[0].node.id, visible_text);
-    assert_eq!(child_find.items[0].node.metadata, visible_metadata);
+    assert!(child_find.items.is_empty());
 
     let hidden_grep = search
         .grep(
@@ -233,8 +237,38 @@ async fn search_policy_excludes_only_the_selected_node() -> Result<(), Box<dyn s
             },
         )
         .await?;
-    assert_eq!(visible_grep.items[0].node.node.id, visible_text);
-    assert_eq!(visible_grep.items[0].node.node.metadata, visible_metadata);
+    assert!(visible_grep.items.is_empty());
+
+    files
+        .update_node_external_access_policy(
+            AccountKind::User,
+            owner,
+            ws,
+            UpdateNodeExternalAccessPolicy {
+                node_id: hidden_folder,
+                enabled: true,
+            },
+        )
+        .await?;
+    let restored = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "marker".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(restored.items.len(), 1);
+    assert_eq!(restored.items[0].node.node.id, visible_text);
+    assert_eq!(restored.items[0].node.node.metadata, visible_metadata);
 
     db.cleanup().await;
     Ok(())

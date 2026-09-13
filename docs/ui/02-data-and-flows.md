@@ -447,7 +447,7 @@ Expand all / Collapse all
 
 - 선택 node가 없어도 빈 Inspector를 렌더링한다.
 - 검색과 Text 암호화 설정은 서로 독립적으로 변경한다.
-- 검색 포함 여부는 `PUT /nodes/{node_id}/search-policy`로 변경한다.
+- 검색 포함 여부는 `PUT /nodes/{node_id}/external-access-policy`로 변경한다.
 - Text 암호화는 `PUT /text/{node_id}/encryption`으로 변경한다.
 - Space의 기본값은 새 node 생성에만 적용하고 Inspector는 선택한 node의 현재 상태를 즉시 변경한다.
 - metadata는 encrypted content가 아니며 읽기 전용으로 표시한다.

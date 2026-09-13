@@ -81,6 +81,10 @@ Changes 호출 이력의 input redaction과 `space_name` summary는 [`event-logg
 
 Event는 `event_id ASC` 순서대로 적용하고 해당 page를 모두 반영한 뒤에만 새 `checkpoint_cursor`를 저장한다. `page.has_more=true`이면 `page.next_cursor`로 계속 읽는다. `resync_required=true`이면 Space snapshot을 다시 만들고 응답의 `checkpoint_cursor`에서 재개한다.
 
+외부 접근 설정 변경, 영구 삭제로 node를 식별할 수 없는 event 또는 비공개 정보 때문에 제외된 event가 있으면 `resync_required=true`를 반환한다. 제외된 event 이후로도 checkpoint는 진행한다.
+
+외부 변경 이력은 비공개 하위 항목을 포함할 수 있는 복사·삭제 집계값을 반환하지 않는다. v1 브라우저 이력은 원본 집계값을 유지한다.
+
 응답은 다른 paginated read/search와 동일하게 `page: {limit, returned, has_more, next_cursor}`를 사용한다. `direction=newer` 응답의 `next_action`은 다음 상태를 구조화한다.
 
 - `call_tool`: 같은 `limit`, `direction=newer`, 새 `cursor`로 다음 page를 호출한다.

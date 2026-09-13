@@ -283,7 +283,7 @@ spaces
   sort_order int not null default 0
   navigation_pinned_at timestamptz null
   user_mcp_enabled_at timestamptz null
-  default_search_enabled bool not null default true
+  default_external_access_enabled bool not null default true
   default_text_encryption_enabled bool not null default false
   created_at timestamptz
   updated_at timestamptz
@@ -367,7 +367,7 @@ nodes
   kind text not null check ('folder','text','file')
   sort_order int not null default 0
   metadata jsonb not null default '{}'
-  search_enabled bool not null default true
+  external_access_enabled bool not null default true
   write_locked bool not null default false
   created_by_account_id uuid not null references accounts(id)
   updated_by_account_id uuid not null references accounts(id)
@@ -383,7 +383,7 @@ nodes
 - Non-root node name은 1~128자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다.
 - 같은 parent 안 live node name은 unique다.
 - `metadata`는 JSON object여야 한다. content가 아니며 암호화 대상이 아니다. 시스템 관리 값이며 외부 caller에게 읽기 전용이다.
-- `search_enabled`는 해당 node만 검색 결과에 포함할지를 나타낸다. Folder 자식에게 상속되지 않는다.
+- `external_access_enabled`는 node의 직접 외부 접근 설정이다. MCP·API v2는 자신과 모든 조상이 ON일 때만 접근할 수 있다. 유효 상태는 `node_external_access_allowed`로 계산하며 자식의 설정값은 변경하지 않는다.
 - `write_locked`는 직접 설정된 쓰기 잠금이다. descendant 상속 상태는 저장하지 않으며 parent chain에서 계산한다.
 - `deleted_at`, `deleted_by_account_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.
 - Full path는 저장하지 않는다.

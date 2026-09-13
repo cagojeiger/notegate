@@ -105,6 +105,7 @@ pub(crate) async fn read(
 ) -> Result<Json<ReadResponse>, ApiError> {
     let result = state
         .files
+        .for_channel(caller.channel)
         .read_text(
             caller.account_id(),
             space_id,
@@ -187,6 +188,7 @@ pub(crate) async fn replace(
     .await?;
     let view = state
         .files
+        .for_channel(caller.channel)
         .write_text(
             caller.account_id(),
             space_id,
@@ -238,6 +240,7 @@ pub(crate) async fn append(
 ) -> Result<Json<TextMutationResponse>, ApiError> {
     let view = state
         .files
+        .for_channel(caller.channel)
         .append_text(
             caller.account_id(),
             space_id,
@@ -335,6 +338,7 @@ pub(crate) async fn patch(
         .collect();
     let result = state
         .files
+        .for_channel(caller.channel)
         .patch_text(
             caller.account_id(),
             space_id,
@@ -419,6 +423,7 @@ pub(crate) async fn edit(
         .collect::<Result<Vec<_>, ApiError>>()?;
     let result = state
         .files
+        .for_channel(caller.channel)
         .edit_text(
             caller.account_id(),
             space_id,

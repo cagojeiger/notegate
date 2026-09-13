@@ -13,7 +13,7 @@ POST   /api/v1/spaces/{space_id}/nodes:batchListChildren
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
 POST   /api/v1/spaces/{space_id}/nodes
 PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}
-PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/search-policy
+PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/external-access-policy
 PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/write-lock
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 POST   /api/v1/spaces/{space_id}/nodes/{node_id}/move
@@ -35,7 +35,7 @@ POST /nodes:batchListChildren   -> { results: BatchChildrenResult[] }
 GET /nodes/{node_id}/reveal     -> { ancestors: RestNode[], target: RestNode }
 POST /nodes                     -> RestNode
 PATCH /nodes/{node_id}          -> RestNode
-PUT /nodes/{node_id}/search-policy -> RestNode
+PUT /nodes/{node_id}/external-access-policy -> RestNode
 PUT /nodes/{node_id}/write-lock    -> RestNode
 GET /nodes/{id}/metadata        -> { metadata: object }
 POST /nodes/{node_id}/move      -> RestNode
@@ -142,7 +142,7 @@ type UpdateNodeBody = {
   sort_order?: number
 }
 
-type UpdateNodeSearchPolicyBody = {
+type UpdateNodeExternalAccessPolicyBody = {
   enabled: boolean
 }
 
@@ -158,8 +158,8 @@ type MoveNodeBody = {
 ```
 
 - `PATCH /nodes/{node_id}`는 rename과 reorder를 처리한다. write Agent도 사용할 수 있다.
-- `PUT /nodes/{node_id}/search-policy`는 검색 포함 여부를 변경하며 Space owner User만 사용할 수 있다.
-- `search_enabled`는 non-root folder/text/file에 적용한다. Folder의 값은 자식에게 상속되지 않는다.
+- `PUT /nodes/{node_id}/external-access-policy`는 MCP/API 외부 접근 허용 여부를 변경하며 Space owner User만 사용할 수 있다. API v1의 브라우저 접근에는 적용하지 않는다.
+- `external_access_enabled`는 non-root folder/text/file의 직접 설정이다. 자신 또는 조상 folder가 OFF면 MCP·API v2 접근을 차단한다. 자식의 설정값과 v1 브라우저 접근은 유지한다.
 - Agent는 write 권한이 있어도 검색 정책을 변경할 수 없다.
 - `PUT /nodes/{node_id}/write-lock`은 node의 직접 쓰기 잠금을 변경한다. Browser channel의 Space owner User만 호출할 수 있으며 MCP/API key와 Agent에는 노출하지 않는다.
 - `RestNode.effective_write_locked`와 `write_lock_sources`의 응답 의미는 `schemas.md`, mutation과 상속 규칙은 [`files-commands.md`](../files-commands.md#write-lock)를 따른다.

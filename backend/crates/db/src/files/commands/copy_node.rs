@@ -23,6 +23,7 @@ use crate::space_usage::{self, UsageDelta};
 
 pub struct CopyNodeArgs<'a> {
     pub pool: &'a PgPool,
+    pub external_only: bool,
     pub crypto: &'a PiiCrypto,
     pub space_id: Uuid,
     pub source_node_id: Uuid,
@@ -36,6 +37,7 @@ pub struct CopyNodeArgs<'a> {
 pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
     let CopyNodeArgs {
         pool,
+        external_only,
         crypto,
         space_id,
         source_node_id,
@@ -47,6 +49,8 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
     } = args;
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
     let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
+    checks::require_external_access(&mut tx, space_id, source_node_id, true, external_only).await?;
+    checks::require_external_access(&mut tx, space_id, new_parent_id, false, external_only).await?;
 
     let snapshot = load_subtree(&mut tx, space_id, source_node_id).await?;
     let source = snapshot
@@ -168,7 +172,7 @@ struct CopyNodeRow {
     kind: String,
     sort_order: i32,
     metadata: Value,
-    search_enabled: bool,
+    external_access_enabled: bool,
     depth: i32,
     relative_path_bytes: i64,
 }
@@ -180,16 +184,16 @@ async fn load_subtree(
 ) -> Result<Vec<CopyNodeRow>> {
     sqlx::query_as(
         "WITH RECURSIVE subtree AS ( \
-                SELECT id, parent_id, name, kind, sort_order, metadata, search_enabled, \
+                SELECT id, parent_id, name, kind, sort_order, metadata, external_access_enabled, \
                        0 AS depth, 0::bigint AS relative_path_bytes \
                 FROM nodes WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                 UNION ALL \
-                SELECT n.id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, \
+                SELECT n.id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.external_access_enabled, \
                        s.depth + 1, s.relative_path_bytes + 1 + octet_length(n.name) \
                 FROM nodes n JOIN subtree s ON n.parent_id = s.id \
                 WHERE n.space_id = $1 AND n.deleted_at IS NULL \
              ) \
-             SELECT id, parent_id, name, kind, sort_order, metadata, search_enabled, depth, \
+             SELECT id, parent_id, name, kind, sort_order, metadata, external_access_enabled, depth, \
                     relative_path_bytes \
              FROM subtree ORDER BY depth, sort_order, name, id",
     )
@@ -233,7 +237,7 @@ async fn insert_copied_node(
 ) -> Result<Node> {
     let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO nodes \
-             (space_id, parent_id, name, kind, sort_order, metadata, search_enabled, created_by_account_id, updated_by_account_id) \
+             (space_id, parent_id, name, kind, sort_order, metadata, external_access_enabled, created_by_account_id, updated_by_account_id) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8) RETURNING {NODE_COLUMNS}"
         )))
         .bind(space_id)
@@ -242,7 +246,7 @@ async fn insert_copied_node(
         .bind(&source.kind)
         .bind(source.sort_order)
         .bind(&source.metadata)
-        .bind(source.search_enabled)
+        .bind(source.external_access_enabled)
         .bind(created_by)
         .fetch_one(&mut *tx)
         .await

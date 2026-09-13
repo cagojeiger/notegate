@@ -226,7 +226,7 @@ async fn user_mcp_visibility_is_independent_from_navigation_and_agent_connection
                 sort_order: None,
                 navigation_pinned: Some(false),
                 user_mcp_enabled: Some(true),
-                default_search_enabled: None,
+                default_external_access_enabled: None,
                 default_text_encryption_enabled: None,
             },
         )

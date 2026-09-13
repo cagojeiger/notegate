@@ -22,6 +22,7 @@ use crate::space_usage::{self, UsageDelta};
 /// Insert a folder under `parent_id`, attributing it to `created_by`.
 pub async fn insert_folder(
     pool: &PgPool,
+    external_only: bool,
     space_id: Uuid,
     parent_id: Uuid,
     name: &str,
@@ -31,18 +32,24 @@ pub async fn insert_folder(
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
+    checks::require_external_access(&mut tx, space_id, parent_id, false, external_only).await?;
+    if external_only && !locked.default_external_access_enabled {
+        return Err(notegate_core::Error::conflict(
+            "MCP & API access is disabled for new items",
+        ));
+    }
     prepare_create(&mut tx, space_id, parent_id, name, locked.limits).await?;
     space_usage::apply_quota_delta(&mut tx, &locked.gate, UsageDelta::nodes(1), locked.limits)
         .await?;
 
     let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
-            "INSERT INTO nodes (space_id, parent_id, name, kind, search_enabled, created_by_account_id, updated_by_account_id) \
+            "INSERT INTO nodes (space_id, parent_id, name, kind, external_access_enabled, created_by_account_id, updated_by_account_id) \
          VALUES ($1, $2, $3, 'folder', $4, $5, $5) RETURNING {NODE_COLUMNS}"
         )))
         .bind(space_id)
         .bind(parent_id)
         .bind(name)
-        .bind(locked.default_search_enabled)
+        .bind(locked.default_external_access_enabled)
         .bind(created_by)
         .fetch_one(&mut *tx)
         .await
@@ -65,6 +72,7 @@ pub async fn insert_folder(
 /// `created_by`. `content` carries the pre-computed metrics from the service.
 pub struct InsertTextArgs<'a> {
     pub pool: &'a PgPool,
+    pub external_only: bool,
     pub crypto: &'a PiiCrypto,
     pub space_id: Uuid,
     pub parent_id: Uuid,
@@ -77,6 +85,7 @@ pub struct InsertTextArgs<'a> {
 pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)> {
     let InsertTextArgs {
         pool,
+        external_only,
         crypto,
         space_id,
         parent_id,
@@ -88,6 +97,12 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
+    checks::require_external_access(&mut tx, space_id, parent_id, false, external_only).await?;
+    if external_only && !locked.default_external_access_enabled {
+        return Err(notegate_core::Error::conflict(
+            "MCP & API access is disabled for new items",
+        ));
+    }
     prepare_create(&mut tx, space_id, parent_id, name, locked.limits).await?;
     space_usage::apply_quota_delta(
         &mut tx,
@@ -98,13 +113,13 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
     .await?;
 
     let node_row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
-            "INSERT INTO nodes (space_id, parent_id, name, kind, search_enabled, created_by_account_id, updated_by_account_id) \
+            "INSERT INTO nodes (space_id, parent_id, name, kind, external_access_enabled, created_by_account_id, updated_by_account_id) \
          VALUES ($1, $2, $3, 'text', $4, $5, $5) RETURNING {NODE_COLUMNS}"
         )))
         .bind(space_id)
         .bind(parent_id)
         .bind(name)
-        .bind(locked.default_search_enabled)
+        .bind(locked.default_external_access_enabled)
         .bind(created_by)
         .fetch_one(&mut *tx)
         .await

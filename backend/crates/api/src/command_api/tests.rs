@@ -64,7 +64,7 @@ async fn cli_read_uses_the_shared_engine_and_records_the_cli_surface()
                 sort_order: None,
                 navigation_pinned: None,
                 user_mcp_enabled: Some(true),
-                default_search_enabled: None,
+                default_external_access_enabled: None,
                 default_text_encryption_enabled: None,
             },
         )
@@ -293,7 +293,7 @@ async fn cli_read_sequence_executes_the_shared_engine_and_records_one_invocation
                 sort_order: None,
                 navigation_pinned: None,
                 user_mcp_enabled: Some(true),
-                default_search_enabled: None,
+                default_external_access_enabled: None,
                 default_text_encryption_enabled: None,
             },
         )

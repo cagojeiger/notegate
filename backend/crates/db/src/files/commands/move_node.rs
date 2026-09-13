@@ -20,6 +20,7 @@ use crate::file_change_events;
 
 pub struct MoveNodeArgs<'a> {
     pub pool: &'a PgPool,
+    pub external_only: bool,
     pub space_id: Uuid,
     pub node_id: Uuid,
     pub new_parent_id: Uuid,
@@ -34,6 +35,7 @@ pub struct MoveNodeArgs<'a> {
 pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
     let MoveNodeArgs {
         pool,
+        external_only,
         space_id,
         node_id,
         new_parent_id,
@@ -45,6 +47,8 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     let (_gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
+    checks::require_external_access(&mut tx, space_id, node_id, true, external_only).await?;
+    checks::require_external_access(&mut tx, space_id, new_parent_id, false, external_only).await?;
 
     // The moved node must exist and be live; the root cannot be moved.
     let moved_row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(

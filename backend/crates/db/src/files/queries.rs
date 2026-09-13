@@ -513,7 +513,7 @@ pub mod node {
                 WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                 UNION ALL \
                 SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, \
-                       n.search_enabled, n.write_locked, \
+                       n.external_access_enabled, n.write_locked, \
                        n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
                        n.purge_after, n.created_at, n.updated_at, n.deleted_at, c.depth + 1 AS depth \
                 FROM nodes n \
@@ -537,23 +537,23 @@ pub mod node {
         pool: &PgPool,
         space_id: Uuid,
         node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, Vec<(Uuid, String)>>> {
+    ) -> Result<HashMap<Uuid, Vec<(Uuid, String, bool)>>> {
         if node_ids.is_empty() {
             return Ok(HashMap::new());
         }
 
-        let rows: Vec<(Uuid, Uuid, String)> = sqlx::query_as(
+        let rows: Vec<(Uuid, Uuid, String, bool)> = sqlx::query_as(
             "WITH RECURSIVE chain AS ( \
-                SELECT id AS target_id, id, parent_id, name, write_locked, 0 AS depth \
+                SELECT id AS target_id, id, parent_id, name, write_locked, external_access_enabled, 0 AS depth \
                 FROM nodes \
                 WHERE space_id = $1 AND id = ANY($2) AND deleted_at IS NULL \
                 UNION ALL \
-                SELECT c.target_id, n.id, n.parent_id, n.name, n.write_locked, c.depth + 1 \
+                SELECT c.target_id, n.id, n.parent_id, n.name, n.write_locked, n.external_access_enabled, c.depth + 1 \
                 FROM nodes n \
                 JOIN chain c ON n.id = c.parent_id \
                 WHERE n.space_id = $1 AND n.deleted_at IS NULL \
              ) \
-             SELECT target_id, id, name \
+             SELECT target_id, id, name, external_access_enabled \
              FROM chain \
              WHERE write_locked \
              ORDER BY target_id, depth DESC",
@@ -565,11 +565,12 @@ pub mod node {
         .map_err(map_sqlx_error)?;
 
         let mut sources = HashMap::new();
-        for (target_id, source_id, name) in rows {
-            sources
-                .entry(target_id)
-                .or_insert_with(Vec::new)
-                .push((source_id, name));
+        for (target_id, source_id, name, external_access_enabled) in rows {
+            sources.entry(target_id).or_insert_with(Vec::new).push((
+                source_id,
+                name,
+                external_access_enabled,
+            ));
         }
         Ok(sources)
     }
@@ -615,15 +616,21 @@ pub mod node {
     }
 
     /// Whether a node has any live direct children.
-    pub async fn has_children(pool: &PgPool, space_id: Uuid, node_id: Uuid) -> Result<bool> {
+    pub async fn has_children(
+        pool: &PgPool,
+        external_only: bool,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> Result<bool> {
         let exists: bool = sqlx::query_scalar(
             "SELECT EXISTS ( \
             SELECT 1 FROM nodes \
-            WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
+            WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL AND (NOT $3 OR node_external_access_allowed(space_id, id)) \
          )",
         )
         .bind(space_id)
         .bind(node_id)
+        .bind(external_only)
         .fetch_one(pool)
         .await
         .map_err(map_sqlx_error)?;
@@ -633,6 +640,7 @@ pub mod node {
     /// Whether each node in a bounded set has any live direct children.
     pub async fn has_children_many(
         pool: &PgPool,
+        external_only: bool,
         space_id: Uuid,
         node_ids: &[Uuid],
     ) -> Result<std::collections::HashMap<Uuid, bool>> {
@@ -645,11 +653,12 @@ pub mod node {
              FROM nodes \
              WHERE space_id = $1 \
                AND parent_id = ANY($2) \
-               AND deleted_at IS NULL \
+               AND deleted_at IS NULL AND (NOT $3 OR node_external_access_allowed(space_id, id)) \
              GROUP BY parent_id",
         )
         .bind(space_id)
         .bind(node_ids.to_vec())
+        .bind(external_only)
         .fetch_all(pool)
         .await
         .map_err(map_sqlx_error)?;
@@ -661,17 +670,23 @@ pub mod node {
     /// Fetches `limit + 1` rows to detect whether more follow.
     pub async fn paged_child_summaries(
         pool: &PgPool,
+        external_only: bool,
         space_id: Uuid,
         parent_node_id: Uuid,
         limit: i64,
         cursor: Option<(i32, &str, Uuid)>,
     ) -> Result<(Vec<NodeSummary>, bool)> {
+        let access_filter = if external_only {
+            "AND node_external_access_allowed(space_id, id)"
+        } else {
+            ""
+        };
         let fetch = limit + 1;
         let rows: Vec<NodeSummaryRow> = match cursor {
             None => {
                 sqlx::query_as::<_, NodeSummaryRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
-                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
+                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
                  ORDER BY sort_order, name, id \
                  LIMIT $3"
                 )))
@@ -684,7 +699,7 @@ pub mod node {
             Some((sort_order, name, id)) => {
                 sqlx::query_as::<_, NodeSummaryRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
-                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
+                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
                    AND (sort_order, name, id) > ($3, $4, $5) \
                  ORDER BY sort_order, name, id \
                  LIMIT $6"
@@ -715,17 +730,23 @@ pub mod node {
     /// use `paged_child_summaries` to avoid loading large metadata columns.
     pub async fn paged_children(
         pool: &PgPool,
+        external_only: bool,
         space_id: Uuid,
         parent_node_id: Uuid,
         limit: i64,
         cursor: Option<(i32, &str, Uuid)>,
     ) -> Result<(Vec<Node>, bool)> {
+        let access_filter = if external_only {
+            "AND node_external_access_allowed(space_id, id)"
+        } else {
+            ""
+        };
         let fetch = limit + 1;
         let rows: Vec<NodeRow> = match cursor {
             None => {
                 sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT {NODE_COLUMNS} FROM nodes \
-                     WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
+                     WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
                      ORDER BY sort_order, name, id \
                      LIMIT $3"
                 )))
@@ -738,7 +759,7 @@ pub mod node {
             Some((sort_order, name, id)) => {
                 sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT {NODE_COLUMNS} FROM nodes \
-                     WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
+                     WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
                        AND (sort_order, name, id) > ($3, $4, $5) \
                      ORDER BY sort_order, name, id \
                      LIMIT $6"
@@ -768,6 +789,7 @@ pub mod node {
     /// First children page for each parent in a bounded ordered set.
     pub async fn first_children_pages(
         pool: &PgPool,
+        external_only: bool,
         space_id: Uuid,
         parent_node_ids: &[Uuid],
         limit: i64,
@@ -775,6 +797,11 @@ pub mod node {
         if parent_node_ids.is_empty() {
             return Ok((HashMap::new(), HashSet::new()));
         }
+        let access_filter = if external_only {
+            "AND node_external_access_allowed(space_id, id)"
+        } else {
+            ""
+        };
         let fetch = limit + 1;
         let rows: Vec<NodeSummaryRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT child.* \
@@ -783,7 +810,7 @@ pub mod node {
                    SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
                    WHERE space_id = $1 \
                      AND parent_id = requested.parent_id \
-                     AND deleted_at IS NULL \
+                     AND deleted_at IS NULL {access_filter} \
                    ORDER BY sort_order, name, id \
                    LIMIT $3 \
                  ) AS child \
@@ -825,12 +852,18 @@ pub mod node {
     /// which remains the tree/navigation query.
     pub async fn paged_node_summaries(
         pool: &PgPool,
+        external_only: bool,
         space_id: Uuid,
         kind: Option<NodeKind>,
         sort: NodeListSort,
         limit: i64,
         cursor: Option<NodeListDbCursor<'_>>,
     ) -> Result<(Vec<NodeSummary>, bool)> {
+        let access_filter = if external_only {
+            "AND node_external_access_allowed(space_id, id)"
+        } else {
+            ""
+        };
         let fetch = limit + 1;
         let kind = kind.map(|kind| kind.as_str().to_owned());
 
@@ -853,7 +886,7 @@ pub mod node {
         let sql = format!(
             "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
              WHERE space_id = $1 \
-               AND deleted_at IS NULL \
+               AND deleted_at IS NULL {access_filter} \
                AND parent_id IS NOT NULL \
                AND ($2::text IS NULL OR kind = $2) \
                {cursor_predicate}\
@@ -893,12 +926,18 @@ pub mod node {
     /// Canonical nodes for the full REST collection view.
     pub async fn paged_nodes(
         pool: &PgPool,
+        external_only: bool,
         space_id: Uuid,
         kind: Option<NodeKind>,
         sort: NodeListSort,
         limit: i64,
         cursor: Option<NodeListDbCursor<'_>>,
     ) -> Result<(Vec<Node>, bool)> {
+        let access_filter = if external_only {
+            "AND node_external_access_allowed(space_id, id)"
+        } else {
+            ""
+        };
         let fetch = limit + 1;
         let kind = kind.map(|kind| kind.as_str().to_owned());
         let order_by = match sort {
@@ -919,7 +958,7 @@ pub mod node {
         let sql = format!(
             "SELECT {NODE_COLUMNS} FROM nodes \
              WHERE space_id = $1 \
-               AND deleted_at IS NULL \
+               AND deleted_at IS NULL {access_filter} \
                AND parent_id IS NOT NULL \
                AND ($2::text IS NULL OR kind = $2) \
                {cursor_predicate}\
@@ -1037,7 +1076,7 @@ pub mod search {
         kind: String,
         sort_order: i32,
         metadata: Value,
-        search_enabled: bool,
+        external_access_enabled: bool,
         write_locked: bool,
         created_by_account_id: Uuid,
         updated_by_account_id: Uuid,
@@ -1057,7 +1096,7 @@ pub mod search {
         kind: String,
         sort_order: i32,
         metadata: Value,
-        search_enabled: bool,
+        external_access_enabled: bool,
         write_locked: bool,
         created_by_account_id: Uuid,
         updated_by_account_id: Uuid,
@@ -1080,7 +1119,7 @@ pub mod search {
                 kind: self.kind.clone(),
                 sort_order: self.sort_order,
                 metadata: self.metadata.clone(),
-                search_enabled: self.search_enabled,
+                external_access_enabled: self.external_access_enabled,
                 write_locked: self.write_locked,
                 created_by_account_id: self.created_by_account_id,
                 updated_by_account_id: self.updated_by_account_id,
@@ -1110,7 +1149,7 @@ pub mod search {
         kind: String,
         sort_order: i32,
         metadata: Value,
-        search_enabled: bool,
+        external_access_enabled: bool,
         write_locked: bool,
         created_by_account_id: Uuid,
         updated_by_account_id: Uuid,
@@ -1144,7 +1183,7 @@ pub mod search {
                 kind: self.kind,
                 sort_order: self.sort_order,
                 metadata: self.metadata,
-                search_enabled: self.search_enabled,
+                external_access_enabled: self.external_access_enabled,
                 write_locked: self.write_locked,
                 created_by_account_id: self.created_by_account_id,
                 updated_by_account_id: self.updated_by_account_id,
@@ -1274,7 +1313,7 @@ pub mod search {
                     kind: row.kind,
                     sort_order: row.sort_order,
                     metadata: row.metadata,
-                    search_enabled: row.search_enabled,
+                    external_access_enabled: row.external_access_enabled,
                     write_locked: row.write_locked,
                     created_by_account_id: row.created_by_account_id,
                     updated_by_account_id: row.updated_by_account_id,
@@ -1324,11 +1363,11 @@ pub mod search {
         let rows: Vec<NodeCandidateRow> = sqlx::query_as(sqlx::AssertSqlSafe(candidate_cte(
             "SELECT id, path, sort_path \
                  FROM subtree \
-                 WHERE id <> $2 AND search_enabled = true \
+                 WHERE id <> $2 AND external_access_enabled = true \
                    AND ($4::text IS NULL OR sort_path > $4) \
                  ORDER BY sort_path \
                  LIMIT $5",
-            "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, n.write_locked, \
+            "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.external_access_enabled, n.write_locked, \
                         n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
                         n.purge_after, n.created_at, n.updated_at, n.deleted_at, s.path, s.sort_path \
                  FROM selected s \
@@ -1368,12 +1407,12 @@ pub mod search {
                  JOIN text_objects t ON t.space_id = $1 AND t.node_id = s.id \
                  WHERE s.id <> $2 \
                    AND s.kind = 'text' \
-                   AND s.search_enabled = true \
+                   AND s.external_access_enabled = true \
                    AND t.storage_format = 'plain' \
                    AND ($4::text IS NULL OR s.sort_path > $4) \
                  ORDER BY s.sort_path \
                  LIMIT $5",
-                "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, n.write_locked, \
+                "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.external_access_enabled, n.write_locked, \
                         n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
                         n.purge_after, n.created_at, n.updated_at, n.deleted_at, s.path, s.sort_path, \
                         s.text_content_sha256, s.text_byte_len, s.text_line_count, s.text_at_rest_encryption \
@@ -1448,7 +1487,7 @@ pub mod search {
             JOIN text_objects t ON t.node_id = s.node_id AND t.space_id = $1 \
             WHERE n.deleted_at IS NULL \
               AND n.kind = 'text' \
-              AND n.search_enabled = true \
+              AND node_external_access_allowed(n.space_id, n.id) \
               AND t.storage_format = 'plain' \
               AND t.content_sha256 = s.content_sha256 \
               AND t.byte_len = s.byte_len \
@@ -1489,13 +1528,14 @@ pub mod search {
     fn candidate_cte(selected_sql: &'static str, result_sql: &'static str) -> String {
         format!(
             "WITH RECURSIVE subtree AS ( \
-                SELECT id, kind, search_enabled, \
+                SELECT id, kind, external_access_enabled, \
                        $3::text AS path, \
                        ''::text AS sort_path \
                 FROM nodes \
                 WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+                  AND node_external_access_allowed(space_id, id) \
                 UNION ALL \
-                SELECT n.id, n.kind, n.search_enabled, \
+                SELECT n.id, n.kind, n.external_access_enabled, \
                        CASE WHEN s.path = '/' THEN '/' || n.name ELSE s.path || '/' || n.name END, \
                        CASE WHEN s.sort_path = '' \
                             THEN concat(lpad((n.sort_order::bigint + 2147483648)::text, 10, '0'), E'\\x1f', n.name, E'\\x1f', n.id::text) \
@@ -1503,7 +1543,7 @@ pub mod search {
                        END \
                 FROM nodes n \
                 JOIN subtree s ON n.parent_id = s.id \
-                WHERE n.space_id = $1 AND n.deleted_at IS NULL \
+                WHERE n.space_id = $1 AND n.deleted_at IS NULL AND n.external_access_enabled \
             ), selected AS ( \
                 {selected_sql} \
             ) \
