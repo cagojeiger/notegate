@@ -120,7 +120,7 @@ describe("AuxiliarySidebar", () => {
     renderSidebar();
 
     expect(screen.getByRole("button", { name: "About Settings" })).toHaveAccessibleDescription(
-      "Changes apply immediately. A direct lock protects this item and anything inside it; inherited locks must be removed at their source. MCP & API access and stored text encryption are independent settings. The space root cannot be locked."
+      "Changes apply immediately. A direct lock protects this item and anything inside it; inherited locks must be removed at their source. MCP & API access requires this item and every parent folder to allow access; browser access is unchanged. Stored text encryption is independent. The space root cannot be locked."
     );
   });
 
