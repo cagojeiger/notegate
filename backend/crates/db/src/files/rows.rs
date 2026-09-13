@@ -23,7 +23,7 @@ pub struct NodeRow {
     pub kind: String,
     pub sort_order: i32,
     pub metadata: Value,
-    pub search_enabled: bool,
+    pub external_access_enabled: bool,
     pub write_locked: bool,
     pub created_by_account_id: Uuid,
     pub updated_by_account_id: Uuid,
@@ -47,7 +47,7 @@ impl NodeRow {
             kind,
             sort_order: self.sort_order,
             metadata: self.metadata,
-            search_enabled: self.search_enabled,
+            external_access_enabled: self.external_access_enabled,
             write_locked: self.write_locked,
             created_by_account_id: self.created_by_account_id,
             updated_by_account_id: self.updated_by_account_id,
@@ -172,7 +172,7 @@ impl TextRow {
 }
 
 /// Selectable columns of `nodes`, in [`NodeRow`] order.
-pub const NODE_COLUMNS: &str = "id, space_id, parent_id, name, kind, sort_order, metadata, search_enabled, write_locked, \
+pub const NODE_COLUMNS: &str = "id, space_id, parent_id, name, kind, sort_order, metadata, external_access_enabled, write_locked, \
      created_by_account_id, updated_by_account_id, deleted_by_account_id, purge_after, created_at, updated_at, deleted_at";
 
 pub const NODE_SUMMARY_COLUMNS: &str =

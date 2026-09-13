@@ -257,10 +257,10 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   canSyncLinks={me.account.kind === "user" && canWriteWorkbench}
                   textEncryptionAvailable={workbench.activeSpace?.features.text_encryption ?? false}
                   writeLockAvailable={workbench.activeSpace?.features.write_lock ?? false}
-                  searchPolicyPending={actions.nodeSearchPolicyPending}
+                  externalAccessPolicyPending={actions.nodeExternalAccessPolicyPending}
                   writeLockPending={actions.nodeWriteLockPending}
                   textEncryptionPending={actions.textEncryptionPending}
-                  onSearchEnabledChange={actions.setNodeSearchEnabled}
+                  onExternalAccessEnabledChange={actions.setNodeExternalAccessEnabled}
                   onWriteLockedChange={actions.setNodeWriteLocked}
                   onTextEncryptionEnabledChange={actions.setTextEncryptionEnabled}
                   onOpenLinkedNode={(nodeId, sourceNodeId) => {

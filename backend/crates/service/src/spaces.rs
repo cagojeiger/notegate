@@ -254,7 +254,7 @@ fn validate_space_update(command: &UpdateSpace) -> ServiceResult<()> {
         && command.sort_order.is_none()
         && command.navigation_pinned.is_none()
         && command.user_mcp_enabled.is_none()
-        && command.default_search_enabled.is_none()
+        && command.default_external_access_enabled.is_none()
         && command.default_text_encryption_enabled.is_none()
     {
         return Err(ServiceError::InvalidInput(
@@ -312,7 +312,7 @@ mod tests {
             sort_order: None,
             navigation_pinned: None,
             user_mcp_enabled: None,
-            default_search_enabled: None,
+            default_external_access_enabled: None,
             default_text_encryption_enabled: None,
         }
     }
@@ -355,7 +355,7 @@ mod tests {
                 ..empty_update()
             },
             UpdateSpace {
-                default_search_enabled: Some(false),
+                default_external_access_enabled: Some(false),
                 ..empty_update()
             },
             UpdateSpace {

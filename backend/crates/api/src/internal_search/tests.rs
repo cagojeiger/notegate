@@ -329,11 +329,7 @@ async fn search_runtime_routes_authority_and_queries_to_their_configured_stores(
     )
     .find(caller.account_id(), space_id, request())
     .await;
-    assert!(matches!(
-        query_result,
-        Err(SearchRunError::Search(notegate_search::SearchError::NotFound(message)))
-            if message == "scope path not found"
-    ));
+    assert!(query_result?.items.is_empty());
 
     empty_db.cleanup().await;
     data_db.cleanup().await;
@@ -341,7 +337,7 @@ async fn search_runtime_routes_authority_and_queries_to_their_configured_stores(
 }
 
 #[tokio::test]
-async fn search_runtime_grep_reads_candidates_bodies_and_hydration_from_query_store()
+async fn search_runtime_uses_replica_content_but_primary_access_policy()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(authority_db) = TestDb::setup().await? else {
         return Ok(());
@@ -351,7 +347,7 @@ async fn search_runtime_grep_reads_candidates_bodies_and_hydration_from_query_st
         return Ok(());
     };
     let authority_state = crate::rest::test_support::state(&authority_db);
-    let (caller, space_id, _root_node_id) =
+    let (caller, space_id, root_node_id) =
         crate::rest::test_support::caller_and_space(&authority_state).await?;
     SpaceRepo::new(authority_state.db.clone())
         .update_space(space_id, caller.account_id(), None, None, Some(true))
@@ -366,10 +362,16 @@ async fn search_runtime_grep_reads_candidates_bodies_and_hydration_from_query_st
         .bind("grep-query")
         .execute(&query_db.pool)
         .await?;
-    let query_root_node_id = SpaceRepo::new(query_state.db.clone())
+    let old_query_root_node_id = SpaceRepo::new(query_state.db.clone())
         .root_node_id(space_id)
         .await?
         .ok_or_else(|| std::io::Error::other("expected query-store root node"))?;
+    sqlx::query("UPDATE nodes SET id = $1 WHERE id = $2")
+        .bind(root_node_id)
+        .bind(old_query_root_node_id)
+        .execute(&query_db.pool)
+        .await?;
+    let query_root_node_id = root_node_id;
     let query_folder = query_state
         .files
         .create_folder(
@@ -412,6 +414,54 @@ async fn search_runtime_grep_reads_candidates_bodies_and_hydration_from_query_st
         .execute(&query_db.pool)
         .await?;
 
+    for (id, parent, name, kind) in [
+        (query_folder.node.id, root_node_id, "Query Folder", "folder"),
+        (
+            query_node.node.node.id,
+            query_folder.node.id,
+            "Query Body.md",
+            "text",
+        ),
+    ] {
+        sqlx::query(
+            "INSERT INTO nodes (id, space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) VALUES ($1, $2, $3, $4, $5, $6, $6)",
+        )
+        .bind(id)
+        .bind(space_id)
+        .bind(parent)
+        .bind(name)
+        .bind(kind)
+        .bind(caller.account_id())
+        .execute(&authority_db.pool)
+        .await?;
+    }
+    sqlx::query(
+        "INSERT INTO text_objects (node_id, space_id, content_text, created_by_account_id, updated_by_account_id) VALUES ($1, $2, '', $3, $3)",
+    )
+    .bind(query_node.node.node.id)
+    .bind(space_id)
+    .bind(caller.account_id())
+    .execute(&authority_db.pool)
+    .await?;
+    authority_state
+        .files
+        .write_text(
+            caller.account_id(),
+            space_id,
+            WriteText {
+                target: WriteTarget::Existing {
+                    node_id: query_node.node.node.id,
+                },
+                body: WriteTextBody::Plain("first line\nquery-only needle".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    sqlx::query("UPDATE nodes SET write_locked = true WHERE id = $1")
+        .bind(query_folder.node.id)
+        .execute(&authority_db.pool)
+        .await?;
+
     let store = |db: &TestDb| {
         notegate_db::FilesRepo::with_limits_and_crypto(
             db.pool.clone(),
@@ -419,27 +469,25 @@ async fn search_runtime_grep_reads_candidates_bodies_and_hydration_from_query_st
             authority_state.security.clone(),
         )
     };
-    let result = SearchRuntime::with_authority_and_query_stores(
+    let runtime = SearchRuntime::with_authority_and_query_stores(
         store(&authority_db),
         store(&query_db),
         authority_state.config.search_body_cache,
         false,
-    )
-    .grep(
-        caller.account_id(),
-        space_id,
-        GrepRequest {
-            q: "query-only needle".to_owned(),
-            path: None,
-            match_mode: GrepMatchMode::Literal,
-            line_mode: GrepLineMode::First,
-            include: Vec::new(),
-            exclude: Vec::new(),
-            limit: Some(10),
-            cursor: None,
-        },
-    )
-    .await?;
+    );
+    let grep_request = || GrepRequest {
+        q: "query-only needle".to_owned(),
+        path: None,
+        match_mode: GrepMatchMode::Literal,
+        line_mode: GrepLineMode::First,
+        include: Vec::new(),
+        exclude: Vec::new(),
+        limit: Some(10),
+        cursor: None,
+    };
+    let result = runtime
+        .grep(caller.account_id(), space_id, grep_request())
+        .await?;
 
     assert_eq!(result.items.len(), 1);
     let hit = result
@@ -456,6 +504,111 @@ async fn search_runtime_grep_reads_candidates_bodies_and_hydration_from_query_st
             .map(|source| (source.node_id, source.path.as_str())),
         Some((query_folder.node.id, "/Query Folder"))
     );
+
+    let find_request = || FindRequest {
+        q: "Query".to_owned(),
+        path: None,
+        kind: None,
+        match_mode: FindMatchMode::Contains,
+        include: Vec::new(),
+        exclude: Vec::new(),
+        limit: Some(1),
+        cursor: None,
+    };
+    // Only primary sees revocation. The replica still returns the old node/body.
+    sqlx::query("UPDATE nodes SET external_access_enabled = false WHERE id = $1")
+        .bind(query_node.node.node.id)
+        .execute(&authority_db.pool)
+        .await?;
+    for search in [
+        runtime.clone(),
+        SearchRuntime::with_authority_and_query_stores(
+            store(&authority_db),
+            store(&query_db),
+            authority_state.config.search_body_cache,
+            false,
+        ),
+    ] {
+        assert!(
+            search
+                .grep(caller.account_id(), space_id, grep_request())
+                .await?
+                .items
+                .is_empty()
+        );
+        let first = search
+            .find(caller.account_id(), space_id, find_request())
+            .await?;
+        assert_eq!(first.items.len(), 1);
+        assert_eq!(
+            first.items.first().map(|node| node.has_children),
+            Some(false)
+        );
+        assert!(!first.has_more);
+        assert!(first.next_cursor.is_none());
+    }
+    sqlx::query(
+        "UPDATE nodes SET external_access_enabled = true, deleted_at = now(), deleted_by_account_id = $2, purge_after = now() WHERE id = $1",
+    )
+    .bind(query_node.node.node.id)
+    .bind(caller.account_id())
+    .execute(&authority_db.pool)
+    .await?;
+    assert!(
+        runtime
+            .grep(caller.account_id(), space_id, grep_request())
+            .await?
+            .items
+            .is_empty()
+    );
+    sqlx::query("UPDATE nodes SET external_access_enabled = false WHERE id = $1")
+        .bind(query_folder.node.id)
+        .execute(&authority_db.pool)
+        .await?;
+    sqlx::query(
+        "UPDATE nodes SET deleted_at = NULL, deleted_by_account_id = NULL, purge_after = NULL WHERE id = $1",
+    )
+    .bind(query_node.node.node.id)
+    .execute(&authority_db.pool)
+    .await?;
+    for search in [
+        runtime.clone(),
+        SearchRuntime::with_authority_and_query_stores(
+            store(&authority_db),
+            store(&query_db),
+            authority_state.config.search_body_cache,
+            false,
+        ),
+    ] {
+        assert!(
+            search
+                .grep(caller.account_id(), space_id, grep_request())
+                .await?
+                .items
+                .is_empty()
+        );
+        let first = search
+            .find(caller.account_id(), space_id, find_request())
+            .await?;
+        assert!(first.items.is_empty());
+        assert!(!first.has_more);
+        assert!(first.next_cursor.is_none());
+    }
+    assert!(matches!(
+        runtime
+            .find(
+                caller.account_id(),
+                space_id,
+                FindRequest {
+                    path: Some("/Query Folder".to_owned()),
+                    ..find_request()
+                }
+            )
+            .await,
+        Err(SearchRunError::Search(
+            notegate_search::SearchError::NotFound(_)
+        ))
+    ));
 
     query_db.cleanup().await;
     authority_db.cleanup().await;

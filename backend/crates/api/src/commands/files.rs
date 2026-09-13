@@ -43,12 +43,14 @@ pub async fn list(
     if depth == 1 {
         let folder = state
             .files
+            .for_channel(caller.channel)
             .resolve_path(account_id, space_id, &path)
             .await
             .map_err(service_error)?;
 
         let page = state
             .files
+            .for_channel(caller.channel)
             .canonical_children(
                 account_id,
                 space_id,
@@ -77,6 +79,7 @@ pub async fn list(
 
     let page = state
         .files
+        .for_channel(caller.channel)
         .tree(
             account_id,
             space_id,
@@ -117,16 +120,25 @@ pub async fn stat(
 
     let view = state
         .files
+        .for_channel(caller.channel)
         .resolve_path(caller.account_id(), resolved.space_id(), &path)
         .await
         .map_err(service_error)?;
-    let mut node = node_summary(&view);
+    Ok(json!({
+        "space": resolved.name(),
+        "node": stat_node_json(&view),
+    }))
+}
+
+pub(crate) fn stat_node_json(view: &notegate_service::files::NodeView) -> Value {
+    let mut node = node_summary(view);
     if let Some(object) = node.as_object_mut() {
         object.insert(
             "write_lock_sources".to_owned(),
             json!(
                 view.write_lock_sources
                     .iter()
+                    .filter(|source| source.external_access_enabled)
                     .map(|source| {
                         json!({
                             "node_id": source.node_id,
@@ -139,10 +151,7 @@ pub async fn stat(
         );
     }
 
-    Ok(json!({
-        "space": resolved.name(),
-        "node": node,
-    }))
+    node
 }
 
 pub async fn mkdir(
@@ -159,6 +168,7 @@ pub async fn mkdir(
     if parents {
         let (view, created_paths) = state
             .files
+            .for_channel(caller.channel)
             .create_folder_recursive(account_id, space_id, &path)
             .await
             .map_err(service_error)?;
@@ -173,12 +183,14 @@ pub async fn mkdir(
     let (parent_path, name) = split_parent_name(&path)?;
     let parent = state
         .files
+        .for_channel(caller.channel)
         .resolve_path(account_id, space_id, &parent_path)
         .await
         .map_err(service_error)?;
 
     let view = state
         .files
+        .for_channel(caller.channel)
         .create_folder(
             account_id,
             space_id,
@@ -212,12 +224,14 @@ pub async fn read(
 
     let node = state
         .files
+        .for_channel(caller.channel)
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
     let result = state
         .files
+        .for_channel(caller.channel)
         .read_text(
             account_id,
             space_id,
@@ -273,13 +287,13 @@ pub async fn read(
 /// its parent when it does not exist and `create` is set. Shared by `write`
 /// and `append`, which only differ in what they do with the existing view.
 async fn resolve_write_target(
-    state: &AppState,
+    files: &notegate_service::files::FilesService,
     account_id: uuid::Uuid,
     space_id: uuid::Uuid,
     path: &str,
     create: bool,
 ) -> Result<(WriteTarget, Option<NodeView>), CommandError> {
-    let existing = match state.files.resolve_path(account_id, space_id, path).await {
+    let existing = match files.resolve_path(account_id, space_id, path).await {
         Ok(view) => Some(view),
         Err(ServiceError::NotFound(_)) => None,
         Err(error) => return Err(service_error(error)),
@@ -296,8 +310,7 @@ async fn resolve_write_target(
                 )));
             }
             let (parent_path, name) = split_parent_name(path)?;
-            let parent = state
-                .files
+            let parent = files
                 .resolve_path(account_id, space_id, &parent_path)
                 .await
                 .map_err(service_error)?;
@@ -324,12 +337,13 @@ pub async fn write(
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
+    let files = state.files.for_channel(caller.channel);
     let (target, existing) =
-        resolve_write_target(state, account_id, space_id, &path, create).await?;
+        resolve_write_target(&files, account_id, space_id, &path, create).await?;
 
     if let Some(view) = &existing {
         let current_sha = guarded_plain_text_sha(
-            state,
+            &files,
             account_id,
             space_id,
             view.node.id,
@@ -340,8 +354,7 @@ pub async fn write(
         expected_sha256 = Some(current_sha);
     }
 
-    let view = state
-        .files
+    let view = files
         .write_text(
             account_id,
             space_id,
@@ -377,11 +390,18 @@ pub async fn append(
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
-    let (target, _existing) =
-        resolve_write_target(state, account_id, space_id, &path, create).await?;
+    let (target, _existing) = resolve_write_target(
+        &state.files.for_channel(caller.channel),
+        account_id,
+        space_id,
+        &path,
+        create,
+    )
+    .await?;
 
     let view = state
         .files
+        .for_channel(caller.channel)
         .append_text(
             account_id,
             space_id,
@@ -420,12 +440,14 @@ pub async fn patch(
 
     let node = state
         .files
+        .for_channel(caller.channel)
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
     let result = state
         .files
+        .for_channel(caller.channel)
         .patch_text(
             account_id,
             space_id,
@@ -467,12 +489,14 @@ pub async fn edit(
 
     let node = state
         .files
+        .for_channel(caller.channel)
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
     let result = state
         .files
+        .for_channel(caller.channel)
         .edit_text(
             account_id,
             space_id,
@@ -519,6 +543,7 @@ pub async fn mv(
 
     let source = state
         .files
+        .for_channel(caller.channel)
         .resolve_path(account_id, space_id, &source_path)
         .await
         .map_err(service_error)?;
@@ -526,12 +551,14 @@ pub async fn mv(
     let (dest_parent_path, new_name) = split_parent_name(&destination_path)?;
     let dest_parent = state
         .files
+        .for_channel(caller.channel)
         .resolve_path(account_id, space_id, &dest_parent_path)
         .await
         .map_err(service_error)?;
 
     let view = state
         .files
+        .for_channel(caller.channel)
         .move_node(
             account_id,
             space_id,
@@ -572,18 +599,21 @@ pub async fn copy(
 
     let source = state
         .files
+        .for_channel(caller.channel)
         .resolve_path(account_id, space_id, &source_path)
         .await
         .map_err(service_error)?;
     let (parent_path, new_name) = split_parent_name(&destination_path)?;
     let parent = state
         .files
+        .for_channel(caller.channel)
         .resolve_path(account_id, space_id, &parent_path)
         .await
         .map_err(service_error)?;
 
     let result = state
         .files
+        .for_channel(caller.channel)
         .copy_node(
             account_id,
             space_id,
@@ -623,12 +653,14 @@ pub async fn rm(
 
     let node = state
         .files
+        .for_channel(caller.channel)
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
     let result = state
         .files
+        .for_channel(caller.channel)
         .delete_node(
             account_id,
             space_id,

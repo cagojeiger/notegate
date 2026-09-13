@@ -59,7 +59,7 @@ pub(crate) struct UpdateBody {
     sort_order: Option<i32>,
     navigation_pinned: Option<bool>,
     user_mcp_enabled: Option<bool>,
-    default_search_enabled: Option<bool>,
+    default_external_access_enabled: Option<bool>,
     default_text_encryption_enabled: Option<bool>,
 }
 
@@ -174,7 +174,7 @@ pub(crate) async fn update(
                 sort_order: body.sort_order,
                 navigation_pinned: body.navigation_pinned,
                 user_mcp_enabled: body.user_mcp_enabled,
-                default_search_enabled: body.default_search_enabled,
+                default_external_access_enabled: body.default_external_access_enabled,
                 default_text_encryption_enabled: body.default_text_encryption_enabled,
             },
         )

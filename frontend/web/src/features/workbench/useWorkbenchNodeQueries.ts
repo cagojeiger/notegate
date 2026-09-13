@@ -8,7 +8,7 @@ import {
   moveNode,
   revealNode,
   updateNode,
-  updateNodeSearchPolicy,
+  updateNodeExternalAccessPolicy,
   updateNodeWriteLock
 } from "../../api/nodes";
 import { updateTextEncryption } from "../../api/text";
@@ -73,12 +73,12 @@ export function useUpdateNodeMutation(onUpdated: (node: RestNode) => void) {
   });
 }
 
-export function useUpdateNodeSearchPolicyMutation(onUpdated: (node: RestNode) => void) {
+export function useUpdateNodeExternalAccessPolicyMutation(onUpdated: (node: RestNode) => void) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ node, enabled }: { node: RestNode; enabled: boolean }) =>
-      updateNodeSearchPolicy(client, node.space_id, node.id, enabled),
+      updateNodeExternalAccessPolicy(client, node.space_id, node.id, enabled),
     onSuccess: (node) => {
       updateNodeCaches(queryClient, node, () => node);
       invalidateRecentNodes(queryClient, node.space_id);

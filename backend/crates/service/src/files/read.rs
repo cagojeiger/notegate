@@ -160,6 +160,13 @@ impl FilesService {
 
         let limit = clamp_children_limit(request.limit);
         let mut parents = self.store.find_nodes(space_id, &parent_node_ids).await?;
+        if self.channel != notegate_model::Channel::Browser {
+            let allowed = self
+                .store
+                .externally_accessible_node_ids(space_id, &parent_node_ids, false)
+                .await?;
+            parents.retain(|id, _| allowed.contains(id));
+        }
         let folder_ids = parent_node_ids
             .iter()
             .filter(|parent_id| {
@@ -367,9 +374,10 @@ impl FilesService {
         self.authorize(space_id, caller_account_id, FileCommand::Stat)
             .await?;
         let rows = self.store.ancestor_chain(space_id, node_id).await?;
-        if rows.is_empty() {
-            return Err(ServiceError::NotFound("node not found".to_owned()));
-        }
+        let target = rows
+            .last()
+            .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))?;
+        self.require_node_access(target).await?;
         let mut views = self.node_views(space_id, rows).await?;
         let target = views
             .pop()
@@ -431,6 +439,7 @@ impl FilesService {
             .find_file(space_id, node_id)
             .await?
             .ok_or_else(|| ServiceError::NotFound("file not found".to_owned()))?;
+        self.require_node_access(&node).await?;
         let view = self.file_node_view(space_id, node, &file).await?;
         Ok(crate::files::FileView { node: view, file })
     }

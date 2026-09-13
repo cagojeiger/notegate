@@ -56,7 +56,7 @@ pub(super) async fn write_lock_sources_many(
     }
     let source_ids: Vec<Uuid> = direct_sources
         .values()
-        .flat_map(|sources| sources.iter().map(|(node_id, _)| *node_id))
+        .flat_map(|sources| sources.iter().map(|(node_id, _, _)| *node_id))
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
@@ -67,11 +67,12 @@ pub(super) async fn write_lock_sources_many(
         .map(|(node_id, sources)| {
             let sources = sources
                 .into_iter()
-                .filter_map(|(source_id, name)| {
+                .filter_map(|(source_id, name, external_access_enabled)| {
                     paths.get(&source_id).map(|path| WriteLockSource {
                         node_id: source_id,
                         name,
                         path: path.clone(),
+                        external_access_enabled,
                     })
                 })
                 .collect();

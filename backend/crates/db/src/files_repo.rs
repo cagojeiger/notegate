@@ -35,6 +35,7 @@ pub struct FilesRepo {
     limits: Limits,
     crypto: PiiCrypto,
     metrics_enabled: bool,
+    external_only: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -57,6 +58,28 @@ impl TextMutationKind {
 }
 
 impl FilesRepo {
+    pub async fn externally_accessible_node_ids(
+        &self,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+        include_deleted: bool,
+    ) -> Result<HashSet<Uuid>> {
+        if node_ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let ids: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM nodes WHERE space_id = $1 AND id = ANY($2) \
+             AND ($3 OR deleted_at IS NULL) AND node_external_access_allowed(space_id, id)",
+        )
+        .bind(space_id)
+        .bind(node_ids)
+        .bind(include_deleted)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(crate::map_sqlx_error)?;
+        Ok(ids.into_iter().collect())
+    }
+
     #[cfg(any(test, feature = "test-util"))]
     pub fn new(pool: PgPool) -> Self {
         Self::with_limits(pool, Limits::default())
@@ -73,7 +96,13 @@ impl FilesRepo {
             limits,
             crypto,
             metrics_enabled: false,
+            external_only: false,
         }
+    }
+
+    pub fn with_external_access_only(mut self, external_only: bool) -> Self {
+        self.external_only = external_only;
+        self
     }
 
     pub fn with_metrics_enabled(mut self, enabled: bool) -> Self {
@@ -115,7 +144,7 @@ impl FilesRepo {
         &self,
         space_id: Uuid,
         node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, Vec<(Uuid, String)>>> {
+    ) -> Result<HashMap<Uuid, Vec<(Uuid, String, bool)>>> {
         queries::node::direct_write_lock_ancestors_many(&self.pool, space_id, node_ids).await
     }
 
@@ -151,7 +180,7 @@ impl FilesRepo {
     }
 
     pub async fn has_children(&self, space_id: Uuid, node_id: Uuid) -> Result<bool> {
-        queries::node::has_children(&self.pool, space_id, node_id).await
+        queries::node::has_children(&self.pool, self.external_only, space_id, node_id).await
     }
 
     pub async fn has_children_many(
@@ -159,7 +188,7 @@ impl FilesRepo {
         space_id: Uuid,
         node_ids: &[Uuid],
     ) -> Result<HashMap<Uuid, bool>> {
-        queries::node::has_children_many(&self.pool, space_id, node_ids).await
+        queries::node::has_children_many(&self.pool, self.external_only, space_id, node_ids).await
     }
 
     pub async fn text_stats(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<TextStats>> {
@@ -234,7 +263,15 @@ impl FilesRepo {
         cursor: Option<&ChildrenCursor>,
     ) -> Result<(Vec<Node>, bool)> {
         let cursor = cursor.map(|c| (c.sort_order, c.name.as_str(), c.id));
-        queries::node::paged_children(&self.pool, space_id, parent_node_id, limit, cursor).await
+        queries::node::paged_children(
+            &self.pool,
+            self.external_only,
+            space_id,
+            parent_node_id,
+            limit,
+            cursor,
+        )
+        .await
     }
 
     pub async fn paged_child_summaries(
@@ -245,8 +282,15 @@ impl FilesRepo {
         cursor: Option<&ChildrenCursor>,
     ) -> Result<(Vec<NodeSummary>, bool)> {
         let cursor = cursor.map(|c| (c.sort_order, c.name.as_str(), c.id));
-        queries::node::paged_child_summaries(&self.pool, space_id, parent_node_id, limit, cursor)
-            .await
+        queries::node::paged_child_summaries(
+            &self.pool,
+            self.external_only,
+            space_id,
+            parent_node_id,
+            limit,
+            cursor,
+        )
+        .await
     }
 
     pub async fn first_children_pages(
@@ -255,7 +299,14 @@ impl FilesRepo {
         parent_node_ids: &[Uuid],
         limit: i64,
     ) -> Result<(HashMap<Uuid, Vec<NodeSummary>>, HashSet<Uuid>)> {
-        queries::node::first_children_pages(&self.pool, space_id, parent_node_ids, limit).await
+        queries::node::first_children_pages(
+            &self.pool,
+            self.external_only,
+            space_id,
+            parent_node_ids,
+            limit,
+        )
+        .await
     }
 
     pub async fn paged_node_summaries(
@@ -281,7 +332,16 @@ impl FilesRepo {
             }
             None => None,
         };
-        queries::node::paged_node_summaries(&self.pool, space_id, kind, sort, limit, cursor).await
+        queries::node::paged_node_summaries(
+            &self.pool,
+            self.external_only,
+            space_id,
+            kind,
+            sort,
+            limit,
+            cursor,
+        )
+        .await
     }
 
     pub async fn paged_nodes(
@@ -307,7 +367,16 @@ impl FilesRepo {
             }
             None => None,
         };
-        queries::node::paged_nodes(&self.pool, space_id, kind, sort, limit, cursor).await
+        queries::node::paged_nodes(
+            &self.pool,
+            self.external_only,
+            space_id,
+            kind,
+            sort,
+            limit,
+            cursor,
+        )
+        .await
     }
 
     pub async fn list_file_change_events(
@@ -413,6 +482,7 @@ impl FilesRepo {
     ) -> Result<Node> {
         commands::create::insert_folder(
             &self.pool,
+            self.external_only,
             space_id,
             command.parent_node_id,
             &command.name,
@@ -432,6 +502,7 @@ impl FilesRepo {
     ) -> Result<(Node, TextObject)> {
         commands::create::insert_text(commands::create::InsertTextArgs {
             pool: &self.pool,
+            external_only: self.external_only,
             crypto: &self.crypto,
             space_id,
             parent_id: parent_node_id,
@@ -471,6 +542,7 @@ impl FilesRepo {
     ) -> Result<PendingObjectUpload> {
         crate::files::object_uploads::insert(
             &self.pool,
+            self.external_only,
             registration,
             space_id,
             requested_by,
@@ -523,15 +595,16 @@ impl FilesRepo {
         detected_media_type: Option<&str>,
         node_metadata: Option<&Value>,
     ) -> Result<(Node, FileObject)> {
-        crate::files::object_uploads::attach(
-            &self.pool,
+        crate::files::object_uploads::attach(crate::files::object_uploads::AttachUploadArgs {
+            pool: &self.pool,
+            external_only: self.external_only,
             id,
             space_id,
             requested_by,
             detected_media_type,
             node_metadata,
-            self.limits,
-        )
+            limits: self.limits,
+        })
         .await
     }
 
@@ -574,6 +647,7 @@ impl FilesRepo {
     ) -> Result<(Node, TextObject)> {
         commands::save::save_text_content(commands::save::SaveTextContentArgs {
             pool: &self.pool,
+            external_only: self.external_only,
             crypto: &self.crypto,
             space_id,
             node_id,
@@ -594,6 +668,7 @@ impl FilesRepo {
     ) -> Result<Node> {
         commands::move_node::move_node(commands::move_node::MoveNodeArgs {
             pool: &self.pool,
+            external_only: self.external_only,
             space_id,
             node_id: command.node_id,
             new_parent_id: command.new_parent_node_id,
@@ -613,6 +688,7 @@ impl FilesRepo {
     ) -> Result<(Node, CopyCounts)> {
         commands::copy_node::copy_node(commands::copy_node::CopyNodeArgs {
             pool: &self.pool,
+            external_only: self.external_only,
             crypto: &self.crypto,
             space_id,
             source_node_id: command.node_id,
@@ -631,16 +707,26 @@ impl FilesRepo {
         command: &notegate_model::files::UpdateNode,
         updated_by: Uuid,
     ) -> Result<Node> {
-        commands::update::update_node(&self.pool, space_id, command, updated_by).await
+        commands::update::update_node(
+            &self.pool,
+            self.external_only,
+            space_id,
+            command,
+            updated_by,
+        )
+        .await
     }
 
-    pub async fn update_node_search_policy(
+    pub async fn update_node_external_access_policy(
         &self,
         space_id: Uuid,
-        command: &notegate_model::files::UpdateNodeSearchPolicy,
+        command: &notegate_model::files::UpdateNodeExternalAccessPolicy,
         updated_by: Uuid,
     ) -> Result<Node> {
-        commands::update::update_node_search_policy(&self.pool, space_id, command, updated_by).await
+        commands::update::update_node_external_access_policy(
+            &self.pool, space_id, command, updated_by,
+        )
+        .await
     }
 
     pub async fn update_node_write_lock(
@@ -683,8 +769,15 @@ impl FilesRepo {
         deleted_by: Uuid,
         recursive: bool,
     ) -> Result<DateTime<Utc>> {
-        commands::delete::soft_delete_node(&self.pool, space_id, node_id, deleted_by, recursive)
-            .await
+        commands::delete::soft_delete_node(
+            &self.pool,
+            self.external_only,
+            space_id,
+            node_id,
+            deleted_by,
+            recursive,
+        )
+        .await
     }
 }
 

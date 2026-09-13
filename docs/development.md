@@ -68,8 +68,8 @@ credential을 넣지 않는다. Private request와 response는 LOOKUP root에서
 서명되며 public listener에는 `/internal/*` route가 등록되지 않는다.
 
 `NOTEGATE_READ_DATABASE_URL`이 없으면 search는 primary pool handle을 공유한다. 값이 있으면 search
-scope, candidate, body와 result hydration은 별도 read pool을 사용하지만 권한 판정은 항상 primary에서
-수행한다. 쓰기, queue worker와 reconciliation도 primary pool을 사용한다. 별도 read endpoint를 선택하면
+본문 로딩과 content stats는 별도 read pool을 사용하지만 권한, scope, candidate, 경로와 잠금은 primary에서
+조회한다. 쓰기, queue worker와 reconciliation도 primary pool을 사용한다. 별도 read endpoint를 선택하면
 권한 철회의 즉시성은 유지되지만 변경 직후 검색 결과 자체에는 replica lag가 보일 수 있다. Read pool은
 로컬 search listener를 소유한 process에서만 생성되며, remote search를 호출하는 API와 background role은
 불필요한 read connection을 만들지 않는다.

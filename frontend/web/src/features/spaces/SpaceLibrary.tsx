@@ -1,4 +1,4 @@
-import { Bot, FolderOpen, Link2, LockKeyhole, Pin, RefreshCw, Search } from "lucide-react";
+import { Bot, FolderOpen, Link2, LockKeyhole, Pin, RefreshCw, Plug } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { UpdateSpaceInput } from "../../api/spaces";
@@ -303,15 +303,15 @@ function SpaceInspector({
           <section className="p-4">
             <SectionHeader
               title="New item defaults"
-              help="These settings apply only to new items created in this space. Search applies to every new item, while encryption applies only to new documents. Existing items are unchanged."
+              help="These settings apply only to new items created in this space. MCP & API access applies to every new item, while encryption applies only to new documents. Existing items are unchanged."
             />
             <div className="space-y-3">
               <SettingToggle
-                icon={<Search size={16} />}
-                label="Include in search"
-                checked={space?.default_search_enabled ?? false}
+                icon={<Plug size={16} />}
+                label="MCP & API access"
+                checked={space?.default_external_access_enabled ?? false}
                 disabled={!space || pending}
-                onChange={(checked) => onUpdate({ default_search_enabled: checked })}
+                onChange={(checked) => onUpdate({ default_external_access_enabled: checked })}
               />
               <SettingToggle
                 icon={<LockKeyhole size={16} />}

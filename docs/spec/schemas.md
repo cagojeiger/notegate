@@ -67,7 +67,7 @@ type RestNode = {
   path: string
   sort_order: number
   metadata: object
-  search_enabled: boolean
+  external_access_enabled: boolean
   write_locked: boolean
   effective_write_locked: boolean
   write_lock_sources: Array<{ node_id: string; name: string; path: string }>
@@ -105,6 +105,8 @@ type RestNode = {
 
 `write_locked`는 현재 node에 직접 설정된 값이다. `effective_write_locked`는 현재 node 또는 live 조상에 직접 잠금이 하나라도 있는지 나타낸다. 상세 REST resource의 `write_lock_sources`는 그 직접 잠금 source를 root부터 나열한다. Tree/Recent용 `NodeSummary`는 원인 목록 없이 잠긴 경우에만 `effective_write_locked: true`를 포함하며, 생략된 값은 `false`다.
 
+MCP/API v2는 외부 접근이 꺼진 잠금 source의 상세 정보를 제외하지만 `effective_write_locked`는 유지한다. 브라우저 응답은 전체 잠금 source를 제공한다.
+
 ## REST node list/reveal envelopes
 
 ```ts
@@ -132,7 +134,7 @@ type McpNodeSummary = {
   name: string
   kind: NodeKind
   sort_order: number
-  search_enabled: boolean
+  external_access_enabled: boolean
   has_children: boolean
   created_at: string
   updated_at: string

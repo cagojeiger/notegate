@@ -1,7 +1,7 @@
 use crate::write_lock_support::{Fixture, TestResult, assert_write_locked};
 use notegate_model::AccountKind;
 use notegate_service::files::{
-    CreateFolder, CreateText, DeleteNode, MoveNode, UpdateNode, UpdateNodeSearchPolicy,
+    CreateFolder, CreateText, DeleteNode, MoveNode, UpdateNode, UpdateNodeExternalAccessPolicy,
     UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody,
 };
 
@@ -109,11 +109,11 @@ async fn locked_node_blocks_each_distinct_mutation_guard() -> TestResult {
     assert_write_locked(
         fixture
             .files
-            .update_node_search_policy(
+            .update_node_external_access_policy(
                 AccountKind::User,
                 fixture.owner,
                 fixture.space_id,
-                UpdateNodeSearchPolicy {
+                UpdateNodeExternalAccessPolicy {
                     node_id: text_id,
                     enabled: false,
                 },

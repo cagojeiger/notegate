@@ -49,6 +49,7 @@ impl FilesService {
             let Some(frame) = stack.last().cloned() else {
                 break;
             };
+            self.load_node(space_id, frame.folder_node_id).await?;
             let parent_path = self
                 .store
                 .node_path(space_id, frame.folder_node_id)
@@ -137,6 +138,7 @@ impl FilesService {
             .resolve_search_scope(space_id, &normalized)
             .await?
             .ok_or_else(|| ServiceError::NotFound("scope path not found".to_owned()))?;
+        self.load_node(space_id, node_id).await?;
         if kind != NodeKind::Folder {
             return Err(ServiceError::InvalidInput(
                 "search scope must be a folder".to_owned(),

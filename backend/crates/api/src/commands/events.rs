@@ -33,7 +33,7 @@ pub async fn call(
     match direction {
         ChangeDirection::Newer => {
             newer(
-                state,
+                &state.files.for_channel(caller.channel),
                 caller.account_id(),
                 resolved.space_id(),
                 resolved.name(),
@@ -46,7 +46,7 @@ pub async fn call(
         }
         ChangeDirection::Older => {
             older(
-                state,
+                &state.files.for_channel(caller.channel),
                 caller.account_id(),
                 resolved.space_id(),
                 resolved.name(),
@@ -122,7 +122,7 @@ fn require_newer_cursor(
 
 #[allow(clippy::too_many_arguments)]
 async fn older(
-    state: &AppState,
+    files: &notegate_service::files::FilesService,
     account_id: Uuid,
     space_id: Uuid,
     space_name: &str,
@@ -134,8 +134,23 @@ async fn older(
     if let Some(cursor) = cursor.as_deref() {
         decode_change_cursor(cursor, space_id, ChangeDirection::Older, target, purpose)?;
     }
-    let page = state
-        .files
+    let checkpoint_cursor = if cursor.is_none() {
+        let baseline = files
+            .sync_file_changes(
+                account_id,
+                space_id,
+                SyncFileChanges {
+                    after_id: None,
+                    limit: Some(1),
+                },
+            )
+            .await
+            .map_err(service_error)?;
+        Some(encode_change_cursor(space_id, baseline.next_after_id)?)
+    } else {
+        None
+    };
+    let page = files
         .list_file_change_events_by_id(
             account_id,
             space_id,
@@ -148,17 +163,6 @@ async fn older(
         .map_err(service_error)?;
     let events = page.items.iter().map(event_json).collect::<Vec<_>>();
     let returned = events.len();
-    let checkpoint_cursor = if cursor.is_none() {
-        Some(
-            page.items
-                .first()
-                .map(|event| encode_change_cursor(space_id, event.id))
-                .transpose()?
-                .unwrap_or(encode_change_cursor(space_id, 0)?),
-        )
-    } else {
-        None
-    };
     let page_json = page_json(
         page.limit,
         returned,
@@ -184,7 +188,7 @@ async fn older(
 
 #[allow(clippy::too_many_arguments)]
 async fn newer(
-    state: &AppState,
+    files: &notegate_service::files::FilesService,
     account_id: Uuid,
     space_id: Uuid,
     space_name: &str,
@@ -196,8 +200,7 @@ async fn newer(
     let after_cursor =
         decode_change_cursor(&cursor, space_id, ChangeDirection::Newer, &target, purpose)?;
 
-    let page = state
-        .files
+    let page = files
         .sync_file_changes(
             account_id,
             space_id,

@@ -105,6 +105,7 @@ pub(crate) async fn read(
 ) -> Result<Json<ReadResponse>, ApiError> {
     let result = state
         .files
+        .for_channel(caller.channel)
         .read_text(
             caller.account_id(),
             space_id,
@@ -177,16 +178,16 @@ pub(crate) async fn replace(
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<ReplaceBody>,
 ) -> Result<Json<TextMutationResponse>, ApiError> {
+    let files = state.files.for_channel(caller.channel);
     let current_sha = guarded_plain_text_sha(
-        &state,
+        &files,
         caller.account_id(),
         space_id,
         node_id,
         body.expected_sha256.as_deref(),
     )
     .await?;
-    let view = state
-        .files
+    let view = files
         .write_text(
             caller.account_id(),
             space_id,
@@ -238,6 +239,7 @@ pub(crate) async fn append(
 ) -> Result<Json<TextMutationResponse>, ApiError> {
     let view = state
         .files
+        .for_channel(caller.channel)
         .append_text(
             caller.account_id(),
             space_id,
@@ -335,6 +337,7 @@ pub(crate) async fn patch(
         .collect();
     let result = state
         .files
+        .for_channel(caller.channel)
         .patch_text(
             caller.account_id(),
             space_id,
@@ -419,6 +422,7 @@ pub(crate) async fn edit(
         .collect::<Result<Vec<_>, ApiError>>()?;
     let result = state
         .files
+        .for_channel(caller.channel)
         .edit_text(
             caller.account_id(),
             space_id,

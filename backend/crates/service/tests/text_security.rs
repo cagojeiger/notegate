@@ -12,15 +12,127 @@ mod common;
 use common::{TestDb, insert_user_account, setup_space};
 use notegate_db::{AgentRepo, ConnectionRepo, FilesRepo, SpaceRepo};
 use notegate_model::{
-    AccountKind, ConnectAgent, CreateAgent, Permission, TextAtRestEncryption, UpdateSpace,
+    AccountKind, Channel, ConnectAgent, CreateAgent, Permission, TextAtRestEncryption, UpdateSpace,
 };
 use notegate_search::{GrepLineMode, GrepMatchMode, GrepRequest, SearchService};
 use notegate_service::ServiceError;
 use notegate_service::connections::ConnectionService;
 use notegate_service::files::{
-    CreateText, FilesService, ReadText, ReadTextBody, UpdateNodeSearchPolicy, UpdateTextEncryption,
-    WriteTarget, WriteText, WriteTextBody,
+    CreateText, FilesService, ReadText, ReadTextBody, UpdateNodeExternalAccessPolicy,
+    UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody,
 };
+
+#[tokio::test]
+async fn disabled_external_access_preserves_browser_access()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+    let owner = insert_user_account(&db.pool, "access-owner", "access-owner@example.test").await?;
+    let (space, root) = setup_space(&SpaceRepo::new(db.pool.clone()), owner, "node-access").await;
+    let created = files
+        .create_text(
+            owner,
+            space,
+            CreateText {
+                parent_node_id: root,
+                name: "private.md".to_owned(),
+            },
+        )
+        .await?;
+    let node_id = created.node.node.id;
+    files
+        .update_node_external_access_policy(
+            AccountKind::User,
+            owner,
+            space,
+            UpdateNodeExternalAccessPolicy {
+                node_id,
+                enabled: false,
+            },
+        )
+        .await?;
+
+    for channel in [Channel::Mcp, Channel::Api] {
+        let external = files.for_channel(channel);
+        assert!(matches!(
+            external.stat(owner, space, node_id).await,
+            Err(ServiceError::NotFound(_))
+        ));
+        assert!(matches!(
+            external.resolve_path(owner, space, "/private.md").await,
+            Err(ServiceError::NotFound(_))
+        ));
+        assert!(matches!(
+            external
+                .read_text(
+                    owner,
+                    space,
+                    ReadText {
+                        node_id,
+                        start_line: None,
+                        max_lines: None,
+                        max_bytes: None,
+                        if_none_match_sha256: Some(created.text.content_sha256.clone()),
+                    }
+                )
+                .await,
+            Err(ServiceError::NotFound(_))
+        ));
+        assert!(matches!(
+            external
+                .write_text(
+                    owner,
+                    space,
+                    WriteText {
+                        target: WriteTarget::Existing { node_id },
+                        body: WriteTextBody::Plain("must not be saved".to_owned()),
+                        expected_sha256: None,
+                    }
+                )
+                .await,
+            Err(ServiceError::NotFound(_))
+        ));
+    }
+
+    let browser = files.for_channel(Channel::Browser);
+    let read = browser
+        .read_text(
+            owner,
+            space,
+            ReadText {
+                node_id,
+                start_line: None,
+                max_lines: None,
+                max_bytes: None,
+                if_none_match_sha256: None,
+            },
+        )
+        .await?;
+    assert!(matches!(read.body, ReadTextBody::Content(ref content) if content.content.is_empty()));
+    browser
+        .update_node_external_access_policy(
+            AccountKind::User,
+            owner,
+            space,
+            UpdateNodeExternalAccessPolicy {
+                node_id,
+                enabled: true,
+            },
+        )
+        .await?;
+    for channel in [Channel::Mcp, Channel::Api] {
+        assert!(
+            files
+                .for_channel(channel)
+                .stat(owner, space, node_id)
+                .await
+                .is_ok()
+        );
+    }
+    Ok(())
+}
 
 #[tokio::test]
 async fn text_encryption_toggle_rewrites_existing_content_immediately()
@@ -183,11 +295,11 @@ async fn write_agent_cannot_change_node_settings() -> Result<(), Box<dyn std::er
     let node_id = text.node.node.id;
 
     let search = files
-        .update_node_search_policy(
+        .update_node_external_access_policy(
             AccountKind::Agent,
             agent,
             ws,
-            UpdateNodeSearchPolicy {
+            UpdateNodeExternalAccessPolicy {
                 node_id,
                 enabled: false,
             },
@@ -273,7 +385,7 @@ async fn server_encrypted_text_stays_readable_and_searchable()
                 sort_order: None,
                 navigation_pinned: None,
                 user_mcp_enabled: None,
-                default_search_enabled: None,
+                default_external_access_enabled: None,
                 default_text_encryption_enabled: Some(true),
             },
         )
@@ -356,11 +468,11 @@ async fn server_encrypted_text_stays_readable_and_searchable()
     assert_eq!(grep.items[0].node.node.id, node_id);
 
     files
-        .update_node_search_policy(
+        .update_node_external_access_policy(
             AccountKind::User,
             owner,
             ws,
-            UpdateNodeSearchPolicy {
+            UpdateNodeExternalAccessPolicy {
                 node_id,
                 enabled: false,
             },
@@ -392,11 +504,11 @@ async fn server_encrypted_text_stays_readable_and_searchable()
     .await?;
     assert_eq!(still_encrypted, "server");
     files
-        .update_node_search_policy(
+        .update_node_external_access_policy(
             AccountKind::User,
             owner,
             ws,
-            UpdateNodeSearchPolicy {
+            UpdateNodeExternalAccessPolicy {
                 node_id,
                 enabled: true,
             },

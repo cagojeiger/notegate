@@ -18,7 +18,7 @@ pub(crate) struct LockedSpace {
     pub gate: MutationGate,
     pub limits: Limits,
     pub owner_tier: UserTier,
-    pub default_search_enabled: bool,
+    pub default_external_access_enabled: bool,
     pub default_text_encryption_enabled: bool,
 }
 
@@ -32,6 +32,39 @@ pub(crate) struct PathBounds {
 pub(super) struct MoveWriteAccess {
     pub destination: PathBounds,
     pub subtree: PathBounds,
+}
+
+pub(crate) async fn require_external_access(
+    tx: &mut PgConnection,
+    space_id: Uuid,
+    node_id: Uuid,
+    subtree: bool,
+    external_only: bool,
+) -> Result<()> {
+    if !external_only {
+        return Ok(());
+    }
+    let denied: bool = sqlx::query_scalar(
+        "WITH RECURSIVE affected AS ( \
+            SELECT id, external_access_enabled FROM nodes \
+            WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+            UNION ALL \
+            SELECT n.id, n.external_access_enabled FROM nodes n \
+            JOIN affected a ON n.parent_id = a.id \
+            WHERE $3 AND n.space_id = $1 AND n.deleted_at IS NULL \
+        ) SELECT NOT node_external_access_allowed($1, $2) \
+            OR EXISTS (SELECT 1 FROM affected WHERE NOT external_access_enabled)",
+    )
+    .bind(space_id)
+    .bind(node_id)
+    .bind(subtree)
+    .fetch_one(tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    if denied {
+        return Err(Error::not_found("node not found"));
+    }
+    Ok(())
 }
 
 /// Exclude reconciliation, then serialize file-tree mutations in a Space.
@@ -61,20 +94,20 @@ pub(crate) async fn lock_space_context(
     let gate = space_usage::acquire_mutation_gate(tx, space_id).await?;
     let tier = tier_lookup::lock_active_space_owner_tier(tx, space_id, "space not found").await?;
     let defaults: Option<(bool, bool)> = sqlx::query_as(
-        "SELECT default_search_enabled, default_text_encryption_enabled \
+        "SELECT default_external_access_enabled, default_text_encryption_enabled \
          FROM spaces WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
     )
     .bind(space_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    let (default_search_enabled, default_text_encryption_enabled) =
+    let (default_external_access_enabled, default_text_encryption_enabled) =
         defaults.ok_or_else(|| Error::not_found("space not found"))?;
     Ok(LockedSpace {
         gate,
         limits: effective_file_tree_limits(tier, base_limits),
         owner_tier: tier,
-        default_search_enabled,
+        default_external_access_enabled,
         default_text_encryption_enabled,
     })
 }

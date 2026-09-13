@@ -174,7 +174,7 @@ pub fn space_summary(view: &SpaceView) -> serde_json::Value {
         "name": view.space.name,
         "sort_order": view.space.sort_order,
         "permission": view.permission.as_str(),
-        "default_search_enabled": view.space.default_search_enabled,
+        "default_external_access_enabled": view.space.default_external_access_enabled,
         "default_text_encryption_enabled": view.space.default_text_encryption_enabled,
         "features": {
             "text_encryption": view.features.text_encryption,
@@ -210,7 +210,7 @@ mod tests {
                 sort_order: 0,
                 navigation_pinned_at: None,
                 user_mcp_enabled_at: None,
-                default_search_enabled: true,
+                default_external_access_enabled: true,
                 default_text_encryption_enabled: false,
                 owner_user_id: owner,
                 created_at: Utc::now(),

@@ -31,7 +31,7 @@ struct SpaceRow {
     sort_order: i32,
     navigation_pinned_at: Option<DateTime<Utc>>,
     user_mcp_enabled_at: Option<DateTime<Utc>>,
-    default_search_enabled: bool,
+    default_external_access_enabled: bool,
     default_text_encryption_enabled: bool,
     owner_user_id: Uuid,
     created_at: DateTime<Utc>,
@@ -49,7 +49,7 @@ impl From<SpaceRow> for Space {
             sort_order: row.sort_order,
             navigation_pinned_at: row.navigation_pinned_at,
             user_mcp_enabled_at: row.user_mcp_enabled_at,
-            default_search_enabled: row.default_search_enabled,
+            default_external_access_enabled: row.default_external_access_enabled,
             default_text_encryption_enabled: row.default_text_encryption_enabled,
             owner_user_id: row.owner_user_id,
             created_at: row.created_at,
@@ -68,7 +68,7 @@ struct SpaceViewRow {
     sort_order: i32,
     navigation_pinned_at: Option<DateTime<Utc>>,
     user_mcp_enabled_at: Option<DateTime<Utc>>,
-    default_search_enabled: bool,
+    default_external_access_enabled: bool,
     default_text_encryption_enabled: bool,
     owner_user_id: Uuid,
     created_at: DateTime<Utc>,
@@ -94,7 +94,7 @@ impl SpaceViewRow {
                 sort_order: self.sort_order,
                 navigation_pinned_at: self.navigation_pinned_at,
                 user_mcp_enabled_at: self.user_mcp_enabled_at,
-                default_search_enabled: self.default_search_enabled,
+                default_external_access_enabled: self.default_external_access_enabled,
                 default_text_encryption_enabled: self.default_text_encryption_enabled,
                 owner_user_id: self.owner_user_id,
                 created_at: self.created_at,
@@ -110,13 +110,13 @@ impl SpaceViewRow {
     }
 }
 
-const SPACE_COLUMNS: &str = "id, name, sort_order, navigation_pinned_at, user_mcp_enabled_at, default_search_enabled, default_text_encryption_enabled, owner_user_id, created_at, updated_at, deleted_at, deleted_by_user_id, purge_after";
-const SPACE_VIEW_BASE_COLUMNS: &str = "s.id, s.name, s.sort_order, s.navigation_pinned_at, s.user_mcp_enabled_at, s.default_search_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
+const SPACE_COLUMNS: &str = "id, name, sort_order, navigation_pinned_at, user_mcp_enabled_at, default_external_access_enabled, default_text_encryption_enabled, owner_user_id, created_at, updated_at, deleted_at, deleted_by_user_id, purge_after";
+const SPACE_VIEW_BASE_COLUMNS: &str = "s.id, s.name, s.sort_order, s.navigation_pinned_at, s.user_mcp_enabled_at, s.default_external_access_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
                                        s.deleted_at, s.deleted_by_user_id, s.purge_after";
-const USER_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.navigation_pinned_at, s.user_mcp_enabled_at, s.default_search_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
+const USER_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.navigation_pinned_at, s.user_mcp_enabled_at, s.default_external_access_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
      s.deleted_at, s.deleted_by_user_id, s.purge_after, \
      'write'::text AS permission, root.id AS root_node_id, owner.tier AS owner_tier";
-const AGENT_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.navigation_pinned_at, s.user_mcp_enabled_at, s.default_search_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
+const AGENT_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.navigation_pinned_at, s.user_mcp_enabled_at, s.default_external_access_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
      s.deleted_at, s.deleted_by_user_id, s.purge_after, \
      c.permission AS permission, root.id AS root_node_id, owner.tier AS owner_tier";
 
@@ -413,7 +413,7 @@ impl SpaceRepo {
                 sort_order,
                 navigation_pinned: None,
                 user_mcp_enabled,
-                default_search_enabled: None,
+                default_external_access_enabled: None,
                 default_text_encryption_enabled: None,
             },
         )
@@ -467,8 +467,8 @@ impl SpaceRepo {
             .user_mcp_enabled
             .is_some_and(|value| value != current.user_mcp_enabled_at.is_some());
         let default_search_changed = command
-            .default_search_enabled
-            .is_some_and(|value| value != current.default_search_enabled);
+            .default_external_access_enabled
+            .is_some_and(|value| value != current.default_external_access_enabled);
         let default_encryption_changed = command
             .default_text_encryption_enabled
             .is_some_and(|value| value != current.default_text_encryption_enabled);
@@ -496,7 +496,7 @@ impl SpaceRepo {
                      WHEN $6 THEN COALESCE(user_mcp_enabled_at, now()) \
                      ELSE NULL \
                  END, \
-                 default_search_enabled = COALESCE($7, default_search_enabled), \
+                 default_external_access_enabled = COALESCE($7, default_external_access_enabled), \
                  default_text_encryption_enabled = COALESCE($8, default_text_encryption_enabled), \
                  updated_at = now() \
              WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL RETURNING {SPACE_COLUMNS}"
@@ -507,7 +507,7 @@ impl SpaceRepo {
         .bind(command.sort_order)
         .bind(command.navigation_pinned)
         .bind(command.user_mcp_enabled)
-        .bind(command.default_search_enabled)
+        .bind(command.default_external_access_enabled)
         .bind(command.default_text_encryption_enabled)
         .fetch_optional(&mut *tx)
         .await
@@ -528,7 +528,7 @@ impl SpaceRepo {
             changed_fields.push("user_mcp_enabled");
         }
         if default_search_changed {
-            changed_fields.push("default_search_enabled");
+            changed_fields.push("default_external_access_enabled");
         }
         if default_encryption_changed {
             changed_fields.push("default_text_encryption_enabled");

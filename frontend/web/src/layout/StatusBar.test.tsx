@@ -18,7 +18,7 @@ describe("StatusBar", () => {
 
     expect(screen.getByText("319 items")).toBeInTheDocument();
     expect(screen.getByText("3 MB used")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "New items are included in search" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "MCP & API access for new items: on" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "New document encryption is off" })).toBeInTheDocument();
     expect(screen.getByText("Personal")).toBeInTheDocument();
   });

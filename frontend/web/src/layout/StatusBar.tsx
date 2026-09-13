@@ -1,4 +1,4 @@
-import { HardDrive, ListTree, LockKeyhole, RefreshCw, Search, SearchX, UnlockKeyhole } from "lucide-react";
+import { HardDrive, ListTree, LockKeyhole, RefreshCw, Plug, Unplug, UnlockKeyhole } from "lucide-react";
 
 import type { Space } from "../api/types";
 import type { SpaceUsage } from "../api/usage";
@@ -56,10 +56,10 @@ export function StatusBar({
             <>
               <span
                 role="img"
-                title={`New items ${activeSpace.default_search_enabled ? "are" : "are not"} included in search`}
-                aria-label={`New items ${activeSpace.default_search_enabled ? "are" : "are not"} included in search`}
+                title={`MCP & API access for new items: ${activeSpace.default_external_access_enabled ? "on" : "off"}`}
+                aria-label={`MCP & API access for new items: ${activeSpace.default_external_access_enabled ? "on" : "off"}`}
               >
-                {activeSpace.default_search_enabled ? <Search size={13} aria-hidden="true" /> : <SearchX size={13} aria-hidden="true" />}
+                {activeSpace.default_external_access_enabled ? <Plug size={13} aria-hidden="true" /> : <Unplug size={13} aria-hidden="true" />}
               </span>
               <span
                 role="img"

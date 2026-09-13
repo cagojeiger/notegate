@@ -25,7 +25,7 @@ pub struct NodeOut {
     pub path: String,
     pub sort_order: i32,
     pub metadata: Value,
-    pub search_enabled: bool,
+    pub external_access_enabled: bool,
     pub write_locked: bool,
     pub effective_write_locked: bool,
     pub write_lock_sources: Vec<WriteLockSourceOut>,
@@ -76,7 +76,7 @@ impl NodeOut {
             path: view.path.clone(),
             sort_order: node.sort_order,
             metadata: node.metadata.clone(),
-            search_enabled: node.search_enabled,
+            external_access_enabled: node.external_access_enabled,
             write_locked: node.write_locked,
             effective_write_locked: !view.write_lock_sources.is_empty(),
             write_lock_sources: view

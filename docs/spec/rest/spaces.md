@@ -52,7 +52,7 @@ Space 응답은 다음 정책과 capability를 포함한다.
 type SpacePolicy = {
   navigation_pinned: boolean
   user_mcp_enabled: boolean
-  default_search_enabled: boolean
+  default_external_access_enabled: boolean
   default_text_encryption_enabled: boolean
   features: {
     text_encryption: boolean
@@ -60,7 +60,7 @@ type SpacePolicy = {
 }
 ```
 
-기본값은 새 node 생성 시에만 복사한다. `default_search_enabled`는 새 folder/text/file에 적용하고 `default_text_encryption_enabled`는 새 Text에만 적용한다.
+기본값은 새 node 생성 시에만 복사한다. `default_external_access_enabled`는 새 folder/text/file에 적용하고 `default_text_encryption_enabled`는 새 Text에만 적용한다.
 
 ## Update space
 
@@ -76,7 +76,7 @@ Owner user만 가능하다.
   "sort_order":0,
   "navigation_pinned":true,
   "user_mcp_enabled":false,
-  "default_search_enabled":true,
+  "default_external_access_enabled":true,
   "default_text_encryption_enabled":false
 }
 ```

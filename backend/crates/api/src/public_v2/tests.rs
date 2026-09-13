@@ -67,6 +67,70 @@ async fn agent_caller(
 }
 
 #[tokio::test]
+async fn private_text_replace_checks_access_before_hash() -> Result<(), Box<dyn std::error::Error>>
+{
+    use notegate_model::AccountKind;
+    use notegate_service::files::{CreateText, UpdateNodeExternalAccessPolicy};
+
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state(&db);
+    let (owner, space_id, root_id) = caller_and_space(&state).await?;
+    let caller = agent_caller(&state, owner.account_id(), space_id, Permission::Write).await?;
+    let node = state
+        .files
+        .create_text(
+            owner.account_id(),
+            space_id,
+            CreateText {
+                parent_node_id: root_id,
+                name: "private.md".to_owned(),
+            },
+        )
+        .await?;
+    state
+        .files
+        .update_node_external_access_policy(
+            AccountKind::User,
+            owner.account_id(),
+            space_id,
+            UpdateNodeExternalAccessPolicy {
+                node_id: node.node.node.id,
+                enabled: false,
+            },
+        )
+        .await?;
+    for expected_sha256 in [
+        None,
+        Some("0".repeat(64)),
+        Some(node.text.content_sha256.clone()),
+    ] {
+        let (status, response) = json_request(
+            app(state.clone(), caller.clone()),
+            "PUT",
+            format!("/spaces/{space_id}/text/{}", node.node.node.id),
+            json!({"content": "replacement", "expected_sha256": expected_sha256}),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{response}");
+        assert_eq!(response["error"], "not_found");
+    }
+    assert_eq!(
+        state
+            .files
+            .stat(owner.account_id(), space_id, node.node.node.id)
+            .await?
+            .text
+            .expect("text stats")
+            .content_sha256,
+        node.text.content_sha256
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn connected_write_agent_can_use_v2_resource_flow() -> Result<(), Box<dyn std::error::Error>>
 {
     let Some(db) = TestDb::setup().await? else {

@@ -180,9 +180,9 @@ pub(crate) struct NodeUpdated<'a> {
     pub parent_node_id: Option<Uuid>,
     pub name_changed: bool,
     pub sort_order_changed: bool,
-    pub search_enabled_changed: bool,
+    pub external_access_enabled_changed: bool,
     pub text_encryption_changed: bool,
-    pub search_enabled: bool,
+    pub external_access_enabled: bool,
     pub text_encryption_enabled: Option<bool>,
 }
 
@@ -195,9 +195,9 @@ fn node_updated_payload(updated: &NodeUpdated<'_>) -> (&'static str, Value) {
             "parent_node_id": updated.parent_node_id,
             "name_changed": updated.name_changed,
             "sort_order_changed": updated.sort_order_changed,
-            "search_enabled_changed": updated.search_enabled_changed,
+            "external_access_enabled_changed": updated.external_access_enabled_changed,
             "text_encryption_changed": updated.text_encryption_changed,
-            "search_enabled": updated.search_enabled,
+            "external_access_enabled": updated.external_access_enabled,
             "text_encryption_enabled": updated.text_encryption_enabled,
         }),
     )
@@ -227,7 +227,7 @@ fn node_write_lock_updated_payload(
             "parent_node_id": parent_node_id,
             "name_changed": false,
             "sort_order_changed": false,
-            "search_enabled_changed": false,
+            "external_access_enabled_changed": false,
             "text_encryption_changed": false,
             "write_lock_changed": true,
             "write_locked": write_locked,
@@ -465,7 +465,7 @@ mod tests {
                 "parent_node_id": parent,
                 "name_changed": false,
                 "sort_order_changed": false,
-                "search_enabled_changed": false,
+                "external_access_enabled_changed": false,
                 "text_encryption_changed": false,
                 "write_lock_changed": true,
                 "write_locked": true,
@@ -482,9 +482,9 @@ mod tests {
             parent_node_id: Some(parent),
             name_changed: true,
             sort_order_changed: false,
-            search_enabled_changed: true,
+            external_access_enabled_changed: true,
             text_encryption_changed: false,
-            search_enabled: false,
+            external_access_enabled: false,
             text_encryption_enabled: None,
         });
         assert_eq!(op_type, "item.update");
@@ -496,9 +496,9 @@ mod tests {
                 "parent_node_id": parent,
                 "name_changed": true,
                 "sort_order_changed": false,
-                "search_enabled_changed": true,
+                "external_access_enabled_changed": true,
                 "text_encryption_changed": false,
-                "search_enabled": false,
+                "external_access_enabled": false,
                 "text_encryption_enabled": null,
             })
         );

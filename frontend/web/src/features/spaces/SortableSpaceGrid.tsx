@@ -21,8 +21,8 @@ import {
   GripVertical,
   LockKeyhole,
   Pin,
-  Search,
-  SearchX,
+  Plug,
+  Unplug,
   UnlockKeyhole
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -226,10 +226,10 @@ function SortableSpaceCard({
 
         <div className="flex items-center gap-1 px-4 pb-3 pt-2">
           <StatusItem
-            description={`Search default ${space.default_search_enabled ? "on" : "off"}`}
-            active={space.default_search_enabled}
+            description={`MCP & API access default ${space.default_external_access_enabled ? "on" : "off"}`}
+            active={space.default_external_access_enabled}
           >
-            {space.default_search_enabled ? <Search size={15} /> : <SearchX size={15} />}
+            {space.default_external_access_enabled ? <Plug size={15} /> : <Unplug size={15} />}
           </StatusItem>
           <StatusItem
             description={`User MCP access ${space.user_mcp_enabled ? "on" : "off"}`}

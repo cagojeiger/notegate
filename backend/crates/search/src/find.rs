@@ -128,7 +128,7 @@ impl SearchService {
                 .await?;
 
             let FindCandidateReduction {
-                items,
+                mut items,
                 after_sort_path,
                 has_more,
             } = self
@@ -148,6 +148,12 @@ impl SearchService {
             } else {
                 None
             };
+            let node_ids: Vec<_> = items.iter().map(|(node, _)| node.id).collect();
+            let allowed = self
+                .store
+                .accessible_live_node_ids(space_id, &node_ids)
+                .await?;
+            items.retain(|(node, _)| allowed.contains(&node.id));
             let result_count = items.len();
             let items = self
                 .telemetry
@@ -201,7 +207,7 @@ mod tests {
                 kind,
                 sort_order: 0,
                 metadata: serde_json::Value::Null,
-                search_enabled: true,
+                external_access_enabled: true,
                 write_locked: false,
                 created_by_account_id: uuid::Uuid::new_v4(),
                 updated_by_account_id: uuid::Uuid::new_v4(),

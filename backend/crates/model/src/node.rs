@@ -44,7 +44,7 @@ pub struct Node {
     pub kind: NodeKind,
     pub sort_order: i32,
     pub metadata: Value,
-    pub search_enabled: bool,
+    pub external_access_enabled: bool,
     pub write_locked: bool,
     pub created_by_account_id: Uuid,
     pub updated_by_account_id: Uuid,

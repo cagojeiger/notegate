@@ -47,7 +47,7 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   ).toBeLessThanOrEqual(1);
 
   const archiveCard = grid.getByRole("listitem").filter({ hasText: "Archive" });
-  await archiveCard.getByTitle("Search default on").click();
+  await archiveCard.getByTitle("MCP & API access default on").click();
   await expect(page.getByRole("button", { name: "Inspect Archive" })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Inspect Daily" }).click();
 
@@ -421,7 +421,7 @@ function space(id: string, name: string, sortOrder: number, navigationPinned: bo
     sort_order: sortOrder,
     navigation_pinned: navigationPinned,
     user_mcp_enabled: navigationPinned,
-    default_search_enabled: true,
+    default_external_access_enabled: true,
     default_text_encryption_enabled: false,
     features: { text_encryption: true, write_lock: true },
     permission: "write",

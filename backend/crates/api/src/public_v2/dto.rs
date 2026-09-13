@@ -82,8 +82,8 @@ pub struct SpaceOut {
     /// Effective connection permission: `read` or `write`.
     pub permission: PermissionOut,
     pub root_node_id: Uuid,
-    /// Default search policy inherited by newly created nodes.
-    pub default_search_enabled: bool,
+    /// Default external access policy inherited by newly created nodes.
+    pub default_external_access_enabled: bool,
     /// Default server-managed at-rest encryption policy for newly created text nodes.
     pub default_text_encryption_enabled: bool,
     pub features: SpaceFeaturesOut,
@@ -121,7 +121,7 @@ impl From<&SpaceView> for SpaceOut {
             name: view.space.name.clone(),
             permission: view.permission.into(),
             root_node_id: view.root_node_id,
-            default_search_enabled: view.space.default_search_enabled,
+            default_external_access_enabled: view.space.default_external_access_enabled,
             default_text_encryption_enabled: view.space.default_text_encryption_enabled,
             features: SpaceFeaturesOut {
                 text_encryption: view.features.text_encryption,
@@ -145,7 +145,7 @@ pub struct NodeOut {
     /// Canonical absolute path derived from parent relationships and names.
     pub path: String,
     pub sort_order: i32,
-    pub search_enabled: bool,
+    pub external_access_enabled: bool,
     /// Whether this node itself is directly write-locked.
     pub write_locked: bool,
     /// Whether this node is write-locked directly or by an ancestor.
@@ -256,12 +256,13 @@ impl From<&NodeView> for NodeOut {
             kind: node.kind.into(),
             path: view.path.clone(),
             sort_order: node.sort_order,
-            search_enabled: node.search_enabled,
+            external_access_enabled: node.external_access_enabled,
             write_locked: node.write_locked,
             effective_write_locked: !view.write_lock_sources.is_empty(),
             write_lock_sources: view
                 .write_lock_sources
                 .iter()
+                .filter(|source| source.external_access_enabled)
                 .map(WriteLockSourceOut::from)
                 .collect(),
             has_children: view.has_children,

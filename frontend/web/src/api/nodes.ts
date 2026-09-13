@@ -120,14 +120,14 @@ export function updateNode(
   return client.patch<RestNode>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}`, input);
 }
 
-export function updateNodeSearchPolicy(
+export function updateNodeExternalAccessPolicy(
   client: ApiClient,
   spaceId: string,
   nodeId: string,
   enabled: boolean
 ): Promise<RestNode> {
   return client.put<RestNode>(
-    `/api/v1/spaces/${spaceId}/nodes/${nodeId}/search-policy`,
+    `/api/v1/spaces/${spaceId}/nodes/${nodeId}/external-access-policy`,
     { enabled }
   );
 }

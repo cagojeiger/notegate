@@ -6,7 +6,7 @@ export type UpdateSpaceInput = {
   sort_order?: number;
   navigation_pinned?: boolean;
   user_mcp_enabled?: boolean;
-  default_search_enabled?: boolean;
+  default_external_access_enabled?: boolean;
   default_text_encryption_enabled?: boolean;
 };
 

@@ -13,7 +13,7 @@ pub struct Space {
     pub sort_order: i32,
     pub navigation_pinned_at: Option<DateTime<Utc>>,
     pub user_mcp_enabled_at: Option<DateTime<Utc>>,
-    pub default_search_enabled: bool,
+    pub default_external_access_enabled: bool,
     pub default_text_encryption_enabled: bool,
     pub owner_user_id: Uuid,
     pub created_at: DateTime<Utc>,
@@ -76,7 +76,7 @@ pub struct UpdateSpace {
     pub sort_order: Option<i32>,
     pub navigation_pinned: Option<bool>,
     pub user_mcp_enabled: Option<bool>,
-    pub default_search_enabled: Option<bool>,
+    pub default_external_access_enabled: Option<bool>,
     pub default_text_encryption_enabled: Option<bool>,
 }
 

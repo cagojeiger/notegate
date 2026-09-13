@@ -57,6 +57,7 @@ pub(crate) async fn resolve_path(
 ) -> Result<Json<NodeOut>, ApiError> {
     let view = state
         .files
+        .for_channel(caller.channel)
         .resolve_path(caller.account_id(), space_id, &query.path)
         .await?;
     Ok(Json(NodeOut::from(&view)))
@@ -78,6 +79,7 @@ pub(crate) async fn get_one(
 ) -> Result<Json<NodeOut>, ApiError> {
     let view = state
         .files
+        .for_channel(caller.channel)
         .stat(caller.account_id(), space_id, node_id)
         .await?;
     Ok(Json(NodeOut::from(&view)))
@@ -118,6 +120,7 @@ pub(crate) async fn children(
 ) -> Result<Json<ChildrenResponse>, ApiError> {
     let page = state
         .files
+        .for_channel(caller.channel)
         .children(
             caller.account_id(),
             space_id,
@@ -181,6 +184,7 @@ pub(crate) async fn tree(
         .map_err(|error| ApiError::invalid_field(error.to_string()))?;
     let page = state
         .files
+        .for_channel(caller.channel)
         .tree(
             caller.account_id(),
             space_id,
@@ -262,6 +266,7 @@ pub(crate) async fn create(
         CreateNodeKind::Folder if body.content.is_none() => {
             state
                 .files
+                .for_channel(caller.channel)
                 .create_folder(
                     account_id,
                     space_id,
@@ -276,6 +281,7 @@ pub(crate) async fn create(
             Some(content) => {
                 state
                     .files
+                    .for_channel(caller.channel)
                     .write_text(
                         account_id,
                         space_id,
@@ -294,6 +300,7 @@ pub(crate) async fn create(
             None => {
                 state
                     .files
+                    .for_channel(caller.channel)
                     .create_text(
                         account_id,
                         space_id,
@@ -352,6 +359,7 @@ pub(crate) async fn move_node(
 ) -> Result<Json<NodeOut>, ApiError> {
     let view = state
         .files
+        .for_channel(caller.channel)
         .move_node(
             caller.account_id(),
             space_id,
@@ -419,6 +427,7 @@ pub(crate) async fn copy_node(
 ) -> Result<(StatusCode, Json<CopyNodeResponse>), ApiError> {
     let result = state
         .files
+        .for_channel(caller.channel)
         .copy_node(
             caller.account_id(),
             space_id,
@@ -477,6 +486,7 @@ pub(crate) async fn delete(
 ) -> Result<Json<DeleteNodeResponse>, ApiError> {
     let result = state
         .files
+        .for_channel(caller.channel)
         .delete_node(
             caller.account_id(),
             space_id,

@@ -134,6 +134,10 @@ pub(crate) async fn begin(
     Path(space_id): Path<Uuid>,
     Json(body): Json<BeginUploadBody>,
 ) -> Result<(StatusCode, Json<BeginUploadResponse>), ApiError> {
+    let state = AppState {
+        files: state.files.for_channel(caller.channel),
+        ..state
+    };
     let command = BeginObjectUpload {
         parent_node_id: body.parent_id,
         name: body.name,
@@ -218,6 +222,10 @@ pub(crate) async fn parts(
     Path((space_id, upload_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<PreparePartsBody>,
 ) -> Result<Json<PreparePartsResponse>, ApiError> {
+    let state = AppState {
+        files: state.files.for_channel(caller.channel),
+        ..state
+    };
     let upload = state
         .files
         .object_upload(caller.account_id(), space_id, upload_id)
@@ -294,6 +302,10 @@ pub(crate) async fn complete(
     Path((space_id, upload_id)): Path<(Uuid, Uuid)>,
     body: Option<Json<CompleteUploadBody>>,
 ) -> Result<(StatusCode, Json<FileResponse>), ApiError> {
+    let state = AppState {
+        files: state.files.for_channel(caller.channel),
+        ..state
+    };
     let upload = state
         .files
         .object_upload(caller.account_id(), space_id, upload_id)
@@ -332,6 +344,10 @@ pub(crate) async fn abort(
     Extension(caller): Extension<Caller>,
     Path((space_id, upload_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
+    let state = AppState {
+        files: state.files.for_channel(caller.channel),
+        ..state
+    };
     let upload = state
         .files
         .object_upload(caller.account_id(), space_id, upload_id)
@@ -360,6 +376,10 @@ pub(crate) async fn download(
     Extension(caller): Extension<Caller>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<DownloadResponse>, ApiError> {
+    let state = AppState {
+        files: state.files.for_channel(caller.channel),
+        ..state
+    };
     let view = state
         .files
         .file_for_download(caller.account_id(), space_id, node_id)

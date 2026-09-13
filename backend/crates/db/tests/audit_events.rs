@@ -118,7 +118,7 @@ async fn space_mutations_write_audit_events() -> Result<(), Box<dyn std::error::
                 sort_order: Some(2000),
                 navigation_pinned: Some(false),
                 user_mcp_enabled: Some(true),
-                default_search_enabled: None,
+                default_external_access_enabled: None,
                 default_text_encryption_enabled: None,
             },
         )

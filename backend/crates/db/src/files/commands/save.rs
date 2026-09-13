@@ -21,6 +21,7 @@ use crate::space_usage::{self, UsageDelta};
 
 pub struct SaveTextContentArgs<'a> {
     pub pool: &'a PgPool,
+    pub external_only: bool,
     pub crypto: &'a PiiCrypto,
     pub space_id: Uuid,
     pub node_id: Uuid,
@@ -36,6 +37,7 @@ pub struct SaveTextContentArgs<'a> {
 pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, TextObject)> {
     let SaveTextContentArgs {
         pool,
+        external_only,
         crypto,
         space_id,
         node_id,
@@ -49,6 +51,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
+    checks::require_external_access(&mut tx, space_id, node_id, false, external_only).await?;
 
     // Current byte length/hash (for budget delta + optimistic guard); the
     // text row is locked so `expected_sha256` is compared atomically with

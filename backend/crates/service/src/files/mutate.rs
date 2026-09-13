@@ -1,4 +1,3 @@
-use notegate_core::limits;
 use notegate_db::TextMutationKind;
 use notegate_model::{AccountKind, Caller, NodeKind};
 use serde_json::Value;
@@ -11,7 +10,7 @@ use crate::files::validation;
 use crate::files::{
     AppendText, BeginObjectUpload, CopyNode, CopyResult, CreateFolder, CreateText, DeleteNode,
     DeleteResult, EditText, FileCommand, MoveNode, NodeView, PatchResult, PatchText,
-    PendingObjectUpload, StoredContent, TextView, UpdateNode, UpdateNodeSearchPolicy,
+    PendingObjectUpload, StoredContent, TextView, UpdateNode, UpdateNodeExternalAccessPolicy,
     UpdateNodeWriteLock, UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody, content,
 };
 
@@ -136,6 +135,7 @@ impl FilesService {
     ) -> ServiceResult<()> {
         self.authorize(space_id, caller_account_id, FileCommand::Write)
             .await?;
+        self.load_node(space_id, command.parent_node_id).await?;
         validation::validate_basename(&command.name)?;
         validation::validate_object_file_bytes(command.byte_len)?;
         validate_file_encryption(
@@ -175,10 +175,16 @@ impl FilesService {
     ) -> ServiceResult<PendingObjectUpload> {
         self.authorize(space_id, caller_account_id, FileCommand::Write)
             .await?;
-        self.store
+        let upload = self
+            .store
             .object_upload(upload_id, space_id, caller_account_id)
             .await?
-            .ok_or_else(|| ServiceError::NotFound("file upload not found".to_owned()))
+            .ok_or_else(|| ServiceError::NotFound("file upload not found".to_owned()))?;
+        if self.channel != notegate_model::Channel::Browser {
+            self.load_node(space_id, upload.node_id.unwrap_or(upload.parent_node_id))
+                .await?;
+        }
+        Ok(upload)
     }
 
     pub async fn object_upload_by_id(
@@ -193,6 +199,13 @@ impl FilesService {
             .ok_or_else(|| ServiceError::NotFound("file upload not found".to_owned()))?;
         self.authorize(upload.space_id, caller_account_id, FileCommand::Write)
             .await?;
+        if self.channel != notegate_model::Channel::Browser {
+            self.load_node(
+                upload.space_id,
+                upload.node_id.unwrap_or(upload.parent_node_id),
+            )
+            .await?;
+        }
         Ok(upload)
     }
 
@@ -645,18 +658,23 @@ impl FilesService {
         self.node_view(space_id, updated).await
     }
 
-    pub async fn update_node_search_policy(
+    pub async fn update_node_external_access_policy(
         &self,
         caller_kind: AccountKind,
         caller_account_id: Uuid,
         space_id: Uuid,
-        command: UpdateNodeSearchPolicy,
+        command: UpdateNodeExternalAccessPolicy,
     ) -> ServiceResult<NodeView> {
+        if self.channel != notegate_model::Channel::Browser {
+            return Err(ServiceError::Forbidden(
+                "node access policy can only be changed in the dashboard".to_owned(),
+            ));
+        }
         self.authorize_space_owner_user(caller_kind, caller_account_id, space_id)
             .await?;
         let updated = self
             .store
-            .update_node_search_policy(space_id, &command, caller_account_id)
+            .update_node_external_access_policy(space_id, &command, caller_account_id)
             .await?;
         self.node_view(space_id, updated).await
     }
@@ -713,19 +731,10 @@ impl FilesService {
             ));
         }
 
-        if node.kind == NodeKind::Folder {
-            if !command.recursive {
-                return Err(ServiceError::Conflict(
-                    "folder deletion requires recursive=true".to_owned(),
-                ));
-            }
-            let subtree = self.store.subtree_live_count(space_id, node.id).await?;
-            if subtree > limits::SUBTREE_DELETE_MAX_NODES {
-                return Err(ServiceError::Conflict(format!(
-                    "subtree of {subtree} nodes exceeds the synchronous delete limit of {}; narrow the operation",
-                    limits::SUBTREE_DELETE_MAX_NODES
-                )));
-            }
+        if node.kind == NodeKind::Folder && !command.recursive {
+            return Err(ServiceError::Conflict(
+                "folder deletion requires recursive=true".to_owned(),
+            ));
         }
 
         let path = self.path_of(space_id, node.id).await?;

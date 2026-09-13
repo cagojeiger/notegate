@@ -41,10 +41,10 @@ function sidebarProps(overrides: Partial<SidebarProps> = {}): SidebarProps {
     canSyncLinks: true,
     textEncryptionAvailable: true,
     writeLockAvailable: true,
-    searchPolicyPending: false,
+    externalAccessPolicyPending: false,
     writeLockPending: false,
     textEncryptionPending: false,
-    onSearchEnabledChange: vi.fn(),
+    onExternalAccessEnabledChange: vi.fn(),
     onWriteLockedChange: vi.fn(),
     onTextEncryptionEnabledChange: vi.fn(),
     onOpenLinkedNode: vi.fn(),
@@ -91,17 +91,17 @@ describe("AuxiliarySidebar", () => {
 
   it("changes search, write lock, and stored-text encryption independently", async () => {
     const user = userEvent.setup();
-    const onSearchEnabledChange = vi.fn();
+    const onExternalAccessEnabledChange = vi.fn();
     const onWriteLockedChange = vi.fn();
     const onTextEncryptionEnabledChange = vi.fn();
 
     renderSidebar({
-      onSearchEnabledChange,
+      onExternalAccessEnabledChange,
       onWriteLockedChange,
       onTextEncryptionEnabledChange
     });
 
-    const search = screen.getByRole("switch", { name: "Include in search" });
+    const search = screen.getByRole("switch", { name: "MCP & API access" });
     const encryption = screen.getByRole("switch", { name: "Stored text encryption" });
     const writeLock = screen.getByRole("switch", { name: "Lock changes" });
     expect(search).toBeChecked();
@@ -111,7 +111,7 @@ describe("AuxiliarySidebar", () => {
     await user.click(encryption);
     await user.click(writeLock);
 
-    expect(onSearchEnabledChange).toHaveBeenCalledWith(false);
+    expect(onExternalAccessEnabledChange).toHaveBeenCalledWith(false);
     expect(onTextEncryptionEnabledChange).toHaveBeenCalledWith(true);
     expect(onWriteLockedChange).toHaveBeenCalledWith(true);
   });
@@ -120,7 +120,7 @@ describe("AuxiliarySidebar", () => {
     renderSidebar();
 
     expect(screen.getByRole("button", { name: "About Settings" })).toHaveAccessibleDescription(
-      "Changes apply immediately. A direct lock protects this item and anything inside it; inherited locks must be removed at their source. Search and stored text encryption are independent settings. The space root cannot be locked."
+      "Changes apply immediately. A direct lock protects this item and anything inside it; inherited locks must be removed at their source. MCP & API access requires this item and every parent folder to allow access; browser access is unchanged. Stored text encryption is independent. The space root cannot be locked."
     );
   });
 
@@ -184,15 +184,15 @@ describe("AuxiliarySidebar", () => {
     renderSidebar({ canManageActiveSpace: false });
 
     expect(screen.queryByRole("button", { name: "Edit metadata" })).not.toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Include in search" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "MCP & API access" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "Stored text encryption" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "Lock changes" })).toBeDisabled();
   });
 
   it("tracks search and encryption requests independently", () => {
-    renderSidebar({ searchPolicyPending: true });
+    renderSidebar({ externalAccessPolicyPending: true });
 
-    expect(screen.getByRole("switch", { name: "Include in search" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "MCP & API access" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "Stored text encryption" })).toBeEnabled();
   });
 
@@ -200,7 +200,7 @@ describe("AuxiliarySidebar", () => {
     renderSidebar({ writeLockPending: true });
 
     expect(screen.getByRole("switch", { name: "Lock changes" })).toBeDisabled();
-    expect(screen.getByRole("switch", { name: "Include in search" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "MCP & API access" })).toBeEnabled();
     expect(screen.getByRole("switch", { name: "Stored text encryption" })).toBeEnabled();
   });
 
@@ -262,7 +262,7 @@ describe("AuxiliarySidebar", () => {
 
     expect(screen.getByText("Inherited")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Lock changes" })).not.toBeChecked();
-    expect(screen.getByRole("switch", { name: "Include in search" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "MCP & API access" })).toBeDisabled();
     expect(screen.queryByTitle("/Policies")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "1 source" }));

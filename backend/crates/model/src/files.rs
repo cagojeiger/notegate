@@ -186,7 +186,7 @@ pub struct UpdateNode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpdateNodeSearchPolicy {
+pub struct UpdateNodeExternalAccessPolicy {
     pub node_id: Uuid,
     pub enabled: bool,
 }
@@ -319,6 +319,7 @@ pub struct WriteLockSource {
     pub node_id: Uuid,
     pub name: String,
     pub path: String,
+    pub external_access_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

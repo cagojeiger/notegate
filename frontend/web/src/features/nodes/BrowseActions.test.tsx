@@ -15,7 +15,7 @@ const activeSpace: Space = {
   sort_order: 0,
   navigation_pinned: false,
   user_mcp_enabled: false,
-  default_search_enabled: false,
+  default_external_access_enabled: false,
   default_text_encryption_enabled: false,
   features: { text_encryption: false, write_lock: false },
   permission: "write",

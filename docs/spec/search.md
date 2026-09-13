@@ -26,10 +26,10 @@ API pod에 `search_service_url`을 지정하면 해당 내부 service를 호출�
 listener에만 등록한다.
 
 Search storage access는 `notegate-search` 내부 `store` 경계가 소유한다. `PostgresSearchStore`는
-`FilesRepo`에 권한, scope, candidate, body와 result hydration 연산을 위임한다. 권한 판정은 primary
-pool을 사용한다. `read_database_url`이 설정되면 scope, candidate, body와 result hydration은 별도
-read pool을 사용하고, 설정되지 않으면 primary pool을 공유한다. 따라서 권한 철회는 primary 기준으로
-판정하고 검색 결과는 read replica의 지연을 반영할 수 있다. 별도 read pool은 local search listener를
+`FilesRepo`에 권한, scope, candidate, body와 result hydration 연산을 위임한다. Space 권한, 검색 범위,
+검색 후보·경로·본문 해시, 결과 node의 현재 접근 허용·삭제 여부, 자식 존재 여부와 잠금은 primary에서 확인한다.
+`read_database_url`이 설정되면 body와 content stats는 별도 read pool을 사용한다.
+캐시 hit도 결과 반환 전에 primary 접근 검증을 통과해야 한다. 별도 read pool은 local search listener를
 소유한 process에서만 생성한다.
 
 API `/ready`는 API가 소유한 dependency만 검사한다. Search pod는 자신의 `/ready`로 DB/schema 준비
@@ -122,7 +122,9 @@ Search는 scope folder 아래를 deterministic DFS pre-order로 순회한다.
 sibling order = sort_order, name, id
 ```
 
-`nodes.search_enabled=false`인 node는 `find` 결과에서 제외한다. Text node는 `grep`에서도 제외한다. Folder의 값은 자식에게 상속되지 않으며 traversal 자체를 막지 않는다. 따라서 제외된 folder 아래의 검색 허용 node는 계속 검색할 수 있다.
+`nodes.external_access_enabled=false`인 node와 그 하위 node는 `find`·`grep` 결과에서 제외한다. Folder를 다시 ON으로 바꾸면 자체 설정이 ON인 하위 node의 외부 접근이 복구된다. 자식의 저장된 설정값은 변경하지 않는다.
+
+외부 접근이 꺼진 folder를 검색 범위로 직접 지정하면 `not_found`다. 결과가 접근 검증에서 제외되어도 cursor는 검사한 후보 이후로 진행한다.
 
 순회 cursor는 마지막 match가 아니라 마지막으로 소비한 candidate 위치를 가리킨다. Cursor는 opaque이며 다음 조건에 묶인다.
 
@@ -225,7 +227,7 @@ DB candidate scan은 raw recursive CTE 반환 순서에 의존하지 않는다. 
 for each node candidate in DFS order:
   if node is root:
     skip result
-  if search_enabled is false:
+  if external_access_enabled is false:
     skip result
   if kind filter mismatches:
     continue
@@ -257,7 +259,7 @@ Glob과 regex는 명시적으로 선택한다. 예를 들어 `*.md`는 glob mode
 
 ```text
 nodes.kind = 'text'
-nodes.search_enabled = true
+nodes.external_access_enabled = true
 text_objects.storage_format = 'plain'
 복호화된 plain content
 ```
@@ -326,7 +328,7 @@ body cache hit:
 
 body cache miss:
   8 MiB request budget 안의 miss만 한 번의 bulk query로 조회
-  live/plain/search_enabled/SHA/byte_len 재검증 후 복호화
+  live/plain/external_access_enabled/SHA/byte_len 재검증 후 복호화
   Arc<str>로 cache 저장
 ```
 

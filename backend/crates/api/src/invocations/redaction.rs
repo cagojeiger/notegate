@@ -46,7 +46,7 @@ const SAFE_OUTPUT_KEYS: FieldSet = "\
 account actor_account_id affected_parent_ids agent appended baseline_call byte_len \
 can_create_space can_manage_agents capabilities code collect_response_header completed \
 content_blocks_omitted content_length content_returned content_sha256 copied counts created_at data \
-created_paths default_search_enabled default_text_encryption_enabled deleted depth description \
+created_paths default_external_access_enabled default_text_encryption_enabled deleted depth description \
 direction edited edits edits_applied effective_write_locked end_line error errors errors_field event_id events executed \
 expected_count expires_in_seconds failed features field fields files has_children has_more \
 id includes_descendants index input item_kind items kind limit line_count matches \
@@ -54,7 +54,7 @@ max_concurrency media_type method mode name next_action next_start_line node nod
 operation order page parent_node_id_after parent_node_id_before parent_scope_known part_count \
 part_number part_numbers part_size parts patched path path_changed permission previous_sha256 \
 purge_after purpose recoverable repeat requires resource result results resync_required \
-retry_after_ms retry_after_seconds retryable returned returned_lines scope search_enabled \
+retry_after_ms retry_after_seconds retryable returned returned_lines scope external_access_enabled \
 server_version skipped sort_order source_path space spaces start_line status subtree_changed suggestions \
 target text_at_rest_encryption text_encryption text_storage_format texts then tool transfer \
 transfer_field transfers_field truncated unchanged updated_at upload_id user when encryption_mode \

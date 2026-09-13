@@ -6,6 +6,7 @@ use notegate_model::{
     FileChangeEventCursor, FileChangeEventIdCursor, FileChangeEventPage, FileChangeSyncPage,
     ListFileChangeEvents, ListFileChangeEventsById, SyncFileChanges,
 };
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::pagination::{clamp_limit, paginate_keyset};
@@ -47,6 +48,34 @@ fn shape_file_change_sync_page(
 }
 
 impl FilesService {
+    async fn filter_external_events(
+        &self,
+        space_id: Uuid,
+        items: &mut Vec<notegate_model::FileChangeEvent>,
+    ) -> ServiceResult<bool> {
+        if self.channel == notegate_model::Channel::Browser || items.is_empty() {
+            return Ok(false);
+        }
+        let ids: Vec<Uuid> = items
+            .iter()
+            .flat_map(event_node_ids)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let allowed = self
+            .store
+            .externally_accessible_node_ids(space_id, &ids, true)
+            .await?;
+        let original_len = items.len();
+        items.retain(|event| {
+            event.node_id.is_some() && event_node_ids(event).all(|id| allowed.contains(&id))
+        });
+        for event in items.iter_mut() {
+            redact_subtree_counts(event);
+        }
+        Ok(items.len() != original_len)
+    }
+
     /// List space-scoped file change event history. Requires read/stat access to the space.
     pub async fn list_file_change_events(
         &self,
@@ -57,7 +86,7 @@ impl FilesService {
         self.authorize(space_id, caller_account_id, FileCommand::Stat)
             .await?;
 
-        let (items, limit, has_more, next_cursor) = paginate_keyset(
+        let (mut items, limit, has_more, next_cursor) = paginate_keyset(
             request.limit,
             limits::FILE_CHANGE_EVENTS_DEFAULT_LIMIT,
             limits::FILE_CHANGE_EVENTS_MAX_LIMIT,
@@ -75,6 +104,7 @@ impl FilesService {
         )
         .await?;
 
+        self.filter_external_events(space_id, &mut items).await?;
         Ok(FileChangeEventPage {
             items,
             limit,
@@ -94,7 +124,7 @@ impl FilesService {
         self.authorize(space_id, caller_account_id, FileCommand::Stat)
             .await?;
 
-        let (items, limit, has_more, next_cursor) = paginate_keyset(
+        let (mut items, limit, has_more, next_cursor) = paginate_keyset(
             request.limit,
             limits::FILE_CHANGE_EVENTS_DEFAULT_LIMIT,
             limits::FILE_CHANGE_EVENTS_MAX_LIMIT,
@@ -120,6 +150,7 @@ impl FilesService {
         )
         .await?;
 
+        self.filter_external_events(space_id, &mut items).await?;
         Ok(FileChangeEventPage {
             items,
             limit,
@@ -148,8 +179,60 @@ impl FilesService {
             .sync_file_change_events(space_id, request.after_id, limit + 1)
             .await?;
 
-        Ok(shape_file_change_sync_page(batch, request.after_id, limit))
+        let mut page = shape_file_change_sync_page(batch, request.after_id, limit);
+        require_external_snapshot_refresh(self.channel, &mut page);
+        page.resync_required |= self
+            .filter_external_events(space_id, &mut page.items)
+            .await?;
+        Ok(page)
     }
+}
+
+fn require_external_snapshot_refresh(
+    channel: notegate_model::Channel,
+    page: &mut FileChangeSyncPage,
+) {
+    if channel != notegate_model::Channel::Browser {
+        // Inspect the raw page before visibility filtering removes revocations.
+        page.resync_required |= page.items.iter().any(|event| {
+            event.metadata.get("external_access_enabled_changed")
+                == Some(&serde_json::Value::Bool(true))
+                || event.node_id.is_none()
+        });
+    }
+}
+
+fn redact_subtree_counts(event: &mut notegate_model::FileChangeEvent) {
+    // Browser operations may include descendants that external callers cannot see.
+    if let Some(metadata) = event.metadata.as_object_mut() {
+        for key in [
+            "copied_nodes",
+            "copied_texts",
+            "copied_files",
+            "deleted_nodes",
+        ] {
+            metadata.remove(key);
+        }
+    }
+}
+
+fn event_node_ids(event: &notegate_model::FileChangeEvent) -> impl Iterator<Item = Uuid> + '_ {
+    event.node_id.into_iter().chain(
+        [
+            "parent_node_id",
+            "parent_node_id_before",
+            "parent_node_id_after",
+            "copied_from_node_id",
+        ]
+        .into_iter()
+        .filter_map(|key| {
+            event
+                .metadata
+                .get(key)
+                .and_then(|value| value.as_str())
+                .and_then(|value| Uuid::parse_str(value).ok())
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -178,6 +261,105 @@ mod tests {
             latest_id,
             token_valid,
         }
+    }
+
+    #[test]
+    fn external_history_omits_subtree_counts_without_losing_navigation() {
+        let parent = Uuid::new_v4();
+        for op in ["item.copy", "item.delete"] {
+            let mut row = event(42);
+            row.op_type = op.to_owned();
+            row.metadata = serde_json::json!({
+                "item_kind": "folder",
+                "item_name": "public",
+                "parent_node_id_after": parent,
+                "copied_nodes": 5,
+                "copied_texts": 3,
+                "copied_files": 1,
+                "deleted_nodes": 5,
+                "recursive": true,
+            });
+            let browser_metadata = row.metadata.clone();
+            redact_subtree_counts(&mut row);
+            for key in [
+                "copied_nodes",
+                "copied_texts",
+                "copied_files",
+                "deleted_nodes",
+            ] {
+                assert!(row.metadata.get(key).is_none());
+                assert!(browser_metadata.get(key).is_some());
+            }
+            assert_eq!(
+                row.metadata.get("item_name"),
+                Some(&serde_json::json!("public"))
+            );
+            assert_eq!(
+                row.metadata.get("parent_node_id_after"),
+                Some(&serde_json::json!(parent))
+            );
+            assert_eq!(
+                row.metadata.get("recursive"),
+                Some(&serde_json::json!(true))
+            );
+        }
+    }
+
+    #[test]
+    fn external_policy_changes_require_resync_in_both_directions() {
+        for channel in [
+            notegate_model::Channel::Browser,
+            notegate_model::Channel::Mcp,
+            notegate_model::Channel::Api,
+        ] {
+            for enabled in [false, true] {
+                let mut row = event(42);
+                row.node_id = Some(Uuid::new_v4());
+                row.metadata = serde_json::json!({
+                    "external_access_enabled_changed": true,
+                    "external_access_enabled": enabled,
+                });
+                let mut page = shape_file_change_sync_page(
+                    FileChangeSyncRows {
+                        events: vec![row],
+                        latest_id: 42,
+                        token_valid: true,
+                    },
+                    Some(41),
+                    10,
+                );
+                require_external_snapshot_refresh(channel, &mut page);
+                assert_eq!(
+                    page.resync_required,
+                    channel != notegate_model::Channel::Browser
+                );
+                assert_eq!(page.next_after_id, 42);
+            }
+        }
+    }
+
+    #[test]
+    fn ordinary_events_do_not_require_resync_but_purged_nodes_do() {
+        let mut row = event(42);
+        row.node_id = Some(Uuid::new_v4());
+        row.metadata = serde_json::json!({"external_access_enabled_changed": false});
+        let mut page = shape_file_change_sync_page(
+            FileChangeSyncRows {
+                events: vec![row],
+                latest_id: 42,
+                token_valid: true,
+            },
+            Some(41),
+            10,
+        );
+        require_external_snapshot_refresh(notegate_model::Channel::Mcp, &mut page);
+        assert!(!page.resync_required);
+        for event in &mut page.items {
+            event.node_id = None;
+        }
+        require_external_snapshot_refresh(notegate_model::Channel::Mcp, &mut page);
+        assert!(page.resync_required);
+        assert_eq!(page.next_after_id, 42);
     }
 
     #[test]

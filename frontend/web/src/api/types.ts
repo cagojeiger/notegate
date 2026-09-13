@@ -31,7 +31,7 @@ export type Space = {
   sort_order: number;
   navigation_pinned: boolean;
   user_mcp_enabled: boolean;
-  default_search_enabled: boolean;
+  default_external_access_enabled: boolean;
   default_text_encryption_enabled: boolean;
   features: {
     text_encryption: boolean;
@@ -73,7 +73,7 @@ export type NodeSummary = {
 export type RestNode = NodeSummary & {
   sort_order: number;
   metadata: Record<string, unknown>;
-  search_enabled: boolean;
+  external_access_enabled: boolean;
   write_locked: boolean;
   write_lock_sources: WriteLockSource[];
   content_sha256?: string;
