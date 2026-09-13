@@ -82,7 +82,7 @@ jobs:
             --publish 9000:9000 \
             --env MINIO_ROOT_USER=minio-root \
             --env MINIO_ROOT_PASSWORD=minio-root-secret \
-            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
               break
@@ -102,7 +102,7 @@ jobs:
             --env NOTEGATE_S3_SECRET_KEY=notegate-app-secret \
             --volume "$PWD/deploy/minio/init.sh:/config/init.sh:ro" \
             --entrypoint /bin/sh \
-            minio/mc:RELEASE.2025-08-13T08-35-41Z /config/init.sh
+            quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z /config/init.sh
 
       - name: Check
         run: cargo check --locked --workspace --all-targets
@@ -239,7 +239,7 @@ jobs:
             --env MINIO_API_CORS_ALLOW_ORIGIN=http://127.0.0.1:5173 \
             --env MINIO_ROOT_USER=minio-root \
             --env MINIO_ROOT_PASSWORD=minio-root-secret \
-            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
               break
@@ -259,7 +259,7 @@ jobs:
             --env NOTEGATE_S3_SECRET_KEY="$NOTEGATE_S3__SECRET_KEY" \
             --volume "$PWD/deploy/minio/init.sh:/config/init.sh:ro" \
             --entrypoint /bin/sh \
-            minio/mc:RELEASE.2025-08-13T08-35-41Z /config/init.sh
+            quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z /config/init.sh
 
       - name: Seed test identities
         id: seed_test_identity
