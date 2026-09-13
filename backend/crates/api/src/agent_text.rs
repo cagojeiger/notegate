@@ -1,19 +1,16 @@
 use notegate_model::TextStorageFormat;
-use notegate_service::files::{ReadText, ReadTextBody};
+use notegate_service::files::{FilesService, ReadText, ReadTextBody};
 use notegate_service::{ServiceError, ServiceResult};
 use uuid::Uuid;
 
-use crate::state::AppState;
-
 pub async fn guarded_plain_text_sha(
-    state: &AppState,
+    files: &FilesService,
     account_id: Uuid,
     space_id: Uuid,
     node_id: Uuid,
     expected_sha256: Option<&str>,
 ) -> ServiceResult<String> {
-    let result = state
-        .files
+    let result = files
         .read_text(
             account_id,
             space_id,

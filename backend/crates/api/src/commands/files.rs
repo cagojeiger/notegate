@@ -337,18 +337,13 @@ pub async fn write(
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
-    let (target, existing) = resolve_write_target(
-        &state.files.for_channel(caller.channel),
-        account_id,
-        space_id,
-        &path,
-        create,
-    )
-    .await?;
+    let files = state.files.for_channel(caller.channel);
+    let (target, existing) =
+        resolve_write_target(&files, account_id, space_id, &path, create).await?;
 
     if let Some(view) = &existing {
         let current_sha = guarded_plain_text_sha(
-            state,
+            &files,
             account_id,
             space_id,
             view.node.id,
@@ -359,9 +354,7 @@ pub async fn write(
         expected_sha256 = Some(current_sha);
     }
 
-    let view = state
-        .files
-        .for_channel(caller.channel)
+    let view = files
         .write_text(
             account_id,
             space_id,

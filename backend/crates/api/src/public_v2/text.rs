@@ -178,17 +178,16 @@ pub(crate) async fn replace(
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<ReplaceBody>,
 ) -> Result<Json<TextMutationResponse>, ApiError> {
+    let files = state.files.for_channel(caller.channel);
     let current_sha = guarded_plain_text_sha(
-        &state,
+        &files,
         caller.account_id(),
         space_id,
         node_id,
         body.expected_sha256.as_deref(),
     )
     .await?;
-    let view = state
-        .files
-        .for_channel(caller.channel)
+    let view = files
         .write_text(
             caller.account_id(),
             space_id,
