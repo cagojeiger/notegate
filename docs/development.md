@@ -11,7 +11,8 @@ notegate/
 │  ├─ service/                 # business logic과 command semantics
 │  ├─ db/                      # sqlx pool, repository, migration
 │  ├─ model/                   # shared domain type
-│  └─ core/                    # config, limit, validation, shared error
+│  ├─ core/                    # config, limit, validation, shared error
+│  └─ text/                    # pure text metrics, logical lines, edits, syntax checks
 ├─ frontend/web/               # React dashboard
 ├─ deploy/
 │  ├─ docker/web.Dockerfile
@@ -195,3 +196,11 @@ pnpm --filter web test:lighthouse
 ```
 
 Playwright는 login과 주요 authenticated workspace flow를 desktop, tablet과 mobile viewport에서 검증한다. Axe 기반 WCAG 2.2 AA 검사는 login, Space Library와 file preview 등 적용된 spec에서 실행한다. Lighthouse 결과는 lab regression 신호이며 production Core Web Vitals는 별도 field monitoring이 필요하다.
+
+### 텍스트 엔진 독립 테스트
+
+텍스트 엔진은 PostgreSQL이나 API 없이 검증할 수 있다.
+
+```sh
+cargo test -p notegate-text
+```

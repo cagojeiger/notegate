@@ -11,6 +11,7 @@ members = [
     "backend/crates/reconciliation",
     "backend/crates/search",
     "backend/crates/service",
+    "backend/crates/text",
 ]
 
 [workspace.package]
@@ -30,6 +31,7 @@ notegate-model = { path = "backend/crates/model" }
 notegate-reconciliation = { path = "backend/crates/reconciliation" }
 notegate-search = { path = "backend/crates/search" }
 notegate-service = { path = "backend/crates/service" }
+notegate-text = { path = "backend/crates/text" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

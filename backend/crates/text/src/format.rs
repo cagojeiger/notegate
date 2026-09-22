@@ -4,7 +4,10 @@
 //! JSONL, YAML, and TOML from being persisted after a text mutation, without
 //! introducing schema-specific product rules.
 
-use crate::error::{ServiceError, ServiceResult};
+/// A structured text syntax error, including its file name and source location.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct FormatError(String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StructuredFormat {
@@ -28,7 +31,7 @@ impl StructuredFormat {
 /// Validate syntax for well-known structured text file names.
 ///
 /// Unknown extensions are treated as free-form text.
-pub fn validate_structured_text(name: &str, content: &str) -> ServiceResult<()> {
+pub fn validate_structured_text(name: &str, content: &str) -> Result<(), FormatError> {
     let Some(format) = infer_format(name) else {
         return Ok(());
     };
@@ -52,7 +55,7 @@ fn infer_format(name: &str) -> Option<StructuredFormat> {
     }
 }
 
-fn validate_json(name: &str, content: &str) -> ServiceResult<()> {
+fn validate_json(name: &str, content: &str) -> Result<(), FormatError> {
     serde_json::from_str::<serde_json::Value>(content).map_err(|error| {
         invalid_format(
             StructuredFormat::Json,
@@ -65,7 +68,7 @@ fn validate_json(name: &str, content: &str) -> ServiceResult<()> {
     Ok(())
 }
 
-fn validate_jsonl(name: &str, content: &str) -> ServiceResult<()> {
+fn validate_jsonl(name: &str, content: &str) -> Result<(), FormatError> {
     if content.is_empty() {
         return Err(invalid_format(
             StructuredFormat::Jsonl,
@@ -100,7 +103,7 @@ fn validate_jsonl(name: &str, content: &str) -> ServiceResult<()> {
     Ok(())
 }
 
-fn validate_yaml(name: &str, content: &str) -> ServiceResult<()> {
+fn validate_yaml(name: &str, content: &str) -> Result<(), FormatError> {
     yaml_rust2::YamlLoader::load_from_str(content).map_err(|error| {
         let marker = error.marker();
         invalid_format(
@@ -114,7 +117,7 @@ fn validate_yaml(name: &str, content: &str) -> ServiceResult<()> {
     Ok(())
 }
 
-fn validate_toml(name: &str, content: &str) -> ServiceResult<()> {
+fn validate_toml(name: &str, content: &str) -> Result<(), FormatError> {
     toml::from_str::<toml::Value>(content).map_err(|error| {
         let (line, column) = error
             .span()
@@ -150,13 +153,13 @@ fn invalid_format(
     line: Option<usize>,
     column: Option<usize>,
     detail: String,
-) -> ServiceError {
+) -> FormatError {
     let location = match (line, column) {
         (Some(line), Some(column)) => format!(" at line {line}, column {column}"),
         (Some(line), None) => format!(" at line {line}"),
         _ => String::new(),
     };
-    ServiceError::InvalidInput(format!(
+    FormatError(format!(
         "invalid {} syntax in {name}{location}: {detail}",
         format.label()
     ))
@@ -169,10 +172,9 @@ mod tests {
     use super::*;
 
     fn invalid(name: &str, content: &str) -> String {
-        match validate_structured_text(name, content).unwrap_err() {
-            ServiceError::InvalidInput(message) => message,
-            other => panic!("unexpected error: {other:?}"),
-        }
+        validate_structured_text(name, content)
+            .unwrap_err()
+            .to_string()
     }
 
     #[test]

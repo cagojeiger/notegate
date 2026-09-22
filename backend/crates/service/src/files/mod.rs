@@ -4,21 +4,19 @@
 //! transactions own structural invariants and quotas; paths are derived from parents.
 
 pub mod content;
-pub mod patch;
+pub use notegate_text::patch;
 pub mod policy;
 pub mod target;
 pub mod validation;
 
 mod access;
 mod events;
-mod format;
 mod mutate;
 mod preview;
 mod read;
 mod tree;
 mod view;
 
-pub use format::validate_structured_text;
 pub use notegate_model::files::{
     AppendText, BatchChildrenRequest, BatchChildrenResult, BeginObjectUpload,
     CanonicalChildrenPage, CanonicalNodeListPage, ChildrenCursor, ChildrenPage, ChildrenRequest,
@@ -48,6 +46,11 @@ use notegate_model::{Caller, Channel, Node, NodeKind, Permission, TextObject};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
+
+/// Validate structured text while preserving the service error contract.
+pub fn validate_structured_text(name: &str, content: &str) -> ServiceResult<()> {
+    notegate_text::format::validate_structured_text(name, content).map_err(Into::into)
+}
 
 /// File-tree service for Node, Text, metadata, and object-upload operations.
 /// Authorization and request validation are service-owned; state-dependent invariants stay in DB transactions.

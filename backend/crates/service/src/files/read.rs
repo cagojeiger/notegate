@@ -710,7 +710,7 @@ pub(super) fn slice_text(
     };
 
     // Split into logical line byte ranges, preserving the stored line endings.
-    let lines = line_ranges(content);
+    let lines: Vec<_> = notegate_text::lines::line_ranges(content).collect();
     let total_lines = lines.len() as i64;
 
     if total_lines == 0 || start_line > total_lines {
@@ -764,29 +764,6 @@ pub(super) fn slice_text(
     })
 }
 
-/// Split content into logical line byte ranges, preserving the original line
-/// endings. A trailing `\n` belongs to the last logical line instead of creating
-/// an extra empty line, mirroring [`content::compute`](crate::files::content::compute)'s
-/// line count.
-fn line_ranges(content: &str) -> Vec<std::ops::Range<usize>> {
-    if content.is_empty() {
-        return Vec::new();
-    }
-    let mut ranges = Vec::new();
-    let mut start = 0;
-    for (idx, ch) in content.char_indices() {
-        if ch == '\n' {
-            let end = idx + ch.len_utf8();
-            ranges.push(start..end);
-            start = end;
-        }
-    }
-    if start < content.len() {
-        ranges.push(start..content.len());
-    }
-    ranges
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(
@@ -798,6 +775,25 @@ mod tests {
     )]
 
     use super::*;
+
+    #[test]
+    fn slice_uses_logical_lines_for_blank_and_utf8_content() {
+        let empty = slice_text("", None, None, None).unwrap();
+        assert_eq!(empty.returned_lines, 0);
+        assert!(!empty.truncated);
+
+        let source = "가\r\n\n🙂\n";
+        let first = slice_text(source, Some(1), Some(1), Some(1)).unwrap();
+        assert_eq!(first.content, "가\r\n");
+        assert_eq!(first.next_start_line, Some(2));
+
+        let rest = slice_text(source, Some(2), None, None).unwrap();
+        assert_eq!(rest.content, "\n🙂\n");
+        assert_eq!(rest.returned_lines, 2);
+        assert_eq!(rest.end_line, 3);
+        assert!(!rest.truncated);
+        assert_eq!(rest.next_start_line, None);
+    }
 
     #[test]
     fn slice_preserves_stored_line_endings() {
