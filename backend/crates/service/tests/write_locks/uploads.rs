@@ -1,5 +1,6 @@
-use notegate_model::FileEncryptionMode;
 use notegate_model::files::{ObjectUploadMode, ObjectUploadRegistration};
+use notegate_model::{Channel, FileEncryptionMode};
+use notegate_service::ServiceError;
 use notegate_service::files::{BeginObjectUpload, DeleteNode};
 use uuid::Uuid;
 
@@ -148,6 +149,68 @@ async fn upload_reservation_and_file_deletion_follow_lock_policy() -> TestResult
             )
             .await,
     );
+
+    // Transfer reads need the same authorization and file data as the full
+    // download view, but write locks must not prevent downloading.
+    for channel in [Channel::Browser, Channel::Api, Channel::Mcp] {
+        let files = fixture.files.for_channel(channel);
+        let full = files
+            .file_for_download(fixture.owner, fixture.space_id, file_id)
+            .await?;
+        let (node, source) = files
+            .file_transfer_source(fixture.owner, fixture.space_id, file_id)
+            .await?;
+        assert_eq!(node, full.node.node);
+        assert_eq!(source, full.file);
+        for (owner, space, id) in [
+            (Uuid::new_v4(), fixture.space_id, file_id),
+            (fixture.owner, Uuid::new_v4(), file_id),
+            (fixture.owner, fixture.space_id, Uuid::new_v4()),
+            (fixture.owner, fixture.space_id, folder_id),
+        ] {
+            assert!(matches!(
+                files.file_transfer_source(owner, space, id).await,
+                Err(ServiceError::NotFound(_))
+            ));
+        }
+    }
+
+    // Both the file's own policy and inherited folder policy must be enforced.
+    for hidden_id in [file_id, folder_id] {
+        sqlx::query("UPDATE nodes SET external_access_enabled = false WHERE id = $1")
+            .bind(hidden_id)
+            .execute(&fixture.db.pool)
+            .await?;
+        fixture
+            .files
+            .file_transfer_source(fixture.owner, fixture.space_id, file_id)
+            .await?;
+        for channel in [Channel::Api, Channel::Mcp] {
+            assert!(matches!(
+                fixture
+                    .files
+                    .for_channel(channel)
+                    .file_transfer_source(fixture.owner, fixture.space_id, file_id)
+                    .await,
+                Err(ServiceError::NotFound(_))
+            ));
+        }
+        sqlx::query("UPDATE nodes SET external_access_enabled = true WHERE id = $1")
+            .bind(hidden_id)
+            .execute(&fixture.db.pool)
+            .await?;
+    }
+    sqlx::query("UPDATE nodes SET deleted_at = now(), deleted_by_account_id = updated_by_account_id, purge_after = now() WHERE id = $1")
+        .bind(file_id)
+        .execute(&fixture.db.pool)
+        .await?;
+    assert!(matches!(
+        fixture
+            .files
+            .file_transfer_source(fixture.owner, fixture.space_id, file_id)
+            .await,
+        Err(ServiceError::NotFound(_))
+    ));
 
     fixture.cleanup().await;
     Ok(())

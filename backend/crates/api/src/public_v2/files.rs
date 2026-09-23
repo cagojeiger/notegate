@@ -391,15 +391,15 @@ pub(crate) async fn download(
         files: state.files.for_channel(caller.channel),
         ..state
     };
-    let view = state
+    let (_, file) = state
         .files
-        .file_for_download(caller.account_id(), space_id, node_id)
+        .file_transfer_source(caller.account_id(), space_id, node_id)
         .await?;
     let url = state
         .object_storage
         .presign_get_with_ttl(
-            &view.file.object_key,
-            view.file.original_filename.as_deref(),
+            &file.object_key,
+            file.original_filename.as_deref(),
             AGENT_TRANSFER_URL_TTL,
         )
         .await?;
