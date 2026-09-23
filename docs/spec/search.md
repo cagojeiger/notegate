@@ -4,6 +4,12 @@ Search는 Command API와 MCP의 path-first command다.
 
 `notegate-search` crate는 `find`와 `grep`을 소유하고, `FilesService`는 일반 file-tree 조회인 `tree`를 소유한다.
 
+`tree`는 한 요청의 활성 DFS frame별로 자식 page와 parent path를 재사용한다. 각 page는
+남은 응답 개수와 `search_children_page_max` 중 작은 값으로 제한하고, frame을 벗어나면 버린다.
+요청 간에는 재사용하지 않으며, cursor는 마지막으로 소비한 자식 위치만 유지한다.
+외부 API/MCP 결과는 반환 전 primary에서 현재 Node/ancestor 접근 허용 여부와 삭제 여부를 다시 확인한다.
+순회 중 tree 변경은 best-effort로 관측하며 요청 전체의 snapshot을 보장하지 않는다.
+
 ## Execution boundary
 
 `find`와 `grep`은 private HTTP client를 통해 `SearchRuntime`으로 전달된다. Runtime은

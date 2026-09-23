@@ -1586,3 +1586,124 @@ async fn cursor_rejects_colliding_filter_arrays_for_find_and_grep()
     db.cleanup().await;
     Ok(())
 }
+
+/// Resuming a parent and resuming a request must preserve the same DFS sequence,
+/// including the final sibling in a database page and empty subtrees.
+#[tokio::test]
+async fn tree_cursor_preserves_siblings_across_nested_and_page_boundaries()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (spaces, files, _) = services(&db);
+    let owner = insert_user_account(&db.pool, "tree-owner", "tree@example.test").await?;
+    let (space, root) = setup_space(&spaces, owner, "tree-pages").await;
+    let mut expected = Vec::new();
+    for i in 0..200 {
+        let name = format!("n{i:03}");
+        expected.push(format!("/{name}"));
+        let folder = mkdir(&files, owner, space, root, &name).await;
+        if [0, 1, 99, 199].contains(&i) {
+            let nested = mkdir(&files, owner, space, folder, "nested").await;
+            write_doc(&files, owner, space, nested, "leaf.md", "leaf").await;
+            expected.push(format!("/{name}/nested"));
+            expected.push(format!("/{name}/nested/leaf.md"));
+        }
+    }
+    for limit in [1, 7, 200] {
+        let mut paths = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = files
+                .tree(
+                    owner,
+                    space,
+                    TreeRequest {
+                        path: None,
+                        depth: Some(3),
+                        limit: Some(limit),
+                        cursor,
+                    },
+                )
+                .await?;
+            assert!(page.items.len() <= limit as usize);
+            paths.extend(page.items.into_iter().map(|view| view.path));
+            assert!(
+                paths.len() <= expected.len(),
+                "cursor must make forward progress"
+            );
+            if !page.has_more {
+                assert!(page.next_cursor.is_none());
+                break;
+            }
+            cursor = Some(page.next_cursor.expect("continuation"));
+        }
+        assert_eq!(paths, expected, "page size {limit}");
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn tree_cursor_rechecks_sibling_visibility_on_the_next_request()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (spaces, files, _) = services(&db);
+    let owner = insert_user_account(&db.pool, "tree-owner", "tree@example.test").await?;
+    let (space, root) = setup_space(&spaces, owner, "tree-policy").await;
+    write_doc(&files, owner, space, root, "a.md", "a").await;
+    let hidden = write_doc(&files, owner, space, root, "b.md", "b").await;
+    let deleted = write_doc(&files, owner, space, root, "c.md", "c").await;
+    let external = files.for_channel(notegate_model::Channel::Api);
+    let first = external
+        .tree(
+            owner,
+            space,
+            TreeRequest {
+                path: None,
+                depth: Some(2),
+                limit: Some(1),
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(first.items[0].path, "/a.md");
+    files
+        .update_node_external_access_policy(
+            AccountKind::User,
+            owner,
+            space,
+            UpdateNodeExternalAccessPolicy {
+                node_id: hidden,
+                enabled: false,
+            },
+        )
+        .await?;
+    sqlx::query("UPDATE nodes SET deleted_at = now(), deleted_by_account_id = $1, purge_after = now() WHERE id = $2")
+        .bind(owner).bind(deleted).execute(&db.pool).await?;
+    write_doc(&files, owner, space, root, "d.md", "new sibling").await;
+    let next = external
+        .tree(
+            owner,
+            space,
+            TreeRequest {
+                path: None,
+                depth: Some(2),
+                limit: Some(200),
+                cursor: first.next_cursor,
+            },
+        )
+        .await?;
+    assert_eq!(
+        next.items
+            .iter()
+            .map(|v| v.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["/d.md"]
+    );
+    assert!(!next.has_more);
+    db.cleanup().await;
+    Ok(())
+}

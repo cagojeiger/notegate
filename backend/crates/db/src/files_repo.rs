@@ -26,7 +26,7 @@ use crate::files::{commands, queries};
 use notegate_model::files::{
     BeginObjectUpload, ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileStats, MoveNode,
     NodeListCursor, NodeListSort, ObjectUploadMode, ObjectUploadRegistration, PendingObjectUpload,
-    StoredContent, TextStats,
+    StoredContent, TextRead, TextStats,
 };
 
 #[derive(Debug, Clone)]
@@ -209,6 +209,22 @@ impl FilesRepo {
         node_id: Uuid,
     ) -> Result<Option<(Node, TextObject)>> {
         queries::text::find_text(&self.pool, &self.crypto, space_id, node_id).await
+    }
+
+    pub async fn find_text_for_read(
+        &self,
+        space_id: Uuid,
+        node_id: Uuid,
+        if_none_match: Option<&str>,
+    ) -> Result<Option<(Node, TextRead)>> {
+        queries::text::find_text_for_read(
+            &self.pool,
+            &self.crypto,
+            space_id,
+            node_id,
+            if_none_match,
+        )
+        .await
     }
 
     pub async fn find_text_object(

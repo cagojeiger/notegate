@@ -575,3 +575,195 @@ async fn server_encrypted_text_stays_readable_and_searchable()
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn conditional_text_reads_preserve_content_formats_and_metadata()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(&db.pool, "conditional", "conditional@example.test").await?;
+    sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
+        .bind(owner)
+        .execute(&db.pool)
+        .await?;
+    let (space, root) = setup_space(&SpaceRepo::new(db.pool.clone()), owner, "conditional").await;
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+    for mode in ["plain", "server", "client"] {
+        let payload =
+            serde_json::json!({"version": 1, "alg": "AES-256-GCM", "ciphertext_b64": "abc"});
+        let created = files
+            .write_text(
+                owner,
+                space,
+                WriteText {
+                    target: WriteTarget::Create {
+                        parent_node_id: root,
+                        name: format!("{mode}.md"),
+                    },
+                    body: if mode == "client" {
+                        WriteTextBody::Encrypted(payload.clone())
+                    } else {
+                        WriteTextBody::Plain("first\nsecond\n".to_owned())
+                    },
+                    expected_sha256: None,
+                },
+            )
+            .await?;
+        let node_id = created.node.node.id;
+        if mode == "server" {
+            files
+                .update_text_encryption(
+                    AccountKind::User,
+                    owner,
+                    space,
+                    UpdateTextEncryption {
+                        node_id,
+                        enabled: true,
+                    },
+                )
+                .await?;
+        }
+        let request = ReadText {
+            node_id,
+            start_line: Some(2),
+            max_lines: Some(1),
+            max_bytes: None,
+            if_none_match_sha256: None,
+        };
+        let full = files.read_text(owner, space, request.clone()).await?;
+        if mode == "client" {
+            assert_eq!(full.body, ReadTextBody::Encrypted(payload));
+        } else {
+            assert!(matches!(&full.body, ReadTextBody::Content(c) if c.content == "second\n"));
+        }
+        for hash in [Some("stale".to_owned()), Some(full.content_sha256.clone())] {
+            let matching = hash.as_deref() == Some(full.content_sha256.as_str());
+            let result = files
+                .read_text(
+                    owner,
+                    space,
+                    ReadText {
+                        if_none_match_sha256: hash,
+                        ..request.clone()
+                    },
+                )
+                .await?;
+            assert_eq!(result.node, full.node);
+            assert_eq!(result.content_sha256, full.content_sha256);
+            assert_eq!(result.storage_format, full.storage_format);
+            assert_eq!(
+                (result.byte_len, result.line_count),
+                (full.byte_len, full.line_count)
+            );
+            assert_eq!(
+                result.body,
+                if matching {
+                    ReadTextBody::Unchanged
+                } else {
+                    full.body.clone()
+                }
+            );
+        }
+        if mode == "server" {
+            // A matching read must not decrypt the ciphertext. Nonmatching reads
+            // still detect corruption rather than returning an empty body.
+            sqlx::query("UPDATE text_objects SET content_ciphertext = decode('00', 'hex') WHERE node_id = $1")
+                .bind(node_id).execute(&db.pool).await?;
+            let hit = files
+                .read_text(
+                    owner,
+                    space,
+                    ReadText {
+                        if_none_match_sha256: Some(full.content_sha256),
+                        ..request.clone()
+                    },
+                )
+                .await?;
+            assert_eq!(hit.body, ReadTextBody::Unchanged);
+            assert!(files.read_text(owner, space, request).await.is_err());
+        }
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn conditional_text_reads_keep_hash_and_body_together_during_writes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(&db.pool, "concurrent", "concurrent@example.test").await?;
+    let (space, root) = setup_space(&SpaceRepo::new(db.pool.clone()), owner, "concurrent").await;
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+    let initial = files
+        .write_text(
+            owner,
+            space,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root,
+                    name: "changing.md".to_owned(),
+                },
+                body: WriteTextBody::Plain("alpha".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    let node_id = initial.node.node.id;
+    let hash = initial.text.content_sha256;
+    let writer = async {
+        for i in 0..40 {
+            files
+                .write_text(
+                    owner,
+                    space,
+                    WriteText {
+                        target: WriteTarget::Existing { node_id },
+                        body: WriteTextBody::Plain(
+                            if i % 2 == 0 { "beta" } else { "alpha" }.to_owned(),
+                        ),
+                        expected_sha256: None,
+                    },
+                )
+                .await?;
+        }
+        Ok::<_, ServiceError>(())
+    };
+    let reader = async {
+        for _ in 0..80 {
+            let result = files
+                .read_text(
+                    owner,
+                    space,
+                    ReadText {
+                        node_id,
+                        start_line: None,
+                        max_lines: None,
+                        max_bytes: None,
+                        if_none_match_sha256: Some(hash.clone()),
+                    },
+                )
+                .await?;
+            match result.body {
+                ReadTextBody::Unchanged => assert_eq!(result.content_sha256, hash),
+                ReadTextBody::Content(content) => {
+                    assert_eq!(content.content, "beta");
+                    assert_eq!(
+                        result.content_sha256,
+                        notegate_text::content::sha256_hex(content.content.as_bytes())
+                    );
+                    assert_eq!(result.byte_len, content.content.len() as i64);
+                }
+                ReadTextBody::Encrypted(_) => panic!("plaintext expected"),
+            }
+        }
+        Ok::<_, ServiceError>(())
+    };
+    let (writes, reads) = tokio::join!(writer, reader);
+    writes?;
+    reads?;
+    db.cleanup().await;
+    Ok(())
+}

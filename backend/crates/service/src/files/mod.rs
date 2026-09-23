@@ -158,15 +158,23 @@ impl FilesService {
             return Ok(text);
         }
 
+        Err(self.text_not_found(space_id, node_id).await?)
+    }
+
+    pub(super) async fn text_not_found(
+        &self,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> ServiceResult<ServiceError> {
         if let Some(node) = self.store.find_node(space_id, node_id).await?
             && node.kind == NodeKind::Folder
         {
-            return Err(ServiceError::InvalidInput(
+            return Ok(ServiceError::InvalidInput(
                 "target is a folder, not a text".to_owned(),
             ));
         }
 
-        Err(ServiceError::NotFound("text not found".to_owned()))
+        Ok(ServiceError::NotFound("text not found".to_owned()))
     }
 
     pub(super) async fn path_of(&self, space_id: Uuid, node_id: Uuid) -> ServiceResult<String> {

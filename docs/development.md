@@ -189,8 +189,9 @@ git diff --check
 ```
 
 `make test`(또는 `make test-integration`)는 전체 Rust 검증이다. PostgreSQL 클라이언트
-`psql`과 실행 중인 테스트 PostgreSQL/S3가 필요하며, 다음 환경변수가 없거나 비어 있으면
-테스트를 시작하지 않고 실패한다.
+`psql`과 실행 중인 테스트 PostgreSQL/S3가 필요하며, `NOTEGATE_TEST_DATABASE_URL` 또는
+`NOTEGATE_TEST_S3_ENDPOINT`가 없거나 비어 있으면 테스트를 시작하지 않고 실패한다.
+아래 버킷과 인증 정보는 테스트 S3 설정에 맞추는 예시다.
 
 ```sh
 export NOTEGATE_TEST_DATABASE_URL=postgres://notegate:notegate@localhost:5432/notegate

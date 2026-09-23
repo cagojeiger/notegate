@@ -57,7 +57,7 @@ type PatchTextMeta = TextMeta & {
 - `node_id`는 `nodes.kind='text'`여야 한다.
 - plain Text는 `start_line`, `max_lines`, `max_bytes`를 적용해 content slice를 반환한다.
 - encrypted Text는 line slicing을 적용하지 않고 encrypted payload 전체를 반환한다.
-- `if_none_match_sha256`이 저장된 content hash와 일치하면 content body 대신 `unchanged=true` 응답을 반환한다.
+- `if_none_match_sha256`이 저장된 content hash와 일치하면 content body 대신 `unchanged=true` 응답을 반환한다. 해시 비교와 본문 선택은 같은 SQL snapshot에서 수행하며, 일치하면 본문 전송과 서버 복호화를 생략한다. Space/Node 접근 검증과 응답 metadata는 유지한다.
 - Markdown Text의 leading YAML frontmatter는 content 그대로 반환한다. 서버는 frontmatter를 Node `metadata`로 해석하지 않는다.
 
 ## PUT/PATCH rules
