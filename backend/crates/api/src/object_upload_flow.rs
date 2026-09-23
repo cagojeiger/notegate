@@ -549,4 +549,68 @@ mod tests {
         ));
         Ok(())
     }
+
+    #[test]
+    fn completed_parts_reject_missing_or_empty_lists() {
+        let upload = multipart_upload(MULTIPART_PART_SIZE + 1);
+
+        for parts in [None, Some(vec![])] {
+            assert!(matches!(
+                validate_completed_parts(&upload, parts),
+                Err(UploadFlowError::InvalidInput(message))
+                    if message == "multipart completion requires completed_parts"
+            ));
+        }
+    }
+
+    #[test]
+    fn completed_parts_reject_duplicate_or_out_of_range_numbers() {
+        let upload = multipart_upload(MULTIPART_PART_SIZE + 1);
+
+        for numbers in [[1, 1], [2, 2], [0, 2], [1, 3]] {
+            let parts = numbers
+                .into_iter()
+                .map(|part_number| CompletedUploadPart {
+                    part_number,
+                    etag: "etag".to_owned(),
+                })
+                .collect();
+
+            assert!(
+                matches!(
+                    validate_completed_parts(&upload, Some(parts)),
+                    Err(UploadFlowError::InvalidInput(_))
+                ),
+                "accepted part numbers: {numbers:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn completed_parts_reject_empty_or_whitespace_etags() {
+        let upload = multipart_upload(MULTIPART_PART_SIZE + 1);
+
+        for etag in ["", " ", "\t\r\n"] {
+            for invalid_part_number in [1, 2] {
+                let parts = (1..=2)
+                    .map(|part_number| CompletedUploadPart {
+                        part_number,
+                        etag: if part_number == invalid_part_number {
+                            etag.to_owned()
+                        } else {
+                            "etag".to_owned()
+                        },
+                    })
+                    .collect();
+
+                assert!(
+                    matches!(
+                        validate_completed_parts(&upload, Some(parts)),
+                        Err(UploadFlowError::InvalidInput(_))
+                    ),
+                    "accepted etag {etag:?} for part {invalid_part_number}"
+                );
+            }
+        }
+    }
 }
