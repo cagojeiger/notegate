@@ -148,7 +148,8 @@ pub(crate) async fn begin(
         encryption_metadata: body.encryption_metadata,
     };
     let begun = begin_upload(
-        &state,
+        &state.files,
+        &state.object_storage,
         caller.account_id(),
         space_id,
         &command,
@@ -231,7 +232,8 @@ pub(crate) async fn parts(
         .object_upload(caller.account_id(), space_id, upload_id)
         .await?;
     let parts = prepare_parts(
-        &state,
+        &state.files,
+        &state.object_storage,
         caller.account_id(),
         upload,
         body.part_numbers,
@@ -321,7 +323,16 @@ pub(crate) async fn complete(
                 })
                 .collect()
         });
-    let view = complete_upload(&state, caller.account_id(), upload, completed_parts, None).await?;
+    let view = complete_upload(
+        &state.files,
+        &state.object_storage,
+        &state.docx_validation_admission,
+        caller.account_id(),
+        upload,
+        completed_parts,
+        None,
+    )
+    .await?;
     Ok((
         StatusCode::CREATED,
         Json(FileResponse {
@@ -352,7 +363,7 @@ pub(crate) async fn abort(
         .files
         .object_upload(caller.account_id(), space_id, upload_id)
         .await?;
-    abort_upload(&state, caller.account_id(), &upload).await?;
+    abort_upload(&state.files, caller.account_id(), &upload).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

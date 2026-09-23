@@ -93,7 +93,8 @@ async fn begin_upload(
         encryption_metadata: input.encryption_metadata,
     };
     let begun = begin_object_upload(
-        state,
+        &state.files,
+        &state.object_storage,
         caller.account_id(),
         resolved.space_id(),
         &command,
@@ -193,7 +194,8 @@ async fn prepare_parts(
         .map_err(service_error)?;
     require_upload_space_visible(state, caller.account_id(), &upload).await?;
     let transfers = prepare_upload_parts(
-        state,
+        &state.files,
+        &state.object_storage,
         caller.account_id(),
         upload,
         part_numbers,
@@ -277,9 +279,17 @@ async fn complete_upload(
             })
             .collect()
     });
-    let view = complete_object_upload(state, caller.account_id(), upload, completed_parts, None)
-        .await
-        .map_err(flow_error)?;
+    let view = complete_object_upload(
+        &state.files,
+        &state.object_storage,
+        &state.docx_validation_admission,
+        caller.account_id(),
+        upload,
+        completed_parts,
+        None,
+    )
+    .await
+    .map_err(flow_error)?;
     Ok(json!({
         "upload_id": upload_id,
         "node": node_summary(&view.node),
@@ -303,7 +313,7 @@ async fn abort_upload(
         .await
         .map_err(service_error)?;
     require_upload_space_visible(state, caller.account_id(), &upload).await?;
-    abort_object_upload(state, caller.account_id(), &upload)
+    abort_object_upload(&state.files, caller.account_id(), &upload)
         .await
         .map_err(flow_error)?;
     Ok(json!({
