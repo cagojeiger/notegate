@@ -242,3 +242,36 @@ cargo test -p notegate-text
 ```sh
 cargo test -p notegate-media
 ```
+
+## 보안과 의존성 관리
+
+- PR의 `Hygiene`는 `make version-check`로 `VERSION`, workspace package version,
+  각 crate의 `version.workspace`, `Cargo.lock`의 로컬 package version을 비교한다.
+  이 검사는 Python 3.11 이상이 필요하며 의존성을 다운로드하지 않는다.
+  `frontend/web/package.json`의 private package version은 제품 릴리즈 버전이 아니다.
+  Dashboard는 기존대로 루트 `VERSION`을 읽는다.
+- `package.json`의 `packageManager`가 pnpm 버전의 기준이며 CI와 Docker가 이를 사용한다.
+  CI Node 버전은 `.node-version` 한 곳에서 관리한다. Rust compiler 변경 시 `rust-toolchain.toml`, workspace의 `rust-version`, Docker Rust
+  base image를 함께 검토한다. Docker base image는 digest로 고정하고 cargo-chef와 sccache는
+  `--version`과 `--locked`로 고정한다. 두 빌드 도구의 버전은 수동 검토 대상이다.
+- Dependabot은 Cargo, npm, Actions, Docker/Compose를 매주 월요일 09:00 KST에 검사한다.
+  minor/patch 업데이트는 묶고 major 업데이트는 별도 PR로 검증한다. Digest 갱신도 PR로
+  검토한다. 자동 업데이트 PR은 자동 머지를 의미하지 않는다.
+- `Dependency Security`는 PR에서 dependency review와 RustSec 감사를 수행한다.
+  Rust 감사는 yanked crate도 실패시킨다. 매주 또는 수동 실행 시 Rust와 npm 모두 감사한다.
+  PR/main의 `Web` 검사와 `make frontend-check`도 개발 의존성을 포함해 npm 감사를 수행한다.
+- `.cargo/audit.toml`의 `RUSTSEC-2023-0071` 예외는 openidconnect의 RSA 서명 검증 경로에
+  한정한다. 네트워크에서 관찰 가능한 RSA 개인키 연산을 추가하거나 upstream 수정 버전이
+  나오면 즉시 재검토한다. 현재 lockfile에 없는 extract-zip의 npm 감사 예외는 제거했다.
+
+GitHub 저장소 설정은 소스 파일과 별도로 관리된다. 2026-09-23 기준 main ruleset은 최신
+base에서 `Hygiene`, `Rust`, `Web`, `Browser E2E`, `Dependency Review`, `RustSec Audit`의
+통과를 요구하며 검사 제공자는 GitHub Actions로 제한한다. CodeQL 분석도 필수이며 새로
+추가되는 medium 이상 보안 경고와 error 수준 분석 경고를 차단한다. Actions는 전체 commit SHA 고정을
+요구하고 기본 토큰 권한은 read-only이며 PR 승인 권한은 없다. Secret scanning, push
+protection, Dependabot security updates, 비공개 취약점 제보를 사용한다.
+
+CodeQL 기본 설정은 Actions와 JS/TS의 extended query suite와 remote/local threat model을
+사용한다. Rust는 현재 기본 설정 API가 허용하지 않아 이 CodeQL 범위에 포함되지 않는다.
+Rust의 compiler, clippy, 테스트, RustSec 검사는 별도로 유지한다. 저장소 설정이나 감사
+통과는 애플리케이션 전체가 안전하다는 보증을 의미하지 않는다.

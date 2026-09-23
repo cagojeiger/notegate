@@ -1,4 +1,4 @@
-.PHONY: fmt check test test-integration test-fast clippy build cli-build frontend-check workflow-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics split-up split-test split-test-isolation split-logs split-down
+.PHONY: fmt check test test-integration test-fast clippy build cli-build frontend-check workflow-check version-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics split-up split-test split-test-isolation split-logs split-down
 
 fmt:
 	cargo fmt --all --check
@@ -25,14 +25,18 @@ cli-build:
 	cargo build --release --bin notegate-cli
 
 frontend-check:
-	pnpm audit --prod --audit-level moderate
+	pnpm audit --audit-level moderate
 	pnpm --filter web check:contrast
 	pnpm --filter web typecheck
 	pnpm --filter web lint
 	pnpm --filter web test
 	pnpm --filter web build
 
-workflow-check:
+version-check:
+	python3 deploy/ci/check-versions.py
+	python3 -B deploy/ci/check-versions.test.py
+
+workflow-check: version-check
 	actionlint
 	find deploy frontend -type f -name '*.sh' -print0 | xargs -0 shellcheck
 	deploy/ci/resolve-release-version.test.sh
