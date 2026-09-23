@@ -1,7 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 const browserSession = process.env.NOTEGATE_WEB_E2E_BROWSER_SESSION;
 
@@ -45,16 +42,15 @@ test("browser session dashboard supports space, text, read-only metadata, and fi
   await expect(page.getByText("No metadata.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Edit metadata" })).toHaveCount(0);
 
-  const dir = join(tmpdir(), "notegate-web-e2e");
-  mkdirSync(dir, { recursive: true });
-  const uploadPath = join(dir, fileName);
-  writeFileSync(uploadPath, "small upload from web smoke e2e\n");
-
   await page.getByRole("button", { name: "Create", exact: true }).click();
   const fileChooserPromise = page.waitForEvent("filechooser");
   await page.getByText("Upload file").click();
   const fileChooser = await fileChooserPromise;
-  await fileChooser.setFiles(uploadPath);
+  await fileChooser.setFiles({
+    name: fileName,
+    mimeType: "text/plain",
+    buffer: Buffer.from("small upload from web smoke e2e\n")
+  });
   await page.getByRole("button", { name: "Upload", exact: true }).click();
   const fileNode = page.getByRole("button", { name: fileName, exact: true });
   await expect(fileNode).toBeVisible();

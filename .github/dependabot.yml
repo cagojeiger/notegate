@@ -60,3 +60,37 @@ updates:
         applies-to: security-updates
         patterns:
           - "*"
+
+  - package-ecosystem: docker
+    directory: /deploy/docker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Seoul
+    open-pull-requests-limit: 3
+    groups:
+      routine-updates:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Seoul
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: notegate-split
+    groups:
+      routine-updates:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

@@ -8,7 +8,7 @@
 #
 # We use Debian instead of Alpine to avoid musl-specific surprises and to keep
 # Rust crate builds close to the runtime libc.
-FROM rust:1.95.0-bookworm AS chef
+FROM rust:1.95.0-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1 AS chef
 
 WORKDIR /app
 # Native toolchain for crates with C build scripts, plus certificates for Cargo HTTPS.
@@ -24,8 +24,8 @@ RUN apt-get update \
 RUN rustup component add rustfmt clippy rust-src
 RUN --mount=type=cache,id=notegate-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=notegate-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    cargo install cargo-chef --locked \
-    && cargo install sccache --locked --no-default-features
+    cargo install cargo-chef --version 0.1.78 --locked \
+    && cargo install sccache --version 0.18.0 --locked --no-default-features
 
 ENV RUSTC_WRAPPER=sccache \
     SCCACHE_DIR=/sccache \
@@ -46,7 +46,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 #
 # The final runtime image serves this Vite build from the Rust server, so the
 # deployed `web` container contains both the dashboard and the API/MCP backend.
-FROM node:22-bookworm-slim AS web-builder
+FROM node:22-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9 AS web-builder
 
 WORKDIR /app
 ENV PNPM_HOME=/pnpm \
@@ -89,7 +89,7 @@ RUN --mount=type=cache,id=notegate-cargo-registry,target=/usr/local/cargo/regist
 #
 # The split-topology test target uses this image without dashboard assets, so
 # backend process composition can be built independently of the Node stage.
-FROM debian:bookworm-slim AS runtime-base
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS runtime-base
 
 # Runtime only needs a CA bundle for outbound HTTPS. Copy it from the build
 # image instead of apt-installing ca-certificates, which would also pull
