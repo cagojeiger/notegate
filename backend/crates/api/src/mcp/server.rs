@@ -20,7 +20,7 @@ use rmcp::handler::server::tool::{Extension, ToolCallContext};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CacheScope, CallToolRequestParams, CallToolResponse, Implementation, JsonObject,
-    ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerInfo,
+    ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
     SubscriptionFilter,
 };
 use rmcp::service::{RequestContext, SubscriptionContext};
@@ -60,8 +60,8 @@ fn object_output_schema() -> Arc<JsonObject> {
     Arc::new(schema)
 }
 
-fn mcp_server_info() -> ServerInfo {
-    ServerInfo::new(
+fn mcp_server_info() -> ServerConfig {
+    ServerConfig::new(
         ServerCapabilities::builder()
             .enable_tools()
             .enable_tool_list_changed()
@@ -255,7 +255,7 @@ impl McpServer {
 
 #[tool_handler]
 impl ServerHandler for McpServer {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         mcp_server_info()
     }
 
@@ -475,7 +475,7 @@ mod tests {
     use super::*;
     use notegate_command::CommandTool;
     use notegate_db::SpaceRepo;
-    use rmcp::model::{CallToolResult, ClientInfo, ContentBlock, ServerNotification};
+    use rmcp::model::{CallToolResult, ClientConfig, ContentBlock, ServerNotification};
     use rmcp::service::SubscriptionEnd;
     use rmcp::transport::StreamableHttpClientTransport;
     use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -524,7 +524,7 @@ mod tests {
     }
 
     impl ServerHandler for ToolRefreshTestServer {
-        fn get_info(&self) -> ServerInfo {
+        fn get_info(&self) -> ServerConfig {
             mcp_server_info()
         }
 
@@ -618,7 +618,7 @@ mod tests {
     }
 
     async fn stop_tool_refresh_test_server(
-        client: rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>,
+        client: rmcp::service::RunningService<rmcp::RoleClient, ClientConfig>,
         shutdown: CancellationToken,
         server_task: tokio::task::JoinHandle<()>,
     ) {
@@ -670,7 +670,7 @@ mod tests {
         let transport = StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(url),
         );
-        let client = ClientInfo::default()
+        let client = ClientConfig::default()
             .serve_with_lifecycle(
                 transport,
                 ClientLifecycleMode::Discover {
@@ -713,7 +713,7 @@ mod tests {
         let transport = StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(url),
         );
-        let client = ClientInfo::default()
+        let client = ClientConfig::default()
             .serve_with_lifecycle(
                 transport,
                 ClientLifecycleMode::Discover {
@@ -760,7 +760,7 @@ mod tests {
         let transport = StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(url),
         );
-        let client = ClientInfo::default()
+        let client = ClientConfig::default()
             .serve_with_lifecycle(transport, ClientLifecycleMode::Initialize)
             .await
             .expect("connect legacy MCP client");
@@ -1550,7 +1550,7 @@ mod tests {
         let transport = StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(url),
         );
-        let client = ClientInfo::default()
+        let client = ClientConfig::default()
             .serve_with_lifecycle(transport, ClientLifecycleMode::Initialize)
             .await?;
 

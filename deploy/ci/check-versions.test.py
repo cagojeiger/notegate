@@ -17,6 +17,10 @@ class VersionChecks(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         (self.root / "crate").mkdir()
+        (self.root / "deploy/docker").mkdir(parents=True)
+        self.write("rust-toolchain.toml", '[toolchain]\nchannel = "1.98.1"\n')
+        self.write(".node-version", "22.23.2\n")
+        self.write("deploy/docker/web.Dockerfile", "FROM rust:1.98.1-bookworm AS chef\nFROM node:22.23.2-bookworm-slim AS web-builder\n")
         self.write("VERSION", "0.1.2\n")
         self.write("Cargo.toml", '[workspace]\nmembers = ["crate"]\n[workspace.package]\nversion = "0.1.2"\n')
         self.write("crate/Cargo.toml", '[package]\nname = "notegate-test"\nversion.workspace = true\n')
@@ -44,6 +48,15 @@ class VersionChecks(unittest.TestCase):
         with (self.root / "Cargo.lock").open("a") as lock:
             lock.write('source = "registry+https://github.com/rust-lang/crates.io-index"\n')
         self.assertTrue(any("local entry" in e for e in checker.check(self.root)))
+
+    def test_docker_toolchain_drift(self):
+        for image, old in [("rust", "1.98.1"), ("node", "22.23.2")]:
+            with self.subTest(image=image):
+                dockerfile = self.root / "deploy/docker/web.Dockerfile"
+                original = dockerfile.read_text()
+                dockerfile.write_text(original.replace(old, "99.0.0"))
+                self.assertTrue(any(f"Docker {image}" in e for e in checker.check(self.root)))
+                dockerfile.write_text(original)
 
     def test_invalid_release_version(self):
         for version in ["v0.1.2", "0.1.2-rc.1", "00.1.2", "garbage"]:
