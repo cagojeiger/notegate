@@ -869,7 +869,15 @@ async fn command_routes_require_bearer_auth() -> Result<(), Box<dyn std::error::
 
 #[tokio::test]
 async fn command_routes_accept_agent_api_keys() -> Result<(), Box<dyn std::error::Error>> {
-    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_pool(
+        ResolverMode::Registered(true),
+        "https://api.example.test",
+        db.pool.clone(),
+    )?;
+    let app = crate::routes::app(state);
     let response = app
         .oneshot(
             cli_request()
@@ -894,13 +902,22 @@ async fn command_routes_accept_agent_api_keys() -> Result<(), Box<dyn std::error
             .as_str()
             .is_some_and(|value| !value.is_empty())
     );
+    db.cleanup().await;
     Ok(())
 }
 
 #[tokio::test]
 async fn command_routes_accept_cli_oauth_for_registered_users()
 -> Result<(), Box<dyn std::error::Error>> {
-    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_pool(
+        ResolverMode::Registered(true),
+        "https://api.example.test",
+        db.pool.clone(),
+    )?;
+    let app = crate::routes::app(state);
     let oauth = token(
         "sub-1",
         "https://auth.example.test",
@@ -922,6 +939,7 @@ async fn command_routes_accept_cli_oauth_for_registered_users()
     let body: Value = serde_json::from_slice(&body)?;
     assert_eq!(body["account"]["kind"], "user");
     assert!(body["user"].is_object());
+    db.cleanup().await;
     Ok(())
 }
 
@@ -1027,7 +1045,15 @@ async fn command_api_key_shape_does_not_depend_on_jwks() -> Result<(), Box<dyn s
 #[tokio::test]
 async fn command_routes_preserve_recovery_errors_and_no_store()
 -> Result<(), Box<dyn std::error::Error>> {
-    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_pool(
+        ResolverMode::Registered(true),
+        "https://api.example.test",
+        db.pool.clone(),
+    )?;
+    let app = crate::routes::app(state);
     let response = app
         .oneshot(
             cli_request()
@@ -1055,6 +1081,7 @@ async fn command_routes_preserve_recovery_errors_and_no_store()
     assert_eq!(body["error"], "required_field_missing");
     assert_eq!(body["kind"], "invalid_input");
     assert_eq!(body["data"]["next_action"]["kind"], "add_fields");
+    db.cleanup().await;
     Ok(())
 }
 
