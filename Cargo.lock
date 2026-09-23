@@ -2955,7 +2955,6 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "hmac 0.13.0",
- "infer",
  "jsonwebtoken",
  "metrics",
  "metrics-exporter-prometheus",
@@ -2963,6 +2962,7 @@ dependencies = [
  "notegate-core",
  "notegate-db",
  "notegate-jobs",
+ "notegate-media",
  "notegate-model",
  "notegate-reconciliation",
  "notegate-search",
@@ -2970,7 +2970,6 @@ dependencies = [
  "openidconnect",
  "reqwest 0.13.4",
  "rmcp",
- "roxmltree",
  "schemars 1.2.2",
  "secrecy",
  "serde",
@@ -3076,6 +3075,15 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "notegate-media"
+version = "0.1.83"
+dependencies = [
+ "infer",
+ "roxmltree",
+ "zip 8.6.0",
 ]
 
 [[package]]
