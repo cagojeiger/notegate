@@ -7,6 +7,7 @@ members = [
     "backend/crates/core",
     "backend/crates/db",
     "backend/crates/jobs",
+    "backend/crates/media",
     "backend/crates/model",
     "backend/crates/reconciliation",
     "backend/crates/search",
@@ -27,6 +28,7 @@ notegate-command = { path = "backend/crates/command" }
 notegate-core = { path = "backend/crates/core" }
 notegate-db = { path = "backend/crates/db" }
 notegate-jobs = { path = "backend/crates/jobs" }
+notegate-media = { path = "backend/crates/media" }
 notegate-model = { path = "backend/crates/model" }
 notegate-reconciliation = { path = "backend/crates/reconciliation" }
 notegate-search = { path = "backend/crates/search" }

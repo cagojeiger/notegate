@@ -7,6 +7,7 @@ notegate/
 ├─ backend/crates/
 │  ├─ api/                     # Axum server, REST/MCP/auth, static web
 │  ├─ jobs/                    # PostgreSQL job queue와 worker runtime
+│  ├─ media/                   # byte-based media detection와 bounded DOCX validation
 │  ├─ search/                  # find/grep 실행, matcher, body cache와 search telemetry
 │  ├─ service/                 # business logic과 command semantics
 │  ├─ db/                      # sqlx pool, repository, migration
@@ -203,4 +204,14 @@ Playwright는 login과 주요 authenticated workspace flow를 desktop, tablet과
 
 ```sh
 cargo test -p notegate-text
+```
+
+### 미디어 판별 독립 테스트
+
+파일 형식 판별과 DOCX의 ZIP/XML 검증은 PostgreSQL, S3, API 없이 실행한다.
+압축 크기·해제 크기·경로·XML 제한은 media에 유지하고, 미리보기 허용 정책과
+저장소 읽기·동시 실행 제한은 API 테스트에서 검증한다.
+
+```sh
+cargo test -p notegate-media
 ```
