@@ -251,7 +251,9 @@ cargo test -p notegate-media
   `frontend/web/package.json`의 private package version은 제품 릴리즈 버전이 아니다.
   Dashboard는 기존대로 루트 `VERSION`을 읽는다.
 - `package.json`의 `packageManager`가 pnpm 버전의 기준이며 CI와 Docker가 이를 사용한다.
-  CI Node 버전은 `.node-version` 한 곳에서 관리한다. Rust compiler 변경 시 `rust-toolchain.toml`, workspace의 `rust-version`, Docker Rust
+  CI Node 버전은 `.node-version`에서 관리하고 Docker의 정확한 Node tag와 비교한다.
+  Rust toolchain channel도 Docker Rust tag와 일치해야 `version-check`를 통과한다.
+  Node major 업데이트는 LTS 지원 여부를 확인한 뒤 CI와 Docker를 함께 변경한다. Rust compiler 변경 시 `rust-toolchain.toml`, workspace의 `rust-version`, Docker Rust
   base image를 함께 검토한다. Docker base image는 digest로 고정하고 cargo-chef와 sccache는
   `--version`과 `--locked`로 고정한다. 두 빌드 도구의 버전은 수동 검토 대상이다.
 - Dependabot은 Cargo, npm, Actions, Docker/Compose를 매주 월요일 09:00 KST에 검사한다.

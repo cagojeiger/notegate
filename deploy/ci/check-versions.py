@@ -24,6 +24,13 @@ def check(root: Path) -> list[str]:
         locked = [p["version"] for p in packages if p["name"] == name and "source" not in p]
         if locked != [version]:
             errors.append(f"Cargo.lock {name} must have exactly one local entry at {version}")
+    dockerfile = (root / "deploy/docker/web.Dockerfile").read_text()
+    rust = tomllib.loads((root / "rust-toolchain.toml").read_text())["toolchain"]["channel"]
+    node = (root / ".node-version").read_text().strip()
+    for image, expected in [("rust", rust), ("node", node)]:
+        match = re.search(rf"^FROM {image}:([0-9.]+)-", dockerfile, re.MULTILINE)
+        if match is None or match.group(1) != expected:
+            errors.append(f"Docker {image} version must match its CI toolchain: {expected}")
     return errors
 
 
@@ -32,4 +39,4 @@ if __name__ == "__main__":
     if problems:
         print("\n".join(problems), file=sys.stderr)
         sys.exit(1)
-    print("Release versions agree: VERSION, workspace manifests, Cargo.lock")
+    print("Release and CI/Docker toolchain versions agree")
