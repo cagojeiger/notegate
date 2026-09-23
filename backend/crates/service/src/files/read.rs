@@ -1,5 +1,5 @@
 use notegate_core::limits;
-use notegate_model::{Node, NodeKind, NodeSummary};
+use notegate_model::{FileObject, Node, NodeKind, NodeSummary};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -432,6 +432,20 @@ impl FilesService {
         space_id: Uuid,
         node_id: Uuid,
     ) -> ServiceResult<crate::files::FileView> {
+        let (node, file) = self
+            .file_transfer_source(caller_account_id, space_id, node_id)
+            .await?;
+        let view = self.file_node_view(space_id, node, &file).await?;
+        Ok(crate::files::FileView { node: view, file })
+    }
+
+    /// Authorize a transfer without hydrating paths or write-lock display data.
+    pub async fn file_transfer_source(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> ServiceResult<(Node, FileObject)> {
         self.authorize(space_id, caller_account_id, FileCommand::Read)
             .await?;
         let (node, file) = self
@@ -440,8 +454,7 @@ impl FilesService {
             .await?
             .ok_or_else(|| ServiceError::NotFound("file not found".to_owned()))?;
         self.require_node_access(&node).await?;
-        let view = self.file_node_view(space_id, node, &file).await?;
-        Ok(crate::files::FileView { node: view, file })
+        Ok((node, file))
     }
 
     /// Read a text with range limits (`read`/`open`). Requires read permission.

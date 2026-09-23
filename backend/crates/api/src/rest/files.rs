@@ -142,16 +142,13 @@ pub(crate) async fn download(
     Extension(caller): Extension<Caller>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Response, ApiError> {
-    let file_view = state
+    let (_, file) = state
         .files
-        .file_for_download(caller.account_id(), space_id, node_id)
+        .file_transfer_source(caller.account_id(), space_id, node_id)
         .await?;
     let get_url = state
         .object_storage
-        .presign_get(
-            &file_view.file.object_key,
-            file_view.file.original_filename.as_deref(),
-        )
+        .presign_get(&file.object_key, file.original_filename.as_deref())
         .await?;
     let location =
         HeaderValue::from_str(&get_url).map_err(|_| ApiError::object_storage_unavailable())?;
@@ -241,17 +238,11 @@ async fn preview_response(
     node_id: Uuid,
     policy: PreviewPolicy,
 ) -> Result<Response, ApiError> {
-    let file_view = state
+    let (node, file) = state
         .files
-        .file_for_download(caller.account_id(), space_id, node_id)
+        .file_transfer_source(caller.account_id(), space_id, node_id)
         .await?;
-    let prepared = prepare_preview(
-        state,
-        &file_view.file,
-        Some(file_view.node.node.name.as_str()),
-        policy,
-    )
-    .await;
+    let prepared = prepare_preview(state, &file, Some(node.name.as_str()), policy).await;
     let detected_media_type = match &prepared {
         Ok(prepared) => prepared.detected_media_type.clone(),
         Err(error) => error.detected_media_type().map(str::to_owned),
