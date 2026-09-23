@@ -91,6 +91,72 @@ async fn long_valid_parent(
 }
 
 #[tokio::test]
+async fn single_path_resolution_preserves_segment_and_visibility_semantics()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "resolve-path").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let folder = insert_folder(&repo, space, root, "한글 '자료'", owner).await?;
+    let child = insert_folder(&repo, space, folder.id, "child", owner).await?;
+    for path in ["", " ", "/", "///", " / "] {
+        assert_eq!(repo.resolve_path(space, path).await?, Some(root), "{path}");
+    }
+    for path in [
+        "/한글 '자료'/child",
+        "한글 '자료'/child",
+        " /한글 '자료'//child/ ",
+    ] {
+        assert_eq!(
+            repo.resolve_path(space, path).await?,
+            Some(child.id),
+            "{path}"
+        );
+    }
+    for path in [
+        "/missing",
+        "/한글 '자료'/missing",
+        "/한글 '자료'/child/missing",
+    ] {
+        assert_eq!(repo.resolve_path(space, path).await?, None, "{path}");
+    }
+    let (_, other_space, _) = space_with_root(&db.pool, "resolve-other").await?;
+    assert_eq!(
+        repo.resolve_path(other_space, "/한글 '자료'/child").await?,
+        None
+    );
+    assert_eq!(repo.resolve_path(Uuid::new_v4(), "/").await?, None);
+
+    // Resolution itself is channel-neutral; the service applies access policy.
+    sqlx::query("UPDATE nodes SET external_access_enabled = false WHERE id = $1")
+        .bind(folder.id)
+        .execute(&db.pool)
+        .await?;
+    assert_eq!(
+        repo.resolve_path(space, "/한글 '자료'/child").await?,
+        Some(child.id)
+    );
+    // A live descendant cannot resolve through a deleted ancestor.
+    sqlx::query("UPDATE nodes SET deleted_at = now(), deleted_by_account_id = updated_by_account_id, purge_after = now() WHERE id = $1")
+        .bind(folder.id)
+        .execute(&db.pool)
+        .await?;
+    assert_eq!(repo.resolve_path(space, "/한글 '자료'/child").await?, None);
+    sqlx::query("UPDATE nodes SET deleted_at = NULL, deleted_by_account_id = NULL, purge_after = NULL WHERE id = $1")
+        .bind(folder.id)
+        .execute(&db.pool)
+        .await?;
+    sqlx::query("UPDATE nodes SET deleted_at = now(), deleted_by_account_id = updated_by_account_id, purge_after = now() WHERE id = $1")
+        .bind(child.id)
+        .execute(&db.pool)
+        .await?;
+    assert_eq!(repo.resolve_path(space, "/한글 '자료'/child").await?, None);
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn create_enforces_derived_path_byte_limit_in_transaction()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {

@@ -1214,46 +1214,26 @@ pub mod search {
         space_id: Uuid,
         scope_path: &str,
     ) -> Result<Option<Uuid>> {
-        let trimmed = scope_path.trim();
-        if trimmed.is_empty() || trimmed == "/" {
-            let id: Option<Uuid> = sqlx::query_scalar(
+        // Keep the single-path resolver's existing trim/empty-segment behavior.
+        let segments = scope_path
+            .trim()
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>();
+        // Root lookup already needs one query; avoid a recursive plan for it.
+        if segments.is_empty() {
+            return sqlx::query_scalar(
                 "SELECT id FROM nodes \
-             WHERE space_id = $1 AND parent_id IS NULL AND deleted_at IS NULL",
+                 WHERE space_id = $1 AND parent_id IS NULL AND deleted_at IS NULL",
             )
             .bind(space_id)
             .fetch_optional(pool)
             .await
-            .map_err(map_sqlx_error)?;
-            return Ok(id);
+            .map_err(map_sqlx_error);
         }
-
-        // Walk segments from the root, resolving each `(parent_id, name)` step.
-        let mut current: Option<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM nodes \
-         WHERE space_id = $1 AND parent_id IS NULL AND deleted_at IS NULL",
-        )
-        .bind(space_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        for segment in trimmed.split('/').filter(|s| !s.is_empty()) {
-            let Some(parent) = current else {
-                return Ok(None);
-            };
-            current = sqlx::query_scalar(
-                "SELECT id FROM nodes \
-             WHERE space_id = $1 AND parent_id = $2 AND name = $3 AND deleted_at IS NULL",
-            )
-            .bind(space_id)
-            .bind(parent)
-            .bind(segment)
-            .fetch_optional(pool)
-            .await
-            .map_err(map_sqlx_error)?;
-        }
-
-        Ok(current)
+        let path = format!("/{}", segments.join("/"));
+        let mut resolved = resolve_node_ids_by_paths_with(pool, space_id, &[path]).await?;
+        Ok(resolved.pop().map(|(_, node_id)| node_id))
     }
 
     /// Resolve a bounded ordered path set with one recursive SQL query.
