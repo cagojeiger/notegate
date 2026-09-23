@@ -32,7 +32,7 @@ x-notegate-runtime: &notegate-runtime
   restart: unless-stopped
 
 x-split-smoke: &split-smoke
-  image: curlimages/curl:8.12.1
+  image: curlimages/curl:8.22.0
   profiles:
     - test
   environment:
@@ -117,7 +117,7 @@ services:
   # The runtime image intentionally carries no probe utility. This one-shot
   # sidecar gates schema/key-epoch consumers on the API migration owner.
   api-ready:
-    image: curlimages/curl:8.12.1
+    image: curlimages/curl:8.22.0
     depends_on:
       api:
         condition: service_started
@@ -176,7 +176,7 @@ services:
         condition: service_completed_successfully
 
   prometheus:
-    image: prom/prometheus:v3.13.1
+    image: prom/prometheus:v3.14.0
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -201,7 +201,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:13.1.1
+    image: grafana/grafana:13.2.2
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-notegate-local}
