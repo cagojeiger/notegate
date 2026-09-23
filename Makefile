@@ -1,4 +1,4 @@
-.PHONY: fmt check test clippy build cli-build frontend-check workflow-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics split-up split-test split-test-isolation split-logs split-down
+.PHONY: fmt check test test-integration test-fast clippy build cli-build frontend-check workflow-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics split-up split-test split-test-isolation split-logs split-down
 
 fmt:
 	cargo fmt --all --check
@@ -6,8 +6,14 @@ fmt:
 check:
 	cargo check --workspace --all-targets
 
-test:
-	cargo test --workspace
+test: test-integration
+
+test-integration:
+	deploy/ci/test-rust.sh
+
+test-fast:
+	@echo "Partial Rust checks: PostgreSQL/S3 integration tests are excluded. Use make test for full verification."
+	env -u NOTEGATE_TEST_DATABASE_URL -u NOTEGATE_TEST_S3_ENDPOINT -u NOTEGATE_TEST_RUN_ID cargo test --locked --workspace
 
 clippy:
 	cargo clippy --workspace --all-targets -- -D warnings
@@ -30,6 +36,7 @@ workflow-check:
 	actionlint
 	find deploy frontend -type f -name '*.sh' -print0 | xargs -0 shellcheck
 	deploy/ci/resolve-release-version.test.sh
+	deploy/ci/test-rust.test.sh
 
 release-check: fmt check test clippy build frontend-check workflow-check
 	git diff --check

@@ -110,8 +110,11 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
+      - name: Test runner cleanup
+        run: deploy/ci/test-rust.test.sh --postgres
+
       - name: Test
-        run: cargo test --locked --workspace
+        run: make test-integration
 
   rust-audit:
     name: Main RustSec Audit

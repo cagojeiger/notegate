@@ -188,6 +188,32 @@ make frontend-check
 git diff --check
 ```
 
+`make test`(또는 `make test-integration`)는 전체 Rust 검증이다. PostgreSQL 클라이언트
+`psql`과 실행 중인 테스트 PostgreSQL/S3가 필요하며, 다음 환경변수가 없거나 비어 있으면
+테스트를 시작하지 않고 실패한다.
+
+```sh
+export NOTEGATE_TEST_DATABASE_URL=postgres://notegate:notegate@localhost:5432/notegate
+export NOTEGATE_TEST_S3_ENDPOINT=http://127.0.0.1:9000
+export NOTEGATE_TEST_S3_BUCKET=notegate-test
+export NOTEGATE_TEST_S3_ACCESS_KEY=notegate-app
+export NOTEGATE_TEST_S3_SECRET_KEY=notegate-app-secret
+make test-integration
+# 특정 Rust 테스트만 실행할 때도 실행 후 정리를 적용한다.
+deploy/ci/test-rust.sh -p notegate-api rest::file_upload_tests
+```
+
+각 실행은 고유 `NOTEGATE_TEST_RUN_ID`를 생성하며, 각 테스트의 DB 스키마도 계속 독립적이다.
+개별 테스트의 정상 cleanup은 유지하고, cargo 종료 후 해당 실행 ID의 잔여 스키마만
+추가 정리한다. assertion 실패, 오류 반환, 마이그레이션 중 오류로 남은 스키마도 대상이다.
+정리 실패는 명령 실패로 보고하며 다른 실행이나 기존 스키마를 일괄 삭제하지 않는다.
+이 종료 시 정리는 통합 실행 명령을 통할 때 적용된다. 프로세스 강제 종료(SIGKILL)나
+DB 장애 시 정리는 보장할 수 없다. S3 객체 정리는 기존 개별 테스트가 담당한다.
+
+DB/S3 없이 빠르게 확인하려면 `make test-fast`를 사용한다. DB/S3 환경변수를 해제하고
+통합 테스트를 제외한다는 안내를 출력하므로, 전체 검증 완료로 취급하지 않는다.
+직접 `cargo test`를 실행할 때는 기존처럼 환경변수가 없는 통합 테스트가 조기 종료할 수 있다.
+
 `make frontend-check`는 dependency audit, theme contrast, typecheck, lint, unit test와 production build를 실행한다.
 
 ```sh

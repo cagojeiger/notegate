@@ -60,6 +60,21 @@ fn test_s3_config() -> Option<S3Config> {
     })
 }
 
+// Keep setup local to the upload suite; each call still owns an isolated schema.
+type UploadTest = (TestDb, crate::state::AppState, Caller, Uuid, Uuid);
+
+async fn upload_test() -> Result<Option<UploadTest>, Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(None);
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(None);
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+    Ok(Some((db, state, caller, space_id, root_id)))
+}
+
 fn unavailable_internal_storage(mut config: S3Config) -> S3Config {
     config.endpoint = "http://127.0.0.1:1".to_owned();
     config
@@ -190,14 +205,9 @@ async fn verified_raster_images_receive_inline_preview_urls()
         0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, b'I', b'H', b'D',
         b'R', 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00,
     ];
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let upload = begin_upload_with_media_type(
         &state,
         &caller,
@@ -307,14 +317,9 @@ async fn verified_raster_images_receive_inline_preview_urls()
 
 #[tokio::test]
 async fn pdf_bytes_use_the_dedicated_preview_url() -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let bytes = b"%PDF-1.7\n";
     let upload = begin_upload_with_media_type(
         &state,
@@ -561,14 +566,9 @@ async fn verified_docx_bytes_use_the_dedicated_preview_url()
 #[tokio::test]
 async fn browser_audio_receives_a_range_capable_inline_preview_url()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let mut bytes = vec![0_u8; 300];
     bytes[..4].copy_from_slice(&[0x1a, 0x45, 0xdf, 0xa3]);
     bytes[16..23].copy_from_slice(b"\x42\x82\x84webm");
@@ -829,14 +829,9 @@ async fn delete_attached_file(
 #[tokio::test]
 async fn object_upload_round_trips_through_s3_presigned_urls()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let payload = b"notegate-s3-round-trip";
     let upload = begin_upload(
         &state,
@@ -919,14 +914,9 @@ async fn object_upload_round_trips_through_s3_presigned_urls()
 #[tokio::test]
 async fn write_lock_is_checked_when_upload_is_registered() -> Result<(), Box<dyn std::error::Error>>
 {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
         .bind(caller.account_id())
         .execute(&db.pool)
@@ -1040,14 +1030,9 @@ async fn write_lock_is_checked_when_upload_is_registered() -> Result<(), Box<dyn
 #[tokio::test]
 async fn rest_multipart_upload_round_trips_and_completes_idempotently()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let byte_len = SINGLE_PUT_MAX_BYTES as i64 + 1;
 
     let (status, begun) = json_request(
@@ -1122,14 +1107,9 @@ async fn rest_multipart_upload_round_trips_and_completes_idempotently()
 
 #[tokio::test]
 async fn begin_rejects_too_many_pending_uploads() -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
 
     // Fill the per-account concurrent-upload allowance with tiny objects so the
     // count cap, rather than the byte quota, is the rejecting invariant.
@@ -1167,14 +1147,9 @@ async fn begin_rejects_too_many_pending_uploads() -> Result<(), Box<dyn std::err
 #[tokio::test]
 async fn rest_begin_uses_multipart_above_the_single_put_limit()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
 
     let (status, body) = json_request(
         rest_app(state.clone(), caller.clone()),
@@ -1264,14 +1239,9 @@ async fn rest_begin_rejects_files_above_the_browser_limit_without_storage()
 #[tokio::test]
 async fn pending_declared_bytes_count_toward_the_space_quota()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
 
     begin_upload(
         &state,
@@ -1304,14 +1274,9 @@ async fn pending_declared_bytes_count_toward_the_space_quota()
 #[tokio::test]
 async fn multipart_abort_cleanup_closes_the_provider_upload()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let upload_id = Uuid::new_v4();
     let object_key = format!("objects/{upload_id}");
     let byte_len = 6 * 1024 * 1024;
@@ -1441,14 +1406,9 @@ async fn begin_counts_expiry_pending_uploads_toward_the_cap()
 
 #[tokio::test]
 async fn presigned_put_rejects_a_size_mismatch() -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let upload = begin_upload(&state, &caller, space_id, root_id, "wrong-size.bin", 4).await?;
     let put = put_upload(&upload, b"bad").await?;
     assert!(
@@ -1469,14 +1429,9 @@ async fn presigned_put_rejects_a_size_mismatch() -> Result<(), Box<dyn std::erro
 
 #[tokio::test]
 async fn object_upload_rejects_completion_before_put() -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let upload = begin_upload(&state, &caller, space_id, root_id, "missing.bin", 4).await?;
     mark_upload_stale(&db, upload.id).await?;
 
@@ -1497,14 +1452,9 @@ async fn object_upload_rejects_completion_before_put() -> Result<(), Box<dyn std
 #[tokio::test]
 async fn abandoned_uploaded_object_is_expired_and_deleted() -> Result<(), Box<dyn std::error::Error>>
 {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let upload = begin_upload(&state, &caller, space_id, root_id, "abandoned.bin", 9).await?;
     put_upload(&upload, b"abandoned")
         .await?
@@ -1531,14 +1481,9 @@ async fn abandoned_uploaded_object_is_expired_and_deleted() -> Result<(), Box<dy
 
 #[tokio::test]
 async fn one_hour_inactive_upload_is_not_expired() -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let upload = begin_upload(&state, &caller, space_id, root_id, "inactive.bin", 4).await?;
 
     set_upload_inactivity(&db, upload.id, "1 hour").await?;
@@ -1552,14 +1497,9 @@ async fn one_hour_inactive_upload_is_not_expired() -> Result<(), Box<dyn std::er
 #[tokio::test]
 async fn active_completion_prevents_stale_upload_cleanup() -> Result<(), Box<dyn std::error::Error>>
 {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let upload = begin_upload(&state, &caller, space_id, root_id, "active.bin", 6).await?;
     put_upload(&upload, b"active").await?.error_for_status()?;
     mark_upload_stale(&db, upload.id).await?;
@@ -1579,14 +1519,9 @@ async fn active_completion_prevents_stale_upload_cleanup() -> Result<(), Box<dyn
 #[tokio::test]
 async fn presigned_put_cannot_overwrite_an_existing_object()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let upload = begin_upload(&state, &caller, space_id, root_id, "immutable.bin", 5).await?;
     put_upload(&upload, b"first").await?.error_for_status()?;
 
@@ -1611,14 +1546,9 @@ async fn presigned_put_cannot_overwrite_an_existing_object()
 #[tokio::test]
 async fn concurrent_completion_attaches_one_file_idempotently()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let upload = begin_upload(&state, &caller, space_id, root_id, "concurrent.bin", 10).await?;
     put_upload(&upload, b"concurrent")
         .await?
@@ -1747,14 +1677,9 @@ async fn cleanup_retries_after_temporary_storage_failure() -> Result<(), Box<dyn
 #[tokio::test]
 async fn cleanup_recovers_when_object_was_deleted_before_state_commit()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let upload = begin_upload(&state, &caller, space_id, root_id, "cleanup-crash.bin", 5).await?;
     put_upload(&upload, b"crash").await?.error_for_status()?;
     mark_upload_stale(&db, upload.id).await?;
@@ -1787,14 +1712,9 @@ async fn cleanup_recovers_when_object_was_deleted_before_state_commit()
 #[tokio::test]
 async fn attachment_conflict_expires_only_the_unattached_object()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {
         return Ok(());
     };
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let state = state_with_s3(&db, s3);
-    let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let first = begin_upload(&state, &caller, space_id, root_id, "same.bin", 5).await?;
     let second = begin_upload(&state, &caller, space_id, root_id, "same.bin", 6).await?;
     put_upload(&first, b"first").await?.error_for_status()?;
