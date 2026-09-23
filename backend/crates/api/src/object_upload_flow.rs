@@ -6,15 +6,18 @@ use std::time::Duration;
 use notegate_model::files::{
     BeginObjectUpload, ObjectUploadMode, ObjectUploadRegistration, PendingObjectUpload,
 };
-use notegate_service::{ServiceError, files::validation};
+use notegate_service::{
+    ServiceError,
+    files::{FilesService, validation},
+};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::admission::DocxValidationAdmission;
 use crate::object_storage::{
-    CompletedUploadPart, MULTIPART_PART_SIZE, ObjectStorageError, PresignedPut,
+    CompletedUploadPart, MULTIPART_PART_SIZE, ObjectStorage, ObjectStorageError, PresignedPut,
     multipart_part_count, multipart_part_len, uses_multipart,
 };
-use crate::state::AppState;
 
 pub const PART_URL_BATCH_MAX: usize = 16;
 pub const PART_UPLOAD_CONCURRENCY_MAX: usize = 4;
@@ -56,14 +59,14 @@ impl From<ObjectStorageError> for UploadFlowError {
 }
 
 pub async fn begin_upload(
-    state: &AppState,
+    files: &FilesService,
+    storage: &ObjectStorage,
     account_id: Uuid,
     space_id: Uuid,
     command: &BeginObjectUpload,
     transfer_ttl: Duration,
 ) -> Result<BegunUpload, UploadFlowError> {
-    state
-        .files
+    files
         .prepare_object_upload(account_id, space_id, command)
         .await?;
 
@@ -72,8 +75,7 @@ pub async fn begin_upload(
     let transfer = if uses_multipart(command.byte_len) {
         let part_count = multipart_part_count(command.byte_len, MULTIPART_PART_SIZE)
             .ok_or_else(|| invalid("file is too large for multipart upload"))?;
-        let storage_upload_id = state
-            .object_storage
+        let storage_upload_id = storage
             .create_multipart_upload(&object_key, &command.media_type)
             .await?;
         let registration = ObjectUploadRegistration {
@@ -83,13 +85,11 @@ pub async fn begin_upload(
             multipart_upload_id: Some(storage_upload_id.clone()),
             multipart_part_size: Some(MULTIPART_PART_SIZE),
         };
-        if let Err(error) = state
-            .files
+        if let Err(error) = files
             .record_registered_object_upload(&registration, account_id, space_id, command)
             .await
         {
-            if let Err(abort_error) = state
-                .object_storage
+            if let Err(abort_error) = storage
                 .abort_multipart_upload(&object_key, &storage_upload_id)
                 .await
             {
@@ -114,8 +114,7 @@ pub async fn begin_upload(
             multipart_upload_id: None,
             multipart_part_size: None,
         };
-        let transfer = state
-            .object_storage
+        let transfer = storage
             .presign_put_with_ttl(
                 &object_key,
                 &command.media_type,
@@ -123,8 +122,7 @@ pub async fn begin_upload(
                 transfer_ttl,
             )
             .await?;
-        state
-            .files
+        files
             .record_registered_object_upload(&registration, account_id, space_id, command)
             .await?;
         BegunTransfer::Single(transfer)
@@ -185,7 +183,8 @@ fn plan_upload_parts(
 }
 
 pub async fn prepare_parts(
-    state: &AppState,
+    files: &FilesService,
+    storage: &ObjectStorage,
     account_id: Uuid,
     upload: PendingObjectUpload,
     part_numbers: Vec<i32>,
@@ -193,8 +192,7 @@ pub async fn prepare_parts(
 ) -> Result<Vec<UploadPartTransfer>, UploadFlowError> {
     let prepared_parts = plan_upload_parts(&upload, &part_numbers)?;
 
-    let upload = state
-        .files
+    let upload = files
         .touch_object_upload(account_id, upload.space_id, upload.id)
         .await?;
     if upload.node_id.is_some() {
@@ -210,8 +208,7 @@ pub async fn prepare_parts(
 
     let mut transfers = Vec::with_capacity(prepared_parts.len());
     for (part_number, content_length) in prepared_parts {
-        let transfer = state
-            .object_storage
+        let transfer = storage
             .presign_upload_part(
                 &upload.object_key,
                 storage_upload_id,
@@ -230,7 +227,9 @@ pub async fn prepare_parts(
 }
 
 pub async fn complete_upload(
-    state: &AppState,
+    files: &FilesService,
+    storage: &ObjectStorage,
+    docx_admission: &DocxValidationAdmission,
     account_id: Uuid,
     upload: PendingObjectUpload,
     completed_parts: Option<Vec<CompletedUploadPart>>,
@@ -251,19 +250,16 @@ pub async fn complete_upload(
                     ))?;
             // Refresh before the provider call so stale cleanup cannot claim
             // this upload while multipart completion is in progress.
-            state
-                .files
+            files
                 .touch_object_upload(account_id, upload.space_id, upload.id)
                 .await?;
-            if let Err(completion_error) = state
-                .object_storage
+            if let Err(completion_error) = storage
                 .complete_multipart_upload(&upload.object_key, storage_upload_id, &completed)
                 .await
             {
                 // Another completion may already have consumed the provider
                 // upload id. A matching final object makes this idempotent.
-                match state
-                    .object_storage
+                match storage
                     .verify_upload(&upload.object_key, upload.byte_len)
                     .await
                 {
@@ -274,15 +270,14 @@ pub async fn complete_upload(
                     Err(error) => return Err(error.into()),
                 }
             }
-            verify_upload(state, &upload).await?;
+            verify_upload(storage, &upload).await?;
         } else {
             if completed_parts.is_some() {
                 return Err(invalid("single uploads do not accept completed_parts"));
             }
             // Verify first so missing single-PUT objects remain eligible for inactivity cleanup.
-            verify_upload(state, &upload).await?;
-            state
-                .files
+            verify_upload(storage, &upload).await?;
+            files
                 .touch_object_upload(account_id, upload.space_id, upload.id)
                 .await?;
         }
@@ -290,8 +285,8 @@ pub async fn complete_upload(
 
     let detected_media_type = if upload.node_id.is_none() {
         match crate::file_preview::detect_object_media_type(
-            &state.object_storage,
-            &state.docx_validation_admission,
+            storage,
+            docx_admission,
             &upload.object_key,
             upload.byte_len,
             upload.encryption_mode,
@@ -320,8 +315,7 @@ pub async fn complete_upload(
         None
     };
 
-    let view = state
-        .files
+    let view = files
         .complete_object_upload(
             account_id,
             upload.space_id,
@@ -340,12 +334,11 @@ pub async fn complete_upload(
 }
 
 pub async fn abort_upload(
-    state: &AppState,
+    files: &FilesService,
     account_id: Uuid,
     upload: &PendingObjectUpload,
 ) -> Result<(), UploadFlowError> {
-    state
-        .files
+    files
         .cancel_object_upload(account_id, upload.space_id, upload.id)
         .await?;
     tracing::info!(
@@ -384,11 +377,10 @@ fn validate_completed_parts(
 }
 
 async fn verify_upload(
-    state: &AppState,
+    storage: &ObjectStorage,
     upload: &PendingObjectUpload,
 ) -> Result<(), UploadFlowError> {
-    let etag = state
-        .object_storage
+    let etag = storage
         .verify_upload(&upload.object_key, upload.byte_len)
         .await?;
     tracing::info!(

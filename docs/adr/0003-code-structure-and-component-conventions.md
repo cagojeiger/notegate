@@ -63,6 +63,8 @@ api transport adapters ──▶ api commands ──┬─▶ service ──▶ 
   Command HTTP와 MCP는 인증·protocol envelope·transport error mapping만 소유하고 같은 command 실행기를
   호출한다. S3·AuthGate 같은 외부 provider adapter와 service command를 조합하는 application workflow는
   각 handler에 중복하지 않고 api의 공용 모듈에 둔다.
+- 공용 업로드 흐름은 전체 `AppState` 대신 함수별로 필요한 `FilesService`, `ObjectStorage`,
+  `DocxValidationAdmission` 참조를 받는다. 채널별 파일 서비스 선택은 transport adapter에 둔다.
 - cli는 command 입력 타입과 생성 schema를 직접 재사용하되 api 구현 crate에는 의존하지 않는다.
   인증 facade, OAuth protocol 처리, credential persistence와 URL 보안 정책은 CLI 내부 책임으로 유지한다.
 
