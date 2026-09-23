@@ -4,7 +4,6 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
-use crate::files::format::validate_structured_text;
 use crate::files::patch::{AppliedText, apply_edits, apply_line_edits, unified_diff};
 use crate::files::validation;
 use crate::files::{
@@ -14,8 +13,8 @@ use crate::files::{
     UpdateNodeWriteLock, UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody, content,
 };
 
-use super::FilesService;
 use super::view::text_view_at_path;
+use super::{FilesService, validate_structured_text};
 
 impl FilesService {
     /// Create a folder (`mkdir`). Requires write permission.
@@ -112,7 +111,7 @@ impl FilesService {
             .await?;
         validation::validate_basename(&command.name)?;
 
-        let empty = content::compute("").into_stored_plain(String::new());
+        let empty = content::into_stored_plain(content::compute(""), String::new());
         let (node, text) = self
             .store
             .insert_text(
@@ -527,7 +526,7 @@ impl FilesService {
         let metrics = content::compute(&applied.content);
         validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
 
-        let stored = metrics.into_stored_plain(applied.content);
+        let stored = content::into_stored_plain(metrics, applied.content);
         let save_guard = expected_sha256.unwrap_or(&previous_sha256);
         let (node, text) = self
             .store
@@ -766,14 +765,14 @@ fn prepare_appended_plain_text(
     validate_structured_text(name, &content)?;
     let metrics = content::compute(&content);
     validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
-    Ok(metrics.into_stored_plain(content))
+    Ok(content::into_stored_plain(metrics, content))
 }
 
 fn stored_text_body(body: WriteTextBody) -> ServiceResult<StoredContent> {
     match body {
         WriteTextBody::Plain(content) => {
             let metrics = content::compute(&content);
-            Ok(metrics.into_stored_plain(content))
+            Ok(content::into_stored_plain(metrics, content))
         }
         WriteTextBody::Encrypted(payload) => content::compute_encrypted(payload),
     }

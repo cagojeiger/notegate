@@ -9,6 +9,7 @@ license.workspace = true
 notegate-core.workspace = true
 notegate-db.workspace = true
 notegate-model.workspace = true
+notegate-text.workspace = true
 
 metrics.workspace = true
 moka.workspace = true

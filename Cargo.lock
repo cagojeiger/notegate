@@ -3084,6 +3084,7 @@ version = "0.1.83"
 dependencies = [
  "chrono",
  "notegate-core",
+ "notegate-text",
  "serde",
  "serde_json",
  "uuid",
@@ -3116,6 +3117,7 @@ dependencies = [
  "notegate-core",
  "notegate-db",
  "notegate-model",
+ "notegate-text",
  "regex",
  "serde_json",
  "thiserror 2.0.20",
@@ -3140,6 +3142,7 @@ dependencies = [
  "notegate-model",
  "notegate-search",
  "notegate-service",
+ "notegate-text",
  "percent-encoding",
  "pulldown-cmark",
  "rand 0.10.2",
@@ -3147,12 +3150,21 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "similar",
  "sqlx",
  "thiserror 2.0.20",
  "tokio",
- "toml",
  "uuid",
+]
+
+[[package]]
+name = "notegate-text"
+version = "0.1.83"
+dependencies = [
+ "serde_json",
+ "sha2 0.11.0",
+ "similar",
+ "thiserror 2.0.20",
+ "toml",
  "yaml-rust2",
 ]
 

@@ -1,44 +1,19 @@
-//! Pure text content metrics: SHA-256, byte length, and line count.
-//!
-//! These are the values persisted on `text_objects` and validated against the
-//! per-text and space caps. `write` and `patch` compute them once here so
-//! the validated values are exactly what the store writes.
+//! Adapt pure content metrics to persisted plain and client-encrypted text.
+
+use notegate_text::content::sha256_hex;
+pub use notegate_text::content::{Metrics, compute};
 
 use super::{StoredContent, WriteTextBody};
 use crate::error::{ServiceError, ServiceResult};
 
-/// The derived metrics of a text's content.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Metrics {
-    /// Hex-encoded SHA-256 of the UTF-8 content.
-    pub content_sha256: String,
-    /// UTF-8 byte length.
-    pub byte_len: usize,
-    /// Logical line count (a single trailing `\n` does not add an empty line;
-    /// empty content is `0` lines).
-    pub line_count: usize,
-}
-
-impl Metrics {
-    /// Bundle these metrics with their content for the store, converting the
-    /// counts to the `i32` columns. Values are validated against the caps before
-    /// this is called, so they fit `i32`.
-    pub fn into_stored_plain(self, content: String) -> StoredContent {
-        StoredContent {
-            body: WriteTextBody::Plain(content),
-            content_sha256: self.content_sha256,
-            byte_len: self.byte_len as i64,
-            line_count: self.line_count as i32,
-        }
-    }
-}
-
-/// Compute the metrics of plain text content.
-pub fn compute(content: &str) -> Metrics {
-    Metrics {
-        content_sha256: sha256_hex(content.as_bytes()),
-        byte_len: content.len(),
-        line_count: line_count(content),
+/// Bundle validated metrics with plain content for storage. Counts have already
+/// been checked against the text limits before conversion to database columns.
+pub fn into_stored_plain(metrics: Metrics, content: String) -> StoredContent {
+    StoredContent {
+        body: WriteTextBody::Plain(content),
+        content_sha256: metrics.content_sha256,
+        byte_len: metrics.byte_len as i64,
+        line_count: metrics.line_count as i32,
     }
 }
 
@@ -61,55 +36,37 @@ pub fn compute_encrypted(payload: serde_json::Value) -> ServiceResult<StoredCont
     })
 }
 
-/// Logical line count: empty content is `0`; otherwise the number of `\n`-joined
-/// segments after dropping a single trailing newline.
-fn line_count(content: &str) -> usize {
-    if content.is_empty() {
-        return 0;
-    }
-    let trimmed = content.strip_suffix('\n').unwrap_or(content);
-    trimmed.split('\n').count()
-}
-
-/// Hex-encoded SHA-256 of a string's UTF-8 bytes.
-fn sha256_hex(content: &[u8]) -> String {
-    use sha2::{Digest as _, Sha256};
-    let digest = Sha256::digest(content);
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 #[cfg(test)]
 mod tests {
-    #![allow(
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::indexing_slicing,
-        clippy::panic,
-        clippy::unwrap_in_result
-    )]
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     #[test]
-    fn empty_content_is_zero_lines() {
-        let metrics = compute("");
-        assert_eq!(metrics.byte_len, 0);
-        assert_eq!(metrics.line_count, 0);
+    fn stored_plain_content_keeps_engine_metrics() {
+        let content = "가\r\n🙂\n".to_owned();
+        let metrics = compute(&content);
+        let stored = into_stored_plain(metrics.clone(), content.clone());
+        assert_eq!(stored.body, WriteTextBody::Plain(content));
+        assert_eq!(stored.content_sha256, metrics.content_sha256);
+        assert_eq!(stored.byte_len, 10);
+        assert_eq!(stored.line_count, 2);
     }
 
     #[test]
-    fn trailing_newline_does_not_add_a_line() {
-        assert_eq!(compute("# Note\n").line_count, 1);
-        assert_eq!(compute("# Note\n").byte_len, 7);
-        assert_eq!(compute("a\nb\n").line_count, 2);
-        assert_eq!(compute("a\nb").line_count, 2);
-    }
-
-    #[test]
-    fn sha256_is_stable_hex() {
-        let a = compute("hello").content_sha256;
-        assert_eq!(a, compute("hello").content_sha256);
-        assert_eq!(a.len(), 64);
-        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
-        assert_ne!(a, compute("world").content_sha256);
+    fn encrypted_content_stays_opaque_and_hashes_serialized_bytes() {
+        let payload = serde_json::json!({"ciphertext": "opaque\\nbytes"});
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let stored = compute_encrypted(payload.clone()).unwrap();
+        assert_eq!(stored.body, WriteTextBody::Encrypted(payload));
+        assert_eq!(stored.content_sha256, sha256_hex(&bytes));
+        assert_eq!(stored.byte_len, bytes.len() as i64);
+        assert_eq!(stored.line_count, 0);
+        assert_eq!(
+            compute_encrypted(serde_json::json!([])),
+            Err(ServiceError::InvalidInput(
+                "encrypted_payload must be a JSON object".to_owned()
+            )),
+        );
     }
 }

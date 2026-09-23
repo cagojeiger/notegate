@@ -274,6 +274,20 @@ mod tests {
     use notegate_core::cursor;
 
     #[test]
+    fn grep_line_numbers_preserve_cr_and_ignore_only_the_final_lf() {
+        let cr = ContentMatcher::new(r"\r$", GrepMatchMode::Regex).unwrap();
+        assert_eq!(
+            cr.match_lines("가\r\n🙂\r\n끝\n\n", GrepLineMode::All),
+            vec![1, 2]
+        );
+
+        let blank = ContentMatcher::new(r"^$", GrepMatchMode::Regex).unwrap();
+        assert_eq!(blank.match_lines("가\n\n🙂\n", GrepLineMode::All), vec![2]);
+        assert!(blank.match_lines("", GrepLineMode::All).is_empty());
+        assert!(blank.match_lines("가\n", GrepLineMode::All).is_empty());
+    }
+
+    #[test]
     fn search_cursor_helpers_round_trip_position_and_omit_empty_cursor() {
         let scope_node_id = Uuid::new_v4();
         assert_eq!(
@@ -516,7 +530,7 @@ mod tests {
 
     #[test]
     fn logical_lines_omit_only_the_terminal_newline() {
-        assert_eq!(logical_lines("").collect::<Vec<_>>(), vec![""]);
+        assert!(logical_lines("").next().is_none());
         assert_eq!(
             logical_lines("first\nsecond\n").collect::<Vec<_>>(),
             vec!["first", "second"]

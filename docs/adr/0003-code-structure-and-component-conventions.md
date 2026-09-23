@@ -6,7 +6,7 @@
 
 ## 맥락
 
-notegate 백엔드는 `core · model · db · service · search · command · api`를 중심으로 구성하고,
+notegate 백엔드는 `core · text · model · db · service · search · command · api`를 중심으로 구성하고,
 `cli`가 HTTP Command API의 외부 adapter 역할을 한다. 구조와 테스트 전략은 PostgreSQL 중심의
 단일 제품 백엔드라는 전제에 맞춘다.
 
@@ -49,6 +49,9 @@ api transport adapters ──▶ api commands ──┬─▶ service ──▶ 
 
 - db는 service나 search를 의존하지 않는다.
 - model은 여러 레이어가 함께 쓰는 순수 데이터 타입과 command/view/cursor DTO를 둔다.
+- text는 다른 내부 크레이트에 의존하지 않는 순수 텍스트 엔진이다. 줄 경계·내용 통계·편집·구문
+  검사를 담당한다. model은 text의 편집 입력 타입을 재노출하고, service와 search는 text를 직접 호출한다.
+- 텍스트 엔진 오류의 서비스 오류 변환, 저장 DTO 변환, 권한·quota·읽기 제한은 service에 둔다.
 - command는 transport-neutral 입력, 허용 operation, JSON Schema, recovery와 오류 계약을 소유한다.
   허용 operation은 한 선언에서 schema와 runtime 검증 값으로 파생한다. 입력 경계에서는 알 수 없는
   값을 구조화된 `invalid_input` 응답으로 변환할 수 있도록 raw string을 유지한다.

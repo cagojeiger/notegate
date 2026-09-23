@@ -2,6 +2,7 @@
 
 use notegate_core::limits;
 use notegate_model::search::{FindMatchMode, GrepLineMode, GrepMatchMode};
+pub(super) use notegate_text::lines::logical_lines;
 use regex::{Regex, RegexBuilder};
 
 use crate::{SearchError, SearchResult};
@@ -62,11 +63,6 @@ impl ContentMatcher {
         }
         lines
     }
-}
-
-pub(super) fn logical_lines(content: &str) -> impl Iterator<Item = &str> {
-    let content = content.strip_suffix('\n').unwrap_or(content);
-    content.split('\n')
 }
 
 pub(super) struct PathFilters {

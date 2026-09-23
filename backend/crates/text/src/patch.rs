@@ -1,4 +1,4 @@
-//! Text patch/edit engines for MCP/REST text mutations.
+//! Pure string and line-based text editing.
 //!
 //! String patch is exact by default: each `unique` edit must match exactly once.
 //! `first` and `all` are explicit opt-ins for broader replacement. Line edits use
@@ -8,9 +8,62 @@ use std::borrow::Cow;
 
 use similar::TextDiff;
 
-use crate::error::ServiceError;
+use crate::lines::line_ranges;
 
-use super::{Edit, LineEdit, PatchMode};
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatchMode {
+    Unique,
+    First,
+    All,
+}
+
+impl PatchMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "unique" => Some(Self::Unique),
+            "first" => Some(Self::First),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unique => "unique",
+            Self::First => "first",
+            Self::All => "all",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Edit {
+    pub old_text: String,
+    pub new_text: String,
+    pub mode: PatchMode,
+    pub expected_count: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LineEdit {
+    InsertBefore {
+        line: i64,
+        content: String,
+    },
+    InsertAfter {
+        line: i64,
+        content: String,
+    },
+    ReplaceLines {
+        start_line: i64,
+        end_line: i64,
+        content: String,
+    },
+    DeleteLines {
+        start_line: i64,
+        end_line: i64,
+    },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppliedText {
@@ -18,7 +71,7 @@ pub struct AppliedText {
     pub replacements: usize,
 }
 
-/// Why a patch/edit failed. Mapped to `400`/`409` by [`PatchError::into_service_error`].
+/// Why a patch/edit failed. Callers decide how to report input errors and conflicts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PatchError {
     EmptyOldText,
@@ -28,39 +81,6 @@ pub enum PatchError {
     CountMismatch { expected: usize, actual: usize },
     OverlappingEdits,
     InvalidLine(String),
-}
-
-impl PatchError {
-    pub fn into_service_error(self) -> ServiceError {
-        match self {
-            Self::EmptyOldText => {
-                ServiceError::InvalidInput("edit old_text must not be empty".to_owned())
-            }
-            Self::NoOpEdit => ServiceError::InvalidInput(
-                "edit old_text and new_text are identical (no-op)".to_owned(),
-            ),
-            Self::InvalidLine(message) => ServiceError::InvalidInput(message),
-            Self::NoMatch => ServiceError::Conflict(
-                "old_text did not match the current text; read it again before patching".to_owned(),
-            ),
-            Self::MultipleMatches => ServiceError::Conflict(
-                "old_text matched multiple times; use mode='all' or include more surrounding context"
-                    .to_owned(),
-            ),
-            Self::CountMismatch { expected, actual } => ServiceError::Conflict(format!(
-                "expected_count was {expected}, but current text has {actual} matches"
-            )),
-            Self::OverlappingEdits => {
-                ServiceError::Conflict("edits target overlapping ranges".to_owned())
-            }
-        }
-    }
-}
-
-impl From<PatchError> for ServiceError {
-    fn from(error: PatchError) -> Self {
-        error.into_service_error()
-    }
 }
 
 struct Span<'a> {
@@ -127,33 +147,31 @@ fn push_match_span<'a>(spans: &mut Vec<Span<'a>>, matched: (usize, &'a str), new
 
 /// Apply line-based edits against the original content.
 pub fn apply_line_edits(original: &str, edits: &[LineEdit]) -> Result<AppliedText, PatchError> {
-    let line_ranges = logical_line_ranges(original);
+    let line_ranges: Vec<_> = line_ranges(original).collect();
     let mut spans: Vec<Span<'_>> = Vec::with_capacity(edits.len());
 
     for edit in edits {
         match edit {
             LineEdit::InsertBefore { line, content } => {
                 let index = line_index(*line, line_ranges.len())?;
-                let (start, _end) = line_ranges
+                let range = line_ranges
                     .get(index)
-                    .copied()
                     .ok_or_else(|| PatchError::InvalidLine("line is out of range".to_owned()))?;
                 spans.push(Span {
-                    start,
-                    end: start,
+                    start: range.start,
+                    end: range.start,
                     new_text: Cow::Owned(line_content_before(content, true)),
                 });
             }
             LineEdit::InsertAfter { line, content } => {
                 let index = line_index(*line, line_ranges.len())?;
-                let (_start, end) = line_ranges
+                let range = line_ranges
                     .get(index)
-                    .copied()
                     .ok_or_else(|| PatchError::InvalidLine("line is out of range".to_owned()))?;
                 spans.push(Span {
-                    start: end,
-                    end,
-                    new_text: Cow::Owned(line_content_after(original, end, content)),
+                    start: range.end,
+                    end: range.end,
+                    new_text: Cow::Owned(line_content_after(original, range.end, content)),
                 });
             }
             LineEdit::ReplaceLines {
@@ -241,25 +259,6 @@ fn apply_spans<'a>(original: &str, mut spans: Vec<Span<'a>>) -> Result<AppliedTe
     })
 }
 
-fn logical_line_ranges(content: &str) -> Vec<(usize, usize)> {
-    if content.is_empty() {
-        return Vec::new();
-    }
-
-    let mut ranges = Vec::new();
-    let mut start = 0_usize;
-    for (offset, ch) in content.char_indices() {
-        if ch == '\n' {
-            ranges.push((start, offset + 1));
-            start = offset + 1;
-        }
-    }
-    if start < content.len() {
-        ranges.push((start, content.len()));
-    }
-    ranges
-}
-
 fn line_index(line: i64, line_count: usize) -> Result<usize, PatchError> {
     if line < 1 || line as usize > line_count {
         return Err(PatchError::InvalidLine(format!(
@@ -272,7 +271,7 @@ fn line_index(line: i64, line_count: usize) -> Result<usize, PatchError> {
 fn line_span(
     start_line: i64,
     end_line: i64,
-    line_ranges: &[(usize, usize)],
+    line_ranges: &[std::ops::Range<usize>],
 ) -> Result<(usize, usize), PatchError> {
     if start_line > end_line {
         return Err(PatchError::InvalidLine(
@@ -283,11 +282,11 @@ fn line_span(
     let end = line_index(end_line, line_ranges.len())?;
     let start_offset = line_ranges
         .get(start)
-        .map(|range| range.0)
+        .map(|range| range.start)
         .ok_or_else(|| PatchError::InvalidLine("start_line is out of range".to_owned()))?;
     let end_offset = line_ranges
         .get(end)
-        .map(|range| range.1)
+        .map(|range| range.end)
         .ok_or_else(|| PatchError::InvalidLine("end_line is out of range".to_owned()))?;
     Ok((start_offset, end_offset))
 }
