@@ -3,13 +3,21 @@
 use notegate_core::limits;
 use notegate_model::files::ChildrenCursor;
 use notegate_model::search::{TreeCursor, TreeFrame, TreePage, TreeRequest};
-use notegate_model::{Node, NodeKind};
+use notegate_model::{Channel, Node, NodeKind};
+use std::collections::{HashMap, VecDeque};
 
 use crate::error::{ServiceError, ServiceResult};
 use crate::files::policy::FileCommand;
 use crate::pagination::clamp_limit;
 
 use super::{FilesService, hydrate_node_views, join_path};
+
+// Only active DFS frames retain a page; nothing is serialized into the cursor.
+struct ChildrenPageBuffer {
+    parent_path: String,
+    children: VecDeque<Node>,
+    has_more: bool,
+}
 
 impl FilesService {
     /// List a subtree as path-first node summaries. Requires read permission.
@@ -42,6 +50,7 @@ impl FilesService {
 
         let mut items = Vec::with_capacity(limit as usize);
         let mut scanned = 0usize;
+        let mut pages: HashMap<uuid::Uuid, ChildrenPageBuffer> = HashMap::new();
         while !stack.is_empty()
             && items.len() < limit as usize
             && scanned < limits::SEARCH_NODE_SCAN_MAX
@@ -50,41 +59,54 @@ impl FilesService {
                 break;
             };
             self.load_node(space_id, frame.folder_node_id).await?;
-            let parent_path = self
-                .store
-                .node_path(space_id, frame.folder_node_id)
-                .await?
-                .unwrap_or_else(|| "/".to_owned());
-            let (children, has_more_children) = self
-                .store
-                .paged_children(
-                    space_id,
-                    frame.folder_node_id,
-                    limits::SEARCH_CHILDREN_PAGE_MAX,
-                    frame.after.as_ref(),
-                )
-                .await?;
+            let page = if let Some(page) = pages.get_mut(&frame.folder_node_id) {
+                page
+            } else {
+                let parent_path = self
+                    .store
+                    .node_path(space_id, frame.folder_node_id)
+                    .await?
+                    .unwrap_or_else(|| "/".to_owned());
+                let (children, has_more) = self
+                    .store
+                    .paged_children(
+                        space_id,
+                        frame.folder_node_id,
+                        limits::SEARCH_CHILDREN_PAGE_MAX.min(limit - items.len() as i64),
+                        frame.after.as_ref(),
+                    )
+                    .await?;
+                pages
+                    .entry(frame.folder_node_id)
+                    .or_insert(ChildrenPageBuffer {
+                        parent_path,
+                        children: children.into(),
+                        has_more,
+                    })
+            };
 
-            if children.is_empty() {
+            if page.children.is_empty() {
                 stack.pop();
+                pages.remove(&frame.folder_node_id);
                 continue;
             }
 
             let mut stopped_early = false;
-            for child in children {
+            while let Some(child) = page.children.pop_front() {
                 scanned += 1;
                 if let Some(top) = stack.last_mut() {
                     top.after = Some(child_cursor(&child));
                 }
 
                 let child_depth = frame.depth + 1;
-                let path = join_path(&parent_path, &child.name);
+                let path = join_path(&page.parent_path, &child.name);
                 let is_descendable_folder = child.kind == NodeKind::Folder && child_depth < depth;
-                items.push((child.clone(), path));
+                let child_id = child.id;
+                items.push((child, path));
 
                 if is_descendable_folder {
                     stack.push(TreeFrame {
-                        folder_node_id: child.id,
+                        folder_node_id: child_id,
                         depth: child_depth,
                         after: None,
                     });
@@ -98,12 +120,18 @@ impl FilesService {
                 }
             }
 
+            let page_exhausted = page.children.is_empty();
+            let has_more_children = page.has_more;
+            if page_exhausted && has_more_children {
+                pages.remove(&frame.folder_node_id);
+            }
             if !stopped_early && !has_more_children {
                 let should_pop = stack
                     .last()
                     .is_some_and(|top| top.folder_node_id == frame.folder_node_id);
                 if should_pop {
                     stack.pop();
+                    pages.remove(&frame.folder_node_id);
                 }
             }
         }
@@ -114,6 +142,17 @@ impl FilesService {
         } else {
             None
         };
+
+        // A cached sibling may have lost external access while we visited a
+        // subtree. Recheck returned ids (including ancestors) before hydration.
+        if self.channel != Channel::Browser {
+            let ids = items.iter().map(|(node, _)| node.id).collect::<Vec<_>>();
+            let allowed = self
+                .store
+                .externally_accessible_node_ids(space_id, &ids, false)
+                .await?;
+            items.retain(|(node, _)| allowed.contains(&node.id));
+        }
 
         Ok(TreePage {
             items: hydrate_node_views(&self.store, space_id, items).await?,

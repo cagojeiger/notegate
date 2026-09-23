@@ -348,22 +348,29 @@ async fn mutation_transactions_reject_protected_subtrees() -> Result<(), Box<dyn
             scoped.reveal_node(owner, space, hidden).await,
             Err(notegate_service::ServiceError::NotFound(_))
         ));
-        assert!(matches!(
-            scoped
-                .read_text(
-                    owner,
-                    space,
-                    ReadText {
-                        node_id: hidden,
-                        start_line: None,
-                        max_lines: None,
-                        max_bytes: None,
-                        if_none_match_sha256: None,
-                    }
-                )
-                .await,
-            Err(notegate_service::ServiceError::NotFound(_))
-        ));
+        let current_hash = repo
+            .text_stats(space, hidden)
+            .await?
+            .unwrap()
+            .content_sha256;
+        for if_none_match_sha256 in [None, Some(current_hash)] {
+            assert!(matches!(
+                scoped
+                    .read_text(
+                        owner,
+                        space,
+                        ReadText {
+                            node_id: hidden,
+                            start_line: None,
+                            max_lines: None,
+                            max_bytes: None,
+                            if_none_match_sha256,
+                        }
+                    )
+                    .await,
+                Err(notegate_service::ServiceError::NotFound(_))
+            ));
+        }
         let batch = scoped
             .batch_children(
                 owner,

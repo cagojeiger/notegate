@@ -241,6 +241,13 @@ pub struct PendingObjectUpload {
     pub node_id: Option<Uuid>,
 }
 
+/// A conditional text read, with no body loaded when the hash matches.
+#[derive(Debug)]
+pub enum TextRead {
+    Content(Box<TextObject>),
+    Unchanged(TextStats),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextStats {
     pub content_sha256: String,

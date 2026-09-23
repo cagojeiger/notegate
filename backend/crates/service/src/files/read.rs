@@ -1,4 +1,5 @@
 use notegate_core::limits;
+use notegate_model::files::TextRead;
 use notegate_model::{FileObject, Node, NodeKind, NodeSummary};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -466,22 +467,35 @@ impl FilesService {
     ) -> ServiceResult<ReadResult> {
         self.authorize(space_id, caller_account_id, FileCommand::Read)
             .await?;
-        let (node, text) = self.load_text(space_id, command.node_id).await?;
+        let Some((node, text)) = self
+            .store
+            .find_text_for_read(
+                space_id,
+                command.node_id,
+                command.if_none_match_sha256.as_deref(),
+            )
+            .await?
+        else {
+            return Err(self.text_not_found(space_id, command.node_id).await?);
+        };
+        self.require_node_access(&node).await?;
+        let text = match text {
+            TextRead::Unchanged(stats) => {
+                let view = self
+                    .text_node_view_with_stats(space_id, node, stats.clone())
+                    .await?;
+                return Ok(ReadResult {
+                    node: view,
+                    storage_format: stats.storage_format,
+                    body: ReadTextBody::Unchanged,
+                    content_sha256: stats.content_sha256,
+                    byte_len: stats.byte_len,
+                    line_count: stats.line_count,
+                });
+            }
+            TextRead::Content(text) => text,
+        };
         let view = self.text_node_view(space_id, node, &text).await?;
-
-        // Conditional read: unchanged when the caller's hash matches.
-        if let Some(ref hash) = command.if_none_match_sha256
-            && hash == &text.content_sha256
-        {
-            return Ok(ReadResult {
-                node: view,
-                storage_format: text.storage_format,
-                body: ReadTextBody::Unchanged,
-                content_sha256: text.content_sha256,
-                byte_len: text.byte_len,
-                line_count: text.line_count,
-            });
-        }
 
         let body = if let Some(plain_content) = text.content.as_deref() {
             ReadTextBody::Content(slice_text(

@@ -124,13 +124,23 @@ impl FilesService {
         node: Node,
         text: &TextObject,
     ) -> ServiceResult<NodeView> {
+        self.text_node_view_with_stats(space_id, node, stats_from_text(text))
+            .await
+    }
+
+    pub(super) async fn text_node_view_with_stats(
+        &self,
+        space_id: Uuid,
+        node: Node,
+        stats: TextStats,
+    ) -> ServiceResult<NodeView> {
         let path = self.path_of(space_id, node.id).await?;
         let write_lock_sources = self.write_lock_sources(space_id, node.id).await?;
         Ok(NodeView {
             node,
             path,
             has_children: false,
-            text: Some(stats_from_text(text)),
+            text: Some(stats),
             file: None,
             write_lock_sources,
         })

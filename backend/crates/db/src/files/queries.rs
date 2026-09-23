@@ -5,7 +5,7 @@ pub mod text {
 
     use notegate_core::security::PiiCrypto;
     use notegate_core::{Error, Result};
-    use notegate_model::files::TextStats;
+    use notegate_model::files::{TextRead, TextStats};
     use notegate_model::{Node, TextAtRestEncryption, TextObject, TextStorageFormat};
     use sqlx::PgPool;
     use std::collections::HashMap;
@@ -123,6 +123,44 @@ pub mod text {
         space_id: Uuid,
         node_id: Uuid,
     ) -> Result<Option<(Node, TextObject)>> {
+        find_text_row(pool, space_id, node_id, None)
+            .await?
+            .map(|(node, row)| Ok((node, row.into_text(crypto)?)))
+            .transpose()
+    }
+
+    /// Compare the hash and select the body in the same SQL snapshot. A match
+    /// avoids transferring large values and never enters the decryption path.
+    pub async fn find_text_for_read(
+        pool: &PgPool,
+        crypto: &PiiCrypto,
+        space_id: Uuid,
+        node_id: Uuid,
+        if_none_match: Option<&str>,
+    ) -> Result<Option<(Node, TextRead)>> {
+        let Some((node, row)) = find_text_row(pool, space_id, node_id, if_none_match).await? else {
+            return Ok(None);
+        };
+        let text = if if_none_match == Some(row.content_sha256.as_str()) {
+            TextRead::Unchanged(parse_text_stats(
+                row.content_sha256,
+                row.byte_len,
+                row.line_count,
+                &row.storage_format,
+                &row.at_rest_encryption,
+            )?)
+        } else {
+            TextRead::Content(Box::new(row.into_text(crypto)?))
+        };
+        Ok(Some((node, text)))
+    }
+
+    async fn find_text_row(
+        pool: &PgPool,
+        space_id: Uuid,
+        node_id: Uuid,
+        if_none_match: Option<&str>,
+    ) -> Result<Option<(Node, TextRow)>> {
         let node_row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {NODE_COLUMNS} FROM nodes \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL AND kind = 'text'"
@@ -137,20 +175,27 @@ pub mod text {
             return Ok(None);
         };
 
-        let doc_row = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT {TEXT_COLUMNS} FROM text_objects \
-         WHERE space_id = $1 AND node_id = $2"
-        )))
+        let doc_row = sqlx::query_as::<_, TextRow>(
+            "SELECT node_id, space_id, \
+             CASE WHEN content_sha256 = $3 THEN NULL ELSE content_text END AS content, \
+             CASE WHEN content_sha256 = $3 THEN NULL ELSE encrypted_payload END AS encrypted_payload, \
+             content_sha256, byte_len, line_count, media_type, encoding, storage_format, \
+             at_rest_encryption, \
+             CASE WHEN content_sha256 = $3 THEN NULL ELSE content_ciphertext END AS content_ciphertext, \
+             content_nonce, content_enc_key_id, content_enc_version, \
+             created_by_account_id, updated_by_account_id, created_at, updated_at \
+             FROM text_objects WHERE space_id = $1 AND node_id = $2",
+        )
         .bind(space_id)
         .bind(node_id)
+        .bind(if_none_match)
         .fetch_optional(pool)
         .await
         .map_err(map_sqlx_error)?;
 
-        match doc_row {
-            Some(doc_row) => Ok(Some((node_row.into_node()?, doc_row.into_text(crypto)?))),
-            None => Ok(None),
-        }
+        doc_row
+            .map(|row| Ok((node_row.into_node()?, row)))
+            .transpose()
     }
 
     pub async fn find_text_object(
