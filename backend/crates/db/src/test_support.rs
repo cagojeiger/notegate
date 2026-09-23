@@ -38,7 +38,8 @@ impl TestDb {
                 return Ok(None);
             }
         };
-        let schema = format!("notegate_test_{}", Uuid::new_v4().simple());
+        let run_id = std::env::var("NOTEGATE_TEST_RUN_ID").ok();
+        let schema = schema_name(run_id.as_deref(), Uuid::new_v4())?;
         let mut admin = PgConnection::connect(&database_url).await?;
         // Extensions are database-global and not schema-isolated. Install them
         // once in `public` before running the per-test schema migration; applying
@@ -199,4 +200,58 @@ async fn record_migration(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+// The integration runner owns only schemas with its validated, unique run ID.
+fn schema_name(run_id: Option<&str>, id: Uuid) -> Result<String, std::io::Error> {
+    match run_id {
+        None => Ok(format!("notegate_test_{}", id.simple())),
+        Some(run_id)
+            if run_id.len() == 16
+                && run_id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) =>
+        {
+            Ok(format!("notegate_test_{run_id}_{}", id.simple()))
+        }
+        Some(_) => Err(std::io::Error::other(
+            "NOTEGATE_TEST_RUN_ID must contain exactly 16 lowercase hexadecimal digits",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::schema_name;
+    use uuid::Uuid;
+
+    #[test]
+    fn run_scoped_schema_names_fit_postgres_identifiers() -> Result<(), std::io::Error> {
+        let id = Uuid::new_v4();
+        let name = schema_name(Some("0123456789abcdef"), id)?;
+        assert_eq!(
+            name,
+            format!("notegate_test_0123456789abcdef_{}", id.simple())
+        );
+        assert_eq!(name.len(), 63);
+        assert_eq!(
+            schema_name(None, id)?,
+            format!("notegate_test_{}", id.simple())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_run_ids_are_rejected() {
+        for run_id in [
+            "",
+            "short",
+            "0123456789ABCDEF",
+            "0123456789abcdef0",
+            "0123456789abcde_",
+            "'; DROP SCHEMA x",
+        ] {
+            assert!(schema_name(Some(run_id), Uuid::new_v4()).is_err());
+        }
+    }
 }
