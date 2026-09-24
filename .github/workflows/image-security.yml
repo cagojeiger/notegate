@@ -1,0 +1,109 @@
+name: Image Security
+
+on:
+  schedule:
+    # Every day at 09:20 KST.
+    - cron: "20 0 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/image-security.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-security-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: Resolve latest image
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ref: ${{ steps.image.outputs.ref }}
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Pin latest to its digest
+        id: image
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+        run: |
+          manifest=$(docker buildx imagetools inspect "$IMAGE:latest" --format '{{json .Manifest}}')
+          digest=$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' <<< "$manifest")
+          for arch in amd64 arm64; do
+            jq -e --arg arch "$arch" \
+              '.manifests | any(.platform.os == "linux" and .platform.architecture == $arch)' \
+              <<< "$manifest" >/dev/null
+          done
+          echo "ref=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
+          printf 'Scanning %s:latest at %s on linux/amd64 and linux/arm64.\n' \
+            "$IMAGE" "$digest" >> "$GITHUB_STEP_SUMMARY"
+
+  scan:
+    name: Trivy linux/${{ matrix.arch }}
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan published image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/${{ matrix.arch }}
+          TRIVY_IMAGE_SRC: remote
+        with:
+          version: v0.74.0
+          image-ref: ${{ needs.image.outputs.ref }}
+          scanners: vuln
+          format: json
+          output: trivy.json
+          exit-code: "0"
+          ignore-unfixed: false
+          timeout: 10m
+
+      - name: Prepare reports
+        run: |
+          trivy convert --format sarif --output trivy.sarif trivy.json
+          trivy convert --format table --output trivy.txt trivy.json
+          {
+            echo '### Vulnerability counts (including unfixed)'
+            jq -r '[.Results[]?.Vulnerabilities[]?] | group_by(.Severity)[] | "- \(.[0].Severity): \(length)"' trivy.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload scan reports
+        if: ${{ always() && hashFiles('trivy.json') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-linux-${{ matrix.arch }}
+          path: |
+            trivy.json
+            trivy.sarif
+            trivy.txt
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Publish security findings
+        if: ${{ always() && github.event_name != 'pull_request' && hashFiles('trivy.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-image-linux-${{ matrix.arch }}
+
+      - name: Fail on high or critical vulnerabilities
+        if: ${{ always() && hashFiles('trivy.json') != '' }}
+        run: trivy convert --format table --severity HIGH,CRITICAL --exit-code 1 trivy.json
