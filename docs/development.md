@@ -262,6 +262,13 @@ cargo test -p notegate-media
 - `Dependency Security`는 PR에서 dependency review와 RustSec 감사를 수행한다.
   Rust 감사는 yanked crate도 실패시킨다. 매주 또는 수동 실행 시 Rust와 npm 모두 감사한다.
   PR/main의 `Web` 검사와 `make frontend-check`도 개발 의존성을 포함해 npm 감사를 수행한다.
+- `Image Security`는 매일 09:20 KST 또는 수동 실행 시 GHCR의 `latest` 이미지를 Trivy로 검사한다.
+  실행 시작 시 digest를 고정하고 linux/amd64와 linux/arm64를 각각 검사한다.
+  수정 버전이 없는 항목도 보고하며 HIGH/CRITICAL 취약점이 있으면 실행을 실패시킨다.
+  JSON/SARIF/텍스트 보고서는 Actions artifact에 30일 보존하고, 일일·수동 실행 결과는
+  GitHub Security의 code scanning에 아키텍처별로 게시한다. 워크플로 변경 PR도 현재 발행
+  이미지를 검사하되 Security 결과를 게시하지 않는다. 이 검사는 이미지에서 식별 가능한
+  패키지를 대상으로 하며, Rust 바이너리와 프론트엔드 번들의 소스 의존성 감사는 위 검사를 유지한다.
 - `.cargo/audit.toml`의 `RUSTSEC-2023-0071` 예외는 openidconnect의 RSA 서명 검증 경로에
   한정한다. 네트워크에서 관찰 가능한 RSA 개인키 연산을 추가하거나 upstream 수정 버전이
   나오면 즉시 재검토한다. 현재 lockfile에 없는 extract-zip의 npm 감사 예외는 제거했다.
