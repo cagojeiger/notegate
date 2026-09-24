@@ -104,6 +104,12 @@ make up
 
 `web` image는 dashboard와 Rust server를 포함한다. Proxy는 public listener만 `http://localhost:9191`에 노출하고 Compose는 PostgreSQL, MinIO, Prometheus, Grafana와 로컬 bucket 초기화 job을 함께 실행한다. Compose는 `all` mode를 사용하고 private search listener는 container loopback에 유지한다. `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`는 각 replica에 전달된다.
 
+최종 runtime은 digest로 고정한 `gcr.io/distroless/cc-debian13:nonroot`이며 UID/GID
+`10001:10001`로 실행한다. Rust/Node 빌드 도구는 build stage에만 있고, runtime의 glibc,
+libgcc와 CA 인증서는 Distroless가 제공한다. Runtime에는 shell이나 package manager가
+없으므로 `docker exec ... sh`를 사용할 수 없다. 상태 확인은 `/health`, `/ready`와
+외부 probe container를 사용하고, 진단 도구는 별도 debug container에서 실행한다.
+
 완전 분리 실행 계약은 `docker-compose.split.yml`로 검증한다. 이 stack은 `api`,
 `search`, `worker`, `reconciler`를 각각 다른 process로 실행하고 Prometheus가 네
 control plane의 `/metrics`를 독립적으로 scrape한다. 실행과 검증은

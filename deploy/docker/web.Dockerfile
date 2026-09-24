@@ -89,20 +89,16 @@ RUN --mount=type=cache,id=notegate-cargo-registry,target=/usr/local/cargo/regist
 #
 # The split-topology test target uses this image without dashboard assets, so
 # backend process composition can be built independently of the Node stage.
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS runtime-base
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:54df941ed0d06a1bd95ef5e0ce391fd8d9f94b64782dc9a60062727849ee3f97 AS runtime-base
 
-# Runtime only needs a CA bundle for outbound HTTPS. Copy it from the build
-# image instead of apt-installing ca-certificates, which would also pull
-# openssl packages into the final image.
-COPY --from=chef /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-RUN groupadd --gid 10001 app \
-    && useradd --uid 10001 --gid app --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin appuser
+# Distroless supplies glibc, libgcc and CA certificates without a shell or
+# package manager. Keep the existing numeric identity for mounted volumes.
 WORKDIR /app
 COPY --from=builder /usr/local/bin/notegate-api /usr/local/bin/notegate-api
 
 ENV NOTEGATE_BIND_ADDR=0.0.0.0:9191
 
-USER appuser
+USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/notegate-api"]
 
 # Backend-only image used by docker-compose.split.yml.
