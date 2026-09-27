@@ -77,32 +77,11 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Start MinIO
-        run: |
-          docker run --detach --name notegate-minio \
-            --publish 9000:9000 \
-            --env MINIO_ROOT_USER=minio-root \
-            --env MINIO_ROOT_PASSWORD=minio-root-secret \
-            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
-              break
-            fi
-            if [ "$attempt" = 30 ]; then
-              docker logs notegate-minio
-              exit 1
-            fi
-            sleep 1
-          done
-          docker run --rm --network host \
-            --env MINIO_ENDPOINT=http://127.0.0.1:9000 \
-            --env MINIO_ROOT_USER=minio-root \
-            --env MINIO_ROOT_PASSWORD=minio-root-secret \
-            --env NOTEGATE_S3_BUCKET=notegate-test \
-            --env NOTEGATE_S3_ACCESS_KEY=notegate-app \
-            --env NOTEGATE_S3_SECRET_KEY=notegate-app-secret \
-            --volume "$PWD/deploy/minio/init.sh:/config/init.sh:ro" \
-            --entrypoint /bin/sh \
-            quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z /config/init.sh
+        env:
+          NOTEGATE_S3_BUCKET: notegate-test
+          NOTEGATE_S3_ACCESS_KEY: notegate-app
+          NOTEGATE_S3_SECRET_KEY: notegate-app-secret
+        run: bash deploy/ci/start-minio.sh
 
       - name: Check
         run: cargo check --locked --workspace --all-targets
@@ -172,6 +151,77 @@ jobs:
       - name: Build
         run: pnpm --filter web build
 
+  image-pr:
+    name: PR Image Gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build PR image locally
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/web.Dockerfile
+          platforms: linux/amd64
+          cache-from: type=gha,scope=notegate-release-amd64
+          tags: notegate-pr:${{ github.sha }}
+          load: true
+          push: false
+
+      - name: Report high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_IMAGE_SRC: docker
+        with:
+          version: v0.74.0
+          image-ref: notegate-pr:${{ github.sha }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          format: json
+          output: trivy.json
+          ignore-unfixed: false
+          exit-code: "0"
+          timeout: 10m
+
+      - name: Summarize image findings
+        run: |
+          {
+            echo '### HIGH and CRITICAL findings, including unfixed'
+            jq -r '[.Results[]?.Vulnerabilities[]?] | group_by(.Severity)[] | "- \(.[0].Severity): \(length)"' trivy.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain scan report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr-image-trivy
+          path: trivy.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Block fixable critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_IMAGE_SRC: docker
+        with:
+          version: v0.74.0
+          image-ref: notegate-pr:${{ github.sha }}
+          scanners: vuln
+          severity: CRITICAL
+          format: table
+          ignore-unfixed: true
+          exit-code: "1"
+          timeout: 10m
+
   browser:
     name: Browser E2E
     needs: [hygiene, rust, web]
@@ -232,33 +282,12 @@ jobs:
         run: pnpm --filter web exec playwright install --with-deps chromium
 
       - name: Start MinIO
-        run: |
-          docker run --detach --name notegate-minio \
-            --publish 9000:9000 \
-            --env MINIO_API_CORS_ALLOW_ORIGIN=http://127.0.0.1:5173 \
-            --env MINIO_ROOT_USER=minio-root \
-            --env MINIO_ROOT_PASSWORD=minio-root-secret \
-            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
-              break
-            fi
-            if [ "$attempt" = 30 ]; then
-              docker logs notegate-minio
-              exit 1
-            fi
-            sleep 1
-          done
-          docker run --rm --network host \
-            --env MINIO_ENDPOINT=http://127.0.0.1:9000 \
-            --env MINIO_ROOT_USER=minio-root \
-            --env MINIO_ROOT_PASSWORD=minio-root-secret \
-            --env NOTEGATE_S3_BUCKET="$NOTEGATE_S3__BUCKET" \
-            --env NOTEGATE_S3_ACCESS_KEY="$NOTEGATE_S3__ACCESS_KEY" \
-            --env NOTEGATE_S3_SECRET_KEY="$NOTEGATE_S3__SECRET_KEY" \
-            --volume "$PWD/deploy/minio/init.sh:/config/init.sh:ro" \
-            --entrypoint /bin/sh \
-            quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z /config/init.sh
+        env:
+          MINIO_API_CORS_ALLOW_ORIGIN: http://127.0.0.1:5173
+          NOTEGATE_S3_BUCKET: ${{ env.NOTEGATE_S3__BUCKET }}
+          NOTEGATE_S3_ACCESS_KEY: ${{ env.NOTEGATE_S3__ACCESS_KEY }}
+          NOTEGATE_S3_SECRET_KEY: ${{ env.NOTEGATE_S3__SECRET_KEY }}
+        run: bash deploy/ci/start-minio.sh
 
       - name: Seed test identities
         id: seed_test_identity

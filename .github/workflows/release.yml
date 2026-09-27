@@ -97,7 +97,8 @@ jobs:
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf '%s\n' "$digest" > "/tmp/digests/${{ matrix.arch }}"
 
       - name: Upload digest
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -106,6 +107,90 @@ jobs:
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
+
+  scan:
+    name: Trivy image gate linux/${{ matrix.arch }}
+    needs: [version, build]
+    if: ${{ needs.version.outputs.should_release == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Download image digest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests
+
+      - name: Select immutable image
+        id: image
+        run: |
+          digest="$(cat "/tmp/digests/${{ matrix.arch }}")"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "ref=${REGISTRY}/${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"
+          echo "Scanning ${REGISTRY}/${IMAGE}@${digest} (linux/${{ matrix.arch }})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/${{ matrix.arch }}
+          TRIVY_IMAGE_SRC: remote
+        with:
+          version: v0.74.0
+          image-ref: ${{ steps.image.outputs.ref }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          format: json
+          output: trivy-linux-${{ matrix.arch }}.json
+          exit-code: "0"
+          ignore-unfixed: false
+          timeout: 10m
+
+      - name: Prepare SARIF and summary
+        run: |
+          trivy convert --format sarif --output "trivy-linux-${{ matrix.arch }}.sarif" "trivy-linux-${{ matrix.arch }}.json"
+          {
+            echo '### HIGH and CRITICAL findings, including unfixed'
+            jq -r '[.Results[]?.Vulnerabilities[]?] | group_by(.Severity)[] | "- \(.[0].Severity): \(length)"' "trivy-linux-${{ matrix.arch }}.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain scan evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-trivy-${{ matrix.arch }}
+          path: |
+            trivy-linux-${{ matrix.arch }}.json
+            trivy-linux-${{ matrix.arch }}.sarif
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish security findings
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          sarif_file: trivy-linux-${{ matrix.arch }}.sarif
+          category: trivy-release-linux-${{ matrix.arch }}
+
+      - name: Block fixable critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/${{ matrix.arch }}
+          TRIVY_IMAGE_SRC: remote
+        with:
+          version: v0.74.0
+          image-ref: ${{ steps.image.outputs.ref }}
+          scanners: vuln
+          severity: CRITICAL
+          format: table
+          ignore-unfixed: true
+          exit-code: "1"
+          timeout: 10m
 
   cli:
     name: Build CLI ${{ matrix.target }}
@@ -177,7 +262,7 @@ jobs:
 
   release:
     name: Release
-    needs: [version, build, cli]
+    needs: [version, build, scan, cli]
     if: ${{ needs.version.outputs.should_release == 'true' }}
     runs-on: ubuntu-latest
     permissions:
@@ -204,6 +289,13 @@ jobs:
           pattern: cli-*
           merge-multiple: true
 
+      - name: Download image scan reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: /tmp/scan-reports
+          pattern: release-trivy-*
+          merge-multiple: true
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -217,10 +309,13 @@ jobs:
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
+          set -euo pipefail
           version="${{ needs.version.outputs.version }}"
           images=()
-          for digest in *; do
-            images+=("${REGISTRY}/${IMAGE}@sha256:${digest}")
+          for arch in amd64 arm64; do
+            digest="$(cat "$arch")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            images+=("${REGISTRY}/${IMAGE}@${digest}")
           done
           docker buildx imagetools create \
             -t "${REGISTRY}/${IMAGE}:${version}" \
@@ -229,8 +324,30 @@ jobs:
 
       - name: Inspect manifest
         run: |
+          set -euo pipefail
           version="${{ needs.version.outputs.version }}"
-          docker buildx imagetools inspect "${REGISTRY}/${IMAGE}:${version}"
+          image="${REGISTRY}/${IMAGE}"
+          manifest="$(docker buildx imagetools inspect "${image}:${version}" --format '{{json .Manifest}}')"
+          index_digest="$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' <<< "$manifest")"
+          for arch in amd64 arm64; do
+            expected="$(cat "/tmp/digests/${arch}")"
+            actual="$(jq -er --arg arch "$arch" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest' <<< "$manifest")"
+            test "$actual" = "$expected"
+          done
+          latest_digest="$(docker buildx imagetools inspect "${image}:latest" --format '{{json .Manifest}}' | jq -er '.digest')"
+          test "$latest_digest" = "$index_digest"
+          mkdir -p /tmp/cli-release
+          jq -n \
+            --arg version "$version" \
+            --arg source_sha "$RELEASE_SHA" \
+            --arg image "$image" \
+            --arg index_digest "$index_digest" \
+            --arg amd64 "$(cat /tmp/digests/amd64)" \
+            --arg arm64 "$(cat /tmp/digests/arm64)" \
+            '{schema_version: 1, version: $version, source_sha: $source_sha, image: $image, index_digest: $index_digest, architectures: {amd64: $amd64, arm64: $arm64}}' \
+            > /tmp/cli-release/image-digests.json
+          cp /tmp/scan-reports/trivy-linux-{amd64,arm64}.json /tmp/cli-release/
+          echo "Published ${image}@${index_digest} after both image gates passed." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Prepare CLI release assets
         shell: bash
