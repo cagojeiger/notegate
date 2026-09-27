@@ -175,7 +175,6 @@ jobs:
   image-pr:
     name: PR Image Gate
     if: github.event_name == 'pull_request'
-    needs: [hygiene, rust, web]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
