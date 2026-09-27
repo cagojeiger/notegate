@@ -70,6 +70,7 @@ jobs:
           version: v0.74.0
           image-ref: ${{ needs.image.outputs.ref }}
           scanners: vuln
+          severity: HIGH,CRITICAL
           format: json
           output: trivy.json
           exit-code: "0"
@@ -104,6 +105,17 @@ jobs:
           sarif_file: trivy.sarif
           category: trivy-image-linux-${{ matrix.arch }}
 
-      - name: Fail on high or critical vulnerabilities
-        if: ${{ always() && hashFiles('trivy.json') != '' }}
-        run: trivy convert --format table --severity HIGH,CRITICAL --exit-code 1 trivy.json
+      - name: Alert on fixable critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/${{ matrix.arch }}
+          TRIVY_IMAGE_SRC: remote
+        with:
+          version: v0.74.0
+          image-ref: ${{ needs.image.outputs.ref }}
+          scanners: vuln
+          severity: CRITICAL
+          format: table
+          ignore-unfixed: true
+          exit-code: "1"
+          timeout: 10m

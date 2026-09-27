@@ -268,13 +268,21 @@ cargo test -p notegate-media
 - `Dependency Security`는 PR에서 dependency review와 RustSec 감사를 수행한다.
   Rust 감사는 yanked crate도 실패시킨다. 매주 또는 수동 실행 시 Rust와 npm 모두 감사한다.
   PR/main의 `Web` 검사와 `make frontend-check`도 개발 의존성을 포함해 npm 감사를 수행한다.
+- PR의 `PR Image Gate`는 자격 증명 없이 linux/amd64 이미지를 로컬 빌드한다.
+  HIGH/CRITICAL은 수정 가능 여부와 관계없이 보고하고, 수정 가능한 CRITICAL만 실패시킨다.
+  릴리즈에서는 최종 linux/amd64·linux/arm64 이미지를 각각 digest로 푸시한 뒤 같은
+  기준으로 검사한다. 두 검사가 통과해야 버전/`latest` 태그와 GitHub Release가 만들어진다.
+  릴리즈에는 index·아키텍처별 digest를 담은 `image-digests.json`과 검사 JSON을 보존한다.
+  스캔 전에 푸시한 태그 없는 digest는 레지스트리에 남을 수 있다.
 - `Image Security`는 매일 09:20 KST 또는 수동 실행 시 GHCR의 `latest` 이미지를 Trivy로 검사한다.
   실행 시작 시 digest를 고정하고 linux/amd64와 linux/arm64를 각각 검사한다.
-  수정 버전이 없는 항목도 보고하며 HIGH/CRITICAL 취약점이 있으면 실행을 실패시킨다.
+  수정 버전이 없는 HIGH/CRITICAL도 보고하며 수정 가능한 CRITICAL이 있으면 실행을 실패시킨다.
   JSON/SARIF/텍스트 보고서는 Actions artifact에 30일 보존하고, 일일·수동 실행 결과는
   GitHub Security의 code scanning에 아키텍처별로 게시한다. 워크플로 변경 PR도 현재 발행
   이미지를 검사하되 Security 결과를 게시하지 않는다. 이 검사는 이미지에서 식별 가능한
   패키지를 대상으로 하며, Rust 바이너리와 프론트엔드 번들의 소스 의존성 감사는 위 검사를 유지한다.
+  `latest` 재검사는 운영 배포 digest의 증거가 아니다. GitOps는 선언된 운영 이미지를 별도로
+  재검사하고, 실제 배포 확인에는 Argo 상태와 Pod imageID를 확인한다.
 - `.cargo/audit.toml`의 `RUSTSEC-2023-0071` 예외는 openidconnect의 RSA 서명 검증 경로에
   한정한다. 네트워크에서 관찰 가능한 RSA 개인키 연산을 추가하거나 upstream 수정 버전이
   나오면 즉시 재검토한다. 현재 lockfile에 없는 extract-zip의 npm 감사 예외는 제거했다.
@@ -285,6 +293,7 @@ base에서 `Hygiene`, `Rust`, `Web`, `Browser E2E`, `Dependency Review`, `RustSe
 추가되는 medium 이상 보안 경고와 error 수준 분석 경고를 차단한다. Actions는 전체 commit SHA 고정을
 요구하고 기본 토큰 권한은 read-only이며 PR 승인 권한은 없다. Secret scanning, push
 protection, Dependabot security updates, 비공개 취약점 제보를 사용한다.
+새 `PR Image Gate`를 병합 차단 조건으로 삼으려면 main ruleset의 필수 검사에도 추가해야 한다.
 
 CodeQL 기본 설정은 Actions와 JS/TS의 extended query suite와 remote/local threat model을
 사용한다. Rust는 현재 기본 설정 API가 허용하지 않아 이 CodeQL 범위에 포함되지 않는다.
