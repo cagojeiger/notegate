@@ -25,7 +25,7 @@ export MINIO_ROOT_PASSWORD=minio-root-secret
 
 for attempt in $(seq 1 30); do
   if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
-    PATH="$bin_dir:$PATH" MINIO_ENDPOINT=http://127.0.0.1:9000 deploy/minio/init.sh
+    PATH="$bin_dir:$PATH" MINIO_ENDPOINT=http://127.0.0.1:9000 sh deploy/minio/init.sh
     exit 0
   fi
   if [ "$attempt" = 30 ]; then
