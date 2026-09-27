@@ -194,6 +194,7 @@ jobs:
           context: .
           file: deploy/docker/web.Dockerfile
           platforms: linux/amd64
+          cache-from: type=gha,scope=notegate-release-amd64
           tags: notegate-pr:${{ github.sha }}
           load: true
           push: false
