@@ -5,6 +5,8 @@ import type { NodeSummary } from "../../api/types";
 export type NodeContextPoint = Pick<MouseEvent, "clientX" | "clientY" | "preventDefault">;
 export type NodeContextHandler = (node: NodeSummary, event: NodeContextPoint) => void;
 
+export type TreeRevealRequest = { spaceId: string; nodeId: string; path: string };
+
 export type TreeKeyboardNavigation = {
   focusLastNode: () => boolean;
 };

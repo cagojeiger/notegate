@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 
 import type { Me, Space } from "../api/types";
 import { canViewAuditEvents } from "../auth/permissions";
@@ -7,6 +7,7 @@ import { MarkdownOutlineProvider } from "../features/editor/MarkdownOutlineConte
 import { useUsageQuery } from "../features/spaces/useUsageQueries";
 import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
 import { PrimarySidebar } from "../features/nodes/PrimarySidebar";
+import type { TreeRevealRequest } from "../features/nodes/types";
 import { useAudioRecordingState } from "../features/recording/AudioRecordingContext";
 import { ActivityRail } from "../features/spaces/ActivityRail";
 import { MobileSpaceBar } from "../features/spaces/MobileSpaceBar";
@@ -58,6 +59,10 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
   const recording = useAudioRecordingState();
   const [historyScope, setHistoryScope] = useState<HistoryScope | null>(null);
   const [surface, setSurface] = useState<AppSurface>("workbench");
+  const [treeRevealRequest, setTreeRevealRequest] = useState<TreeRevealRequest | null>(null);
+  const recentRequestId = useRef(0);
+  const activeSpaceId = useRef(workbench.activeSpace?.id ?? null);
+  activeSpaceId.current = workbench.activeSpace?.id ?? null;
   const { actions } = workbench;
   const recordingActive = recording.status !== "idle";
   const canWriteWorkbench = workbench.canWriteActiveSpace && !recordingActive;
@@ -120,14 +125,31 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
     closeMobilePanels();
     setHistoryScope({ initialSpaceId: workbench.activeSpace?.id ?? null });
   };
-  const openNode = async (node: Parameters<typeof actions.openNode>[0]) => {
+  const cancelTreeReveal = () => {
+    recentRequestId.current += 1;
+    setTreeRevealRequest(null);
+  };
+  const openNodeCore = async (node: Parameters<typeof actions.openNode>[0]) => {
     try {
-      await actions.openNode(node);
+      return await actions.openNode(node);
     } finally {
       closeMobilePanels();
     }
   };
+  const openNode = (node: Parameters<typeof actions.openNode>[0]) => {
+    cancelTreeReveal();
+    return openNodeCore(node);
+  };
+  const openRecentNode = (node: Parameters<typeof actions.openNode>[0]) => {
+    cancelTreeReveal();
+    const requestId = recentRequestId.current;
+    void openNodeCore(node).then((reveal) => {
+      if (requestId !== recentRequestId.current || activeSpaceId.current !== node.space_id || !reveal) return;
+      setTreeRevealRequest({ spaceId: node.space_id, nodeId: reveal.target.id, path: reveal.target.path });
+    });
+  };
   const openNodeInNewGroup = async (node: Parameters<typeof actions.openNodeInNewGroup>[0]) => {
+    cancelTreeReveal();
     try {
       await actions.openNodeInNewGroup(node);
     } finally {
@@ -135,6 +157,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
     }
   };
   const focusEditorGroup = (index: number) => {
+    cancelTreeReveal();
     actions.focusGroup(index);
     workbench.inspectNode(workbench.editorGroups[index]?.node ?? null);
   };
@@ -199,6 +222,10 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   openedNodeId={workbench.activeNode?.id ?? null}
                   inspectedNodeId={workbench.inspectedNodeId}
                   expandedFolderIds={workbench.expandedFolderIds}
+                  revealRequest={treeRevealRequest}
+                  onRevealRequestHandled={(request) => setTreeRevealRequest((current) => current === request ? null : current)}
+                  onCancelTreeReveal={cancelTreeReveal}
+                  onOpenRecentNode={openRecentNode}
                   onToggleFolder={actions.toggleFolder}
                   onInspectNode={workbench.inspectNode}
                   onOpenNode={(node) => { void openNode(node); }}

@@ -7,7 +7,7 @@ import { canMoveNodeToFolder, canMutateNode } from "./nodeWriteAccess";
 import { NodeRow } from "./NodeRow";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { projectVisibleTree, type TreeFolderSnapshot, type TreeRow } from "./treeProjection";
-import type { NodeContextHandler, TreeKeyboardNavigationRegistrar } from "./types";
+import type { NodeContextHandler, TreeKeyboardNavigationRegistrar, TreeRevealRequest } from "./types";
 import { useNodeChildrenQuery } from "./useNodeQueries";
 import { useTreeRestoreBatch } from "./useTreeRestoreBatch";
 import { useVirtualTreeNavigation } from "./useVirtualTreeNavigation";
@@ -17,11 +17,14 @@ type TreeProps = {
   openedNodeId: string | null;
   inspectedNodeId: string | null;
   expandedFolderIds: Set<string>;
+  revealRequest?: TreeRevealRequest | null;
+  onRevealRequestHandled?: (request: TreeRevealRequest) => void;
   onToggleFolder: (nodeId: string) => void;
   onInspectNode: (node: NodeSummary) => void;
   onOpenNode: (node: NodeSummary) => void;
   onNodeContextMenu: NodeContextHandler;
   onMoveNodeToFolder: (node: NodeSummary, folder: NodeSummary) => void;
+  onUserNavigation?: () => void;
   canWriteActiveSpace: boolean;
 };
 
@@ -30,6 +33,8 @@ export function TreeSection({
   openedNodeId,
   inspectedNodeId,
   expandedFolderIds,
+  revealRequest,
+  onRevealRequestHandled,
   open,
   onToggle,
   headerActions,
@@ -38,6 +43,7 @@ export function TreeSection({
   onOpenNode,
   onNodeContextMenu,
   onMoveNodeToFolder,
+  onUserNavigation,
   onTreeNavigationChange,
   canWriteActiveSpace
 }: TreeProps & {
@@ -61,11 +67,14 @@ export function TreeSection({
           openedNodeId={openedNodeId}
           inspectedNodeId={inspectedNodeId}
           expandedFolderIds={expandedFolderIds}
+          revealRequest={revealRequest}
+          onRevealRequestHandled={onRevealRequestHandled}
           onToggleFolder={onToggleFolder}
           onInspectNode={onInspectNode}
           onOpenNode={onOpenNode}
           onNodeContextMenu={onNodeContextMenu}
           onMoveNodeToFolder={onMoveNodeToFolder}
+          onUserNavigation={onUserNavigation}
           onTreeNavigationChange={onTreeNavigationChange}
           canWriteActiveSpace={canWriteActiveSpace}
         />
@@ -80,16 +89,20 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
     openedNodeId,
     inspectedNodeId,
     expandedFolderIds,
+    revealRequest,
+    onRevealRequestHandled,
     onToggleFolder,
     onInspectNode,
     onOpenNode,
     onNodeContextMenu,
     onMoveNodeToFolder,
+    onUserNavigation,
     onTreeNavigationChange,
     canWriteActiveSpace
   } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   const fetchNextPageByParent = useRef(new Map<string, () => void>());
+  const requestedRevealPage = useRef<{ request: TreeProps["revealRequest"]; parentId: string; loaded: number } | null>(null);
   const [snapshots, setSnapshots] = useState<Map<string, TreeFolderSnapshot>>(() => new Map());
   const [draggedNode, setDraggedNode] = useState<NodeSummary | null>(null);
   const [dropFolderId, setDropFolderId] = useState<string | null>(null);
@@ -116,6 +129,45 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
     onTreeNavigationChange
   });
 
+  useEffect(() => {
+    if (!revealRequest) return;
+    if (revealRequest.spaceId !== activeSpace.id) {
+      onRevealRequestHandled?.(revealRequest);
+      return;
+    }
+    const index = visibleTree.rows.findIndex(
+      (row) => row.type === "node" && row.node.id === revealRequest.nodeId
+    );
+    if (index < 0) {
+      let parentId = root.id;
+      for (const row of visibleTree.rows) {
+        if (row.type === "node" && row.node.kind === "folder" && revealRequest.path.startsWith(`${row.node.path}/`)) {
+          parentId = row.node.id;
+        }
+      }
+      const snapshot = snapshots.get(parentId);
+      if (snapshot?.isError || (snapshot && !snapshot.isLoading && !snapshot.isFetchingNextPage && !snapshot.hasNextPage)) {
+        onRevealRequestHandled?.(revealRequest);
+        return;
+      }
+      const previous = requestedRevealPage.current;
+      const alreadyRequested = previous?.request === revealRequest
+        && previous.parentId === parentId
+        && previous.loaded === snapshot?.children.length;
+      if (
+        !snapshot?.hasNextPage || snapshot.isFetchingNextPage
+        || alreadyRequested
+      ) return;
+      const fetchNextPage = fetchNextPageByParent.current.get(parentId);
+      if (!fetchNextPage) return;
+      requestedRevealPage.current = { request: revealRequest, parentId, loaded: snapshot.children.length };
+      fetchNextPage();
+      return;
+    }
+    rowVirtualizer.scrollToIndex(index, { align: "center" });
+    onRevealRequestHandled?.(revealRequest);
+  }, [activeSpace.id, onRevealRequestHandled, revealRequest, root.id, rowVirtualizer, snapshots, visibleTree.rows]);
+
   const updateSnapshot = useCallback((parentId: string, snapshot: TreeFolderSnapshot) => {
     setSnapshots((current) => {
       const previous = current.get(parentId);
@@ -123,7 +175,8 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
         previous?.children === snapshot.children &&
         previous.isLoading === snapshot.isLoading &&
         previous.hasNextPage === snapshot.hasNextPage &&
-        previous.isFetchingNextPage === snapshot.isFetchingNextPage
+        previous.isFetchingNextPage === snapshot.isFetchingNextPage &&
+        previous.isError === snapshot.isError
       ) {
         return current;
       }
@@ -180,7 +233,10 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
         aria-label="Files"
         className="min-h-0 flex-1 overflow-y-auto"
         onKeyDown={handleTreeKeyDown}
-        onFocusCapture={handleTreeFocusCapture}
+        onFocusCapture={(event) => {
+          onUserNavigation?.();
+          handleTreeFocusCapture(event);
+        }}
         onBlurCapture={handleTreeBlurCapture}
         onDragLeave={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropFolderId(null);
@@ -267,9 +323,10 @@ function FolderQueryBridge({
       children,
       isLoading: query.isLoading,
       hasNextPage: query.hasNextPage,
-      isFetchingNextPage: query.isFetchingNextPage
+      isFetchingNextPage: query.isFetchingNextPage,
+      isError: query.isError
     });
-  }, [children, onSnapshot, parentId, query.hasNextPage, query.isFetchingNextPage, query.isLoading]);
+  }, [children, onSnapshot, parentId, query.hasNextPage, query.isFetchingNextPage, query.isLoading, query.isError]);
 
   return null;
 }

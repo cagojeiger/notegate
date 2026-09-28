@@ -5,7 +5,7 @@ import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
 import { ResizeSeparator } from "../../shared/ui";
 import { RecentSection } from "./RecentSection";
 import { TreeSection } from "./TreeSection";
-import type { NodeContextHandler, TreeKeyboardNavigationRegistrar } from "./types";
+import type { NodeContextHandler, TreeKeyboardNavigationRegistrar, TreeRevealRequest } from "./types";
 import { usePrimarySidebarSections } from "./usePrimarySidebarSections";
 
 export function PrimarySidebarSections({
@@ -13,6 +13,10 @@ export function PrimarySidebarSections({
   openedNodeId,
   inspectedNodeId,
   expandedFolderIds,
+  revealRequest,
+  onRevealRequestHandled,
+  onCancelTreeReveal,
+  onOpenRecentNode,
   onToggleFolder,
   onInspectNode,
   onOpenNode,
@@ -26,6 +30,10 @@ export function PrimarySidebarSections({
   openedNodeId: string | null;
   inspectedNodeId: string | null;
   expandedFolderIds: Set<string>;
+  revealRequest: TreeRevealRequest | null;
+  onRevealRequestHandled: (request: TreeRevealRequest) => void;
+  onCancelTreeReveal: () => void;
+  onOpenRecentNode: (node: NodeSummary) => void;
   canWriteActiveSpace: boolean;
   onToggleFolder: (nodeId: string) => void;
   onInspectNode: (node: NodeSummary) => void;
@@ -36,6 +44,12 @@ export function PrimarySidebarSections({
   onTreeNavigationChange: TreeKeyboardNavigationRegistrar;
 }) {
   const sections = usePrimarySidebarSections();
+
+  function openRecentNode(node: NodeSummary) {
+    if (!sections.treeSectionOpen) sections.toggleTreeSection();
+    onOpenRecentNode(node);
+  }
+
   return (
     <div id="browse-sidebar-panel" role="tabpanel" aria-labelledby="browse-sidebar-panel-tab" ref={sections.gridRef} className="grid min-h-0 min-w-0 flex-1 content-start" style={{ gridTemplateRows: sections.gridRows }}>
       <TreeSection
@@ -43,15 +57,36 @@ export function PrimarySidebarSections({
         openedNodeId={openedNodeId}
         inspectedNodeId={inspectedNodeId}
         expandedFolderIds={expandedFolderIds}
+        revealRequest={revealRequest}
+        onRevealRequestHandled={onRevealRequestHandled}
         open={sections.treeSectionOpen}
-        onToggle={sections.toggleTreeSection}
+        onToggle={() => {
+          onCancelTreeReveal();
+          sections.toggleTreeSection();
+        }}
         headerActions={treeHeaderActions}
         onTreeNavigationChange={onTreeNavigationChange}
-        onToggleFolder={onToggleFolder}
-        onInspectNode={onInspectNode}
-        onOpenNode={onOpenNode}
-        onNodeContextMenu={onNodeContextMenu}
-        onMoveNodeToFolder={onMoveNodeToFolder}
+        onToggleFolder={(nodeId) => {
+          onCancelTreeReveal();
+          onToggleFolder(nodeId);
+        }}
+        onInspectNode={(node) => {
+          onCancelTreeReveal();
+          onInspectNode(node);
+        }}
+        onOpenNode={(node) => {
+          onCancelTreeReveal();
+          onOpenNode(node);
+        }}
+        onNodeContextMenu={(node, event) => {
+          onCancelTreeReveal();
+          onNodeContextMenu(node, event);
+        }}
+        onMoveNodeToFolder={(node, folder) => {
+          onCancelTreeReveal();
+          onMoveNodeToFolder(node, folder);
+        }}
+        onUserNavigation={onCancelTreeReveal}
         canWriteActiveSpace={canWriteActiveSpace}
       />
       <div
@@ -82,7 +117,7 @@ export function PrimarySidebarSections({
         open={sections.recentSectionOpen}
         onToggle={sections.toggleRecentSection}
         onToggleDensity={sections.toggleRecentDensity}
-        onOpenNode={onOpenNode}
+        onOpenNode={openRecentNode}
         onInspectNode={onInspectNode}
         onNodeContextMenu={onNodeContextMenu}
       />

@@ -65,15 +65,34 @@ test("Recent loads a second page once, deduplicates the boundary, and renders ho
 
 test("revealing a deeply nested recent node restores expanded folders with one batch request", async ({ page }) => {
   const folders = folderChain(10);
-  const target = node("target", "target.md", "text", folders.at(-1)?.id);
+  const target = node("target", "target.md", "text", folders.at(-1)?.id, `${folders.at(-1)?.path}/target.md`);
+  const preceding = Array.from({ length: 80 }, (_, index) =>
+    node(`root-${index}`, `root-${index}.md`, "text")
+  );
   let batchRequests = 0;
+  let rootNextPageRequests = 0;
   let nestedChildrenRequests = 0;
 
   await routeJsonApi(page, (url, request) => {
+    if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`) {
+      if (url.searchParams.has("cursor")) {
+        rootNextPageRequests += 1;
+        return childrenResponse(space.root_node_id, [folders[0]!]);
+      }
+      return { ...childrenResponse(space.root_node_id, preceding), page: pageInfo(80, true, "next-page", 100) };
+    }
     if (request.method() === "POST" && url.pathname.endsWith("/nodes:batchListChildren")) {
       batchRequests += 1;
       const parentIds = bodyParentIds(request.postData());
-      return { results: parentIds.map((parentId) => readyResult(parentId, folders, target)) };
+      return { results: parentIds.map((parentId) => parentId === space.root_node_id
+        ? {
+            parent_id: parentId,
+            status: "ready",
+            parent: { id: parentId, path: "/" },
+            children: preceding,
+            page: pageInfo(80, true, "next-page", 100)
+          }
+        : readyResult(parentId, folders, target)) };
     }
     if (isChildren(url) && !url.pathname.includes(`/${space.root_node_id}/`)) {
       nestedChildrenRequests += 1;
@@ -85,9 +104,155 @@ test("revealing a deeply nested recent node restores expanded folders with one b
   await page.goto("/");
   await page.locator("[data-recent-list]").getByRole("button", { name: target.name }).click();
 
-  await expect(page.getByRole("tree", { name: "Files" }).getByRole("button", { name: target.name })).toBeVisible();
+  const tree = page.getByRole("tree", { name: "Files" });
+  await expect(tree.getByRole("button", { name: target.name })).toBeVisible();
+  await expect.poll(() => tree.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   expect(batchRequests).toBe(1);
+  expect(rootNextPageRequests).toBe(1);
   expect(nestedChildrenRequests).toBe(0);
+});
+
+test("Recent loads the target's tree pages before scrolling to it", async ({ page }) => {
+  const target = node("target", "target.md", "text");
+  const firstPage = Array.from({ length: 80 }, (_, index) =>
+    node(`root-${index}`, `root-${index}.md`, "text")
+  );
+  const secondPage = Array.from({ length: 80 }, (_, index) =>
+    node(`root-${index + 80}`, `root-${index + 80}.md`, "text")
+  );
+  let nextPageRequests = 0;
+
+  await routeJsonApi(page, (url) => {
+    if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`) {
+      if (url.searchParams.get("cursor") === "next-page") {
+        nextPageRequests += 1;
+        return { ...childrenResponse(space.root_node_id, secondPage), page: pageInfo(80, true, "last-page", 100) };
+      }
+      if (url.searchParams.get("cursor") === "last-page") {
+        nextPageRequests += 1;
+        return { ...childrenResponse(space.root_node_id, [target]), page: pageInfo(1, false, null, 100) };
+      }
+      return { ...childrenResponse(space.root_node_id, firstPage), page: pageInfo(80, true, "next-page", 100) };
+    }
+    return browsingResponse(url, [], target);
+  });
+
+  await page.goto("/");
+  await page.locator("[data-recent-list]").getByRole("button", { name: target.name }).click();
+
+  const tree = page.getByRole("tree", { name: "Files" });
+  await expect(tree.getByRole("button", { name: target.name })).toBeVisible();
+  await expect.poll(() => tree.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(nextPageRequests).toBe(2);
+});
+
+test("Recent uses the revealed path when its cached path is stale", async ({ page }) => {
+  const folder = node("renamed", "renamed", "folder", space.root_node_id, "/renamed");
+  const target = node("target", "target.md", "text", folder.id, "/renamed/target.md");
+  const stale = { ...target, path: "/old/target.md" };
+  const beforeFolder = Array.from({ length: 30 }, (_, index) =>
+    node(`root-${index}`, `root-${index}.md`, "text")
+  );
+  const afterFolder = Array.from({ length: 69 }, (_, index) =>
+    node(`root-${index + 30}`, `root-${index + 30}.md`, "text")
+  );
+  let rootNextPageRequests = 0;
+
+  await routeJsonApi(page, (url) => {
+    if (isNodesList(url)) return { nodes: [stale], page: pageInfo(1, false, null, 50) };
+    if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`) {
+      if (url.searchParams.has("cursor")) {
+        rootNextPageRequests += 1;
+        return childrenResponse(space.root_node_id, []);
+      }
+      return {
+        ...childrenResponse(space.root_node_id, [...beforeFolder, folder, ...afterFolder]),
+        page: pageInfo(100, true, "next-page", 100)
+      };
+    }
+    if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${folder.id}/children`) {
+      return childrenResponse(folder.id, [target]);
+    }
+    return browsingResponse(url, [folder], target);
+  });
+
+  await page.goto("/");
+  await page.locator("[data-recent-list]").getByRole("button", { name: target.name }).click();
+
+  const tree = page.getByRole("tree", { name: "Files" });
+  await expect(tree.getByRole("button", { name: target.name })).toBeVisible();
+  expect(rootNextPageRequests).toBe(0);
+});
+
+test("an older Recent response does not replace a newer open node", async ({ page }) => {
+  const first = node("first", "first.md", "text");
+  const second = node("second", "second.md", "text");
+  let releaseFirst!: () => void;
+  let markFirstStarted!: () => void;
+  const firstReleased = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+
+  await routeJsonApi(page, (url) => {
+    if (isNodesList(url)) return { nodes: [first, second], page: pageInfo(2, false, null, 50) };
+    if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`) {
+      return childrenResponse(space.root_node_id, [first, second]);
+    }
+    if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${first.id}`) return first;
+    return browsingResponse(url, [], second);
+  });
+  await page.route(`**/api/v1/spaces/${space.id}/nodes/${first.id}/reveal`, async (route) => {
+    markFirstStarted();
+    await firstReleased;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ancestors: [node(space.root_node_id, "", "folder", null)], target: first })
+    });
+  });
+
+  await page.goto("/");
+  const recent = page.locator("[data-recent-list]");
+  await recent.getByRole("button", { name: first.name }).click();
+  await firstStarted;
+  await recent.getByRole("button", { name: second.name }).click();
+  await expect(page.locator('[data-editor-group][data-active="true"]')).toContainText(second.name);
+
+  const firstResponse = page.waitForResponse((response) => response.url().endsWith(`/nodes/${first.id}/reveal`));
+  releaseFirst();
+  await firstResponse;
+  await expect(page.locator('[data-editor-group][data-active="true"]')).toContainText(second.name);
+  await expect(page.getByRole("tree", { name: "Files" }).getByRole("treeitem", { name: second.name })).toHaveAttribute("aria-selected", "true");
+});
+
+test("mobile Files reveals the Recent target after reopening the sidebar", async ({ page }) => {
+  const target = node("target", "target.md", "text");
+  const firstPage = Array.from({ length: 80 }, (_, index) =>
+    node(`root-${index}`, `root-${index}.md`, "text")
+  );
+  let nextPageRequests = 0;
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await routeJsonApi(page, (url) => {
+    if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`) {
+      if (url.searchParams.has("cursor")) {
+        nextPageRequests += 1;
+        return childrenResponse(space.root_node_id, [target]);
+      }
+      return { ...childrenResponse(space.root_node_id, firstPage), page: pageInfo(80, true, "next-page", 100) };
+    }
+    return browsingResponse(url, [], target);
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Toggle left sidebar" }).click();
+  await page.locator("[data-recent-list]").getByRole("button", { name: target.name }).click();
+  await expect(page.getByRole("tree", { name: "Files" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Toggle left sidebar" }).click();
+
+  const tree = page.getByRole("tree", { name: "Files" });
+  await expect(tree.getByRole("button", { name: target.name })).toBeVisible();
+  await expect.poll(() => tree.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(nextPageRequests).toBe(1);
 });
 
 test("a malformed batch response falls back to individual folder queries", async ({ page }) => {

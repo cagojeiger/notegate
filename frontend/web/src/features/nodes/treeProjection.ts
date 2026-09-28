@@ -5,6 +5,7 @@ export type TreeFolderSnapshot = {
   isLoading: boolean;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
+  isError?: boolean;
 };
 
 export type TreeRow =

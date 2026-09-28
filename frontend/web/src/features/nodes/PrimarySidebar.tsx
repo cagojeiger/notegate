@@ -5,7 +5,7 @@ import { Tabs } from "../../shared/ui";
 import { BrowseActions } from "./BrowseActions";
 import { NodeContextMenu } from "./NodeContextMenu";
 import { PrimarySidebarSections } from "./PrimarySidebarSections";
-import type { NodeContextHandler } from "./types";
+import type { NodeContextHandler, TreeRevealRequest } from "./types";
 import { useSidebarKeyboardNavigation } from "./useSidebarKeyboardNavigation";
 
 const browseTabs: Array<{ id: "browse"; label: string; controls: string }> = [
@@ -17,6 +17,10 @@ export function PrimarySidebar({
   openedNodeId,
   inspectedNodeId,
   expandedFolderIds,
+  revealRequest,
+  onRevealRequestHandled,
+  onCancelTreeReveal,
+  onOpenRecentNode,
   onToggleFolder,
   onInspectNode,
   onOpenNode,
@@ -43,6 +47,10 @@ export function PrimarySidebar({
   openedNodeId: string | null;
   inspectedNodeId: string | null;
   expandedFolderIds: Set<string>;
+  revealRequest: TreeRevealRequest | null;
+  onRevealRequestHandled: (request: TreeRevealRequest) => void;
+  onCancelTreeReveal: () => void;
+  onOpenRecentNode: (node: NodeSummary) => void;
   canWriteActiveSpace: boolean;
   canManageActiveSpace: boolean;
   canOpenInNewGroup: boolean;
@@ -85,6 +93,10 @@ export function PrimarySidebar({
           openedNodeId={openedNodeId}
           inspectedNodeId={inspectedNodeId}
           expandedFolderIds={expandedFolderIds}
+          revealRequest={revealRequest}
+          onRevealRequestHandled={onRevealRequestHandled}
+          onCancelTreeReveal={onCancelTreeReveal}
+          onOpenRecentNode={onOpenRecentNode}
           onToggleFolder={onToggleFolder}
           onInspectNode={onInspectNode}
           onOpenNode={onOpenNode}
