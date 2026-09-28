@@ -46,7 +46,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 #
 # The final runtime image serves this Vite build from the Rust server, so the
 # deployed `web` container contains both the dashboard and the API/MCP backend.
-FROM node:22.23.2-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9 AS web-builder
+FROM node:22.23.3-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS web-builder
 
 WORKDIR /app
 ENV PNPM_HOME=/pnpm \
