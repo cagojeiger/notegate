@@ -167,6 +167,28 @@ describe("TreeSection", () => {
     await waitFor(() => expect(onRevealRequestHandled).toHaveBeenCalled());
   });
 
+  it("cancels a pending reveal on user scroll input, but not a programmatic scroll", () => {
+    vi.stubGlobal("IntersectionObserver", class {
+      observe() {}
+      disconnect() {}
+    });
+    mocks.useNodeChildrenQuery.mockReturnValue({ ...query([]), hasNextPage: true });
+    const onUserNavigation = vi.fn();
+    const view = render(treeSectionElement(space, {
+      revealRequest: { spaceId: space.id, nodeId: "missing", path: "/missing.md" },
+      onUserNavigation
+    }));
+    const tree = view.getByRole("tree", { name: "Files" });
+
+    fireEvent.scroll(tree);
+    expect(onUserNavigation).not.toHaveBeenCalled();
+
+    fireEvent.wheel(tree);
+    fireEvent.touchStart(tree);
+    fireEvent.pointerDown(tree);
+    expect(onUserNavigation).toHaveBeenCalledTimes(3);
+  });
+
   it("does not make effectively locked rows draggable", async () => {
     const locked = { ...node("text-1", "text"), effective_write_locked: true };
     mocks.useNodeChildrenQuery.mockReturnValue(query([locked]));

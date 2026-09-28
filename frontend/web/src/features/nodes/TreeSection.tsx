@@ -233,6 +233,9 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
         aria-label="Files"
         className="min-h-0 flex-1 overflow-y-auto"
         onKeyDown={handleTreeKeyDown}
+        onWheelCapture={onUserNavigation}
+        onTouchStartCapture={onUserNavigation}
+        onPointerDownCapture={onUserNavigation}
         onFocusCapture={(event) => {
           onUserNavigation?.();
           handleTreeFocusCapture(event);
