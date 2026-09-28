@@ -330,9 +330,23 @@ jobs:
           manifest="$(docker buildx imagetools inspect "${image}:${version}" --format '{{json .Manifest}}')"
           index_digest="$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' <<< "$manifest")"
           for arch in amd64 arm64; do
-            expected="$(cat "/tmp/digests/${arch}")"
-            actual="$(jq -er --arg arch "$arch" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest' <<< "$manifest")"
-            test "$actual" = "$expected"
+            scanned_digest="$(cat "/tmp/digests/${arch}")"
+            scanned_manifest="$(docker buildx imagetools inspect "${image}@${scanned_digest}" --format '{{json .Manifest}}')"
+            test "$(jq -er '.digest' <<< "$scanned_manifest")" = "$scanned_digest"
+            expected="$(jq -er --arg arch "$arch" '
+              if .manifests then
+                [.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest]
+                | if length == 1 then .[0] else empty end
+              else .digest end
+            ' <<< "$scanned_manifest")"
+            actual="$(jq -er --arg arch "$arch" '
+              [.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest]
+              | if length == 1 then .[0] else empty end
+            ' <<< "$manifest")"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::${arch} release digest $actual does not match scanned image digest $expected"
+              exit 1
+            fi
           done
           latest_digest="$(docker buildx imagetools inspect "${image}:latest" --format '{{json .Manifest}}' | jq -er '.digest')"
           test "$latest_digest" = "$index_digest"
