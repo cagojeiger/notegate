@@ -34,12 +34,14 @@ export function useWorkbenchNodeNavigationActions({
   const showToast = useUiStore((state) => state.showToast);
   const revealNodeInSpace = useRevealNode();
   const inspectedNodeIdRef = useRef(inspectedNode?.id ?? null);
+  const openNodeRequestRef = useRef(0);
   const navigatingGroupsRef = useRef(new Set<number>());
   const [navigatingGroupIds, setNavigatingGroupIds] = useState<ReadonlySet<number>>(new Set());
   inspectedNodeIdRef.current = inspectedNode?.id ?? null;
 
   async function openNode(summary: NodeSummary) {
-    await openNodeFromSummary(summary, openInActiveGroup);
+    const requestId = ++openNodeRequestRef.current;
+    return openNodeFromSummary(summary, openInActiveGroup, () => openNodeRequestRef.current === requestId);
   }
 
   async function openNodeInNewGroup(summary: NodeSummary) {
@@ -189,8 +191,9 @@ export function useWorkbenchNodeNavigationActions({
 
   async function openNodeFromSummary(
     summary: NodeSummary,
-    open: (node: RestNode) => void
-  ) {
+    open: (node: RestNode) => void,
+    isCurrent: () => boolean = () => true
+  ): Promise<NodeRevealResponse | null> {
     let revealFailed = false;
     if (activeSpace?.id === summary.space_id && summary.parent_id !== null) {
       let reveal: NodeRevealResponse | null = null;
@@ -199,21 +202,23 @@ export function useWorkbenchNodeNavigationActions({
       } catch {
         revealFailed = true;
       }
+      if (!isCurrent()) return null;
       if (reveal) {
         applyReveal(reveal);
         open(reveal.target);
         closeMobile();
-        return;
+        return reveal;
       }
     }
 
     const node = await loadCanonicalNode(summary, "Could not open item");
-    if (!node) return;
+    if (!node || !isCurrent()) return null;
     open(node);
     closeMobile();
     if (revealFailed) {
       showToast("Opened item, but could not reveal it in Files");
     }
+    return null;
   }
 
   async function revealNodeBestEffort(spaceId: string, node: NodeSummary) {

@@ -202,6 +202,47 @@ describe("useWorkbenchNodeNavigationActions", () => {
     expect(useUiStore.getState().expandedFolderIds.has(folder.id)).toBe(true);
   });
 
+  it("returns the current reveal path instead of the path in a stale summary", async () => {
+    const activeSpace = space("space-1");
+    const current = node("target", activeSpace.id, "/renamed/target.md");
+    const stale = { ...current, path: "/old/target.md" };
+    mocks.revealNode.mockResolvedValue({ ancestors: [], target: current });
+    const { result } = renderNavigationActions(activeSpace);
+
+    const open = result.current.openNode(stale);
+    await act(async () => {
+      await open;
+    });
+
+    expect((await open)?.target.path).toBe(current.path);
+    expect(useUiStore.getState().editorGroups[0].node?.path).toBe(current.path);
+  });
+
+  it("ignores an older open response after a newer node is opened", async () => {
+    const activeSpace = space("space-1");
+    const first = node("first", activeSpace.id, "/first.md");
+    const second = node("second", activeSpace.id, "/second.md");
+    const firstReveal = deferred<{ ancestors: RestNode[]; target: RestNode }>();
+    const secondReveal = deferred<{ ancestors: RestNode[]; target: RestNode }>();
+    mocks.revealNode.mockImplementation((_spaceId: string, nodeId: string) =>
+      nodeId === first.id ? firstReveal.promise : secondReveal.promise
+    );
+    const { result } = renderNavigationActions(activeSpace);
+
+    const firstOpen = result.current.openNode(first);
+    const secondOpen = result.current.openNode(second);
+    await act(async () => {
+      secondReveal.resolve({ ancestors: [], target: second });
+      await secondOpen;
+    });
+    await act(async () => {
+      firstReveal.resolve({ ancestors: [], target: first });
+      expect(await firstOpen).toBeNull();
+    });
+
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(second.id);
+  });
+
   it("opens an indexed link by node id through normal editor history", async () => {
     const activeSpace = space("space-1");
     const sourceNode = node("source", activeSpace.id, "/source.md");

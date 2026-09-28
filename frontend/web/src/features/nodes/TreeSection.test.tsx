@@ -1,5 +1,5 @@
 import { fireEvent, render, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RestNode } from "../../api/types";
 import { makeSpace } from "../../test/fixtures";
@@ -19,6 +19,8 @@ const space = makeSpace();
 const node = createTreeNodeFactory(space);
 
 describe("TreeSection", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   beforeEach(() => {
     mocks.useNodeChildrenQuery.mockReset();
     mocks.useTreeRestoreBatch.mockReset().mockReturnValue(false);
@@ -131,6 +133,60 @@ describe("TreeSection", () => {
     const view = renderTree(new Set());
 
     await waitFor(() => expect(view.container.querySelectorAll("[data-node-row]")).toHaveLength(20));
+  });
+
+  it("stops a reveal when the target is absent and the parent has no more pages", async () => {
+    mocks.useNodeChildrenQuery.mockReturnValue(query([node("other", "text")]));
+    const onRevealRequestHandled = vi.fn();
+
+    render(treeSectionElement(space, {
+      revealRequest: { spaceId: space.id, nodeId: "missing", path: "/missing.md" },
+      onRevealRequestHandled
+    }));
+
+    await waitFor(() => expect(onRevealRequestHandled).toHaveBeenCalled());
+  });
+
+  it("stops a reveal when loading the target folder fails", async () => {
+    vi.stubGlobal("IntersectionObserver", class {
+      observe() {}
+      disconnect() {}
+    });
+    mocks.useNodeChildrenQuery.mockReturnValue({
+      ...query([node("other", "text")]),
+      hasNextPage: true,
+      isError: true
+    });
+    const onRevealRequestHandled = vi.fn();
+
+    render(treeSectionElement(space, {
+      revealRequest: { spaceId: space.id, nodeId: "missing", path: "/missing.md" },
+      onRevealRequestHandled
+    }));
+
+    await waitFor(() => expect(onRevealRequestHandled).toHaveBeenCalled());
+  });
+
+  it("cancels a pending reveal on user scroll input, but not a programmatic scroll", () => {
+    vi.stubGlobal("IntersectionObserver", class {
+      observe() {}
+      disconnect() {}
+    });
+    mocks.useNodeChildrenQuery.mockReturnValue({ ...query([]), hasNextPage: true });
+    const onUserNavigation = vi.fn();
+    const view = render(treeSectionElement(space, {
+      revealRequest: { spaceId: space.id, nodeId: "missing", path: "/missing.md" },
+      onUserNavigation
+    }));
+    const tree = view.getByRole("tree", { name: "Files" });
+
+    fireEvent.scroll(tree);
+    expect(onUserNavigation).not.toHaveBeenCalled();
+
+    fireEvent.wheel(tree);
+    fireEvent.touchStart(tree);
+    fireEvent.pointerDown(tree);
+    expect(onUserNavigation).toHaveBeenCalledTimes(3);
   });
 
   it("does not make effectively locked rows draggable", async () => {
