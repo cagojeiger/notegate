@@ -172,7 +172,7 @@ jobs:
 
       - name: Publish security findings
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: trivy-linux-${{ matrix.arch }}.sarif
           category: trivy-release-linux-${{ matrix.arch }}
@@ -330,9 +330,23 @@ jobs:
           manifest="$(docker buildx imagetools inspect "${image}:${version}" --format '{{json .Manifest}}')"
           index_digest="$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' <<< "$manifest")"
           for arch in amd64 arm64; do
-            expected="$(cat "/tmp/digests/${arch}")"
-            actual="$(jq -er --arg arch "$arch" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest' <<< "$manifest")"
-            test "$actual" = "$expected"
+            scanned_digest="$(cat "/tmp/digests/${arch}")"
+            scanned_manifest="$(docker buildx imagetools inspect "${image}@${scanned_digest}" --format '{{json .Manifest}}')"
+            test "$(jq -er '.digest' <<< "$scanned_manifest")" = "$scanned_digest"
+            expected="$(jq -er --arg arch "$arch" '
+              if .manifests then
+                [.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest]
+                | if length == 1 then .[0] else empty end
+              else .digest end
+            ' <<< "$scanned_manifest")"
+            actual="$(jq -er --arg arch "$arch" '
+              [.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest]
+              | if length == 1 then .[0] else empty end
+            ' <<< "$manifest")"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::${arch} release digest $actual does not match scanned image digest $expected"
+              exit 1
+            fi
           done
           latest_digest="$(docker buildx imagetools inspect "${image}:latest" --format '{{json .Manifest}}' | jq -er '.digest')"
           test "$latest_digest" = "$index_digest"
