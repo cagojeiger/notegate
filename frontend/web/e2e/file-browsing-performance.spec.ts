@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import type {
   BatchChildrenItem,
@@ -102,14 +102,16 @@ test("revealing a deeply nested recent node restores expanded folders with one b
   });
 
   await page.goto("/");
-  await page.locator("[data-recent-list]").getByRole("button", { name: target.name }).click();
-
-  const tree = page.getByRole("tree", { name: "Files" });
-  await expect(tree.getByRole("button", { name: target.name })).toBeVisible();
-  await expect.poll(() => tree.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  const metrics = await measureRecentReveal(page, target.name);
   expect(batchRequests).toBe(1);
   expect(rootNextPageRequests).toBe(1);
   expect(nestedChildrenRequests).toBe(0);
+  console.log(`TREE_REVEAL_METRIC ${JSON.stringify({
+    scenario: "10 nested folders",
+    loadedNodes: preceding.length + folders.length + 1,
+    requests: { batch: batchRequests, rootNextPage: rootNextPageRequests, nested: nestedChildrenRequests },
+    ...metrics
+  })}`);
 });
 
 test("Recent loads the target's tree pages before scrolling to it", async ({ page }) => {
@@ -138,12 +140,14 @@ test("Recent loads the target's tree pages before scrolling to it", async ({ pag
   });
 
   await page.goto("/");
-  await page.locator("[data-recent-list]").getByRole("button", { name: target.name }).click();
-
-  const tree = page.getByRole("tree", { name: "Files" });
-  await expect(tree.getByRole("button", { name: target.name })).toBeVisible();
-  await expect.poll(() => tree.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  const metrics = await measureRecentReveal(page, target.name);
   expect(nextPageRequests).toBe(2);
+  console.log(`TREE_REVEAL_METRIC ${JSON.stringify({
+    scenario: "target on third root page",
+    loadedNodes: firstPage.length + secondPage.length + 1,
+    requests: { rootNextPage: nextPageRequests },
+    ...metrics
+  })}`);
 });
 
 test("Recent uses the revealed path when its cached path is stale", async ({ page }) => {
@@ -434,4 +438,31 @@ function pageInfo(
     has_more: hasMore,
     next_cursor: nextCursor
   };
+}
+
+async function measureRecentReveal(page: Page, targetName: string) {
+  const session = await page.context().newCDPSession(page);
+  await session.send("Performance.enable");
+  const readMetrics = async () => new Map<string, number>(
+    ((await session.send("Performance.getMetrics")) as { metrics: { name: string; value: number }[] })
+      .metrics.map((metric) => [metric.name, metric.value])
+  );
+  const before = await readMetrics();
+  const startedAt = performance.now();
+
+  await page.locator("[data-recent-list]").getByRole("button", { name: targetName }).click();
+  const tree = page.getByRole("tree", { name: "Files" });
+  await expect(tree.getByRole("button", { name: targetName })).toBeVisible();
+  await expect.poll(() => tree.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+  const elapsedMs = Math.round(performance.now() - startedAt);
+  const after = await readMetrics();
+  const deltaMs = (name: string) => {
+    const start = before.get(name);
+    const end = after.get(name);
+    return start === undefined || end === undefined ? null : Math.round((end - start) * 1_000);
+  };
+  const mountedRows = await tree.locator("[data-tree-index]").count();
+  await session.detach();
+  return { elapsedMs, taskMs: deltaMs("TaskDuration"), scriptMs: deltaMs("ScriptDuration"), mountedRows };
 }
