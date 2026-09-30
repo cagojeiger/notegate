@@ -171,6 +171,43 @@ test("Recent loads the target's tree pages before scrolling to it", async ({ pag
   })}`);
 });
 
+test("measures a reveal after 1,000 paged root nodes", async ({ page }) => {
+  test.setTimeout(60_000);
+  const target = node("bulk-target", "bulk-target.md", "text");
+  const pages = Array.from({ length: 10 }, (_, pageIndex) =>
+    Array.from({ length: 100 }, (__, index) => {
+      const id = `bulk-${pageIndex * 100 + index}`;
+      return node(id, `${id}.md`, "text");
+    })
+  );
+  let nextPageRequests = 0;
+
+  await routeJsonApi(page, (url) => {
+    if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`) {
+      const cursor = url.searchParams.get("cursor");
+      const pageIndex = cursor ? Number(cursor.slice("page-".length)) : 0;
+      if (cursor) nextPageRequests += 1;
+      const children = pages[pageIndex] ?? [target];
+      const hasMore = pageIndex < pages.length;
+      return {
+        ...childrenResponse(space.root_node_id, children),
+        page: pageInfo(children.length, hasMore, hasMore ? `page-${pageIndex + 1}` : null, 100)
+      };
+    }
+    return browsingResponse(url, [], target);
+  });
+
+  await page.goto("/");
+  const metrics = await measureRecentReveal(page, target.name);
+  expect(nextPageRequests).toBe(10);
+  console.log(`TREE_REVEAL_METRIC ${JSON.stringify({
+    scenario: "target after 1,000 paged root nodes",
+    loadedNodes: pages.length * 100 + 1,
+    requests: { rootNextPage: nextPageRequests },
+    ...metrics
+  })}`);
+});
+
 test("Recent uses the revealed path when its cached path is stale", async ({ page }) => {
   const folder = node("renamed", "renamed", "folder", space.root_node_id, "/renamed");
   const target = node("target", "target.md", "text", folder.id, "/renamed/target.md");

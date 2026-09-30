@@ -387,7 +387,7 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:4173/ >/dev/null
           pnpm --filter web exec playwright test e2e/file-browsing-performance.spec.ts \
-            --grep 'measures the fixed cost|revealing a deeply nested|Recent loads the target'
+            --grep 'measures the fixed cost|revealing a deeply nested|Recent loads the target|measures a reveal after'
 
       - name: Upload browser diagnostics
         if: failure()
