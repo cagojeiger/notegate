@@ -74,6 +74,7 @@ export function restoreSpaceWorkbench(spaceId: string, nextGroupId: number): Edi
 
 export function persistSpaceWorkbench(spaceId: string, editorGroups: EditorGroup[], activeGroupIndex: number): void {
   if (typeof window === "undefined") return;
+  const startedAt = performance.now();
   const updatedAt = Date.now();
   const groups = editorGroups.slice(0, MAX_EDITOR_GROUPS).map((group) => ({
     node: group.node?.space_id === spaceId ? group.node : null,
@@ -94,6 +95,9 @@ export function persistSpaceWorkbench(spaceId: string, editorGroups: EditorGroup
     updateWorkbenchIndex(spaceId, updatedAt);
   } catch {
     // Browser storage can be unavailable or full. Restoring panes is best-effort.
+  }
+  if (Reflect.get(window, "__measureWorkbenchStorage") === true) {
+    performance.measure("notegate-workbench-persist", { start: startedAt, end: performance.now() });
   }
 }
 

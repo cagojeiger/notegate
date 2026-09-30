@@ -100,6 +100,102 @@ test("restores the saved workbench before showing the app and persists panel tog
   });
 });
 
+for (const indexedSpaces of [2, 20]) {
+  test(`profiles editor persistence with ${indexedSpaces} indexed spaces`, async ({ page }) => {
+    test.skip(!process.env.NOTEGATE_PROFILE_WORKBENCH, "Run against the production bundle in CI");
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.addInitScript(({ node, spaceId, indexedSpaces: count }) => {
+      window.localStorage.setItem("notegate.lastActiveSpaceId", spaceId);
+      window.localStorage.setItem(`notegate.workbench.v1.space.${spaceId}`, JSON.stringify({
+        version: 1,
+        spaceId,
+        updatedAt: Date.now(),
+        activeGroupIndex: 0,
+        groups: [{ node, mode: "preview", back: [], forward: [] }]
+      }));
+      window.localStorage.setItem("notegate.workbench.v1.index", JSON.stringify({
+        version: 1,
+        spaces: [
+          { spaceId: "space-1", updatedAt: 2 },
+          { spaceId, updatedAt: 1 },
+          ...Array.from({ length: count - 2 }, (_, index) => ({
+            spaceId: `older-space-${index}`,
+            updatedAt: -index
+          }))
+        ]
+      }));
+
+      const storageCalls: { operation: string; durationMs: number; bytes: number }[] = [];
+      Reflect.set(window, "__workbenchStorageCalls", storageCalls);
+      Reflect.set(window, "__measureWorkbenchStorage", true);
+      const originalGet = Storage.prototype.getItem;
+      const originalSet = Storage.prototype.setItem;
+      const originalRemove = Storage.prototype.removeItem;
+      Storage.prototype.getItem = function (key) {
+        const start = performance.now();
+        try { return originalGet.call(this, key); } finally {
+          if (key.startsWith("notegate.workbench.v1.")) storageCalls.push({ operation: "read", durationMs: performance.now() - start, bytes: 0 });
+        }
+      };
+      Storage.prototype.setItem = function (key, value) {
+        const start = performance.now();
+        try { return originalSet.call(this, key, value); } finally {
+          if (key.startsWith("notegate.workbench.v1.")) storageCalls.push({ operation: "write", durationMs: performance.now() - start, bytes: value.length });
+        }
+      };
+      Storage.prototype.removeItem = function (key) {
+        const start = performance.now();
+        try { return originalRemove.call(this, key); } finally {
+          if (key.startsWith("notegate.workbench.v1.")) storageCalls.push({ operation: "remove", durationMs: performance.now() - start, bytes: 0 });
+        }
+      };
+    }, { node: savedNode, spaceId: savedSpace.id, indexedSpaces });
+    await mockApi(page);
+    await page.goto("/");
+    const editor = page.locator('[data-editor-group][data-active="true"]');
+    await expect(editor.getByRole("heading", { name: "Restored workbench" })).toBeVisible();
+    await page.evaluate(() => {
+      performance.clearMeasures("notegate-workbench-persist");
+      (Reflect.get(window, "__workbenchStorageCalls") as unknown[]).length = 0;
+    });
+
+    for (let iteration = 0; iteration < 10; iteration += 1) {
+      await editor.getByRole("button", { name: "Edit", exact: true }).click();
+      await expect(editor.getByRole("button", { name: "Cancel edit" })).toBeVisible();
+      await editor.getByRole("button", { name: "Cancel edit" }).click();
+      await expect(editor.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
+    }
+
+    await expect.poll(() => page.evaluate(() =>
+      performance.getEntriesByName("notegate-workbench-persist", "measure").length
+    )).toBeGreaterThanOrEqual(20);
+
+    const metrics = await page.evaluate(() => {
+      const durations = performance.getEntriesByName("notegate-workbench-persist", "measure")
+        .map((entry) => entry.duration)
+        .sort((a, b) => a - b);
+      const calls = Reflect.get(window, "__workbenchStorageCalls") as {
+        operation: string; durationMs: number; bytes: number
+      }[];
+      const writes = calls.filter((call) => call.operation === "write");
+      const percentile = (values: number[], fraction: number) => values[Math.ceil(values.length * fraction) - 1] ?? 0;
+      return {
+        saves: durations.length,
+        saveMedianMs: percentile(durations, 0.5),
+        saveP95Ms: percentile(durations, 0.95),
+        saveMaxMs: durations.at(-1) ?? 0,
+        storageReads: calls.filter((call) => call.operation === "read").length,
+        storageWrites: writes.length,
+        storageRemoves: calls.filter((call) => call.operation === "remove").length,
+        storageWriteMs: writes.reduce((sum, call) => sum + call.durationMs, 0),
+        storageWrittenChars: writes.reduce((sum, call) => sum + call.bytes, 0)
+      };
+    });
+    expect(metrics.saves).toBeGreaterThanOrEqual(20);
+    console.log(`WORKBENCH_STORAGE_METRIC ${JSON.stringify({ indexedSpaces, editCycles: 10, ...metrics })}`);
+  });
+}
+
 async function mockApi(page: import("@playwright/test").Page) {
   await routeJsonApi(page, (url) => responseFor(url));
 }

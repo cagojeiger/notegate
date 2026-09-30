@@ -373,6 +373,23 @@ jobs:
       - name: Test Lighthouse budgets
         run: pnpm --filter web test:lighthouse
 
+      - name: Profile workbench storage in production bundle
+        env:
+          NOTEGATE_WEB_BASE_URL: http://127.0.0.1:4173
+          NOTEGATE_PROFILE_WORKBENCH: "1"
+          NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
+        run: |
+          pnpm --filter web exec vite preview --host 127.0.0.1 --port 4173 --strictPort >browser-e2e/preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4173/ >/dev/null
+          pnpm --filter web exec playwright test e2e/workbench-persistence.spec.ts \
+            --grep 'profiles editor persistence'
+
       - name: Upload browser diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
