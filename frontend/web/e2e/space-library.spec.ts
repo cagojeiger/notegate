@@ -17,7 +17,6 @@ const initialSpaces: Space[] = [
 ];
 
 test("Space Library keeps its desktop light appearance", async ({ page }) => {
-  test.skip(!process.env.NOTEGATE_CAPTURE_VISUAL_BASELINE, "Generate the baseline in CI first");
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await mockSpaceLibraryApi(page);
@@ -25,6 +24,7 @@ test("Space Library keeps its desktop light appearance", async ({ page }) => {
   await page.getByRole("button", { name: "Open space library" }).click();
 
   await expect(page.getByRole("list", { name: "All spaces" }).getByRole("listitem")).toHaveCount(4);
+  await expect(page.getByRole("progressbar", { name: "Files usage" })).toBeVisible();
   await expect(page.locator("footer").getByText("ready", { exact: true })).toBeVisible();
   await expect(page).toHaveScreenshot("space-library-light-desktop.png", {
     animations: "disabled",
