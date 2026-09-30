@@ -373,6 +373,19 @@ jobs:
       - name: Test Lighthouse budgets
         run: pnpm --filter web test:lighthouse
 
+      - name: Generate Space Library visual baseline
+        env:
+          NOTEGATE_CAPTURE_VISUAL_BASELINE: "1"
+          NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
+        run: pnpm --filter web exec playwright test e2e/space-library.spec.ts --grep 'keeps its desktop light appearance' --update-snapshots
+
+      - name: Upload Space Library visual baseline
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: space-library-visual-baseline
+          path: frontend/web/e2e/space-library.spec.ts-snapshots/
+          if-no-files-found: error
+
       - name: Upload browser diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
