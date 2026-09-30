@@ -16,7 +16,7 @@ const initialSpaces: Space[] = [
   space("archive", "Archive", 4000, false)
 ];
 
-test("Space Library keeps its desktop light appearance", async ({ page }) => {
+test("Space Library keeps its Linux CI desktop light appearance", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await mockSpaceLibraryApi(page);
@@ -31,6 +31,27 @@ test("Space Library keeps its desktop light appearance", async ({ page }) => {
     caret: "hide",
     maxDiffPixelRatio: 0.002
   });
+});
+
+test("long Korean Space names stay within the mobile card", async ({ page }) => {
+  const name = "한글로 작성한 매우 긴 스페이스 이름과 추가 설명이 계속 이어지는 공간";
+  await page.setViewportSize({ width: 320, height: 800 });
+  await mockSpaceLibraryApi(page, [space("korean", name, 1000, true)]);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open space library" }).click();
+
+  const card = page.getByRole("list", { name: "All spaces" }).getByRole("listitem");
+  const inspect = card.getByRole("button", { name: `Inspect ${name}` });
+  const title = inspect.locator("span").first();
+  await expect(inspect).toBeVisible();
+  expect(await title.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return style.whiteSpace === "nowrap"
+      && style.overflowX === "hidden"
+      && style.textOverflow === "ellipsis"
+      && element.scrollWidth > element.clientWidth;
+  })).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
 
 test("Space Library keeps one accessible ordered grid", async ({ page }) => {
@@ -308,8 +329,8 @@ for (const viewport of [
   });
 }
 
-async function mockSpaceLibraryApi(page: Page) {
-  let spaces = initialSpaces.map((item) => ({ ...item }));
+async function mockSpaceLibraryApi(page: Page, initial = initialSpaces) {
+  let spaces = initial.map((item) => ({ ...item }));
   let patchCount = 0;
   let linkReindexRequests = 0;
   const pendingLinkIndexes = new Set<string>();
