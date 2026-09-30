@@ -121,6 +121,7 @@ describe("DocxPreview", () => {
     expect(frameDocument.head.textContent).toContain("blob:docx-bullet");
     expect(frameDocument.querySelector("[data-escaped-url]")?.hasAttribute("style")).toBe(false);
     expect(frameDocument.querySelector("[data-image-set]")?.hasAttribute("style")).toBe(false);
+    expect(frameDocument.querySelector("[data-event-handler]")?.hasAttribute("onclick")).toBe(false);
     expect(document.body).not.toHaveTextContent("Script");
   });
 
@@ -248,6 +249,11 @@ function renderedNodes(options: Partial<Options>) {
     "background-image:image-set(url(https://tracker.example/image-set.png) 1x)"
   );
   wrapper.appendChild(imageSet);
+
+  const eventHandler = document.createElement("span");
+  eventHandler.dataset.eventHandler = "true";
+  eventHandler.setAttribute("onclick", "alert(1)");
+  wrapper.appendChild(eventHandler);
 
   const style = document.createElement("style");
   style.textContent = [
