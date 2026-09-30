@@ -138,9 +138,10 @@ frontend/web/src/design/theme.css
 - 상태는 색상만으로 전달하지 않고 text, icon, shape 중 하나를 함께 사용한다.
 - 브랜드 자산은 제품 식별에만 사용하고 기능 icon은 Lucide로 통일한다.
 - UI font는 Apple/system sans stack.
+- Space Library 스크린샷 기준 이미지는 Linux CI의 시각적 회귀 검사에 사용한다. 운영체제별 시스템 글꼴의 모양을 동일하게 보장하는 기준은 아니다.
 - editor/code font는 monospace stack.
-- Button/input radius는 8-10px.
-- Panel/card radius는 12-16px.
+- 붙어 있는 Workbench control과 row는 4px, section surface는 6px radius를 사용한다. 독립 입력 필드는 8px을 사용한다.
+- 독립 card는 16px, 중앙 modal은 8px radius를 사용한다. Panel은 section surface 규칙을 따른다.
 - shadow는 popover/dialog/focus에만 사용한다.
 
 ## Area style
