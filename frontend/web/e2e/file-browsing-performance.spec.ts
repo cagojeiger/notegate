@@ -469,6 +469,8 @@ async function measureRecentReveal(page: Page, targetName: string, requireScroll
       .metrics.map((metric) => [metric.name, metric.value])
   );
   const before = await readMetrics();
+  await session.send("Profiler.enable");
+  await session.send("Profiler.start");
   const startedAt = performance.now();
 
   await page.locator("[data-recent-list]").getByRole("button", { name: targetName }).click();
@@ -476,6 +478,13 @@ async function measureRecentReveal(page: Page, targetName: string, requireScroll
   await expect(tree.getByRole("button", { name: targetName })).toBeVisible();
   if (requireScroll) await expect.poll(() => tree.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 
+  const { profile } = (await session.send("Profiler.stop")) as {
+    profile: {
+      nodes: { id: number; callFrame: { functionName: string; url: string } }[];
+      samples: number[];
+      timeDeltas: number[];
+    };
+  };
   const elapsedMs = Math.round(performance.now() - startedAt);
   const after = await readMetrics();
   const deltaMs = (name: string) => {
@@ -485,5 +494,16 @@ async function measureRecentReveal(page: Page, targetName: string, requireScroll
   };
   const mountedRows = await tree.locator("[data-tree-index]").count();
   await session.detach();
-  return { elapsedMs, taskMs: deltaMs("TaskDuration"), scriptMs: deltaMs("ScriptDuration"), mountedRows };
+  const frames = new Map(profile.nodes.map((node) => [node.id, node.callFrame]));
+  const selfMs = new Map<string, number>();
+  for (const [index, sample] of profile.samples.entries()) {
+    const frame = frames.get(sample);
+    if (!frame) continue;
+    const source = frame.url.split("?")[0]!.replace(/^https?:\/\/[^/]+/u, "") || "(native)";
+    const key = `${source}#${frame.functionName || "(anonymous)"}`;
+    selfMs.set(key, (selfMs.get(key) ?? 0) + profile.timeDeltas[index]! / 1_000);
+  }
+  const topCpu = [...selfMs].sort((left, right) => right[1] - left[1]).slice(0, 8)
+    .map(([frame, ms]) => ({ frame, selfMs: Math.round(ms) }));
+  return { elapsedMs, taskMs: deltaMs("TaskDuration"), scriptMs: deltaMs("ScriptDuration"), mountedRows, topCpu };
 }
