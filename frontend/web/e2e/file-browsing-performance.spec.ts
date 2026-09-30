@@ -63,6 +63,27 @@ test("Recent loads a second page once, deduplicates the boundary, and renders ho
   expect(recentRequests[1]).toContain("cursor=recent-cursor-1");
 });
 
+test("measures the fixed cost of revealing one root node", async ({ page }) => {
+  const target = node("single-target", "single-target.md", "text");
+  let rootRequests = 0;
+  await routeJsonApi(page, (url) => {
+    if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`) {
+      rootRequests += 1;
+      return childrenResponse(space.root_node_id, [target]);
+    }
+    return browsingResponse(url, [], target);
+  });
+
+  await page.goto("/");
+  const metrics = await measureRecentReveal(page, target.name, false);
+  console.log(`TREE_REVEAL_METRIC ${JSON.stringify({
+    scenario: "one root node",
+    loadedNodes: 1,
+    requests: { root: rootRequests },
+    ...metrics
+  })}`);
+});
+
 test("revealing a deeply nested recent node restores expanded folders with one batch request", async ({ page }) => {
   const folders = folderChain(10);
   const target = node("target", "target.md", "text", folders.at(-1)?.id, `${folders.at(-1)?.path}/target.md`);
@@ -440,7 +461,7 @@ function pageInfo(
   };
 }
 
-async function measureRecentReveal(page: Page, targetName: string) {
+async function measureRecentReveal(page: Page, targetName: string, requireScroll = true) {
   const session = await page.context().newCDPSession(page);
   await session.send("Performance.enable");
   const readMetrics = async () => new Map<string, number>(
@@ -453,7 +474,7 @@ async function measureRecentReveal(page: Page, targetName: string) {
   await page.locator("[data-recent-list]").getByRole("button", { name: targetName }).click();
   const tree = page.getByRole("tree", { name: "Files" });
   await expect(tree.getByRole("button", { name: targetName })).toBeVisible();
-  await expect.poll(() => tree.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  if (requireScroll) await expect.poll(() => tree.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 
   const elapsedMs = Math.round(performance.now() - startedAt);
   const after = await readMetrics();
