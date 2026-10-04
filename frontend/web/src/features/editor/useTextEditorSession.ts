@@ -114,6 +114,7 @@ export function useTextEditorSession({
     draft,
     sha,
     () => {
+      setEditSessionId(crypto.randomUUID());
       setConflict(false);
       onSetMode("preview");
     },

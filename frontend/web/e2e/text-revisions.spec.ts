@@ -74,15 +74,56 @@ test("lazily opens revision comparison and restores with the reviewed current ha
   await expect(dialog.getByText("MTU: 1450", { exact: true })).toBeVisible();
   await dialog.getByRole("tab", { name: "Full version" }).click();
   await expect(dialog.getByRole("heading", { name: "Network", exact: true })).toBeVisible();
+  await page.screenshot({ path: "test-results/text-revisions-full-version.png" });
   await dialog.getByRole("tab", { name: "Compare changes" }).click();
   await expect(dialog.getByLabel("Version comparison", { exact: true })).toBeVisible();
   await page.screenshot({ path: "test-results/text-revisions-desktop.png" });
   await dialog.getByRole("button", { name: "Restore this version" }).click();
   expect(requests.filter((r) => r.method === "POST")).toHaveLength(0);
+  await page.screenshot({ path: "test-results/text-revisions-confirm-restore.png" });
   await dialog.getByRole("button", { name: "Confirm restore" }).click();
   await expect(dialog).not.toBeVisible();
   expect(requests.find((r) => r.path.endsWith("/restore"))?.body).toEqual({ expected_sha256: initialNode.content_sha256 });
   await expect(page.getByText(/MTU: 1500/).first()).toBeVisible();
+});
+
+test("editing after restore uses the restored body while background reads are delayed", async ({ page }) => {
+  await setup(page);
+  let restoring = false;
+  let pendingReads = 0;
+  let releaseRead!: () => void;
+  const readBarrier = new Promise<void>((resolve) => { releaseRead = resolve; });
+  await page.route(`**${textPath}/revisions/${revision.id}/restore`, async (route) => {
+    restoring = true;
+    await route.fallback();
+  });
+  await page.route(`**${textPath}?*`, async (route) => {
+    if (restoring) {
+      pendingReads++;
+      await readBarrier;
+    }
+    await route.fallback();
+  });
+  try {
+    await page.getByRole("button", { name: "Version history", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByLabel("Version comparison", { exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "Restore this version" }).click();
+    await dialog.getByRole("button", { name: "Confirm restore" }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect.poll(() => pendingReads).toBeGreaterThan(0);
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    const editor = page.getByRole("textbox", { name: "Edit text content" });
+    await expect(editor).toHaveValue(oldContent);
+    await editor.fill("New draft after restoring");
+    const refreshed = page.waitForResponse((response) => new URL(response.url()).pathname === textPath && response.request().method() === "GET");
+    releaseRead();
+    await refreshed;
+    await expect(editor).toHaveValue("New draft after restoring");
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+  } finally {
+    releaseRead();
+  }
 });
 
 test("history browsing preserves unsaved edits and blocks restore", async ({ page }) => {

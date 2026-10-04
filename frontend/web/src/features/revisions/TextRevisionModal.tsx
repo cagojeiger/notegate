@@ -42,9 +42,9 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
     void list.refetch();
   }
   function submit() {
-    if (blocked || !selected || !current) return;
+    if (blocked || !selected || !current || !body.data) return;
     if (!confirming) { setConfirming(true); return; }
-    restore.mutate({ revisionId: selected.id, sha: current.content_sha256 });
+    restore.mutate({ revisionId: selected.id, sha: current.content_sha256, content: body.data.content });
   }
   const error = restore.error instanceof ApiError && restore.error.kind === "text_revision_storage_full"
     ? "Text history storage is full. Nothing was changed. Wait for retention cleanup or contact the administrator."

@@ -6,7 +6,7 @@ import { invalidateFileChangeEvents, invalidateRecentNodes, invalidateSpaceLinks
 import { queryKeys } from "../../api/queryKeys";
 import { readText } from "../../api/text";
 import { listTextRevisions, readTextRevision, restoreTextRevision } from "../../api/textRevisions";
-import type { RestNode } from "../../api/types";
+import type { ReadTextResponse, RestNode } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
 
 // Revision bodies and the comparison baseline live only while the dialog is open.
@@ -39,12 +39,33 @@ export function useTextRevisions(node: RestNode, selectedId: string | null, onRe
   });
   const restore = useMutation({
     meta: { silentError: true },
-    mutationFn: ({ revisionId, sha }: { revisionId: string; sha: string }) => restoreTextRevision(client, node.space_id, node.id, revisionId, sha),
-    onSuccess: (result) => {
+    mutationFn: async ({ revisionId, sha, content }: { revisionId: string; sha: string; content: string }) => ({
+      result: await restoreTextRevision(client, node.space_id, node.id, revisionId, sha),
+      content
+    }),
+    onSuccess: async ({ result, content }) => {
+      const textKey = queryKeys.text(node.space_id, node.id);
+      // Discard any older in-flight read, then publish the restored body before reopening the editor.
+      await queryClient.cancelQueries({ queryKey: textKey, exact: true });
+      const previous = queryClient.getQueryData<ReadTextResponse>(textKey) ?? baseline.data;
+      if (previous) queryClient.setQueryData<ReadTextResponse>(textKey, {
+        ...previous,
+        text: {
+          ...previous.text,
+          ...result,
+          storage_format: "plain",
+          content,
+          start_line: 1,
+          end_line: result.line_count,
+          returned_lines: result.line_count,
+          truncated: false,
+          next_start_line: null
+        }
+      });
       const updated = { ...node, ...result, id: node.id };
       updateNodeCaches(queryClient, updated, (previous) => ({ ...previous, content_sha256: result.content_sha256, byte_len: result.byte_len, line_count: result.line_count }));
       useUiStore.getState().updateGroupsNode(updated);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.text(node.space_id, node.id), exact: true });
+      void queryClient.invalidateQueries({ queryKey: textKey, exact: true });
       void queryClient.invalidateQueries({ queryKey: queryKeys.node(node.space_id, node.id), exact: true });
       void queryClient.invalidateQueries({ queryKey: queryKeys.textRevisionList(node.space_id, node.id) });
       invalidateRecentNodes(queryClient, node.space_id);
