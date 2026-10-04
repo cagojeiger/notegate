@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use notegate_core::security::{EncryptedField, PiiCrypto};
 use notegate_core::{Error, Result};
 use notegate_model::text_revision::{
-    TextRevision, TextRevisionContent, TextRevisionCursor, TextRevisionPage,
+    CurrentTextRevision, TextRevision, TextRevisionContent, TextRevisionCursor, TextRevisionPage,
 };
 use sqlx::{PgConnection, PgPool, Row, postgres::PgRow};
 use uuid::Uuid;
@@ -18,7 +18,7 @@ pub const IDLE_SECONDS: i32 = 120;
 pub const GROUP_SECONDS: i32 = 600;
 pub const SPACE_HISTORY_BYTES: i64 = 1024 * 1024 * 1024;
 const CLEANUP_BATCH: i64 = 100;
-const META: &str = "r.id, r.node_id, r.content_sha256, r.byte_len, r.line_count, r.written_at, r.author_id, r.group_id, r.source, r.superseded_at";
+const META: &str = "r.id, r.node_id, r.content_sha256, r.byte_len, r.line_count, r.written_at, r.author_id, r.group_id, r.source, r.purpose, r.superseded_at";
 const VISIBLE: &str = "r.space_id = $1 AND r.node_id = $2 AND EXISTS (SELECT 1 FROM text_objects t JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id JOIN spaces s ON s.id = t.space_id WHERE t.node_id = r.node_id AND t.space_id = r.space_id AND t.storage_format = 'plain' AND n.deleted_at IS NULL AND s.deleted_at IS NULL)";
 
 /// Called only while the normal write transaction owns the Space and text locks.
@@ -30,11 +30,12 @@ pub(crate) async fn capture(
     actor: Uuid,
     source: &str,
     session: Option<Uuid>,
+    purpose: Option<&str>,
     next_plain: bool,
 ) -> Result<()> {
     let head = sqlx::query(
         "SELECT revision_id, revision_written_at, revision_author_id, revision_group_id, \
-         revision_group_started_at, revision_source, clock_timestamp() AS saved_at, \
+         revision_group_started_at, revision_source, revision_purpose, clock_timestamp() AS saved_at, \
          ($3::uuid IS NOT NULL AND revision_session_id = $3 AND revision_author_id = $4 \
           AND revision_source = $5 AND revision_written_at > clock_timestamp() - make_interval(secs => $6) \
           AND revision_group_started_at > clock_timestamp() - make_interval(secs => $7)) AS same_group \
@@ -91,8 +92,8 @@ pub(crate) async fn capture(
         sqlx::query(
             "INSERT INTO text_revisions (id, node_id, space_id, content_sha256, byte_len, line_count, \
              written_at, author_id, group_id, source, checkpoint, superseded_at, cleanup_at, \
-             ciphertext, nonce, enc_key_id, enc_version) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12 + make_interval(secs => $13),$14,$15,$16,$17)",
+             ciphertext, nonce, enc_key_id, enc_version, purpose) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12 + make_interval(secs => $13),$14,$15,$16,$17,$18)",
         ).bind(id).bind(current.node_id).bind(current.space_id).bind(&current.content_sha256)
             .bind(current.byte_len).bind(current.line_count)
             .bind(head.try_get::<DateTime<Utc>, _>("revision_written_at").map_err(map_sqlx_error)?)
@@ -100,15 +101,16 @@ pub(crate) async fn capture(
             .bind(previous_group).bind(head.try_get::<String, _>("revision_source").map_err(map_sqlx_error)?)
             .bind(!same_group).bind(saved_at).bind(if same_group { RECENT_SECONDS } else { RETENTION_SECONDS })
             .bind(encrypted.ciphertext).bind(encrypted.nonce).bind(crypto.enc_key_id()).bind(crypto.version())
+            .bind(head.try_get::<Option<String>, _>("revision_purpose").map_err(map_sqlx_error)?)
             .execute(&mut *tx).await.map_err(map_sqlx_error)?;
     }
     sqlx::query(
         "UPDATE text_objects SET revision_id = $3, revision_written_at = $4, revision_author_id = $5, \
-         revision_group_id = $6, revision_group_started_at = $7, revision_session_id = $8, revision_source = $9 \
+         revision_group_id = $6, revision_group_started_at = $7, revision_session_id = $8, revision_source = $9, revision_purpose = $10 \
          WHERE space_id = $1 AND node_id = $2",
     ).bind(current.space_id).bind(current.node_id).bind(Uuid::new_v4()).bind(saved_at).bind(actor)
         .bind(if same_group { previous_group } else { Uuid::new_v4() })
-        .bind(if same_group { started_at } else { saved_at }).bind(session).bind(source)
+        .bind(if same_group { started_at } else { saved_at }).bind(session).bind(source).bind(purpose)
         .execute(&mut *tx).await.map_err(map_sqlx_error)?;
     Ok(())
 }
@@ -128,6 +130,7 @@ fn metadata(row: &PgRow) -> Result<TextRevision> {
         author_id: row.try_get("author_id").map_err(map_sqlx_error)?,
         group_id: row.try_get("group_id").map_err(map_sqlx_error)?,
         source: row.try_get("source").map_err(map_sqlx_error)?,
+        purpose: row.try_get("purpose").map_err(map_sqlx_error)?,
         superseded_at: row.try_get("superseded_at").map_err(map_sqlx_error)?,
     })
 }
@@ -171,7 +174,29 @@ pub async fn list(
     } else {
         None
     };
+    let head = sqlx::query(
+        "SELECT t.content_sha256, t.revision_purpose FROM text_objects t \
+        JOIN nodes n ON n.id=t.node_id AND n.space_id=t.space_id JOIN spaces s ON s.id=t.space_id \
+        WHERE t.space_id=$1 AND t.node_id=$2 AND t.storage_format='plain' \
+        AND n.deleted_at IS NULL AND s.deleted_at IS NULL \
+        AND (NOT $3 OR node_external_access_allowed($1,$2))",
+    )
+    .bind(space)
+    .bind(node)
+    .bind(external_only)
+    .fetch_optional(pool)
+    .await
+    .map_err(map_sqlx_error)?;
+    let current = head
+        .map(|row| -> Result<CurrentTextRevision> {
+            Ok(CurrentTextRevision {
+                content_sha256: row.try_get("content_sha256").map_err(map_sqlx_error)?,
+                purpose: row.try_get("revision_purpose").map_err(map_sqlx_error)?,
+            })
+        })
+        .transpose()?;
     Ok(TextRevisionPage {
+        current,
         revisions,
         next_cursor,
     })

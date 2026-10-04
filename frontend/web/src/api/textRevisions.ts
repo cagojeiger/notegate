@@ -11,10 +11,11 @@ export type TextRevision = {
   author_id: string;
   group_id: string;
   source: string;
+  purpose?: string | null;
   superseded_at: string;
 };
 export type TextRevisionBody = { revision: TextRevision; content: string };
-export type TextRevisionList = { revisions: TextRevision[]; page: Page };
+export type TextRevisionList = { current?: { content_sha256: string; purpose: string | null } | null; revisions: TextRevision[]; page: Page };
 export type RestoredText = { node_id: string; content_sha256: string; byte_len: number; line_count: number };
 
 function path(spaceId: string, nodeId: string) {

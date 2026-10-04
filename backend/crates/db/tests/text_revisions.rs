@@ -41,6 +41,75 @@ async fn save(
 }
 
 #[tokio::test]
+async fn purpose_follows_the_resulting_body_and_ignores_failed_or_unchanged_writes() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (actor, space, root) = space_with_root(&db.pool, "revision-purpose").await?;
+    let repo = FilesRepo::new(db.pool.clone()).with_revision_context("mcp", None);
+    let (node, _) = repo
+        .clone()
+        .with_revision_purpose(Some("Create the original note".into()))
+        .insert_text(space, root, "note.md", &body("a"), actor)
+        .await?;
+    let editing = repo
+        .clone()
+        .with_revision_purpose(Some("Correct the configuration".into()));
+    save(&editing, space, node.id, actor, "b").await?;
+    let page = repo.list_text_revisions(space, node.id, 10, None).await?;
+    assert_eq!(
+        page.current.unwrap().purpose.as_deref(),
+        Some("Correct the configuration")
+    );
+    assert_eq!(
+        page.revisions[0].purpose.as_deref(),
+        Some("Create the original note")
+    );
+    assert_eq!(
+        repo.read_text_revision(space, node.id, page.revisions[0].id)
+            .await?
+            .revision
+            .purpose,
+        page.revisions[0].purpose
+    );
+    let attempt = repo
+        .clone()
+        .with_revision_purpose(Some("Must not replace the saved reason".into()));
+    save(&attempt, space, node.id, actor, "b").await?;
+    assert!(
+        attempt
+            .save_text_content(
+                space,
+                node.id,
+                &body("c"),
+                Some(&body("a").content_sha256),
+                actor,
+                TextMutationKind::Write
+            )
+            .await
+            .is_err()
+    );
+    let page = repo.list_text_revisions(space, node.id, 10, None).await?;
+    assert_eq!(page.revisions.len(), 1);
+    assert_eq!(
+        page.current.unwrap().purpose.as_deref(),
+        Some("Correct the configuration")
+    );
+    let browser = attempt.with_revision_context("browser", None);
+    save(&browser, space, node.id, actor, "c").await?;
+    let page = browser
+        .list_text_revisions(space, node.id, 10, None)
+        .await?;
+    assert!(page.current.unwrap().purpose.is_none());
+    assert_eq!(
+        page.revisions[0].purpose.as_deref(),
+        Some("Correct the configuration")
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn snapshots_are_atomic_encrypted_and_guarded() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());

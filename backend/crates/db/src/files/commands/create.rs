@@ -80,6 +80,8 @@ pub struct InsertTextArgs<'a> {
     pub content: &'a StoredContent,
     pub created_by: Uuid,
     pub caps: Limits,
+    pub revision_source: &'static str,
+    pub revision_purpose: Option<&'a str>,
 }
 
 pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)> {
@@ -93,6 +95,8 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
         content,
         created_by,
         caps,
+        revision_source,
+        revision_purpose,
     } = args;
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -137,8 +141,8 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
             "INSERT INTO text_objects \
             (node_id, space_id, storage_format, content_text, encrypted_payload, content_sha256, byte_len, line_count, \
              at_rest_encryption, content_ciphertext, content_nonce, content_enc_key_id, content_enc_version, \
-             created_by_account_id, updated_by_account_id) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14) \
+             created_by_account_id, updated_by_account_id, revision_source, revision_purpose) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14, $15, $16) \
          RETURNING {TEXT_COLUMNS}"
         )))
         .bind(node_row.id)
@@ -155,6 +159,8 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
         .bind(stored.content_enc_key_id)
         .bind(stored.content_enc_version)
         .bind(created_by)
+        .bind(revision_source)
+        .bind(revision_purpose)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;

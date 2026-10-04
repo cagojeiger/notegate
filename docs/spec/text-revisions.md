@@ -8,6 +8,8 @@ Text revisions preserve recoverable bodies separately from audit events and live
 
 Existing documents are backfilled with their last known author/time; pre-feature overwritten bodies cannot be recovered. New documents start with an independent initial state. Copying creates independent history; rename/move and encryption-policy changes create no body revision. Body attribution is stored separately from metadata `updated_at`.
 
+MCP and CLI write commands already require a top-level `purpose` (at most 200 characters). The shared command executor now attaches it to the resulting saved body as well as the existing invocation log. Creation records its purpose immediately; subsequent changed writes atomically carry the old body's purpose into its historical snapshot and record the new purpose on the current body. Failed/conflicting and unchanged saves do not replace the saved purpose. Sequence writes inherit their top-level purpose. Browser/raw REST writes without a command purpose and historical data from before this feature show no recorded reason; reasons are never reconstructed by guessing from timestamps or paths. Restore starts a new body with no inherited AI purpose. These caller-supplied reasons describe the declared intent, not independently verified reasoning.
+
 REST v1/v2 text mutations and command/MCP `write` inputs (direct and sequence) accept optional `edit_session_id` (UUID). Clients must use a new ID for a new editing session or AI operation. This identifier is a grouping hint, never an authorization credential. The server also requires the same document, authenticated account and transport channel. Backend callers with no channel use `unknown`.
 
 - Missing session ID: every changed save is independent. Existing clients remain compatible.
@@ -41,6 +43,8 @@ Browser endpoints (under `/api`):
 - `POST /v1/spaces/{space_id}/text/{node_id}/revisions/{revision_id}/restore` with required `expected_sha256` of the current document.
 
 Lists return metadata only, newest first, with the shared `page` object (`limit`, `returned`, `has_more`, `next_cursor`) and a signed document-scoped cursor; limit is 1–100. A selected body is loaded/decrypted separately. Current content is obtained through the existing Text read API. An expired and already deleted revision returns 404.
+
+Revision metadata includes nullable `purpose`. Lists also return nullable `current` metadata (`content_sha256`, `purpose`) without reading or decrypting a body. The web modal displays the selected version's change reason, and shows the current reason only when its hash matches the comparison baseline. Missing reasons are displayed as `Not recorded`. Purpose is bounded, caller-supplied metadata under the same current document/Space access checks; it is stored as plaintext like the existing invocation purpose and must not contain secrets.
 
 The service checks current Space permission, document visibility and external-access policy for every call. A revision ID does not bypass document/Space scoping. Restore requires write permission and uses the existing guarded write path, including current write locks, format validation, quotas and encryption policy. A stale current hash returns 409. Restoring identical content is a no-op; otherwise the replaced current body is preserved. Restore does not rewind or erase history. Public v2/MCP history browsing tools remain later integrations; all existing mutation surfaces already record history.
 

@@ -340,7 +340,8 @@ pub async fn write(
     let files = state
         .files
         .for_channel(caller.channel)
-        .with_revision_session(context.edit_session_id());
+        .with_revision_session(context.edit_session_id())
+        .with_revision_purpose(context.write_purpose());
     let (target, existing) =
         resolve_write_target(&files, account_id, space_id, &path, create).await?;
 
@@ -397,7 +398,8 @@ pub async fn append(
         &state
             .files
             .for_channel(caller.channel)
-            .with_revision_session(context.edit_session_id()),
+            .with_revision_session(context.edit_session_id())
+            .with_revision_purpose(context.write_purpose()),
         account_id,
         space_id,
         &path,
@@ -409,6 +411,7 @@ pub async fn append(
         .files
         .for_channel(caller.channel)
         .with_revision_session(context.edit_session_id())
+        .with_revision_purpose(context.write_purpose())
         .append_text(
             account_id,
             space_id,
@@ -449,6 +452,7 @@ pub async fn patch(
         .files
         .for_channel(caller.channel)
         .with_revision_session(context.edit_session_id())
+        .with_revision_purpose(context.write_purpose())
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
@@ -457,6 +461,7 @@ pub async fn patch(
         .files
         .for_channel(caller.channel)
         .with_revision_session(context.edit_session_id())
+        .with_revision_purpose(context.write_purpose())
         .patch_text(
             account_id,
             space_id,
@@ -500,6 +505,7 @@ pub async fn edit(
         .files
         .for_channel(caller.channel)
         .with_revision_session(context.edit_session_id())
+        .with_revision_purpose(context.write_purpose())
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
@@ -508,6 +514,7 @@ pub async fn edit(
         .files
         .for_channel(caller.channel)
         .with_revision_session(context.edit_session_id())
+        .with_revision_purpose(context.write_purpose())
         .edit_text(
             account_id,
             space_id,

@@ -28,6 +28,8 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
   const conflict = restore.error instanceof ApiError && restore.error.status === 409;
   const blocked = !canRestore || dirty || saving || !selected || !body.isSuccess || body.isFetching || !baseline.isSuccess || baseline.isFetching || !plainCurrent || list.isError || restore.isPending || externalChange || conflict || unchanged;
   const showingCurrent = selectedId === "current";
+  const head = list.data?.pages[0]?.current;
+  const purpose = showingCurrent ? (head?.content_sha256 === current?.content_sha256 ? head?.purpose : null) : selected?.purpose;
 
   function select(id: string) {
     setSelectedId(id);
@@ -83,6 +85,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
         </nav>
         <section aria-label="Version content" className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Tabs items={[{ id: "diff", label: "Compare changes" }, { id: "full", label: "Full version" }]} value={view} onChange={setView} label="Version view" />
+          <p aria-label="Change reason" className="mb-2 whitespace-pre-wrap break-words text-sm text-muted"><span className="font-medium">Change reason:</span> {purpose ?? "Not recorded"}</p>
           {dirty ? <p role="status" className="mb-2 text-sm text-warning">Unsaved edits are preserved. Close this window and save or cancel your edits before restoring.</p> : null}
           {!canRestore ? <p className="mb-2 text-sm text-muted">History is read-only. Restoring requires write access and an unlocked document.</p> : null}
           {error ? <p role="alert" className="mb-2 text-sm text-danger">{error}</p> : null}

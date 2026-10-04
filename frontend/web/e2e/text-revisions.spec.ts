@@ -22,7 +22,7 @@ const oldContent = "# Network\nMTU: 1500\nCheck\n[Related note](/related.md)";
 const newContent = "# Network\nMTU: 1450\nReady\n[Related note](/related.md)";
 const revision = {
   id: "revision-1", node_id: initialNode.id, content_sha256: "a".repeat(64), byte_len: oldContent.length, line_count: 4,
-  written_at: "2026-10-04T05:12:00Z", author_id: me.account.id, group_id: "group-1", source: "browser", superseded_at: "2026-10-04T05:20:00Z"
+  written_at: "2026-10-04T05:12:00Z", author_id: me.account.id, group_id: "group-1", source: "mcp", purpose: "Document the original MTU before correcting the network configuration.", superseded_at: "2026-10-04T05:20:00Z"
 };
 const textPath = `/api/v1/spaces/${space.id}/text/${initialNode.id}`;
 const pageInfo = (returned: number) => ({ limit: 50, returned, has_more: false, next_cursor: null });
@@ -42,7 +42,7 @@ async function setup(page: Page, options: { mobile?: boolean; readOnly?: boolean
     if (url.pathname === `/api/v1/spaces/${space.id}/nodes`) return { nodes: [node], page: pageInfo(1) };
     if (url.pathname.endsWith(`/nodes/${node.id}`)) return node;
     if (url.pathname.endsWith(`/nodes/${node.id}/reveal`)) return { ancestors: [], target: node };
-    if (url.pathname === `${textPath}/revisions`) return { revisions: [revision], page: pageInfo(1) };
+    if (url.pathname === `${textPath}/revisions`) return { current: { content_sha256: node.content_sha256, purpose: node.content_sha256 === initialNode.content_sha256 ? "Correct MTU to 1450 after verifying the overlay network." : null }, revisions: [revision], page: pageInfo(1) };
     if (url.pathname === `${textPath}/revisions/${revision.id}`) return { revision, content: oldContent };
     if (url.pathname === `${textPath}/revisions/${revision.id}/restore`) {
       content = oldContent;
@@ -72,6 +72,10 @@ test("lazily opens revision comparison and restores with the reviewed current ha
   await expect(dialog.getByLabel("Version comparison", { exact: true })).toBeVisible();
   await expect(dialog.getByText("MTU: 1500", { exact: true })).toBeVisible();
   await expect(dialog.getByText("MTU: 1450", { exact: true })).toBeVisible();
+  await expect(dialog.getByLabel("Change reason")).toContainText(revision.purpose);
+  await dialog.getByRole("button", { name: "Current saved version", exact: true }).click();
+  await expect(dialog.getByLabel("Change reason")).toContainText("Correct MTU to 1450");
+  await dialog.getByRole("button", { name: /Edited via MCP/ }).click();
   await dialog.getByRole("tab", { name: "Full version" }).click();
   await expect(dialog.getByRole("heading", { name: "Network", exact: true })).toBeVisible();
   await page.screenshot({ path: "test-results/text-revisions-full-version.png" });
