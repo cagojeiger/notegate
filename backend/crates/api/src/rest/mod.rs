@@ -22,3 +22,6 @@ mod spaces_tests;
 pub(crate) mod test_support;
 #[cfg(test)]
 mod usage_tests;
+
+#[cfg(test)]
+mod text_revisions_tests;

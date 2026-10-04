@@ -243,7 +243,7 @@ pub struct WriteInput {
     pub expected_sha256: Option<String>,
     /// Optional editing session or AI operation ID. Omit for independent writes.
     #[serde(default)]
-    pub edit_session_id: Option<uuid::Uuid>,
+    pub edit_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
