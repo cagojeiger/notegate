@@ -140,7 +140,8 @@ pub(crate) async fn read(
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path), ("revision_id" = Uuid, Path)),
     request_body = TextRevisionRestoreBody,
     responses((status = 200, description = "Restore as a guarded normal save; same-body restore is a no-op", body = TextRevisionRestoreResponse),
-        (status = 409, description = "Current content changed or revision storage is full")), security(("browser_session" = [])))]
+        (status = 409, description = "Current content changed"),
+        (status = 422, description = "Protected revision storage is full")), security(("browser_session" = [])))]
 pub(crate) async fn restore(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,

@@ -68,6 +68,14 @@ impl ApiError {
         Self::new(StatusCode::CONFLICT, "conflict", message)
     }
 
+    pub fn text_revision_storage_full() -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "text_revision_storage_full",
+            "Text history storage is full. Current content was not changed. Wait for history retention cleanup or contact the administrator.",
+        )
+    }
+
     pub fn write_locked(scope: WriteLockScope) -> Self {
         Self::new(
             StatusCode::LOCKED,
@@ -122,6 +130,7 @@ impl From<ServiceError> for ApiError {
             ServiceError::InvalidInput(message) => Self::invalid_field(message),
             ServiceError::Forbidden(message) => Self::forbidden(message),
             ServiceError::Conflict(message) => Self::conflict(message),
+            ServiceError::TextRevisionStorageFull => Self::text_revision_storage_full(),
             ServiceError::WriteLocked { scope } => Self::write_locked(scope),
             ServiceError::UsageRecalculationInProgress {
                 retry_after_seconds,
@@ -173,6 +182,7 @@ impl From<CoreError> for ApiError {
             CoreError::NotFound(msg) => Self::not_found(msg),
             CoreError::Validation(msg) => Self::invalid_field(msg),
             CoreError::Conflict(msg) => Self::conflict(msg),
+            CoreError::TextRevisionStorageFull => Self::text_revision_storage_full(),
             CoreError::WriteLocked { scope } => Self::write_locked(scope),
             CoreError::UsageRecalculationInProgress {
                 retry_after_seconds,
@@ -272,6 +282,17 @@ mod tests {
             assert_eq!(api_error.status, status);
             assert_eq!(api_error.code, code);
             assert_eq!(api_error.message, message);
+        }
+    }
+
+    #[test]
+    fn revision_capacity_is_not_a_retryable_hash_conflict() {
+        for error in [
+            ApiError::from(CoreError::TextRevisionStorageFull),
+            ApiError::from(ServiceError::from(CoreError::TextRevisionStorageFull)),
+        ] {
+            assert_eq!(error.status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(error.code, "text_revision_storage_full");
         }
     }
 

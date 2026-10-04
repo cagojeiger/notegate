@@ -27,7 +27,7 @@ Policy constants live together in `backend/crates/db/src/files/revisions.rs`:
 - These are cleanup eligibility times, not exact deletion deadlines. Current content is never a cleanup target.
 - There is no last-N cap that can silently truncate the protected 24-hour window.
 - Each Space has a separate 1 GiB history-body budget. `text_revision_usage.stored_bytes` counts ciphertext plus nonce bytes, including soft-deleted documents. This is not physical database size: table/index overhead and backups are additional.
-- When a changed save would exceed that budget, return `409` and leave current content/history unchanged. Do not silently delete protected revisions or save without history. Identical saves remain no-ops.
+- When a changed save would exceed that budget, return `422` (`text_revision_storage_full`) and leave current content/history unchanged. Do not silently delete protected revisions or save without history. Identical saves remain no-ops.
 - Successful expiration/hard deletion releases the budget transactionally. Soft deletion hides history but retains it until normal expiration or document purge.
 
 The budget is intentionally separate from tier-dependent live text/file quotas and their existing recalculation. Operators can inspect `text_revision_usage` and compare it with `SUM(text_revisions.stored_bytes)` per Space. History bytes are not yet added to the frontend usage display.

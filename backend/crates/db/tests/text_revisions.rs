@@ -238,7 +238,7 @@ async fn quota_failure_keeps_current_and_cascade_releases_history() -> TestResul
         .await?;
     assert!(matches!(
         save(&repo, space, node.id, actor, "c").await,
-        Err(Error::Conflict(_))
+        Err(Error::TextRevisionStorageFull)
     ));
     assert_eq!(
         repo.find_text(space, node.id)

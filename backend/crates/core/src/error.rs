@@ -40,6 +40,10 @@ pub enum Error {
     #[error("conflict: {0}")]
     Conflict(String),
 
+    /// Protected text history has reached its Space budget.
+    #[error("text revision storage limit reached; current content was not changed")]
+    TextRevisionStorageFull,
+
     /// The target is protected by a direct or inherited node write lock.
     #[error("{scope}")]
     WriteLocked { scope: WriteLockScope },

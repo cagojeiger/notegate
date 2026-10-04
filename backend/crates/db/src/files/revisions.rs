@@ -86,9 +86,7 @@ pub(crate) async fn capture(
         .await
         .map_err(map_sqlx_error)?;
         if reserved.rows_affected() == 0 {
-            return Err(Error::conflict(
-                "text revision storage limit reached; current content was not changed",
-            ));
+            return Err(Error::TextRevisionStorageFull);
         }
         sqlx::query(
             "INSERT INTO text_revisions (id, node_id, space_id, content_sha256, byte_len, line_count, \

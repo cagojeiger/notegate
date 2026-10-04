@@ -42,3 +42,5 @@ inactive_account -> 403 inactive OAuth/session local account
 ```
 
 API key가 비활성 account에 연결되어 있으면 credential 존재를 노출하지 않기 위해 `401 invalid_token`으로 처리한다.
+
+`text_revision_storage_full` → HTTP 422: protected text revision storage has reached its Space budget. The save is rolled back. Do not show hash-conflict overwrite recovery; wait for retention cleanup or resolve capacity operationally.
