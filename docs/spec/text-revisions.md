@@ -8,13 +8,13 @@ Text revisions preserve recoverable bodies separately from audit events and live
 
 Existing documents are backfilled with their last known author/time; pre-feature overwritten bodies cannot be recovered. New documents start with an independent initial state. Copying creates independent history; rename/move and encryption-policy changes create no body revision. Body attribution is stored separately from metadata `updated_at`.
 
-REST v1/v2 text mutations and the direct command/MCP `write` input accept optional `edit_session_id` (UUID). Clients must use a new ID for a new editing session or AI operation. This identifier is a grouping hint, never an authorization credential. The server also requires the same document, authenticated account and transport channel. Backend callers with no channel use `unknown`.
+REST v1/v2 text mutations and command/MCP `write` inputs (direct and sequence) accept optional `edit_session_id` (UUID). Clients must use a new ID for a new editing session or AI operation. This identifier is a grouping hint, never an authorization credential. The server also requires the same document, authenticated account and transport channel. Backend callers with no channel use `unknown`.
 
 - Missing session ID: every changed save is independent. Existing clients remain compatible.
 - Same actor, channel and ID: continue only while the last content save is less than 120 seconds old and the group is less than 600 seconds old.
 - At either boundary, or when actor/channel/ID changes: start a new group, even if an old ID is reused.
 - Restore: independent group, never coalesced into ordinary edits.
-- Sequence commands currently omit session IDs and remain independent. No frontend change is included in this implementation.
+- Sequence write commands support the same optional ID and validate it during preflight, before executing earlier writes. No frontend change is included in this implementation.
 
 For `A -> B -> C -> D` in one editing group followed by another group's `D -> E -> F`, keep the initial `A`, boundary `D`, and final `F`; `B`, `C`, and `E` are intermediate states. The last state stays in `text_objects` until it is replaced. At replacement, whether the old state is a checkpoint is recorded permanently, so repeated cleanup cannot merge formerly separate groups. This is snapshot selection, not text merging or diff compression.
 

@@ -825,7 +825,7 @@ mod tests {
             ),
             (
                 "write",
-                "purpose op target content edits create ensure_newline expected_sha256",
+                "purpose op target content edits create ensure_newline expected_sha256 edit_session_id",
                 "purpose op target",
             ),
             (

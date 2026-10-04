@@ -282,12 +282,7 @@ pub async fn write(
     input: WriteInput,
 ) -> Result<Value, CommandError> {
     validate_write_operation(&input)?;
-    let session = input
-        .edit_session_id
-        .as_deref()
-        .map(uuid::Uuid::parse_str)
-        .transpose()
-        .map_err(|_| invalid_input_error("edit_session_id must be a UUID"))?;
+    let session = write_session_id(&input)?;
     let scoped = context.clone().with_edit_session(session);
     let context = &scoped;
     match input.op.as_str() {
@@ -338,8 +333,18 @@ pub async fn write(
     }
 }
 
+fn write_session_id(input: &WriteInput) -> Result<Option<uuid::Uuid>, CommandError> {
+    input
+        .edit_session_id
+        .as_deref()
+        .map(uuid::Uuid::parse_str)
+        .transpose()
+        .map_err(|_| invalid_input_error("edit_session_id must be a UUID"))
+}
+
 pub(crate) fn validate_write_operation(input: &WriteInput) -> Result<(), CommandError> {
     validate_purpose(&input.purpose)?;
+    write_session_id(input)?;
     match input.op.as_str() {
         WRITE_OP_WRITE | WRITE_OP_APPEND => {
             required_ref(input.content.as_ref(), "content", input.op.as_str())?;

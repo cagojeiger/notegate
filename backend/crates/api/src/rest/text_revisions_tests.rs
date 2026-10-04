@@ -4,7 +4,9 @@
     clippy::expect_used,
     clippy::indexing_slicing
 )]
-use super::test_support::{caller_and_space, get_json, json_request, rest_app, state};
+use super::test_support::{
+    caller_and_space, get_json, json_request, json_response, rest_app, state,
+};
 use axum::http::StatusCode;
 use notegate_db::test_support::TestDb;
 use serde_json::json;
@@ -65,14 +67,14 @@ async fn history_http_contract_paginates_and_restores_with_a_required_guard()
     assert_ne!(next["revisions"][0]["id"], page["revisions"][0]["id"]);
     let (status, _) = get_json(app.clone(), format!("{history}?limit=101")).await?;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    let (status, _) = json_request(
+    let response = json_response(
         app.clone(),
         "POST",
         format!("{history}/{id}/restore"),
         json!({}),
     )
     .await?;
-    assert!(status.is_client_error());
+    assert!(response.status().is_client_error());
     let (status, _) = json_request(
         app.clone(),
         "POST",
