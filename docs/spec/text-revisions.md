@@ -40,7 +40,7 @@ Browser endpoints (under `/api`):
 - `GET /v1/spaces/{space_id}/text/{node_id}/revisions/{revision_id}`
 - `POST /v1/spaces/{space_id}/text/{node_id}/revisions/{revision_id}/restore` with required `expected_sha256` of the current document.
 
-Lists return metadata only, newest first, with a signed document-scoped cursor; limit is 1–100. A selected body is loaded/decrypted separately. Current content is obtained through the existing Text read API. An expired and already deleted revision returns 404.
+Lists return metadata only, newest first, with the shared `page` object (`limit`, `returned`, `has_more`, `next_cursor`) and a signed document-scoped cursor; limit is 1–100. A selected body is loaded/decrypted separately. Current content is obtained through the existing Text read API. An expired and already deleted revision returns 404.
 
 The service checks current Space permission, document visibility and external-access policy for every call. A revision ID does not bypass document/Space scoping. Restore requires write permission and uses the existing guarded write path, including current write locks, format validation, quotas and encryption policy. A stale current hash returns 409. Restoring identical content is a no-op; otherwise the replaced current body is preserved. Restore does not rewind or erase history. Public v2/MCP history browsing tools and frontend UI are later integrations; all existing mutation surfaces already record history.
 

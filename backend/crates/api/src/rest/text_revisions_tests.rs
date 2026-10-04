@@ -60,7 +60,7 @@ async fn history_http_contract_paginates_and_restores_with_a_required_guard()
         app.clone(),
         format!(
             "{history}?limit=1&cursor={}",
-            page["next_cursor"].as_str().unwrap()
+            page["page"]["next_cursor"].as_str().unwrap()
         ),
     )
     .await?;

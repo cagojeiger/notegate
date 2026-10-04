@@ -1,5 +1,5 @@
 //! Browser history endpoints; service owns permission checks and restore semantics.
-use crate::{error::ApiError, state::AppState};
+use crate::{error::ApiError, page::Page, state::AppState};
 use axum::{
     Json, Router,
     extract::{Extension, Path, Query, State},
@@ -62,7 +62,7 @@ impl From<TextRevision> for TextRevisionOut {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct TextRevisionListResponse {
     revisions: Vec<TextRevisionOut>,
-    next_cursor: Option<String>,
+    page: Page,
 }
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct TextRevisionReadResponse {
@@ -105,9 +105,15 @@ pub(crate) async fn list(
             query.cursor.as_deref(),
         )
         .await?;
+    let pagination = Page::from_items(
+        query.limit.unwrap_or(50),
+        &page.revisions,
+        page.next_cursor.is_some(),
+        page.next_cursor,
+    );
     Ok(Json(TextRevisionListResponse {
         revisions: page.revisions.into_iter().map(Into::into).collect(),
-        next_cursor: page.next_cursor,
+        page: pagination,
     }))
 }
 
