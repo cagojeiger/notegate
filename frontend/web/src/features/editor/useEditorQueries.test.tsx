@@ -165,7 +165,8 @@ describe("editor queries", () => {
       node.space_id,
       node.id,
       draft,
-      "sha-1"
+      "sha-1",
+      undefined
     );
     expect(queryClient.getQueryData(queryKeys.text(node.space_id, node.id))).toEqual({
       node: { id: node.id, path: node.path },

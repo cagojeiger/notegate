@@ -1,0 +1,127 @@
+import { expect, test, type Page } from "@playwright/test";
+
+import type { Me, RestNode, Space } from "../src/api/types";
+import { routeJsonApi } from "./support/api";
+import { usageResponse } from "./support/usage";
+
+const me: Me = { account: { id: "user-1", kind: "user", display_name: "User" }, user: { email: "user@example.com" }, capabilities: { can_create_space: true, can_manage_agents: true } };
+const space: Space = {
+  id: "space-1", name: "Daily", sort_order: 0, navigation_pinned: true, user_mcp_enabled: true,
+  default_external_access_enabled: true, default_text_encryption_enabled: false,
+  features: { text_encryption: true, write_lock: true }, permission: "write", root_node_id: "root-1",
+  created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z"
+};
+const initialNode: RestNode = {
+  id: "note-1", space_id: space.id, parent_id: space.root_node_id, name: "network.md", kind: "text", path: "/network.md",
+  sort_order: 0, metadata: {}, external_access_enabled: true, write_locked: false, write_lock_sources: [],
+  has_children: false, effective_write_locked: false, byte_len: 28, line_count: 3, content_sha256: "b".repeat(64),
+  text_storage_format: "plain", text_at_rest_encryption: "none", created_by: me.account, updated_by: me.account,
+  created_at: "2026-10-04T05:00:00Z", updated_at: "2026-10-04T05:20:00Z"
+};
+const oldContent = "# Network\nMTU: 1500\nCheck";
+const newContent = "# Network\nMTU: 1450\nReady";
+const revision = {
+  id: "revision-1", node_id: initialNode.id, content_sha256: "a".repeat(64), byte_len: oldContent.length, line_count: 3,
+  written_at: "2026-10-04T05:12:00Z", author_id: me.account.id, group_id: "group-1", source: "browser", superseded_at: "2026-10-04T05:20:00Z"
+};
+const textPath = `/api/v1/spaces/${space.id}/text/${initialNode.id}`;
+const pageInfo = (returned: number) => ({ limit: 50, returned, has_more: false, next_cursor: null });
+
+async function setup(page: Page, options: { mobile?: boolean; readOnly?: boolean } = {}) {
+  await page.setViewportSize(options.mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+  let content = newContent;
+  let node = { ...initialNode };
+  const requests: { path: string; method: string; body: Record<string, unknown> | null }[] = [];
+  await routeJsonApi(page, (url, request) => {
+    requests.push({ path: url.pathname, method: request.method(), body: request.postDataJSON() });
+    if (url.pathname === "/api/v1/me") return me;
+    if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
+    if (url.pathname === "/api/v1/spaces") return { spaces: [{ ...space, permission: options.readOnly ? "read" : "write" }], page: pageInfo(1) };
+    if (url.pathname.endsWith(`/nodes/${space.root_node_id}/children`)) return { parent: { id: space.root_node_id, path: "/" }, children: [node], page: pageInfo(1) };
+    if (url.pathname === `/api/v1/spaces/${space.id}/nodes`) return { nodes: [node], page: pageInfo(1) };
+    if (url.pathname.endsWith(`/nodes/${node.id}`)) return node;
+    if (url.pathname.endsWith(`/nodes/${node.id}/reveal`)) return { ancestors: [], target: node };
+    if (url.pathname === `${textPath}/revisions`) return { revisions: [revision], page: pageInfo(1) };
+    if (url.pathname === `${textPath}/revisions/${revision.id}`) return { revision, content: oldContent };
+    if (url.pathname === `${textPath}/revisions/${revision.id}/restore`) {
+      content = oldContent;
+      node = { ...node, content_sha256: revision.content_sha256, updated_at: "2026-10-04T05:30:00Z" };
+      return { node_id: node.id, content_sha256: node.content_sha256, byte_len: content.length, line_count: 3 };
+    }
+    if (url.pathname === textPath) return {
+      node: { id: node.id, path: node.path }, text: { node_id: node.id, storage_format: "plain", content,
+        content_sha256: node.content_sha256, byte_len: content.length, line_count: 3, start_line: 1, end_line: 3,
+        returned_lines: 3, truncated: false, next_start_line: null, updated_by: me.account, updated_at: node.updated_at }
+    };
+    if (url.pathname.endsWith("/file-change-sync")) return { changes: [], next_after_id: 0, has_more: false, resync_required: false };
+    throw new Error(`Unhandled request: ${request.method()} ${url.pathname}`);
+  });
+  await page.goto("/");
+  if (options.mobile) await page.getByRole("button", { name: "Toggle left sidebar" }).click();
+  await page.getByRole("button", { name: node.name }).first().click();
+  await expect(page.getByRole("heading", { name: "Network", exact: true })).toBeVisible();
+  return requests;
+}
+
+test("lazily opens revision comparison and restores with the reviewed current hash", async ({ page }) => {
+  const requests = await setup(page);
+  expect(requests.filter((r) => r.path.includes("/revisions"))).toHaveLength(0);
+  await page.getByRole("button", { name: "Version history", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Version history · network.md" });
+  await expect(dialog.getByLabel("Version comparison", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("MTU: 1500", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("MTU: 1450", { exact: true })).toBeVisible();
+  await dialog.getByRole("tab", { name: "Full version" }).click();
+  await expect(dialog.getByRole("heading", { name: "Network", exact: true })).toBeVisible();
+  await dialog.getByRole("tab", { name: "Compare changes" }).click();
+  await expect(dialog.getByLabel("Version comparison", { exact: true })).toBeVisible();
+  await page.screenshot({ path: "test-results/text-revisions-desktop.png" });
+  await dialog.getByRole("button", { name: "Restore this version" }).click();
+  expect(requests.filter((r) => r.method === "POST")).toHaveLength(0);
+  await dialog.getByRole("button", { name: "Confirm restore" }).click();
+  await expect(dialog).not.toBeVisible();
+  expect(requests.find((r) => r.path.endsWith("/restore"))?.body).toEqual({ expected_sha256: initialNode.content_sha256 });
+  await expect(page.getByText(/MTU: 1500/).first()).toBeVisible();
+});
+
+test("history browsing preserves unsaved edits and blocks restore", async ({ page }) => {
+  await setup(page);
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("textbox", { name: "Edit text content" }).fill("Unsaved draft stays here");
+  await page.getByRole("button", { name: "Version history", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText(/Unsaved edits are preserved/)).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Edit text content" })).toHaveValue("Unsaved draft stays here");
+});
+
+test("mobile opens history from More actions and keeps read-only history accessible", async ({ page }) => {
+  await setup(page, { mobile: true, readOnly: true });
+  await page.getByRole("button", { name: "More actions", exact: true }).first().click();
+  await page.getByRole("button", { name: "Version history", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Version comparison", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeDisabled();
+  expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/text-revisions-mobile.png" });
+});
+
+test("a stale restore asks for review instead of retrying or overwriting", async ({ page }) => {
+  const requests = await setup(page);
+  let restoreCalls = 0;
+  await page.route(`**${textPath}/revisions/${revision.id}/restore`, async (route) => {
+    restoreCalls++;
+    await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ kind: "conflict", message: "stale" }) });
+  });
+  await page.getByRole("button", { name: "Version history", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeEnabled();
+  await dialog.getByRole("button", { name: "Restore this version" }).click();
+  await dialog.getByRole("button", { name: "Confirm restore" }).click();
+  await expect(dialog.getByText(/The current document changed/)).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Confirm restore" })).toBeDisabled();
+  expect(restoreCalls).toBe(1);
+  expect(requests.filter((r) => r.method === "PUT")).toHaveLength(0);
+});

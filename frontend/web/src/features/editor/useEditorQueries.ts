@@ -37,7 +37,7 @@ export function useNodeFreshness(node: RestNode) {
   });
 }
 
-export function useSaveTextDocument(node: RestNode, draft: string, sha: string | undefined, onSaved: () => void, onConflict: () => void) {
+export function useSaveTextDocument(node: RestNode, draft: string, sha: string | undefined, onSaved: () => void, onConflict: () => void, editSessionId?: string) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const showToast = useUiStore((state) => state.showToast);
@@ -52,7 +52,8 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
         node.space_id,
         node.id,
         submittedDraft,
-        force ? undefined : sha
+        force ? undefined : sha,
+        editSessionId
       );
       return { response, submittedDraft };
     },

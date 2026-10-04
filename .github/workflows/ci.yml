@@ -370,6 +370,15 @@ jobs:
           pnpm --filter web test:e2e
           kill -0 "$api_pid"
 
+      - name: Upload revision UI screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: text-revisions-ui
+          if-no-files-found: ignore
+          retention-days: 7
+          path: frontend/web/test-results/text-revisions-*.png
+
       - name: Test Lighthouse budgets
         run: pnpm --filter web test:lighthouse
 
