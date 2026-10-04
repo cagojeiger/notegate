@@ -26,6 +26,11 @@ async fn history_obeys_permissions_external_policy_write_locks_and_deletion() ->
     };
     let owner =
         insert_user_account(&db.pool, "revision-owner", "revision-owner@example.com").await?;
+    // Two Spaces are needed to exercise cross-Space ID scoping.
+    sqlx::query("UPDATE users SET tier='system_max' WHERE id=$1")
+        .bind(owner)
+        .execute(&db.pool)
+        .await?;
     let stranger = insert_user_account(
         &db.pool,
         "revision-stranger",
