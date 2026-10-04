@@ -368,3 +368,80 @@ async fn simultaneous_guarded_writes_only_record_the_winner() -> TestResult {
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn migration_backfills_existing_documents_without_inventing_history() -> TestResult {
+    let Some(db) = TestDb::setup_before(42).await? else {
+        return Ok(());
+    };
+    let (actor, space, root) = space_with_root(&db.pool, "revision-migration").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let (node, _) = repo
+        .insert_text(space, root, "legacy.md", &body("a"), actor)
+        .await?;
+    sqlx::query("UPDATE text_objects SET updated_at=now()-interval '90 days' WHERE node_id=$1")
+        .bind(node.id)
+        .execute(&db.pool)
+        .await?;
+    db.apply_migration(42).await?;
+    let backfilled: bool=sqlx::query_scalar("SELECT revision_author_id=updated_by_account_id AND revision_written_at=updated_at FROM text_objects WHERE node_id=$1").bind(node.id).fetch_one(&db.pool).await?;
+    assert!(backfilled);
+    assert!(
+        repo.list_text_revisions(space, node.id, 10, None)
+            .await?
+            .revisions
+            .is_empty()
+    );
+    save(&repo, space, node.id, actor, "b").await?;
+    assert_eq!(revisions::cleanup(&db.pool).await?, 0);
+    let page = repo.list_text_revisions(space, node.id, 10, None).await?;
+    assert_eq!(
+        repo.read_text_revision(space, node.id, page.revisions[0].id)
+            .await?
+            .content,
+        "a"
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn cleanup_is_bounded_and_space_cascade_removes_usage() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (actor, space, root) = space_with_root(&db.pool, "revision-batch").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let (node, _) = repo
+        .insert_text(space, root, "note.md", &body("a"), actor)
+        .await?;
+    for index in 0..105 {
+        save(
+            &repo,
+            space,
+            node.id,
+            actor,
+            if index % 2 == 0 { "b" } else { "a" },
+        )
+        .await?;
+    }
+    sqlx::query("UPDATE text_revisions SET cleanup_at=now()-interval '1 second'")
+        .execute(&db.pool)
+        .await?;
+    assert_eq!(revisions::cleanup(&db.pool).await?, 100);
+    assert_eq!(revisions::cleanup(&db.pool).await?, 5);
+    assert_eq!(revisions::cleanup(&db.pool).await?, 0);
+    save(&repo, space, node.id, actor, "c").await?;
+    sqlx::query("DELETE FROM spaces WHERE id=$1")
+        .bind(space)
+        .execute(&db.pool)
+        .await?;
+    let remaining: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM text_revisions),(SELECT count(*) FROM text_revision_usage)",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(remaining, (0, 0));
+    db.cleanup().await;
+    Ok(())
+}

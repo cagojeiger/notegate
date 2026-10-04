@@ -557,6 +557,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn revision_session_is_validated_during_write_preflight() {
+        for session in [
+            None,
+            Some(uuid::Uuid::new_v4().to_string()),
+            Some("invalid".to_owned()),
+        ] {
+            let input: WriteInput = serde_json::from_value(json!({
+                "purpose": "edit a document", "op": "write", "target": "notes:/note.md",
+                "content": "new body", "edit_session_id": session,
+            }))
+            .expect("input parses");
+            assert_eq!(
+                validate_write_operation(&input).is_ok(),
+                session.as_deref() != Some("invalid")
+            );
+        }
+    }
+
+    #[test]
     fn full_text_read_contract_matches_service_limits() {
         assert_eq!(
             notegate_command::FULL_TEXT_READ_MAX_LINES,

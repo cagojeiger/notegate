@@ -221,6 +221,11 @@ async fn server_encryption_changes_do_not_create_versions_or_change_body_attribu
             },
         )
         .await?;
+    let written_at: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT revision_written_at FROM text_objects WHERE node_id=$1")
+            .bind(node)
+            .fetch_one(&db.pool)
+            .await?;
     files
         .update_text_encryption(
             AccountKind::User,
@@ -256,6 +261,8 @@ async fn server_encryption_changes_do_not_create_versions_or_change_body_attribu
         .await?;
     let page = files.text_revisions(owner, space, node, 10, None).await?;
     assert_eq!(page.revisions.len(), 2);
+    assert_eq!(page.revisions[0].written_at, written_at);
+    assert_eq!(page.revisions[0].author_id, owner);
     assert_eq!(
         files
             .text_revision(owner, space, node, page.revisions[0].id)
@@ -284,6 +291,78 @@ async fn server_encryption_changes_do_not_create_versions_or_change_body_attribu
         )
         .await?;
     assert_eq!(restored.text.content, Some("secret-one".into()));
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn cursor_is_document_bound_and_opaque_current_content_hides_history() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner =
+        insert_user_account(&db.pool, "revision-cursor", "revision-cursor@example.com").await?;
+    let (space, root) =
+        setup_space(&SpaceRepo::new(db.pool.clone()), owner, "cursor-history").await;
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+    let node = files
+        .create_text(
+            owner,
+            space,
+            CreateText {
+                parent_node_id: root,
+                name: "note.md".into(),
+            },
+        )
+        .await?
+        .node
+        .node
+        .id;
+    let other = files
+        .create_text(
+            owner,
+            space,
+            CreateText {
+                parent_node_id: root,
+                name: "other.md".into(),
+            },
+        )
+        .await?
+        .node
+        .node
+        .id;
+    for value in ["one", "two"] {
+        files
+            .write_text(
+                owner,
+                space,
+                WriteText {
+                    target: WriteTarget::Existing { node_id: node },
+                    body: WriteTextBody::Plain(value.into()),
+                    expected_sha256: None,
+                },
+            )
+            .await?;
+    }
+    let page = files.text_revisions(owner, space, node, 1, None).await?;
+    assert!(page.next_cursor.is_some());
+    assert!(matches!(
+        files
+            .text_revisions(owner, space, other, 1, page.next_cursor.as_deref())
+            .await,
+        Err(ServiceError::InvalidInput(_))
+    ));
+    sqlx::query("UPDATE text_objects SET storage_format='encrypted',content_text=NULL,encrypted_payload='{}'::jsonb WHERE node_id=$1").bind(node).execute(&db.pool).await?;
+    assert!(matches!(
+        files.text_revisions(owner, space, node, 10, None).await,
+        Err(ServiceError::InvalidInput(_))
+    ));
+    assert!(matches!(
+        files
+            .text_revision(owner, space, node, page.revisions[0].id)
+            .await,
+        Err(ServiceError::InvalidInput(_))
+    ));
     db.cleanup().await;
     Ok(())
 }

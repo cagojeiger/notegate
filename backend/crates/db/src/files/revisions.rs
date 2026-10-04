@@ -11,8 +11,9 @@ use uuid::Uuid;
 use super::{commands::checks, rows::TextRow};
 use crate::map_sqlx_error;
 
-pub const RECENT_SECONDS: i32 = 24 * 60 * 60;
-pub const RETENTION_SECONDS: i32 = 30 * RECENT_SECONDS;
+const DAY_SECONDS: i32 = 24 * 60 * 60;
+pub const RECENT_SECONDS: i32 = DAY_SECONDS;
+pub const RETENTION_SECONDS: i32 = 30 * DAY_SECONDS;
 pub const IDLE_SECONDS: i32 = 120;
 pub const GROUP_SECONDS: i32 = 600;
 pub const SPACE_HISTORY_BYTES: i64 = 1024 * 1024 * 1024;
