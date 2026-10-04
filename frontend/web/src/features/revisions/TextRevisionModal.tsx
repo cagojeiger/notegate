@@ -23,7 +23,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
   const current = baseline.data?.text;
   const plainCurrent = current?.storage_format === "plain" && "content" in current ? current : null;
   const unchanged = !!selected && selected.content_sha256 === current?.content_sha256;
-  const externalChange = !!node.content_sha256 && !!current && node.content_sha256 !== current.content_sha256 && Date.parse(node.updated_at) > Date.parse(current.updated_at);
+  const externalChange = !!node.content_sha256 && !!plainCurrent && node.content_sha256 !== plainCurrent.content_sha256 && Date.parse(node.updated_at) > Date.parse(plainCurrent.updated_at);
   const conflict = restore.error instanceof ApiError && restore.error.status === 409;
   const blocked = !canRestore || dirty || saving || !selected || !body.isSuccess || body.isFetching || !baseline.isSuccess || baseline.isFetching || !plainCurrent || list.isError || restore.isPending || externalChange || conflict || unchanged;
   const showingCurrent = selectedId === "current";

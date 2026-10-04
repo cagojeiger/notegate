@@ -249,6 +249,28 @@ describe("useTextEditorSession", () => {
     expect(result.current.draft).toBe("unsaved");
     expect(result.current.canSave).toBe(true);
   });
+  it("reuses the editing session across saves and resets it on cancel, restore and navigation", async () => {
+    editorQueryMocks.useTextDocument.mockReturnValue({ data: textResponse, isSuccess: true, refetch: vi.fn() });
+    const { result, rerender } = renderHook(({ currentNode }) => useTextEditorSession({
+      node: currentNode, mode: "edit", canWrite: true, onSetMode: vi.fn()
+    }), { initialProps: { currentNode: node } });
+    const session = () => editorQueryMocks.useSaveTextDocument.mock.lastCall?.[5];
+    const initial = session();
+    expect(initial).toMatch(/^[0-9a-f-]{36}$/);
+    act(() => result.current.setDraft("change one"));
+    expect(session()).toBe(initial);
+    act(() => result.current.saveDraft());
+    expect(session()).toBe(initial);
+    act(() => result.current.cancelEdit());
+    expect(session()).not.toBe(initial);
+    const afterCancel = session();
+    act(() => result.current.resetRevisionSession());
+    expect(session()).not.toBe(afterCancel);
+    const beforeNavigation = session();
+    rerender({ currentNode: { ...node, id: "another-node" } });
+    expect(session()).not.toBe(beforeNavigation);
+  });
+
 });
 
 function textDocumentQuery(
