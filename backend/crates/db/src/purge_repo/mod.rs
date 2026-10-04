@@ -1,13 +1,12 @@
 //! Hard purge for soft-deleted spaces and nodes.
 //!
 //! Cross-process scheduling is owned by the reconciliation runtime. This repo
-//! performs one bounded, atomic purge attempt.
+//! runs bounded resource, identity, and history transactions sequentially.
 
 mod history;
 mod identities;
 mod resources;
 
-use crate::map_sqlx_error;
 use notegate_core::Result;
 use sqlx::PgPool;
 
@@ -21,15 +20,28 @@ impl PurgeRepo {
         Self { pool }
     }
 
-    /// Run one bounded purge attempt in a single transaction.
+    /// Run each cleanup group in its own transaction, in order.
+    ///
+    /// A group error does not skip subsequent groups or undo committed work.
+    /// Every failed group is logged; after all groups finish, return the first
+    /// error in execution order. Counts are returned only when all groups commit.
     pub async fn run_once(&self) -> Result<PurgeRun> {
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        // Await every group before propagating errors. Do not use `?` here:
+        // independent cleanup must still run after an earlier group fails.
+        let resources = resources::purge(&self.pool).await.inspect_err(|error| {
+            tracing::warn!(event = "purge.group_failed", group = "resources", %error);
+        });
+        let identities = identities::purge(&self.pool).await.inspect_err(|error| {
+            tracing::warn!(event = "purge.group_failed", group = "identities", %error);
+        });
+        let history = history::purge(&self.pool).await.inspect_err(|error| {
+            tracing::warn!(event = "purge.group_failed", group = "history", %error);
+        });
 
-        let resources = resources::purge(&mut tx).await?;
-        let identities = identities::purge(&mut tx).await?;
-        let history = history::purge(&mut tx).await?;
+        let resources = resources?;
+        let identities = identities?;
+        let history = history?;
 
-        tx.commit().await.map_err(map_sqlx_error)?;
         Ok(PurgeRun {
             spaces_deleted: resources.spaces_deleted.max(0) as u64,
             nodes_deleted: resources.nodes_deleted.max(0) as u64,

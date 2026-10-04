@@ -2,7 +2,7 @@
 
 use crate::map_sqlx_error;
 use notegate_core::Result;
-use sqlx::{PgConnection, Row as _};
+use sqlx::{PgPool, Row as _};
 
 const SPACE_PURGE_BATCH: i64 = 100;
 const NODE_PURGE_BATCH: i64 = 1_000;
@@ -15,7 +15,9 @@ pub(super) struct PurgedResources {
     pub(super) object_deletions_queued: u64,
 }
 
-pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedResources> {
+pub(super) async fn purge(pool: &PgPool) -> Result<PurgedResources> {
+    let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
+
     // Safety net for requests missed during soft delete: queue physical
     // object deletion before semantic rows disappear. The operational
     // ledger survives the following cascades and is processed outside this
@@ -32,7 +34,7 @@ pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedResourc
          )",
     )
     .bind(SPACE_PURGE_BATCH)
-    .execute(&mut *connection)
+    .execute(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
     .rows_affected();
@@ -55,7 +57,7 @@ pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedResourc
          WHERE f.state = 'attached' AND f.node_id IN (SELECT id FROM due_nodes)",
     )
     .bind(NODE_PURGE_BATCH)
-    .execute(&mut *connection)
+    .execute(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
     .rows_affected();
@@ -75,7 +77,7 @@ pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedResourc
          SELECT count(*) AS deleted_count FROM deleted",
     )
     .bind(SPACE_PURGE_BATCH)
-    .fetch_one(&mut *connection)
+    .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
     .get("deleted_count");
@@ -98,7 +100,7 @@ pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedResourc
          SELECT count(*) AS deleted_count FROM deleted",
     )
     .bind(NODE_PURGE_BATCH)
-    .fetch_one(&mut *connection)
+    .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
     .get("deleted_count");
@@ -128,15 +130,26 @@ pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedResourc
          SELECT count(*) AS deleted_count FROM deleted",
     )
     .bind(LINK_GRAPH_PROJECTION_PURGE_BATCH)
-    .fetch_one(&mut *connection)
+    .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
     .get("deleted_count");
+
+    let object_deletions_queued = queued_for_spaces + queued_for_nodes;
+    tx.commit().await.map_err(map_sqlx_error)?;
+    tracing::info!(
+        event = "purge.group_completed",
+        group = "resources",
+        spaces_deleted,
+        nodes_deleted,
+        link_graph_projections_deleted,
+        object_deletions_queued,
+    );
 
     Ok(PurgedResources {
         spaces_deleted,
         nodes_deleted,
         link_graph_projections_deleted,
-        object_deletions_queued: queued_for_spaces + queued_for_nodes,
+        object_deletions_queued,
     })
 }
