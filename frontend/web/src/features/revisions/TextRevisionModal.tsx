@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 
 import { ApiError } from "../../api/errors";
 import type { RestNode } from "../../api/types";
+import { useUiStore } from "../../stores/uiStore";
 import { Button, Modal, Tabs } from "../../shared/ui";
 import { TextPreview } from "../editor/TextPreview";
 import { RevisionComparison } from "./RevisionComparison";
@@ -107,7 +108,14 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
 }
 
 function VersionPreview({ node, content, identity }: { node: RestNode; content: string; identity: string }) {
-  return <div className="flex min-h-0 flex-1 overflow-auto rounded-workbench border border-seam">
+  const showToast = useUiStore((state) => state.showToast);
+  return <div className="flex min-h-0 flex-1 overflow-auto rounded-workbench border border-seam" onClickCapture={(event) => {
+    if (event.target instanceof Element && event.target.closest("a[href]")) {
+      event.preventDefault();
+      event.stopPropagation();
+      showToast("Links do not navigate from version previews. Copy the link address to open it separately.");
+    }
+  }}>
     <TextPreview name={node.name} content={content} previewIdentity={`revision:${node.id}:${identity}`} />
   </div>;
 }

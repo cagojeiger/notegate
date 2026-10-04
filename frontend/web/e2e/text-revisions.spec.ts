@@ -14,20 +14,21 @@ const space: Space = {
 const initialNode: RestNode = {
   id: "note-1", space_id: space.id, parent_id: space.root_node_id, name: "network.md", kind: "text", path: "/network.md",
   sort_order: 0, metadata: {}, external_access_enabled: true, write_locked: false, write_lock_sources: [],
-  has_children: false, effective_write_locked: false, byte_len: 28, line_count: 3, content_sha256: "b".repeat(64),
+  has_children: false, effective_write_locked: false, byte_len: 28, line_count: 4, content_sha256: "b".repeat(64),
   text_storage_format: "plain", text_at_rest_encryption: "none", created_by: me.account, updated_by: me.account,
   created_at: "2026-10-04T05:00:00Z", updated_at: "2026-10-04T05:20:00Z"
 };
-const oldContent = "# Network\nMTU: 1500\nCheck";
-const newContent = "# Network\nMTU: 1450\nReady";
+const oldContent = "# Network\nMTU: 1500\nCheck\n[Related note](/related.md)";
+const newContent = "# Network\nMTU: 1450\nReady\n[Related note](/related.md)";
 const revision = {
-  id: "revision-1", node_id: initialNode.id, content_sha256: "a".repeat(64), byte_len: oldContent.length, line_count: 3,
+  id: "revision-1", node_id: initialNode.id, content_sha256: "a".repeat(64), byte_len: oldContent.length, line_count: 4,
   written_at: "2026-10-04T05:12:00Z", author_id: me.account.id, group_id: "group-1", source: "browser", superseded_at: "2026-10-04T05:20:00Z"
 };
 const textPath = `/api/v1/spaces/${space.id}/text/${initialNode.id}`;
 const pageInfo = (returned: number) => ({ limit: 50, returned, has_more: false, next_cursor: null });
 
 async function setup(page: Page, options: { mobile?: boolean; readOnly?: boolean } = {}) {
+  await page.emulateMedia({ colorScheme: options.mobile ? "light" : "dark" });
   await page.setViewportSize(options.mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
   let content = newContent;
   let node = { ...initialNode };
@@ -46,12 +47,12 @@ async function setup(page: Page, options: { mobile?: boolean; readOnly?: boolean
     if (url.pathname === `${textPath}/revisions/${revision.id}/restore`) {
       content = oldContent;
       node = { ...node, content_sha256: revision.content_sha256, updated_at: "2026-10-04T05:30:00Z" };
-      return { node_id: node.id, content_sha256: node.content_sha256, byte_len: content.length, line_count: 3 };
+      return { node_id: node.id, content_sha256: node.content_sha256, byte_len: content.length, line_count: 4 };
     }
     if (url.pathname === textPath) return {
       node: { id: node.id, path: node.path }, text: { node_id: node.id, storage_format: "plain", content,
-        content_sha256: node.content_sha256, byte_len: content.length, line_count: 3, start_line: 1, end_line: 3,
-        returned_lines: 3, truncated: false, next_start_line: null, updated_by: me.account, updated_at: node.updated_at }
+        content_sha256: node.content_sha256, byte_len: content.length, line_count: 4, start_line: 1, end_line: 4,
+        returned_lines: 4, truncated: false, next_start_line: null, updated_by: me.account, updated_at: node.updated_at }
     };
     if (url.pathname.endsWith("/file-change-sync")) return { changes: [], next_after_id: 0, has_more: false, resync_required: false };
     throw new Error(`Unhandled request: ${request.method()} ${url.pathname}`);
@@ -91,6 +92,11 @@ test("history browsing preserves unsaved edits and blocks restore", async ({ pag
   await page.getByRole("button", { name: "Version history", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText(/Unsaved edits are preserved/)).toBeVisible();
+  await dialog.getByRole("tab", { name: "Full version" }).click();
+  const originalUrl = page.url();
+  await dialog.getByRole("link", { name: "Related note" }).click();
+  expect(page.url()).toBe(originalUrl);
+  await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeDisabled();
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();

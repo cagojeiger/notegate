@@ -55,6 +55,7 @@ export function RevisionComparison({ before, after }: { before: string; after: s
 function Line({ line, kind, second = false }: { line: DiffLine | null; kind: "same" | "removed" | "added"; second?: boolean }) {
   const color = kind === "removed" ? "bg-danger/10 text-danger" : kind === "added" ? "bg-success/10 text-success" : "text-text";
   return <div className={`flex min-w-0 items-start ${second ? "md:border-l md:border-seam" : ""} ${!line || (second && kind === "same") ? "hidden md:flex" : ""} ${line ? color : ""}`}>
+    {line && kind !== "same" ? <span className="sr-only">{kind === "added" ? "Added: " : "Removed: "}</span> : null}
     <span aria-hidden="true" className="w-10 shrink-0 select-none px-2 text-right text-muted">{line?.number}</span>
     <span aria-hidden="true" className="w-4 shrink-0 select-none">{line && kind !== "same" ? kind === "added" ? "+" : "−" : " "}</span>
     <span className="min-w-0 whitespace-pre-wrap break-all pr-2">{line ? line.text.replace(/\r/g, "␍") || "\u00a0" : "\u00a0"}</span>
