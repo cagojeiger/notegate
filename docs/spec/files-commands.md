@@ -112,3 +112,7 @@ grep        plain Text content가 query를 포함하는 text node 후보 검색
 ## list
 
 `list`는 선택 folder 아래 목록을 반환한다. 기본 `depth=1`은 direct children만 반환하고, `depth>1`은 subtree를 DFS pre-order로 반환한다. MCP의 path-first 구조 조회이며, REST의 node children API와 1:1 대응하지 않는다. 최소 depth는 1, 최대 Space path depth다.
+
+## Text revision recording
+
+Changed text writes preserve the prior body transactionally. Optional `edit_session_id` groups consecutive direct writes only within actor/channel and time boundaries. Version list/read/restore and the separate history capacity policy are described in [Text revisions](text-revisions.md); a full history budget returns 409 without saving the new body.

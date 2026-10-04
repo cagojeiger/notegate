@@ -337,7 +337,10 @@ pub async fn write(
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
-    let files = state.files.for_channel(caller.channel);
+    let files = state
+        .files
+        .for_channel(caller.channel)
+        .with_revision_session(context.edit_session_id());
     let (target, existing) =
         resolve_write_target(&files, account_id, space_id, &path, create).await?;
 
@@ -391,7 +394,10 @@ pub async fn append(
     let space_id = resolved.space_id();
 
     let (target, _existing) = resolve_write_target(
-        &state.files.for_channel(caller.channel),
+        &state
+            .files
+            .for_channel(caller.channel)
+            .with_revision_session(context.edit_session_id()),
         account_id,
         space_id,
         &path,
@@ -402,6 +408,7 @@ pub async fn append(
     let view = state
         .files
         .for_channel(caller.channel)
+        .with_revision_session(context.edit_session_id())
         .append_text(
             account_id,
             space_id,
@@ -441,6 +448,7 @@ pub async fn patch(
     let node = state
         .files
         .for_channel(caller.channel)
+        .with_revision_session(context.edit_session_id())
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
@@ -448,6 +456,7 @@ pub async fn patch(
     let result = state
         .files
         .for_channel(caller.channel)
+        .with_revision_session(context.edit_session_id())
         .patch_text(
             account_id,
             space_id,
@@ -490,6 +499,7 @@ pub async fn edit(
     let node = state
         .files
         .for_channel(caller.channel)
+        .with_revision_session(context.edit_session_id())
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
@@ -497,6 +507,7 @@ pub async fn edit(
     let result = state
         .files
         .for_channel(caller.channel)
+        .with_revision_session(context.edit_session_id())
         .edit_text(
             account_id,
             space_id,

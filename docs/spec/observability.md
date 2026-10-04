@@ -254,3 +254,7 @@ notegate_search_cache_lookups_total
 - Operation, stage, and match/reduce durations use fixed histogram buckets. No
   search query, path, cursor, identifier, filename, content, or error text is
   recorded.
+
+### Text revision cleanup
+
+Reconciliation kind `text_revisions.retention` uses the standard active/result/duration/last-success metrics. `text_revisions.cleaned` logs each pass's deleted row count; a successful pass with follow-up work is not proof that the backlog is empty. Per-Space retained encrypted-body bytes are available in `text_revision_usage`. See [Text revisions](text-revisions.md).

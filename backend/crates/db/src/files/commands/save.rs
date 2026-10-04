@@ -30,6 +30,8 @@ pub struct SaveTextContentArgs<'a> {
     pub updated_by: Uuid,
     pub mutation_kind: TextMutationKind,
     pub caps: Limits,
+    pub revision_session: Option<Uuid>,
+    pub revision_source: &'static str,
 }
 
 /// Replace a live text's content + metrics, attributing the update to
@@ -45,6 +47,8 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         expected_sha256,
         updated_by,
         mutation_kind,
+        revision_session,
+        revision_source,
         caps,
     } = args;
 
@@ -84,6 +88,12 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     {
         return Err(Error::conflict(
             "expected_sha256 does not match the current text; read it again",
+        ));
+    }
+
+    if revision_source == "restore" && current_text.storage_format != "plain" {
+        return Err(Error::conflict(
+            "client-encrypted text history is not supported",
         ));
     }
 
@@ -134,6 +144,20 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         space_id,
         node_id,
     )?;
+    super::super::revisions::capture(
+        &mut tx,
+        crypto,
+        &current_text,
+        updated_by,
+        revision_source,
+        revision_session,
+        matches!(
+            &content.body,
+            notegate_model::files::WriteTextBody::Plain(_)
+        ),
+    )
+    .await?;
+
     let doc_row = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE text_objects \
          SET storage_format = $3, content_text = $4, encrypted_payload = $5, \

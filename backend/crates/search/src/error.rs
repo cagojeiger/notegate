@@ -28,6 +28,9 @@ impl From<CoreError> for SearchError {
             CoreError::NotFound(message) => Self::NotFound(message),
             CoreError::Validation(message) => Self::InvalidInput(message),
             CoreError::Conflict(message) => Self::Conflict(message),
+            CoreError::TextRevisionStorageFull => {
+                Self::Internal("unexpected revision quota error in search".to_owned())
+            }
             CoreError::WriteLocked { scope } => Self::WriteLocked { scope },
             CoreError::UsageRecalculationInProgress {
                 retry_after_seconds,

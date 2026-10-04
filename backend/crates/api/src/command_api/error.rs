@@ -137,6 +137,7 @@ fn status_for(class: CommandErrorClass, kind: &str, code: &str) -> StatusCode {
         ("not_found", _) => StatusCode::NOT_FOUND,
         ("forbidden", _) => StatusCode::FORBIDDEN,
         ("conflict", _) => StatusCode::CONFLICT,
+        ("text_revision_storage_full", _) => StatusCode::UNPROCESSABLE_ENTITY,
         ("write_locked", _) | (_, "node_write_locked" | "subtree_write_locked") => {
             StatusCode::LOCKED
         }

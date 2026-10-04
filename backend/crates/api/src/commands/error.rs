@@ -23,6 +23,10 @@ pub fn service_error(error: ServiceError) -> CommandError {
         ServiceError::Conflict(message) => {
             CommandError::invalid_request(message).with_data(error_meta("conflict"))
         }
+        ServiceError::TextRevisionStorageFull => CommandError::invalid_request(
+            "Text history storage is full; current content was not changed",
+        )
+        .with_data(error_meta("text_revision_storage_full")),
         ServiceError::WriteLocked { scope } => write_locked_error(scope),
         ServiceError::UsageRecalculationInProgress {
             retry_after_seconds,

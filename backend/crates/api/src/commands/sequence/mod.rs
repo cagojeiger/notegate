@@ -40,6 +40,7 @@ const WRITE_COMMAND_FIELDS: &[&str] = &[
     "create",
     "ensure_newline",
     "expected_sha256",
+    "edit_session_id",
 ];
 const MANAGE_COMMAND_FIELDS: &[&str] = &[
     "tool",
@@ -519,6 +520,7 @@ fn write_input(
     purpose: &str,
 ) -> Result<notegate_command::WriteInput, CommandError> {
     Ok(notegate_command::WriteInput {
+        edit_session_id: command.edit_session_id,
         purpose: purpose.to_owned(),
         op: command.op,
         target: required_input(command.target, "target", "write command")?,

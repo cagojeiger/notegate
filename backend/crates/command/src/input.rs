@@ -241,6 +241,9 @@ pub struct WriteInput {
     /// Optimistic write guard.
     #[serde(default)]
     pub expected_sha256: Option<String>,
+    /// Optional editing session or AI operation ID. Omit for independent writes.
+    #[serde(default)]
+    pub edit_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

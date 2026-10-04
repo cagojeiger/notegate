@@ -19,6 +19,10 @@ pub enum ServiceError {
     /// The operation conflicts with current state or a limit.
     #[error("{0}")]
     Conflict(String),
+
+    /// Protected text history has reached its Space budget.
+    #[error("text revision storage limit reached; current content was not changed")]
+    TextRevisionStorageFull,
     /// A direct or inherited node write lock blocks the mutation.
     #[error("{scope}")]
     WriteLocked { scope: WriteLockScope },
@@ -39,6 +43,7 @@ impl From<CoreError> for ServiceError {
             CoreError::NotFound(message) => Self::NotFound(message),
             CoreError::Validation(message) => Self::InvalidInput(message),
             CoreError::Conflict(message) => Self::Conflict(message),
+            CoreError::TextRevisionStorageFull => Self::TextRevisionStorageFull,
             CoreError::WriteLocked { scope } => Self::WriteLocked { scope },
             CoreError::UsageRecalculationInProgress {
                 retry_after_seconds,

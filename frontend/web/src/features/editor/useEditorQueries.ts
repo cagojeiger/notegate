@@ -103,6 +103,10 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
         return;
       }
       setSaveState("error");
+      if (error instanceof ApiError && error.kind === "text_revision_storage_full") {
+        showToast(error.message);
+        return;
+      }
       if (
         error instanceof ApiError
         && error.status === 423

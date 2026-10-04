@@ -282,6 +282,9 @@ pub async fn write(
     input: WriteInput,
 ) -> Result<Value, CommandError> {
     validate_write_operation(&input)?;
+    let session = write_session_id(&input)?;
+    let scoped = context.clone().with_edit_session(session);
+    let context = &scoped;
     match input.op.as_str() {
         WRITE_OP_WRITE => {
             files::write(
@@ -330,8 +333,18 @@ pub async fn write(
     }
 }
 
+fn write_session_id(input: &WriteInput) -> Result<Option<uuid::Uuid>, CommandError> {
+    input
+        .edit_session_id
+        .as_deref()
+        .map(uuid::Uuid::parse_str)
+        .transpose()
+        .map_err(|_| invalid_input_error("edit_session_id must be a UUID"))
+}
+
 pub(crate) fn validate_write_operation(input: &WriteInput) -> Result<(), CommandError> {
     validate_purpose(&input.purpose)?;
+    write_session_id(input)?;
     match input.op.as_str() {
         WRITE_OP_WRITE | WRITE_OP_APPEND => {
             required_ref(input.content.as_ref(), "content", input.op.as_str())?;
@@ -542,6 +555,25 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn revision_session_is_validated_during_write_preflight() {
+        for session in [
+            None,
+            Some(uuid::Uuid::new_v4().to_string()),
+            Some("invalid".to_owned()),
+        ] {
+            let input: WriteInput = serde_json::from_value(json!({
+                "purpose": "edit a document", "op": "write", "target": "notes:/note.md",
+                "content": "new body", "edit_session_id": session,
+            }))
+            .expect("input parses");
+            assert_eq!(
+                validate_write_operation(&input).is_ok(),
+                session.as_deref() != Some("invalid")
+            );
+        }
+    }
 
     #[test]
     fn full_text_read_contract_matches_service_limits() {

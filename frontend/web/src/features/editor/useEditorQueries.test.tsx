@@ -238,4 +238,22 @@ describe("editor queries", () => {
     expect(onConflict).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();
   });
+  it("keeps history capacity failure out of overwrite-conflict recovery", async () => {
+    const message = "Text history storage is full. Current content was not changed.";
+    vi.mocked(replaceText).mockRejectedValue(new ApiError(message, 422, "text_revision_storage_full"));
+    const queryClient = createTestQueryClient();
+    const onConflict = vi.fn();
+    const onSaved = vi.fn();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useSaveTextDocument(node, "draft", "sha", onSaved, onConflict), { wrapper });
+    act(() => result.current.mutate(false));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(onConflict).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(useUiStore.getState().saveState).toBe("error");
+    expect(useUiStore.getState().toast).toBe(message);
+  });
+
 });

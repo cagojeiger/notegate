@@ -15,6 +15,7 @@ pub mod node;
 pub mod search;
 pub mod space;
 pub mod text;
+pub mod text_revision;
 pub mod user;
 
 pub use account::{Account, AccountKind, AccountRef};

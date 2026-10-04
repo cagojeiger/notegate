@@ -498,3 +498,7 @@ file_objects row -> matching nodes.kind='file'
 ```
 
 DB trigger는 content row가 올바른 node kind에만 붙도록 보장한다. Folder는 content row를 만들지 않는다. Text 생성/쓰기는 service transaction에서 node와 text_objects row를 함께 만든다.
+
+## Text revision history
+
+`text_objects.revision_*` tracks body attribution and the current editing group independently of metadata updates. `text_revisions` stores immutable encrypted past bodies and precomputed cleanup eligibility. `text_revision_usage` tracks a separate Space history-body budget; deletion releases it transactionally. All three are detailed in [Text revisions](text-revisions.md).

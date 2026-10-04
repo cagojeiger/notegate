@@ -101,6 +101,8 @@ pub struct SequenceCommand {
     #[serde(default)]
     pub expected_sha256: Option<String>,
     #[serde(default)]
+    pub edit_session_id: Option<String>,
+    #[serde(default)]
     pub if_none_match_sha256: Option<String>,
 }
 
@@ -204,6 +206,7 @@ struct SequenceWriteCommandSchema {
     #[serde(default)]
     ensure_newline: bool,
     expected_sha256: Option<String>,
+    edit_session_id: Option<String>,
 }
 
 #[allow(dead_code)]
