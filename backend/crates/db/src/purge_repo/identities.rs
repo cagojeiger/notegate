@@ -2,7 +2,7 @@
 
 use crate::map_sqlx_error;
 use notegate_core::{Result, limits};
-use sqlx::{PgConnection, Row as _};
+use sqlx::{PgPool, Row as _};
 
 const ACCOUNT_PURGE_BATCH: i64 = 100;
 const API_KEY_PURGE_BATCH: i64 = 1_000;
@@ -14,7 +14,9 @@ pub(super) struct PurgedIdentities {
     pub(super) browser_sessions_deleted: i64,
 }
 
-pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedIdentities> {
+pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
+    let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
+
     // ADR 0004: anonymize soft-deleted accounts whose retention window has elapsed.
     // Wipe PII and free the `provider_sub_hash` tombstone, but KEEP the (now
     // identifier-less) account/user rows for attribution. Freeing the tombstone lets
@@ -49,7 +51,7 @@ pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedIdentit
     )
     .bind(i32::try_from(limits::ACCOUNT_DELETION_RETENTION_DAYS).unwrap_or(i32::MAX))
     .bind(ACCOUNT_PURGE_BATCH)
-    .fetch_one(&mut *connection)
+    .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
     .get("anonymized_count");
@@ -78,7 +80,7 @@ pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedIdentit
     )
     .bind(i32::try_from(limits::DEAD_API_KEY_RETENTION_DAYS).unwrap_or(i32::MAX))
     .bind(API_KEY_PURGE_BATCH)
-    .fetch_one(&mut *connection)
+    .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
     .get("deleted_count");
@@ -102,10 +104,19 @@ pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedIdentit
     )
     .bind(i32::try_from(limits::DEAD_API_KEY_RETENTION_DAYS).unwrap_or(i32::MAX))
     .bind(BROWSER_SESSION_PURGE_BATCH)
-    .fetch_one(&mut *connection)
+    .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
     .get("deleted_count");
+
+    tx.commit().await.map_err(map_sqlx_error)?;
+    tracing::info!(
+        event = "purge.group_completed",
+        group = "identities",
+        accounts_anonymized,
+        api_keys_deleted,
+        browser_sessions_deleted,
+    );
 
     Ok(PurgedIdentities {
         accounts_anonymized,

@@ -2,7 +2,7 @@
 
 use crate::map_sqlx_error;
 use notegate_core::{Result, limits};
-use sqlx::{PgConnection, Row as _};
+use sqlx::{PgPool, Row as _};
 
 const OBJECT_STORAGE_HISTORY_PURGE_BATCH: i64 = 1_000;
 const AUDIT_EVENT_PURGE_BATCH: i64 = 1_000;
@@ -16,7 +16,9 @@ pub(super) struct PurgedHistory {
     pub(super) command_invocations_deleted: i64,
 }
 
-pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedHistory> {
+pub(super) async fn purge(pool: &PgPool) -> Result<PurgedHistory> {
+    let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
+
     let object_storage_history_deleted: i64 = sqlx::query(
         "WITH due AS ( \
              SELECT id FROM object_storage_objects \
@@ -35,7 +37,7 @@ pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedHistory
     )
     .bind(i32::try_from(limits::OBJECT_STORAGE_HISTORY_RETENTION_DAYS).unwrap_or(i32::MAX))
     .bind(OBJECT_STORAGE_HISTORY_PURGE_BATCH)
-    .fetch_one(&mut *connection)
+    .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
     .get("deleted_count");
@@ -55,7 +57,7 @@ pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedHistory
     )
     .bind(i32::try_from(limits::AUDIT_EVENT_RETENTION_DAYS).unwrap_or(i32::MAX))
     .bind(AUDIT_EVENT_PURGE_BATCH)
-    .fetch_one(&mut *connection)
+    .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
     .get("deleted_count");
@@ -75,7 +77,7 @@ pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedHistory
     )
     .bind(i32::try_from(limits::FILE_CHANGE_EVENT_RETENTION_DAYS).unwrap_or(i32::MAX))
     .bind(FILE_CHANGE_EVENT_PURGE_BATCH)
-    .fetch_one(&mut *connection)
+    .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
     .get("deleted_count");
@@ -95,10 +97,20 @@ pub(super) async fn purge(connection: &mut PgConnection) -> Result<PurgedHistory
     )
     .bind(i32::try_from(limits::COMMAND_INVOCATION_RETENTION_DAYS).unwrap_or(i32::MAX))
     .bind(COMMAND_INVOCATION_PURGE_BATCH)
-    .fetch_one(&mut *connection)
+    .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
     .get("deleted_count");
+
+    tx.commit().await.map_err(map_sqlx_error)?;
+    tracing::info!(
+        event = "purge.group_completed",
+        group = "history",
+        object_storage_history_deleted,
+        audit_events_deleted,
+        file_change_events_deleted,
+        command_invocations_deleted,
+    );
 
     Ok(PurgedHistory {
         object_storage_history_deleted,

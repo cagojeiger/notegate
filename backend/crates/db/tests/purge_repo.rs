@@ -9,7 +9,7 @@
 )]
 mod common;
 
-use common::{TestDb, agent_api_key_prefix, insert_user_account};
+use common::{TestDb, agent_api_key_prefix, attach_file, insert_user_account, space_with_root};
 use notegate_core::security::PiiCrypto;
 use notegate_db::{
     ApiKeyRepo, BrowserSessionRepo, PurgeRepo, api_key_repo::InsertApiKey,
@@ -484,6 +484,165 @@ async fn purge_deletes_long_dead_browser_sessions_only() -> Result<(), Box<dyn s
     );
     assert!(!remaining.contains(&old_revoked));
     assert!(!remaining.contains(&old_expired));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn resource_failure_rolls_back_deletion_intent_but_allows_other_cleanup()
+-> Result<(), Box<dyn std::error::Error>> {
+    assert_purge_failure_isolation(&["resources"]).await
+}
+
+#[tokio::test]
+async fn identity_failure_preserves_resources_and_allows_history_cleanup()
+-> Result<(), Box<dyn std::error::Error>> {
+    assert_purge_failure_isolation(&["identities"]).await
+}
+
+#[tokio::test]
+async fn history_failure_does_not_undo_resources_or_identities()
+-> Result<(), Box<dyn std::error::Error>> {
+    assert_purge_failure_isolation(&["history"]).await
+}
+
+#[tokio::test]
+async fn multiple_group_failures_still_allow_history_cleanup()
+-> Result<(), Box<dyn std::error::Error>> {
+    assert_purge_failure_isolation(&["resources", "identities"]).await
+}
+
+async fn assert_purge_failure_isolation(
+    failed_groups: &[&str],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (user, space, root) = space_with_root(&db.pool, "purge-isolation").await?;
+    let files = notegate_db::FilesRepo::new(db.pool.clone());
+    let (node, _) = attach_file(&files, space, root, "retired.bin", 10, user).await?;
+    let object: Uuid =
+        sqlx::query_scalar("SELECT id FROM object_storage_objects WHERE node_id = $1")
+            .bind(node.id)
+            .fetch_one(&db.pool)
+            .await?;
+    // Leave the object attached to exercise purge's safety net for missed
+    // soft-delete requests, including rollback if a later resource query fails.
+    sqlx::query(
+        "UPDATE spaces SET deleted_at = now() - interval '40 days', \
+         deleted_by_user_id = $2, purge_after = now() - interval '1 day' WHERE id = $1",
+    )
+    .bind(space)
+    .bind(user)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "UPDATE accounts SET is_active = false, deleted_at = now() - interval '40 days', \
+         deleted_by_account_id = id WHERE id = $1",
+    )
+    .bind(user)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO audit_events \
+         (created_at, owner_user_id, actor_account_id, source, op_type, resource_type) \
+         VALUES (now() - interval '366 days', $1, $1, 'system', 'test.expired', 'test')",
+    )
+    .bind(user)
+    .execute(&db.pool)
+    .await?;
+
+    sqlx::raw_sql(
+        "CREATE FUNCTION fail_purge_test() RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN RAISE EXCEPTION 'injected purge failure'; END; $$",
+    )
+    .execute(&db.pool)
+    .await?;
+    // Fail after preceding statements have already changed rows within each
+    // group. Statement triggers also fire when the failing table is empty.
+    let failure_tables = [
+        ("resources", "node_link_projections"),
+        ("identities", "browser_sessions"),
+        ("history", "file_change_events"),
+    ];
+    for (group, table) in failure_tables {
+        if failed_groups.contains(&group) {
+            sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+                "CREATE TRIGGER fail_purge BEFORE DELETE ON {table} \
+                 FOR EACH STATEMENT EXECUTE FUNCTION fail_purge_test()"
+            )))
+            .execute(&db.pool)
+            .await?;
+        }
+    }
+
+    let repo = PurgeRepo::new(db.pool.clone());
+    assert!(
+        repo.run_once().await.is_err(),
+        "partial success is an error"
+    );
+
+    let resources_failed = failed_groups.contains(&"resources");
+    let identities_failed = failed_groups.contains(&"identities");
+    let history_failed = failed_groups.contains(&"history");
+    let space_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM spaces WHERE id = $1)")
+            .bind(space)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(space_exists, resources_failed);
+    let ledger: (String, Option<Uuid>, Option<Uuid>, bool) = sqlx::query_as(
+        "SELECT state, space_id, node_id, delete_requested_at IS NOT NULL \
+         FROM object_storage_objects WHERE id = $1",
+    )
+    .bind(object)
+    .fetch_one(&db.pool)
+    .await?;
+    if resources_failed {
+        assert_eq!(
+            ledger,
+            ("attached".to_owned(), Some(space), Some(node.id), false)
+        );
+    } else {
+        assert_eq!(ledger, ("delete_pending".to_owned(), None, None, true));
+    }
+    let identity: (bool, bool) = sqlx::query_as(
+        "SELECT u.anonymized_at IS NOT NULL, a.display_name_ciphertext IS NULL \
+         FROM users u JOIN accounts a ON a.id = u.id WHERE u.id = $1",
+    )
+    .bind(user)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(identity, (!identities_failed, !identities_failed));
+    let expired_audit_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM audit_events WHERE op_type = 'test.expired')",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(expired_audit_exists, history_failed);
+
+    // The next scheduled attempt must converge without redoing committed work.
+    for (group, table) in failure_tables {
+        if failed_groups.contains(&group) {
+            sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+                "DROP TRIGGER fail_purge ON {table}"
+            )))
+            .execute(&db.pool)
+            .await?;
+        }
+    }
+    let retry = repo.run_once().await?;
+    assert_eq!(retry.spaces_deleted, u64::from(resources_failed));
+    assert_eq!(retry.object_deletions_queued, u64::from(resources_failed));
+    assert_eq!(retry.accounts_anonymized, u64::from(identities_failed));
+    assert_eq!(retry.audit_events_deleted, u64::from(history_failed));
+    let settled = repo.run_once().await?;
+    assert_eq!(settled.spaces_deleted, 0);
+    assert_eq!(settled.object_deletions_queued, 0);
+    assert_eq!(settled.accounts_anonymized, 0);
+    assert_eq!(settled.audit_events_deleted, 0);
 
     db.cleanup().await;
     Ok(())

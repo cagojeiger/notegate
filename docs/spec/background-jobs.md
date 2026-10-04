@@ -169,8 +169,9 @@ API transaction ── insert background_jobs ── COMMIT ── broadcast NOT
                                                    0~50ms spread
                                                          │
                                                          ▼
-Worker replicas ── claim batch ── bounded handlers ── state transition
-     │
+Worker replicas (all/worker) ── claim batch ── bounded handlers ── state transition
+
+Reconciler replicas (all/reconciler)
      └─ ReconciliationRuntime ── advisory lock ── lease recovery / retention
 ```
 
