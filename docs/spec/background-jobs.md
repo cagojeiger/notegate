@@ -46,6 +46,11 @@ backend/crates/api/src/process_runtime.rs
                                      process mode별 작업 기동, 감시, 종료
 
 backend/crates/db/                   schema, repository, transaction
+  src/link_graph_work_repo/
+    mod.rs                           공개 계약과 수동 요청 흐름
+    collection.rs                    변경 수집, 전체 재색인, 진행 위치 관리
+    targets.rs                       문서별 요청 병합, 상태 조회, 종료 작업 반영
+    dispatch.rs                      큐 용량 확인, 작업 등록, 대상과 작업 연결
 backend/crates/service/              authorization과 업무 흐름
 ```
 
@@ -68,6 +73,7 @@ notegate-api background runtime
 - Handler는 typed payload를 받아 완료, 지연 또는 분류된 실패를 queue runtime에 반환한다.
 - 멱등성, stale 판정, 업무 결과 transaction은 handler가 호출하는 db/service 계층이 소유한다.
 - Queue schema와 migration은 database schema 소유권에 따라 `notegate-db`가 관리한다.
+- Link graph work의 내부 모듈은 기존 transaction connection을 공유한다. 변경 처리 위치와 durable target 기록, queue 등록과 대상의 active job 연결을 파일 경계 때문에 별도로 커밋하지 않는다. `collection`은 `targets`와 `dispatch`를 호출하고, `dispatch`는 `targets`의 공통 범위 타입을 사용한다.
 - `all` mode는 HTTP server, queue consumer와 reconciliation runtime을 함께 실행한다. `api`, `worker`, `reconciler` mode는 같은 binary에서 실행 책임을 분리한다.
 
 ## 상태 머신
