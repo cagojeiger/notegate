@@ -445,27 +445,32 @@ async fn migration_backfills_existing_documents_without_inventing_history() -> T
     };
     let (actor, space, root) = space_with_root(&db.pool, "revision-migration").await?;
     let repo = FilesRepo::new(db.pool.clone());
-    let (node, _) = repo
-        .insert_text(space, root, "legacy.md", &body("a"), actor)
-        .await?;
+    // Model the old binary's schema directly; the current writer requires the latest migration.
+    let node_id: Uuid = sqlx::query_scalar("INSERT INTO nodes (space_id,parent_id,name,kind,created_by_account_id,updated_by_account_id) VALUES ($1,$2,'legacy.md','text',$3,$3) RETURNING id")
+        .bind(space).bind(root).bind(actor).fetch_one(&db.pool).await?;
+    sqlx::query("INSERT INTO text_objects (node_id,space_id,storage_format,content_text,content_sha256,byte_len,line_count,created_by_account_id,updated_by_account_id) VALUES ($1,$2,'plain','a',$3,1,1,$4,$4)")
+        .bind(node_id).bind(space).bind(&body("a").content_sha256).bind(actor).execute(&db.pool).await?;
     sqlx::query("UPDATE text_objects SET updated_at=now()-interval '90 days' WHERE node_id=$1")
-        .bind(node.id)
+        .bind(node_id)
         .execute(&db.pool)
         .await?;
     db.apply_migration(42).await?;
-    let backfilled: bool=sqlx::query_scalar("SELECT revision_author_id=updated_by_account_id AND revision_written_at=updated_at FROM text_objects WHERE node_id=$1").bind(node.id).fetch_one(&db.pool).await?;
+    let backfilled: bool=sqlx::query_scalar("SELECT revision_author_id=updated_by_account_id AND revision_written_at=updated_at FROM text_objects WHERE node_id=$1").bind(node_id).fetch_one(&db.pool).await?;
     assert!(backfilled);
+    db.apply_migration(43).await?;
     assert!(
-        repo.list_text_revisions(space, node.id, 10, None)
+        repo.list_text_revisions(space, node_id, 10, None)
             .await?
             .revisions
             .is_empty()
     );
-    save(&repo, space, node.id, actor, "b").await?;
+    save(&repo, space, node_id, actor, "b").await?;
     assert_eq!(revisions::cleanup(&db.pool).await?, 0);
-    let page = repo.list_text_revisions(space, node.id, 10, None).await?;
+    let page = repo.list_text_revisions(space, node_id, 10, None).await?;
+    assert!(page.current.unwrap().purpose.is_none());
+    assert!(page.revisions[0].purpose.is_none());
     assert_eq!(
-        repo.read_text_revision(space, node.id, page.revisions[0].id)
+        repo.read_text_revision(space, node_id, page.revisions[0].id)
             .await?
             .content,
         "a"
