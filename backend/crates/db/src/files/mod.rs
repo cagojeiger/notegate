@@ -7,3 +7,5 @@ pub mod error;
 pub mod object_uploads;
 pub mod queries;
 pub mod rows;
+
+pub mod revisions;

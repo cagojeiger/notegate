@@ -89,7 +89,7 @@ impl NodeSummaryRow {
 }
 
 /// A row from `text_objects`.
-#[derive(Debug, FromRow)]
+#[derive(Debug, Clone, FromRow)]
 pub struct TextRow {
     pub node_id: Uuid,
     pub space_id: Uuid,

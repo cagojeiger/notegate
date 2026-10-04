@@ -14,6 +14,8 @@ mod events;
 mod mutate;
 mod preview;
 mod read;
+mod revisions;
+pub use revisions::RevisionHistoryPage;
 mod tree;
 mod view;
 
@@ -63,7 +65,7 @@ pub struct FilesService {
 impl FilesService {
     pub fn new(store: FilesRepo) -> Self {
         Self {
-            store,
+            store: store.with_revision_context("browser", None),
             channel: Channel::Browser,
         }
     }
@@ -73,7 +75,15 @@ impl FilesService {
             store: self
                 .store
                 .clone()
-                .with_external_access_only(channel != Channel::Browser),
+                .with_external_access_only(channel != Channel::Browser)
+                .with_revision_context(
+                    match channel {
+                        Channel::Browser => "browser",
+                        Channel::Api => "api",
+                        Channel::Mcp => "mcp",
+                    },
+                    None,
+                ),
             channel,
         }
     }

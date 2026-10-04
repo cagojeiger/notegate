@@ -282,6 +282,8 @@ pub async fn write(
     input: WriteInput,
 ) -> Result<Value, CommandError> {
     validate_write_operation(&input)?;
+    let scoped = context.clone().with_edit_session(input.edit_session_id);
+    let context = &scoped;
     match input.op.as_str() {
         WRITE_OP_WRITE => {
             files::write(

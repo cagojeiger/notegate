@@ -157,6 +157,9 @@ pub(crate) struct ReplaceBody {
     encrypted_payload: Option<Value>,
     #[serde(default)]
     expected_sha256: Option<String>,
+    /// Optional editing session or AI operation ID; missing means an independent save.
+    #[serde(default)]
+    edit_session_id: Option<Uuid>,
 }
 
 fn default_storage_format() -> String {
@@ -180,6 +183,8 @@ pub(crate) async fn replace(
 ) -> Result<Json<TextResponse>, ApiError> {
     let view = state
         .files
+        .clone()
+        .with_revision_session(body.edit_session_id)
         .write_text(
             caller.account_id(),
             space_id,
@@ -249,6 +254,9 @@ pub(crate) struct PatchBody {
     edits: Vec<Edit>,
     #[serde(default)]
     expected_sha256: Option<String>,
+    /// Optional editing session or AI operation ID; missing means an independent save.
+    #[serde(default)]
+    edit_session_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -318,6 +326,8 @@ pub(crate) async fn patch(
 
     let result = state
         .files
+        .clone()
+        .with_revision_session(body.edit_session_id)
         .patch_text(
             caller.account_id(),
             space_id,

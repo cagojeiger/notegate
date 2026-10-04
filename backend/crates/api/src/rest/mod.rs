@@ -8,6 +8,7 @@ pub mod me;
 pub mod nodes;
 pub mod spaces;
 pub mod text;
+pub mod text_revisions;
 
 #[cfg(test)]
 mod file_upload_tests;

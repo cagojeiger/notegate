@@ -36,6 +36,8 @@ pub struct FilesRepo {
     crypto: PiiCrypto,
     metrics_enabled: bool,
     external_only: bool,
+    revision_session: Option<Uuid>,
+    revision_source: &'static str,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -97,11 +99,19 @@ impl FilesRepo {
             crypto,
             metrics_enabled: false,
             external_only: false,
+            revision_session: None,
+            revision_source: "unknown",
         }
     }
 
     pub fn with_external_access_only(mut self, external_only: bool) -> Self {
         self.external_only = external_only;
+        self
+    }
+
+    pub fn with_revision_context(mut self, source: &'static str, session: Option<Uuid>) -> Self {
+        self.revision_source = source;
+        self.revision_session = session;
         self
     }
 
@@ -671,6 +681,8 @@ impl FilesRepo {
             expected_sha256,
             updated_by,
             mutation_kind,
+            revision_source: self.revision_source,
+            revision_session: self.revision_session,
             caps: self.limits,
         })
         .await
@@ -804,5 +816,42 @@ impl FilesRepo {
         account_id: Uuid,
     ) -> Result<Option<Permission>> {
         queries::node::permission_for(&self.pool, space_id, account_id).await
+    }
+}
+
+impl FilesRepo {
+    pub async fn list_text_revisions(
+        &self,
+        space_id: Uuid,
+        node_id: Uuid,
+        limit: i64,
+        cursor: Option<&notegate_model::text_revision::TextRevisionCursor>,
+    ) -> Result<notegate_model::text_revision::TextRevisionPage> {
+        crate::files::revisions::list(
+            &self.pool,
+            space_id,
+            node_id,
+            limit,
+            cursor,
+            self.external_only,
+        )
+        .await
+    }
+
+    pub async fn read_text_revision(
+        &self,
+        space_id: Uuid,
+        node_id: Uuid,
+        revision_id: Uuid,
+    ) -> Result<notegate_model::text_revision::TextRevisionContent> {
+        crate::files::revisions::read(
+            &self.pool,
+            &self.crypto,
+            space_id,
+            node_id,
+            revision_id,
+            self.external_only,
+        )
+        .await
     }
 }

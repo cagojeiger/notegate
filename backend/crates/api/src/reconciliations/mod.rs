@@ -2,6 +2,8 @@ mod background_jobs;
 mod link_graph;
 mod object_storage;
 mod purge;
+mod text_revisions;
+use text_revisions::TextRevisionRetentionReconciler;
 
 use notegate_db::{LinkGraphWorkRepo, PgPool};
 use notegate_jobs::JobQueue;
@@ -27,6 +29,10 @@ pub(crate) fn spawn(
 ) -> Result<JoinHandle<()>, ReconciliationError> {
     let queue = JobQueue::new(pool.clone());
     let registry = ReconciliationRegistry::new()
+        .register(
+            TextRevisionRetentionReconciler::new(pool.clone()),
+            TextRevisionRetentionReconciler::schedule()?,
+        )?
         .register(
             PurgeReconciler::new(pool.clone()),
             PurgeReconciler::schedule()?,

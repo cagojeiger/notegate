@@ -519,6 +519,7 @@ fn write_input(
     purpose: &str,
 ) -> Result<notegate_command::WriteInput, CommandError> {
     Ok(notegate_command::WriteInput {
+        edit_session_id: None,
         purpose: purpose.to_owned(),
         op: command.op,
         target: required_input(command.target, "target", "write command")?,

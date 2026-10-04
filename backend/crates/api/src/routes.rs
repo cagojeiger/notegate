@@ -389,6 +389,7 @@ fn rest_api_routes(state: AppState) -> Router<AppState> {
         .merge(crate::rest::spaces::routes())
         .merge(crate::rest::nodes::routes())
         .merge(crate::rest::text::routes())
+        .merge(crate::rest::text_revisions::routes())
         .merge(crate::rest::file_uploads::routes())
         .merge(crate::rest::files::routes())
         .merge(crate::rest::link_graph::routes())

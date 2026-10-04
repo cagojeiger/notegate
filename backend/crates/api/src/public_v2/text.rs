@@ -160,6 +160,9 @@ pub(crate) struct ReplaceBody {
     /// Optional optimistic guard copied from the latest read response.
     #[serde(default)]
     expected_sha256: Option<String>,
+    /// Optional editing session or AI operation ID; missing means an independent save.
+    #[serde(default)]
+    edit_session_id: Option<Uuid>,
 }
 
 #[utoipa::path(
@@ -178,7 +181,10 @@ pub(crate) async fn replace(
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<ReplaceBody>,
 ) -> Result<Json<TextMutationResponse>, ApiError> {
-    let files = state.files.for_channel(caller.channel);
+    let files = state
+        .files
+        .for_channel(caller.channel)
+        .with_revision_session(body.edit_session_id);
     let current_sha = guarded_plain_text_sha(
         &files,
         caller.account_id(),
@@ -219,6 +225,9 @@ pub(crate) struct AppendBody {
     /// Optional optimistic guard copied from the latest read response.
     #[serde(default)]
     expected_sha256: Option<String>,
+    /// Optional editing session or AI operation ID; missing means an independent save.
+    #[serde(default)]
+    edit_session_id: Option<Uuid>,
 }
 
 #[utoipa::path(
@@ -240,6 +249,7 @@ pub(crate) async fn append(
     let view = state
         .files
         .for_channel(caller.channel)
+        .with_revision_session(body.edit_session_id)
         .append_text(
             caller.account_id(),
             space_id,
@@ -272,6 +282,9 @@ pub(crate) struct PatchBody {
     /// Optional optimistic guard copied from the latest read response.
     #[serde(default)]
     expected_sha256: Option<String>,
+    /// Optional editing session or AI operation ID; missing means an independent save.
+    #[serde(default)]
+    edit_session_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -338,6 +351,7 @@ pub(crate) async fn patch(
     let result = state
         .files
         .for_channel(caller.channel)
+        .with_revision_session(body.edit_session_id)
         .patch_text(
             caller.account_id(),
             space_id,
@@ -369,6 +383,9 @@ pub(crate) struct LineEditBody {
     /// Optional optimistic guard copied from the latest read response.
     #[serde(default)]
     expected_sha256: Option<String>,
+    /// Optional editing session or AI operation ID; missing means an independent save.
+    #[serde(default)]
+    edit_session_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -423,6 +440,7 @@ pub(crate) async fn edit(
     let result = state
         .files
         .for_channel(caller.channel)
+        .with_revision_session(body.edit_session_id)
         .edit_text(
             caller.account_id(),
             space_id,
