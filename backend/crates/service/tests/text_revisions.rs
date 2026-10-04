@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_in_result,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing
+)]
 mod common;
 use common::{TestDb, insert_user_account, setup_space};
 use notegate_db::{AccountRepo, AgentRepo, ConnectionRepo, FilesRepo, SpaceRepo};

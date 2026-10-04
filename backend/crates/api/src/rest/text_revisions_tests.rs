@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_in_result,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing
+)]
 use super::test_support::{caller_and_space, get_json, json_request, rest_app, state};
 use axum::http::StatusCode;
 use notegate_db::test_support::TestDb;

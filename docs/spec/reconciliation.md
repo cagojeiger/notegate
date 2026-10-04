@@ -17,6 +17,7 @@ NoteGate의 주기적인 전역 수렴 작업은 `notegate-reconciliation` runti
 
 ```text
 ReconciliationRegistry
+  ├─ text_revisions.retention
   ├─ system.purge
   ├─ background_jobs.lease_recovery
   ├─ background_jobs.history_retention
@@ -73,3 +74,7 @@ system.purge (1시간 주기, 전체 실행 timeout 1시간)
 Reconciliation runtime은 kind별 활성 상태, 실행 결과, 실행 시간과 최근 완료·성공 시각을 노출한다. Metric 이름, label domain과 fleet 집계 방법은 [Observability의 Reconciliation 메트릭](observability.md#reconciliation-메트릭)을 따른다.
 
 `lock_held`는 다른 replica가 동일 kind를 실행 중인 정상적인 조정 결과다. 같은 kind의 `active` 합계가 `1`을 초과하면 단일 실행 불변식 위반이다. `ContinueAfter`를 반환한 bounded pass도 성공한 실행이며, 완전 수렴 여부는 업무별 backlog 또는 freshness metric으로 판단한다.
+
+## Text revision retention
+
+`text_revisions.retention`은 기존 runtime에서 10분마다 실행하며, 한 Space의 만료된 본문 버전을 최대 100개씩 정리한다. 삭제가 있었다면 lock을 해제한 뒤 1초 후 후속 실행한다. 보존 경계·별도 용량·실패 의미는 [Text revisions](text-revisions.md)를 따른다. 별도 worker를 추가하지 않는다.

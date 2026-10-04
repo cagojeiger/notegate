@@ -43,6 +43,7 @@ CREATE TABLE text_revisions (
 );
 CREATE INDEX text_revisions_list_idx ON text_revisions(space_id, node_id, superseded_at DESC, id DESC);
 CREATE INDEX text_revisions_cleanup_idx ON text_revisions(cleanup_at, id);
+CREATE INDEX text_revisions_space_cleanup_idx ON text_revisions(space_id, cleanup_at, id);
 
 -- Kept separate from live-content usage, including while a document is soft-deleted.
 CREATE TABLE text_revision_usage (

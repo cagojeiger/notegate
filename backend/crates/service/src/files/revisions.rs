@@ -20,6 +20,21 @@ struct HistoryCursor {
 }
 
 impl FilesService {
+    async fn require_revision_access(&self, space: Uuid, node: Uuid) -> ServiceResult<()> {
+        self.load_node(space, node).await?;
+        let stats = self
+            .store
+            .text_stats(space, node)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("text not found".to_owned()))?;
+        if stats.storage_format != notegate_model::TextStorageFormat::Plain {
+            return Err(ServiceError::InvalidInput(
+                "client-encrypted text history is not supported".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn with_revision_session(mut self, session: Option<Uuid>) -> Self {
         self.store = self.store.with_revision_context(
             match self.channel {
@@ -41,7 +56,7 @@ impl FilesService {
         raw_cursor: Option<&str>,
     ) -> ServiceResult<RevisionHistoryPage> {
         self.authorize(space, actor, FileCommand::Read).await?;
-        self.load_node(space, node).await?;
+        self.require_revision_access(space, node).await?;
         let decoded: Option<HistoryCursor> = raw_cursor.map(cursor::decode).transpose()?;
         if decoded
             .as_ref()
@@ -64,7 +79,8 @@ impl FilesService {
                     position,
                 })
             })
-            .transpose()?;
+            .transpose()
+            .map_err(|_| ServiceError::Internal("failed to encode revision cursor".to_owned()))?;
         Ok(RevisionHistoryPage {
             revisions: page.revisions,
             next_cursor,
@@ -79,7 +95,7 @@ impl FilesService {
         revision: Uuid,
     ) -> ServiceResult<TextRevisionContent> {
         self.authorize(space, actor, FileCommand::Read).await?;
-        self.load_node(space, node).await?;
+        self.require_revision_access(space, node).await?;
         Ok(self.store.read_text_revision(space, node, revision).await?)
     }
 

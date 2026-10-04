@@ -1,4 +1,5 @@
 #![allow(
+    clippy::unwrap_in_result,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,
