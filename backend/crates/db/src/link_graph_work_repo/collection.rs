@@ -1,183 +1,27 @@
-use std::collections::{BTreeMap, BTreeSet};
+//! Collect changes and advance incremental/full-scan checkpoints atomically
+//! with durable targets and any queue work dispatched in that pass.
+
+use std::collections::BTreeSet;
 
 use notegate_core::Result;
-use notegate_jobs::{JobHistoryContext, JobQueue, JobSpec, NewJob};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{FromRow, PgConnection, PgPool};
+use sqlx::{FromRow, PgConnection};
 use uuid::Uuid;
 
-use crate::link_graph_state::NODE_REQUEST_PENDING_PREDICATE;
+use super::dispatch::dispatch_targets_in;
+use super::targets::{TargetScope, settle_terminal_targets_in, stage_node_ids_in};
+use super::{LinkGraphChangeCollection, LinkGraphWorkRepo};
 use crate::map_sqlx_error;
 
-pub const LINK_GRAPH_PROJECT_BATCH_MAX: usize = 50;
-pub const LINK_GRAPH_ACTIVE_JOB_MAX: i64 = 1_000;
 const LINK_GRAPH_CHANGE_BATCH_SIZE: usize = 500;
 const LINK_GRAPH_CHANGE_FETCH_LIMIT: i64 = 501;
 const LINK_GRAPH_CHANGE_SPACE_BATCH_SIZE: usize = 32;
 const LINK_GRAPH_CHANGE_SPACE_FETCH_LIMIT: i64 = 33;
 const LINK_GRAPH_FULL_SCAN_BATCH_SIZE: usize = 500;
 const LINK_GRAPH_FULL_SCAN_FETCH_LIMIT: i64 = 501;
-const LINK_GRAPH_DISPATCH_BATCH_SIZE: usize = 500;
-const LINK_GRAPH_DISPATCH_FETCH_LIMIT: i64 = 501;
 const LINK_GRAPH_SETTLEMENT_BATCH_SIZE: i64 = 500;
-const LINK_GRAPH_PROJECT_MAX_ATTEMPTS: i32 = 8;
-const LINK_GRAPH_DISPATCH_LOCK_SEED: i64 = 0x4e47_4c49_4e4b_0001;
-
-pub struct LinkGraphProjectNodesJob;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LinkGraphProjectNodesPayload {
-    pub space_id: Uuid,
-    pub sources: Vec<LinkGraphProjectSource>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LinkGraphProjectSource {
-    pub node_id: Uuid,
-    pub expected_content_sha256: Option<String>,
-}
-
-impl JobSpec for LinkGraphProjectNodesJob {
-    const KIND: &'static str = "link_graph_project_nodes";
-    type Payload = LinkGraphProjectNodesPayload;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LinkGraphProjectionTarget {
-    pub node_id: Uuid,
-    pub request_version: i64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LinkGraphChangeCollection {
-    Idle,
-    Collected {
-        spaces: usize,
-        events: usize,
-        staged_targets: usize,
-        failed_targets: usize,
-        dispatched_targets: usize,
-        jobs: usize,
-        has_more: bool,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LinkGraphSpaceRequestOutcome {
-    Requested,
-    AlreadyPending,
-    NotFound,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LinkGraphNodeRequestOutcome {
-    Requested,
-    AlreadyPending,
-}
-
-#[derive(Debug, Clone)]
-pub struct LinkGraphWorkRepo {
-    pool: PgPool,
-}
 
 impl LinkGraphWorkRepo {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
-    }
-
-    pub async fn request_node(
-        &self,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<LinkGraphNodeRequestOutcome> {
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        lock_space_state_in(&mut tx, space_id).await?;
-        if node_request_pending_in(&mut tx, space_id, node_id).await? {
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(LinkGraphNodeRequestOutcome::AlreadyPending);
-        }
-        stage_node_ids_in(&mut tx, space_id, &[node_id], true).await?;
-        dispatch_targets_in(
-            &mut tx,
-            TargetScope::Nodes {
-                space_id,
-                node_ids: &[node_id],
-            },
-        )
-        .await?;
-        tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(LinkGraphNodeRequestOutcome::Requested)
-    }
-
-    pub async fn request_nodes(&self, space_id: Uuid, node_ids: &[Uuid]) -> Result<()> {
-        validate_node_batch(node_ids)?;
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        let scope = TargetScope::Nodes { space_id, node_ids };
-        stage_node_ids_in(&mut tx, space_id, node_ids, true).await?;
-        dispatch_targets_in(&mut tx, scope).await?;
-        tx.commit().await.map_err(map_sqlx_error)
-    }
-
-    pub async fn space_pending(&self, space_id: Uuid) -> Result<Option<bool>> {
-        let mut connection = self.pool.acquire().await.map_err(map_sqlx_error)?;
-        space_pending_in(&mut connection, space_id).await
-    }
-
-    pub async fn request_space(&self, space_id: Uuid) -> Result<LinkGraphSpaceRequestOutcome> {
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        let live: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM spaces WHERE id = $1 AND deleted_at IS NULL)",
-        )
-        .bind(space_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        if !live {
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(LinkGraphSpaceRequestOutcome::NotFound);
-        }
-        lock_space_state_in(&mut tx, space_id).await?;
-        if space_pending_in(&mut tx, space_id).await? == Some(true) {
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(LinkGraphSpaceRequestOutcome::AlreadyPending);
-        }
-        let full_scan_event_id = start_full_scan_state(&mut tx, space_id).await?;
-        run_full_scan_pass(&mut tx, space_id, full_scan_event_id, None).await?;
-        tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(LinkGraphSpaceRequestOutcome::Requested)
-    }
-
-    pub async fn dispatch_ready_nodes(&self, space_id: Uuid, node_ids: &[Uuid]) -> Result<()> {
-        validate_node_batch(node_ids)?;
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        dispatch_targets_in(&mut tx, TargetScope::Nodes { space_id, node_ids }).await?;
-        tx.commit().await.map_err(map_sqlx_error)
-    }
-
-    pub async fn claimed_targets(
-        &self,
-        job_id: Uuid,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<Vec<LinkGraphProjectionTarget>> {
-        validate_node_batch(node_ids)?;
-        sqlx::query_as::<_, ProjectionTargetRow>(
-            "SELECT source_node_id AS node_id, active_request_version AS request_version \
-             FROM node_link_projections \
-             WHERE active_job_id = $1 AND active_request_version IS NOT NULL \
-               AND space_id = $2 AND source_node_id = ANY($3) \
-             ORDER BY source_node_id",
-        )
-        .bind(job_id)
-        .bind(space_id)
-        .bind(node_ids)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_sqlx_error)
-        .map(|rows| rows.into_iter().map(Into::into).collect())
-    }
-
     pub async fn collect_changes(&self) -> Result<LinkGraphChangeCollection> {
         let mut space_ids: Vec<Uuid> = sqlx::query_scalar(
             "SELECT space_id FROM link_graph_space_states \
@@ -372,27 +216,13 @@ impl LinkGraphWorkRepo {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct CollectedSpace {
+pub(super) struct CollectedSpace {
     events: usize,
     targets: usize,
     dispatched_targets: usize,
     jobs: usize,
     has_more: bool,
     backpressured: bool,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct DispatchSummary {
-    targets: usize,
-    jobs: usize,
-    has_more: bool,
-    backpressured: bool,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct SettlementSummary {
-    failed: usize,
-    has_more: bool,
 }
 
 #[derive(Debug, FromRow)]
@@ -409,47 +239,6 @@ struct FullScanBatch {
     targets: usize,
     last_node_id: Option<Uuid>,
     has_more: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum TargetScope<'a> {
-    All,
-    Space(Uuid),
-    Nodes {
-        space_id: Uuid,
-        node_ids: &'a [Uuid],
-    },
-}
-
-#[derive(Debug, FromRow)]
-struct ProjectionTargetRow {
-    node_id: Uuid,
-    request_version: i64,
-}
-
-impl From<ProjectionTargetRow> for LinkGraphProjectionTarget {
-    fn from(row: ProjectionTargetRow) -> Self {
-        Self {
-            node_id: row.node_id,
-            request_version: row.request_version,
-        }
-    }
-}
-
-#[derive(Debug, FromRow)]
-struct DispatchCandidateRow {
-    space_id: Uuid,
-    owner_user_id: Option<Uuid>,
-    space_name: Option<String>,
-    node_id: Uuid,
-    expected_content_sha256: Option<String>,
-}
-
-#[derive(Debug)]
-struct DispatchSpaceBatch {
-    owner_user_id: Option<Uuid>,
-    space_name: Option<String>,
-    sources: Vec<LinkGraphProjectSource>,
 }
 
 #[derive(Debug, FromRow)]
@@ -552,56 +341,6 @@ async fn load_event_window(
     Ok((checkpoint_valid, events))
 }
 
-async fn stage_node_ids_in(
-    connection: &mut PgConnection,
-    space_id: Uuid,
-    node_ids: &[Uuid],
-    supersede_active_job: bool,
-) -> Result<usize> {
-    if node_ids.is_empty() {
-        return Ok(0);
-    }
-    let affected = sqlx::query(
-        "WITH input AS ( \
-             SELECT DISTINCT requested.node_id \
-             FROM unnest($2::uuid[]) AS requested(node_id) \
-         ), candidates AS ( \
-             SELECT input.node_id \
-             FROM input \
-             WHERE EXISTS ( \
-                 SELECT 1 FROM nodes node \
-                 WHERE node.id = input.node_id AND node.space_id = $1 \
-             ) OR EXISTS ( \
-                 SELECT 1 FROM node_link_projections projection \
-                 WHERE projection.space_id = $1 \
-                   AND projection.source_node_id = input.node_id \
-             ) \
-         ) \
-         INSERT INTO node_link_projections ( \
-             space_id, source_node_id, needs_projection, request_version \
-         ) \
-         SELECT $1, candidates.node_id, true, 1 \
-         FROM candidates \
-         ON CONFLICT (space_id, source_node_id) DO UPDATE \
-         SET needs_projection = true, \
-             request_version = node_link_projections.request_version + 1, \
-             active_job_id = CASE WHEN $3 THEN NULL \
-                 ELSE node_link_projections.active_job_id END, \
-             active_request_version = CASE WHEN $3 THEN NULL \
-                 ELSE node_link_projections.active_request_version END, \
-             failure_code = NULL, failed_at = NULL",
-    )
-    .bind(space_id)
-    .bind(node_ids)
-    .bind(supersede_active_job)
-    .execute(&mut *connection)
-    .await
-    .map_err(map_sqlx_error)?
-    .rows_affected();
-    usize::try_from(affected)
-        .map_err(|_error| notegate_core::Error::internal("link target count overflow"))
-}
-
 async fn stage_full_space_batch_in(
     connection: &mut PgConnection,
     space_id: Uuid,
@@ -658,7 +397,7 @@ async fn stage_full_space_batch_in(
     })
 }
 
-async fn run_full_scan_pass(
+pub(super) async fn run_full_scan_pass(
     connection: &mut PgConnection,
     space_id: Uuid,
     full_scan_event_id: i64,
@@ -700,238 +439,6 @@ async fn run_full_scan_pass(
     })
 }
 
-async fn settle_terminal_targets_in(
-    connection: &mut PgConnection,
-    scope: TargetScope<'_>,
-    limit: i64,
-) -> Result<SettlementSummary> {
-    let (space_id, node_ids) = scope_parameters(scope);
-    let (processed, failed): (i64, i64) = sqlx::query_as(
-        "WITH candidates AS ( \
-             SELECT projection.space_id, projection.source_node_id, \
-                    projection.request_version, projection.active_request_version, job.status, \
-                    job.last_error_code, job.completed_at \
-             FROM node_link_projections projection \
-             JOIN background_jobs job ON job.job_id = projection.active_job_id \
-             WHERE ($1::uuid IS NULL OR projection.space_id = $1) \
-               AND ($2::uuid[] IS NULL OR projection.source_node_id = ANY($2)) \
-               AND job.status IN ('succeeded', 'dead') \
-             ORDER BY projection.space_id, projection.source_node_id \
-             LIMIT $3 FOR UPDATE OF projection SKIP LOCKED \
-         ), updated AS ( \
-             UPDATE node_link_projections projection \
-             SET active_job_id = NULL, active_request_version = NULL, \
-                 needs_projection = \
-                     candidate.active_request_version IS DISTINCT FROM candidate.request_version, \
-                 failure_code = CASE \
-                     WHEN candidate.active_request_version IS DISTINCT FROM candidate.request_version \
-                         THEN NULL \
-                     WHEN candidate.status = 'dead' \
-                         THEN COALESCE(candidate.last_error_code, 'job_failed') \
-                     ELSE 'projection_incomplete' \
-                 END, \
-                 failed_at = CASE \
-                     WHEN candidate.active_request_version IS DISTINCT FROM candidate.request_version \
-                         THEN NULL \
-                     ELSE COALESCE(candidate.completed_at, now()) \
-                 END \
-             FROM candidates candidate \
-             WHERE projection.space_id = candidate.space_id \
-               AND projection.source_node_id = candidate.source_node_id \
-             RETURNING projection.failure_code IS NOT NULL AS failed \
-         ) \
-         SELECT count(*), count(*) FILTER (WHERE failed) FROM updated",
-    )
-    .bind(space_id)
-    .bind(node_ids)
-    .bind(limit)
-    .fetch_one(&mut *connection)
-    .await
-    .map_err(map_sqlx_error)?;
-    Ok(SettlementSummary {
-        failed: usize::try_from(failed).map_err(|_error| {
-            notegate_core::Error::internal("failed link target count overflow")
-        })?,
-        has_more: processed == limit,
-    })
-}
-
-async fn dispatch_targets_in(
-    connection: &mut PgConnection,
-    scope: TargetScope<'_>,
-) -> Result<DispatchSummary> {
-    let (space_id, node_ids) = scope_parameters(scope);
-    let capacity_locked: bool = sqlx::query_scalar(
-        "SELECT pg_try_advisory_xact_lock(hashtextextended(current_schema(), $1))",
-    )
-    .bind(LINK_GRAPH_DISPATCH_LOCK_SEED)
-    .fetch_one(&mut *connection)
-    .await
-    .map_err(map_sqlx_error)?;
-    if !capacity_locked {
-        return pending_dispatch_summary(connection, space_id, node_ids.as_deref()).await;
-    }
-
-    let active_jobs: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM background_jobs \
-         WHERE job_kind = $1 AND status IN ('queued', 'running')",
-    )
-    .bind(LinkGraphProjectNodesJob::KIND)
-    .fetch_one(&mut *connection)
-    .await
-    .map_err(map_sqlx_error)?;
-    let job_capacity =
-        usize::try_from(LINK_GRAPH_ACTIVE_JOB_MAX.saturating_sub(active_jobs).max(0))
-            .map_err(|_error| notegate_core::Error::internal("link graph job capacity overflow"))?;
-    if job_capacity == 0 {
-        return pending_dispatch_summary(connection, space_id, node_ids.as_deref()).await;
-    }
-
-    let mut rows = sqlx::query_as::<_, DispatchCandidateRow>(
-        "SELECT projection.space_id, space.owner_user_id, space.name AS space_name, \
-                projection.source_node_id AS node_id, \
-                text.content_sha256 AS expected_content_sha256 \
-         FROM node_link_projections projection \
-         LEFT JOIN spaces space ON space.id = projection.space_id \
-         LEFT JOIN nodes node ON node.space_id = projection.space_id \
-           AND node.id = projection.source_node_id AND node.kind = 'text' \
-           AND node.deleted_at IS NULL \
-         LEFT JOIN text_objects text ON text.space_id = node.space_id \
-           AND text.node_id = node.id \
-         WHERE ($1::uuid IS NULL OR projection.space_id = $1) \
-           AND ($2::uuid[] IS NULL OR projection.source_node_id = ANY($2)) \
-           AND projection.needs_projection \
-           AND projection.active_job_id IS NULL AND projection.failed_at IS NULL \
-         ORDER BY projection.space_id, projection.source_node_id \
-         LIMIT $3 FOR UPDATE OF projection SKIP LOCKED",
-    )
-    .bind(space_id)
-    .bind(node_ids)
-    .bind(LINK_GRAPH_DISPATCH_FETCH_LIMIT)
-    .fetch_all(&mut *connection)
-    .await
-    .map_err(map_sqlx_error)?;
-    let fetched_more = rows.len() > LINK_GRAPH_DISPATCH_BATCH_SIZE;
-    rows.truncate(LINK_GRAPH_DISPATCH_BATCH_SIZE);
-    let candidate_count = rows.len();
-
-    let mut by_space = BTreeMap::<Uuid, DispatchSpaceBatch>::new();
-    for row in rows {
-        by_space
-            .entry(row.space_id)
-            .or_insert_with(|| DispatchSpaceBatch {
-                owner_user_id: row.owner_user_id,
-                space_name: row.space_name.clone(),
-                sources: Vec::new(),
-            })
-            .sources
-            .push(LinkGraphProjectSource {
-                node_id: row.node_id,
-                expected_content_sha256: row.expected_content_sha256,
-            });
-    }
-
-    let mut targets = 0;
-    let mut jobs = 0;
-    'spaces: for (space_id, space_batch) in by_space {
-        for batch in space_batch.sources.chunks(LINK_GRAPH_PROJECT_BATCH_MAX) {
-            if jobs == job_capacity {
-                break 'spaces;
-            }
-            let payload = LinkGraphProjectNodesPayload {
-                space_id,
-                sources: batch.to_vec(),
-            };
-            let mut job = NewJob::<LinkGraphProjectNodesJob>::new(payload)
-                .max_attempts(LINK_GRAPH_PROJECT_MAX_ATTEMPTS);
-            if let (Some(owner_user_id), Some(space_name)) =
-                (space_batch.owner_user_id, space_batch.space_name.as_ref())
-            {
-                job = job.record_in_history(
-                    owner_user_id,
-                    Some(
-                        JobHistoryContext::new("space")
-                            .id(space_id)
-                            .label(space_name),
-                    ),
-                );
-            }
-            let enqueued = JobQueue::enqueue_in(connection, &job)
-                .await
-                .map_err(job_error)?;
-            sqlx::query(
-                "UPDATE node_link_projections \
-                 SET active_job_id = $3, active_request_version = request_version \
-                 WHERE space_id = $1 AND source_node_id = ANY($2)",
-            )
-            .bind(space_id)
-            .bind(
-                batch
-                    .iter()
-                    .map(|source| source.node_id)
-                    .collect::<Vec<_>>(),
-            )
-            .bind(enqueued.job_id)
-            .execute(&mut *connection)
-            .await
-            .map_err(map_sqlx_error)?;
-            targets += batch.len();
-            jobs += 1;
-        }
-    }
-    let capacity_exhausted = jobs == job_capacity && (targets < candidate_count || fetched_more);
-    Ok(DispatchSummary {
-        targets,
-        jobs,
-        has_more: targets < candidate_count || fetched_more,
-        backpressured: capacity_exhausted,
-    })
-}
-
-async fn pending_dispatch_summary(
-    connection: &mut PgConnection,
-    space_id: Option<Uuid>,
-    node_ids: Option<&[Uuid]>,
-) -> Result<DispatchSummary> {
-    let node_ids = node_ids.map(<[Uuid]>::to_vec);
-    let has_more: bool = sqlx::query_scalar(
-        "SELECT EXISTS ( \
-             SELECT 1 FROM node_link_projections projection \
-             WHERE ($1::uuid IS NULL OR projection.space_id = $1) \
-               AND ($2::uuid[] IS NULL OR projection.source_node_id = ANY($2)) \
-               AND projection.needs_projection \
-               AND projection.active_job_id IS NULL AND projection.failed_at IS NULL \
-         )",
-    )
-    .bind(space_id)
-    .bind(node_ids)
-    .fetch_one(&mut *connection)
-    .await
-    .map_err(map_sqlx_error)?;
-    Ok(DispatchSummary {
-        has_more,
-        backpressured: has_more,
-        ..DispatchSummary::default()
-    })
-}
-
-fn scope_parameters(scope: TargetScope<'_>) -> (Option<Uuid>, Option<Vec<Uuid>>) {
-    match scope {
-        TargetScope::All => (None, None),
-        TargetScope::Space(space_id) => (Some(space_id), None),
-        TargetScope::Nodes { space_id, node_ids } => (Some(space_id), Some(node_ids.to_vec())),
-    }
-}
-
-fn validate_node_batch(node_ids: &[Uuid]) -> Result<()> {
-    if node_ids.is_empty() || node_ids.len() > LINK_GRAPH_PROJECT_BATCH_MAX {
-        return Err(notegate_core::Error::validation(format!(
-            "link graph batch must contain between 1 and {LINK_GRAPH_PROJECT_BATCH_MAX} node ids"
-        )));
-    }
-    Ok(())
-}
-
 async fn latest_event_id(connection: &mut PgConnection, space_id: Uuid) -> Result<i64> {
     sqlx::query_scalar("SELECT COALESCE(max(id), 0) FROM file_change_events WHERE space_id = $1")
         .bind(space_id)
@@ -940,7 +447,10 @@ async fn latest_event_id(connection: &mut PgConnection, space_id: Uuid) -> Resul
         .map_err(map_sqlx_error)
 }
 
-async fn lock_space_state_in(connection: &mut PgConnection, space_id: Uuid) -> Result<()> {
+pub(super) async fn lock_space_state_in(
+    connection: &mut PgConnection,
+    space_id: Uuid,
+) -> Result<()> {
     sqlx::query(
         "INSERT INTO link_graph_space_states (space_id) \
          VALUES ($1) ON CONFLICT (space_id) DO NOTHING",
@@ -957,52 +467,10 @@ async fn lock_space_state_in(connection: &mut PgConnection, space_id: Uuid) -> R
     Ok(())
 }
 
-async fn space_pending_in(connection: &mut PgConnection, space_id: Uuid) -> Result<Option<bool>> {
-    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "SELECT ( \
-             EXISTS ( \
-                 SELECT 1 FROM link_graph_space_states state \
-                 WHERE state.space_id = space.id \
-                   AND state.full_scan_event_id IS NOT NULL \
-             ) OR EXISTS ( \
-                 SELECT 1 FROM node_link_projections projection \
-                 LEFT JOIN background_jobs job ON job.job_id = projection.active_job_id \
-                 WHERE projection.space_id = space.id \
-                   AND {NODE_REQUEST_PENDING_PREDICATE} \
-             ) \
-         ) \
-         FROM spaces space \
-         WHERE space.id = $1 AND space.deleted_at IS NULL"
-    )))
-    .bind(space_id)
-    .fetch_optional(&mut *connection)
-    .await
-    .map_err(map_sqlx_error)
-}
-
-async fn node_request_pending_in(
+pub(super) async fn start_full_scan_state(
     connection: &mut PgConnection,
     space_id: Uuid,
-    node_id: Uuid,
-) -> Result<bool> {
-    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "SELECT EXISTS ( \
-             SELECT 1 \
-             FROM node_link_projections projection \
-             LEFT JOIN background_jobs job ON job.job_id = projection.active_job_id \
-             WHERE projection.space_id = $1 \
-               AND projection.source_node_id = $2 \
-               AND {NODE_REQUEST_PENDING_PREDICATE} \
-         )"
-    )))
-    .bind(space_id)
-    .bind(node_id)
-    .fetch_one(&mut *connection)
-    .await
-    .map_err(map_sqlx_error)
-}
-
-async fn start_full_scan_state(connection: &mut PgConnection, space_id: Uuid) -> Result<i64> {
+) -> Result<i64> {
     let full_scan_event_id = latest_event_id(connection, space_id).await?;
     sqlx::query(
         "UPDATE link_graph_space_states \
@@ -1092,10 +560,6 @@ async fn cleanup_space_in(connection: &mut PgConnection, space_id: Uuid) -> Resu
         .await
         .map_err(map_sqlx_error)?;
     Ok(())
-}
-
-fn job_error(error: notegate_jobs::JobQueueError) -> notegate_core::Error {
-    notegate_core::Error::internal(format!("link graph job queue failed: {error}"))
 }
 
 #[cfg(test)]
