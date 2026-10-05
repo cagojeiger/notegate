@@ -854,3 +854,50 @@ async fn cleanup_is_bounded_and_space_cascade_removes_usage() -> TestResult {
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn changed_save_updates_body_and_revision_attribution_once() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (actor, space, root) = space_with_root(&db.pool, "revision-single-update").await?;
+    let repo = FilesRepo::new(db.pool.clone()).with_revision_time(policy_time());
+    let (node, _) = repo
+        .insert_text(space, root, "note.md", &body("a"), actor)
+        .await?;
+    let original = revision_head(&db.pool, node.id).await?;
+    sqlx::raw_sql("CREATE TABLE text_update_observations (body_changed bool NOT NULL, revision_changed bool NOT NULL); CREATE FUNCTION observe_text_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO text_update_observations VALUES (OLD.content_sha256 IS DISTINCT FROM NEW.content_sha256, OLD.revision_id IS DISTINCT FROM NEW.revision_id); RETURN NEW; END $$; CREATE TRIGGER observe_text_update AFTER UPDATE ON text_objects FOR EACH ROW EXECUTE FUNCTION observe_text_update();")
+        .execute(&db.pool).await?;
+    let now = policy_time() + Duration::seconds(1);
+    save(
+        &repo.clone().with_revision_time(now),
+        space,
+        node.id,
+        actor,
+        "b",
+    )
+    .await?;
+    let observed: Vec<(bool, bool)> =
+        sqlx::query_as("SELECT body_changed, revision_changed FROM text_update_observations")
+            .fetch_all(&db.pool)
+            .await?;
+    assert_eq!(observed, vec![(true, true)]);
+    let head = revision_head(&db.pool, node.id).await?;
+    assert_eq!(head.1, now);
+    assert_ne!(head.0, original.0);
+    assert_eq!(
+        repo.read_text_revision(space, node.id, original.0)
+            .await?
+            .content,
+        "a"
+    );
+    save(&repo, space, node.id, actor, "b").await?;
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM text_update_observations")
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(count, 1);
+    assert_eq!(revision_head(&db.pool, node.id).await?, head);
+    assert_history_usage(&db.pool, space).await?;
+    db.cleanup().await;
+    Ok(())
+}

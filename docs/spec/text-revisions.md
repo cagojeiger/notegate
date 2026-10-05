@@ -4,7 +4,7 @@ Text revisions preserve recoverable bodies separately from audit events and live
 
 ## Save and editing groups
 
-`write`, `append`, `patch`, and `edit` converge on `save_text_content`. After the existing checks, one transaction reserves history capacity, snapshots the old body, advances body attribution/group metadata, updates current content and records the existing file-change event. Any failure rolls back all of these. Unchanged or conflicting saves add no history.
+`write`, `append`, `patch`, and `edit` converge on `save_text_content`. After the existing checks, one transaction reserves history capacity, snapshots the old body, updates current content and body attribution/group metadata in one statement, and records the existing file-change event. Any failure rolls back all of these. Unchanged or conflicting saves add no history.
 
 Existing documents are backfilled with their last known author/time; pre-feature overwritten bodies cannot be recovered. New documents start with an independent initial state. Copying creates independent history; rename/move and encryption-policy changes create no body revision. Body attribution is stored separately from metadata `updated_at`.
 
@@ -69,6 +69,36 @@ The database is the revision policy clock in production. Creation and each chang
 CI checks one microsecond before, exactly at, and one microsecond after the 120-second idle, 600-second group, 24-hour intermediate and 30-day checkpoint boundaries. Continued writes isolate the group-age limit from the idle limit. Tests also verify replacement-based retention, unchanged current content during cleanup, transactional usage accounting, and that no-op, hash-conflict, quota-rejected and rolled-back writes do not refresh an editing group.
 
 CI exercises atomic rollback, no-op and competing writes, group boundaries, recent protection of old current content, repeated cleanup, expiration, quota accounting, cascade deletion, encrypted identity binding, access controls, write locks, encryption transitions, pagination and guarded restore. Local builds/tests are not required for this change.
+
+## Write cost and CI comparison
+
+Full replacement loads node and text metrics for preflight, without fetching/decrypting the previous body. The transaction still locks and loads that body to preserve the recoverable snapshot. Append, patch and edit retain their required content reads. Changed saves update current content and revision attribution together once; a trigger-based regression test checks the actual row-update count. No-op, conflict, rollback, quota, channel/session and encryption contracts are unchanged.
+
+Account-deletion safety still locks the active Space owner's account before locking the Space. Consequently, concurrent writes to different Spaces owned by the same user can also serialize. This change shortens work in that transaction; it does not remove that safety boundary.
+
+The `Text Write Performance` workflow compares a PR's base and candidate on one Linux runner and PostgreSQL 17 using the same ignored service benchmark. It builds the release profile once per revision, then alternates three paired trials. Cases cover 10 KiB, 100 KiB and 1 MiB bodies, plain/server encryption, sequential saves, four writers in one Space, different Spaces under one owner, and different owners. Each writer uses a separate document and performs two warmup saves followed by 20 changed saves through a four-connection pool. History bodies/counts and usage are verified after timing. The summary and raw measurements are retained as `text-write-performance`.
+
+Measurements are service-call p95 and throughput for synthetic repeated-character bodies; they include pool/row-lock waits and crypto, but exclude HTTP middleware, production networking, real workload distributions and long-running cleanup. Reported figures are medians across three trial percentiles/rates. Timing is informational and has no noisy CI pass/fail threshold; compilation, fixture correctness and complete measurement coverage must pass. Local benchmarks are not required.
+
+## First deployment
+
+The first rollout from a binary without revision recording requires a controlled write pause. Pre-feature writers neither preserve snapshots nor advance revision attribution; concurrent old/new writes and a rollback to a pre-feature writer cannot provide these history guarantees. Forward fixes retain the existing encryption root/key ID. This is a first-feature rollout requirement, not a new migration in the write optimization.
+
+1. Inspect the actual database's applied migration versions, backup/recovery readiness and `text_objects` size. A cheap size estimate is:
+
+   ```sql
+   SELECT reltuples::bigint AS estimated_rows,
+          pg_size_pretty(pg_total_relation_size(oid)) AS total_size
+   FROM pg_class WHERE oid = 'text_objects'::regclass;
+   ```
+
+   `estimated_rows` is planner statistics, not an exact count. Migration 0042 adds volatile random-UUID defaults, which rewrite the existing table/indexes, and then updates every existing text's attribution. ALTER TABLE holds an exclusive lock; migration time and temporary disk/WAL requirements depend on real data size. Rehearse on a representative restored database when the table is large. See [PostgreSQL ALTER TABLE](https://www.postgresql.org/docs/17/sql-altertable.html#SQL-ALTERTABLE-NOTES). CI's small migration fixture proves correctness, not production downtime.
+2. Pause ingress for text writes, drain in-flight mutations and terminate all pre-feature `all`/`api` writers. Updating a mutable image tag or relying on an overlapping rolling update does not establish this boundary.
+3. Start one new `api`/`all` process with traffic held; it owns migration application. Wait for schema readiness, then start/upgrade the other process roles. Do not edit/reapply an already recorded migration checksum.
+4. Verify a controlled document's guarded save, previous-body read and guarded restore, followed by history usage consistency and retention reconciliation. These checks create real revisions; choose an operational test document deliberately.
+5. Restore replicas/traffic and watch write-route latency/errors, DB-pool acquisition latency/timeouts, database lock waits, history capacity, and `text_revisions.retention` results. Fix forward rather than restarting pre-feature writers against newly recorded history.
+
+This runbook does not establish that any cluster has been migrated or deployed. Confirm release digest, GitOps desired digest, and running Pod `imageID` separately when performing the rollout.
 
 ## Web version history
 

@@ -21,6 +21,14 @@ const CLEANUP_BATCH: i64 = 100;
 const META: &str = "r.id, r.node_id, r.content_sha256, r.byte_len, r.line_count, r.written_at, r.author_id, r.group_id, r.source, r.purpose, r.superseded_at";
 const VISIBLE: &str = "r.space_id = $1 AND r.node_id = $2 AND EXISTS (SELECT 1 FROM text_objects t JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id JOIN spaces s ON s.id = t.space_id WHERE t.node_id = r.node_id AND t.space_id = r.space_id AND t.storage_format = 'plain' AND n.deleted_at IS NULL AND s.deleted_at IS NULL)";
 
+/// Revision attribution to commit together with the replacement body.
+pub(crate) struct NextRevision {
+    pub id: Uuid,
+    pub written_at: DateTime<Utc>,
+    pub group_id: Uuid,
+    pub group_started_at: DateTime<Utc>,
+}
+
 /// Called only while the normal write transaction owns the Space and text locks.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn capture(
@@ -30,10 +38,9 @@ pub(crate) async fn capture(
     actor: Uuid,
     source: &str,
     session: Option<Uuid>,
-    purpose: Option<&str>,
     next_plain: bool,
     now: Option<DateTime<Utc>>,
-) -> Result<()> {
+) -> Result<NextRevision> {
     // Sample wall time once, after the write transaction acquired its locks.
     let head = sqlx::query(
         "WITH clock AS MATERIALIZED (SELECT COALESCE($6::timestamptz, clock_timestamp()) AS saved_at) \
@@ -107,15 +114,16 @@ pub(crate) async fn capture(
             .bind(head.try_get::<Option<String>, _>("revision_purpose").map_err(map_sqlx_error)?)
             .execute(&mut *tx).await.map_err(map_sqlx_error)?;
     }
-    sqlx::query(
-        "UPDATE text_objects SET revision_id = $3, revision_written_at = $4, revision_author_id = $5, \
-         revision_group_id = $6, revision_group_started_at = $7, revision_session_id = $8, revision_source = $9, revision_purpose = $10 \
-         WHERE space_id = $1 AND node_id = $2",
-    ).bind(current.space_id).bind(current.node_id).bind(Uuid::new_v4()).bind(saved_at).bind(actor)
-        .bind(if same_group { previous_group } else { Uuid::new_v4() })
-        .bind(if same_group { started_at } else { saved_at }).bind(session).bind(source).bind(purpose)
-        .execute(&mut *tx).await.map_err(map_sqlx_error)?;
-    Ok(())
+    Ok(NextRevision {
+        id: Uuid::new_v4(),
+        written_at: saved_at,
+        group_id: if same_group {
+            previous_group
+        } else {
+            Uuid::new_v4()
+        },
+        group_started_at: if same_group { started_at } else { saved_at },
+    })
 }
 
 fn revision_binding(node: Uuid, revision: Uuid) -> String {

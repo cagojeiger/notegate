@@ -149,14 +149,13 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         space_id,
         node_id,
     )?;
-    super::super::revisions::capture(
+    let revision = super::super::revisions::capture(
         &mut tx,
         crypto,
         &current_text,
         updated_by,
         revision_source,
         revision_session,
-        revision_purpose,
         matches!(
             &content.body,
             notegate_model::files::WriteTextBody::Plain(_)
@@ -171,7 +170,10 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
              content_sha256 = $6, byte_len = $7, line_count = $8, \
              at_rest_encryption = $9, content_ciphertext = $10, content_nonce = $11, \
              content_enc_key_id = $12, content_enc_version = $13, \
-             updated_by_account_id = $14, updated_at = now() \
+             updated_by_account_id = $14, updated_at = now(), \
+             revision_id = $15, revision_written_at = $16, revision_author_id = $14, \
+             revision_group_id = $17, revision_group_started_at = $18, \
+             revision_session_id = $19, revision_source = $20, revision_purpose = $21 \
          WHERE space_id = $1 AND node_id = $2 RETURNING {TEXT_COLUMNS}"
     )))
     .bind(space_id)
@@ -188,6 +190,13 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     .bind(stored.content_enc_key_id)
     .bind(stored.content_enc_version)
     .bind(updated_by)
+    .bind(revision.id)
+    .bind(revision.written_at)
+    .bind(revision.group_id)
+    .bind(revision.group_started_at)
+    .bind(revision_session)
+    .bind(revision_source)
+    .bind(revision_purpose)
     .fetch_one(&mut *tx)
     .await
     .map_err(map_constraint_error)?;

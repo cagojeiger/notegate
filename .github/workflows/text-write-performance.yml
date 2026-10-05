@@ -1,0 +1,72 @@
+name: Text Write Performance
+
+on:
+  pull_request:
+    paths:
+      - backend/crates/db/src/files/commands/save.rs
+      - backend/crates/db/src/files/revisions.rs
+      - backend/crates/service/src/files/mutate.rs
+      - backend/crates/service/tests/text_write_performance.rs
+      - deploy/ci/compare-text-write.sh
+      - deploy/ci/summarize-text-write.py
+      - .github/workflows/text-write-performance.yml
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: Existing baseline commit or ref to compare
+        required: true
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: Text Write Comparison
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: notegate
+          POSTGRES_PASSWORD: notegate
+          POSTGRES_DB: notegate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notegate -d notegate"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NOTEGATE_TEST_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Checkout baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || inputs.base_ref }}
+          path: comparison-base
+          persist-credentials: false
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: text-write-performance
+
+      - name: Compare baseline and candidate
+        run: deploy/ci/compare-text-write.sh "$GITHUB_WORKSPACE/comparison-base"
+
+      - name: Retain measurements
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: text-write-performance
+          path: text-write-results/
+          if-no-files-found: warn

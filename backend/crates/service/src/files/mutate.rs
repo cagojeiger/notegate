@@ -346,8 +346,16 @@ impl FilesService {
 
         match command.target {
             WriteTarget::Existing { node_id } => {
-                let (node, text) = self.load_text(space_id, node_id).await?;
-                check_expected_sha(command.expected_sha256.as_deref(), &text.content_sha256)?;
+                let node = self
+                    .store
+                    .find_node(space_id, node_id)
+                    .await?
+                    .ok_or_else(|| ServiceError::NotFound("text not found".to_owned()))?;
+                let Some(stats) = self.store.text_stats(space_id, node_id).await? else {
+                    return Err(self.text_not_found(space_id, node_id).await?);
+                };
+                self.require_node_access(&node).await?;
+                check_expected_sha(command.expected_sha256.as_deref(), &stats.content_sha256)?;
                 validate_stored_text_format(&node.name, &stored)?;
 
                 let (node, text) = self
