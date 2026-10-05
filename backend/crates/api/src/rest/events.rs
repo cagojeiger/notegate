@@ -308,4 +308,3 @@ pub(crate) async fn sync_file_changes(
         resync_required: page.resync_required,
     }))
 }
-
