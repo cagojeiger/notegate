@@ -13,6 +13,7 @@ use notegate_service::accounts::AccountService;
 use notegate_service::agents::AgentService;
 use notegate_service::connections::ConnectionService;
 use notegate_service::files::FilesService;
+use notegate_service::history::HistoryService;
 use notegate_service::link_graph::LinkGraphService;
 use notegate_service::spaces::SpaceService;
 use notegate_service::usage::UsageService;
@@ -103,6 +104,7 @@ pub struct AppState {
     pub security: PiiCrypto,
     pub spaces: Spaces,
     pub account_lifecycle: Accounts,
+    pub history: HistoryService,
     pub connections: Connections,
     pub agents: Agents,
     pub files: Files,
@@ -182,8 +184,8 @@ impl AppState {
             config.default_user_tier,
         );
         let command_invocations = CommandInvocationRepo::new(db.clone());
-        let account_lifecycle = AccountService::new(
-            account_repo.clone(),
+        let account_lifecycle = AccountService::new(account_repo.clone());
+        let history = HistoryService::new(
             AuditEventRepo::new(db.clone()),
             command_invocations.clone(),
             BackgroundJobRepo::new(db.clone()),
@@ -218,6 +220,7 @@ impl AppState {
             security: pii_crypto,
             spaces,
             account_lifecycle,
+            history,
             connections,
             agents,
             files,

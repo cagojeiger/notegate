@@ -22,31 +22,19 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::page::Page;
-use crate::rest::dto::{
-    FileChangeDeltaOut, FileChangeEventListResponse, FileChangeEventOut, FileChangeSyncResponse,
-    NodeOut, NodeRef, NodeSummaryOut, attribution_ids, parse_kind,
-};
+use crate::rest::dto::{NodeOut, NodeRef, NodeSummaryOut, attribution_ids, parse_kind};
 use crate::state::AppState;
 
 use notegate_service::files::{
     BatchChildrenRequest, BatchChildrenResult, ChildrenRequest, CreateFolder, CreateText,
-    DeleteNode, ListFileChangeEvents, ListNodesRequest, MoveNode, NodeListSort, SyncFileChanges,
-    UpdateNode, UpdateNodeExternalAccessPolicy, UpdateNodeWriteLock, WriteTarget, WriteText,
-    WriteTextBody,
+    DeleteNode, ListNodesRequest, MoveNode, NodeListSort, UpdateNode, UpdateNodeExternalAccessPolicy,
+    UpdateNodeWriteLock, WriteTarget, WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/spaces/{space_id}/paths/resolve", get(resolve_path))
         .route("/v1/spaces/{space_id}/nodes", get(list).post(create))
-        .route(
-            "/v1/spaces/{space_id}/file-change-events",
-            get(list_file_change_events),
-        )
-        .route(
-            "/v1/spaces/{space_id}/file-change-sync",
-            get(sync_file_changes),
-        )
         .route(
             "/v1/spaces/{space_id}/nodes/{node_id}",
             get(get_node).patch(update).delete(delete),
@@ -109,109 +97,6 @@ pub(crate) async fn resolve_path(
         .find_account_refs(&attribution_ids([&view]))
         .await?;
     Ok(Json(NodeOut::from_view(&view, &refs)))
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct ListFileChangeEventsQuery {
-    node_id: Option<Uuid>,
-    limit: Option<i64>,
-    cursor: Option<String>,
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/v1/spaces/{space_id}/file-change-events",
-    tag = "events",
-    params(
-        ("space_id" = Uuid, Path),
-        ("node_id" = Option<Uuid>, Query, description = "Optional node id filter"),
-        ("limit" = Option<i64>, Query, description = "Page size"),
-        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
-    ),
-    responses((status = 200, description = "List file change event history in a space", body = FileChangeEventListResponse)),
-    security(("browser_session" = []))
-)]
-pub(crate) async fn list_file_change_events(
-    State(state): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Path(space_id): Path<Uuid>,
-    Query(query): Query<ListFileChangeEventsQuery>,
-) -> Result<Json<FileChangeEventListResponse>, ApiError> {
-    let page = state
-        .files
-        .list_file_change_events(
-            caller.account_id(),
-            space_id,
-            ListFileChangeEvents {
-                node_id: query.node_id,
-                limit: query.limit,
-                cursor: query.cursor,
-            },
-        )
-        .await?;
-    let actor_ids = page
-        .items
-        .iter()
-        .filter_map(|event| event.actor_account_id)
-        .collect::<Vec<_>>();
-    let refs = state.accounts.find_account_refs(&actor_ids).await?;
-    let events = page
-        .items
-        .iter()
-        .map(|event| FileChangeEventOut::from_event(event, &refs))
-        .collect();
-
-    Ok(Json(FileChangeEventListResponse {
-        events,
-        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
-    }))
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct SyncFileChangesQuery {
-    after_id: Option<i64>,
-    limit: Option<i64>,
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/v1/spaces/{space_id}/file-change-sync",
-    tag = "events",
-    params(
-        ("space_id" = Uuid, Path),
-        ("after_id" = Option<i64>, Query, description = "Last applied event id; omit to establish a baseline"),
-        ("limit" = Option<i64>, Query, description = "Page size"),
-    ),
-    responses((status = 200, description = "Read file changes after a sync token", body = FileChangeSyncResponse)),
-    security(("browser_session" = []))
-)]
-pub(crate) async fn sync_file_changes(
-    State(state): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Path(space_id): Path<Uuid>,
-    Query(query): Query<SyncFileChangesQuery>,
-) -> Result<Json<FileChangeSyncResponse>, ApiError> {
-    let page = state
-        .files
-        .sync_file_changes(
-            caller.account_id(),
-            space_id,
-            SyncFileChanges {
-                after_id: query.after_id,
-                limit: query.limit,
-            },
-        )
-        .await?;
-    Ok(Json(FileChangeSyncResponse {
-        changes: page
-            .items
-            .iter()
-            .map(FileChangeDeltaOut::from_event)
-            .collect(),
-        next_after_id: page.next_after_id,
-        has_more: page.has_more,
-        resync_required: page.resync_required,
-    }))
 }
 
 #[utoipa::path(

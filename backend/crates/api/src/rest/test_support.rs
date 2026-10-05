@@ -185,6 +185,7 @@ pub(crate) async fn caller_and_space(
 pub(super) fn rest_app(state: crate::state::AppState, caller: Caller) -> Router {
     Router::new()
         .merge(crate::rest::me::routes())
+        .merge(crate::rest::events::routes())
         .merge(crate::rest::spaces::routes())
         .merge(crate::rest::nodes::routes())
         .merge(crate::rest::text::routes())

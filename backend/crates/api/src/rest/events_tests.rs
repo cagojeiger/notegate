@@ -8,7 +8,8 @@
 )]
 
 use axum::http::{StatusCode, header::CACHE_CONTROL};
-use notegate_db::{NewCommandInvocation, test_support::TestDb};
+use notegate_db::{AgentRepo, NewCommandInvocation, test_support::TestDb};
+use notegate_model::{Caller, CallerIdentity, Channel, CreateAgent, ResolveAttrs};
 use uuid::Uuid;
 
 use super::test_support::{
@@ -227,12 +228,78 @@ async fn background_jobs_return_owned_queue_history_and_attempts()
     assert_eq!(list["jobs"][0]["context_label"], "rest-test");
     assert_eq!(list["jobs"][0]["status"], "succeeded");
 
-    let app = rest_app(state, caller);
+    let app = rest_app(state.clone(), caller);
     let (status, detail) = get_json(app, format!("/v1/me/jobs/{job_id}")).await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(detail["attempts"][0]["attempt_number"], 1);
     assert_eq!(detail["attempts"][0]["outcome"], "succeeded");
     assert!(detail["attempts"][0].get("worker_id").is_none());
+
+    let (account, user) = state
+        .accounts
+        .upsert_user_by_sub(&ResolveAttrs {
+            sub: "history-stranger".to_owned(),
+            email: "history-stranger@example.test".to_owned(),
+            name: "History Stranger".to_owned(),
+        })
+        .await?;
+    let stranger = Caller {
+        account,
+        identity: CallerIdentity::User(user),
+        channel: Channel::Browser,
+    };
+    let (status, list) = get_json(
+        rest_app(state.clone(), stranger.clone()),
+        "/v1/me/jobs".to_owned(),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["jobs"], serde_json::json!([]));
+    let (status, _) =
+        get_json(rest_app(state, stranger), format!("/v1/me/jobs/{job_id}")).await?;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn agents_cannot_access_user_history_routes() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state(&db);
+    let (owner, _, _) = caller_and_space(&state).await?;
+    let agent = AgentRepo::new(state.db.clone())
+        .insert_agent(
+            &CreateAgent {
+                name: "history-agent".to_owned(),
+            },
+            owner.account_id(),
+        )
+        .await?;
+    let account = state
+        .accounts
+        .find_account(agent.id)
+        .await?
+        .expect("agent account");
+    let caller = Caller {
+        account,
+        identity: CallerIdentity::Agent(agent),
+        channel: Channel::Api,
+    };
+
+    for path in [
+        "/v1/me/audit-events".to_owned(),
+        "/v1/me/command-invocations?surface=mcp".to_owned(),
+        "/v1/me/command-invocations?surface=cli".to_owned(),
+        "/v1/me/jobs".to_owned(),
+        format!("/v1/me/jobs/{}", Uuid::new_v4()),
+    ] {
+        let (status, body) =
+            get_json(rest_app(state.clone(), caller.clone()), path.clone()).await?;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+    }
 
     db.cleanup().await;
     Ok(())
