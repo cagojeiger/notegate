@@ -4,6 +4,7 @@ use notegate_command::{CommandError, RecoveryAction, SEARCH_OP_FIND, SEARCH_OP_G
 use notegate_model::NodeKind;
 use notegate_search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchCapacity,
+    SearchDateFilters, validate_date_filters,
 };
 use serde_json::{Value, json};
 
@@ -23,6 +24,7 @@ pub async fn find(
     match_mode: Option<String>,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    date_filters: SearchDateFilters,
     limit: Option<i64>,
     cursor: Option<String>,
 ) -> Result<Value, CommandError> {
@@ -44,6 +46,7 @@ pub async fn find(
             caller.account_id(),
             resolved.space_id(),
             FindRequest {
+                date_filters,
                 q,
                 path: scope_path,
                 kind,
@@ -81,6 +84,7 @@ pub async fn grep(
     lines: Option<String>,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    date_filters: SearchDateFilters,
     limit: Option<i64>,
     cursor: Option<String>,
 ) -> Result<Value, CommandError> {
@@ -99,6 +103,7 @@ pub async fn grep(
             caller.account_id(),
             resolved.space_id(),
             GrepRequest {
+                date_filters,
                 q,
                 path: scope_path,
                 match_mode,
@@ -124,6 +129,35 @@ pub async fn grep(
             page.next_cursor.as_deref(),
         ),
     }))
+}
+
+pub(super) fn parse_date_filters(
+    input: &notegate_command::SearchInput,
+) -> Result<SearchDateFilters, CommandError> {
+    fn parse(
+        value: Option<&str>,
+        field: &str,
+    ) -> Result<Option<chrono::DateTime<chrono::Utc>>, CommandError> {
+        value
+            .map(|value| {
+                chrono::DateTime::parse_from_rfc3339(value)
+                    .map(|date| date.with_timezone(&chrono::Utc))
+                    .map_err(|_| {
+                        search_error(notegate_search::SearchError::InvalidInput(format!(
+                            "{field} must be an RFC 3339 timestamp with timezone"
+                        )))
+                    })
+            })
+            .transpose()
+    }
+    let dates = SearchDateFilters {
+        created_from: parse(input.created_from.as_deref(), "created_from")?,
+        created_to: parse(input.created_to.as_deref(), "created_to")?,
+        updated_from: parse(input.updated_from.as_deref(), "updated_from")?,
+        updated_to: parse(input.updated_to.as_deref(), "updated_to")?,
+    };
+    validate_date_filters(&dates).map_err(search_error)?;
+    Ok(dates)
 }
 
 fn search_client_error(error: SearchClientError) -> CommandError {
@@ -381,5 +415,37 @@ mod tests {
         let data = error.data.expect("missing deadline error carries metadata");
         assert_eq!(data["code"], "search_unavailable");
         assert_eq!(data["retryable"], true);
+    }
+}
+
+#[cfg(test)]
+mod date_filter_tests {
+    #![allow(clippy::indexing_slicing)]
+    use super::parse_date_filters;
+    use notegate_command::SearchInput;
+    use serde_json::json;
+
+    #[test]
+    fn dates_require_timezone_and_normalize_offsets() -> Result<(), Box<dyn std::error::Error>> {
+        let base = json!({"purpose":"search dates","op":"find","target":"daily:/","q":"note"});
+        let input: SearchInput = serde_json::from_value(base.clone())?;
+        assert_eq!(parse_date_filters(&input)?, Default::default());
+        for field in ["created_from", "created_to", "updated_from", "updated_to"] {
+            for invalid in ["2026-10-05", "2026-10-05T00:00:00", "yesterday", ""] {
+                let mut value = base.clone();
+                value[field] = json!(invalid);
+                let input = serde_json::from_value(value)?;
+                assert!(parse_date_filters(&input).is_err(), "{field}: {invalid}");
+            }
+        }
+        let mut korean = base.clone();
+        korean["updated_from"] = json!("2026-10-05T00:00:00+09:00");
+        let mut utc = base;
+        utc["updated_from"] = json!("2026-10-04T15:00:00Z");
+        assert_eq!(
+            parse_date_filters(&serde_json::from_value(korean)?)?,
+            parse_date_filters(&serde_json::from_value(utc)?)?
+        );
+        Ok(())
     }
 }

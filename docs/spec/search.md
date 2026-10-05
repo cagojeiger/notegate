@@ -170,6 +170,29 @@ Scan budget에 먼저 도달하면 result가 없어도 `has_more=true`와 `next_
 
 이 응답은 이번 요청의 budget 안에서 match가 없었지만 아직 탐색할 candidate가 남았다는 의미다.
 
+## Date filters
+
+`find`와 `grep`은 `created_from`, `created_to`, `updated_from`, `updated_to`를 선택적으로 받는다.
+각 값은 timezone이 포함된 RFC 3339 timestamp이며 command boundary에서 UTC로 정규화한다.
+`from <= node timestamp < to`로 검사한다. 생략한 경계는 무제한이며 모든 지정 조건은 AND다.
+동일 날짜 종류의 `from >= to`는 invalid input이다. Internal search role에서도 typed range를 검증한다.
+`updated_at`는 본문 저장, 이름·이동·설정 변경을 포함하는 현재 node 변경 시각이며 수정 이력을 검색하지 않는다.
+
+날짜 조건은 recursive subtree 순회가 끝난 후 candidate 선택에 적용하고 `LIMIT` 전에 검사한다.
+날짜가 맞지 않는 folder도 하위 탐색을 계속해야 한다. Grep 본문 cache 조회·본문 읽기·복호화는
+날짜를 통과한 candidate에 대해서만 수행한다. 기존 접근 정책, DFS 순서, scan budget은 유지한다.
+날짜는 cursor fingerprint에 포함하며, 전부 생략하면 기존 fingerprint를 유지한다.
+페이지 사이에 문서 날짜가 바뀌는 경우 기존 tree pagination과 같이 best-effort다.
+
+날짜 인덱스를 추가하지 않는다. 현재 조건은 recursive CTE 결과에 적용하므로 날짜 인덱스만으로
+subtree 순회 비용이 줄지는 않는다. 기존 child/recent 인덱스는 유지한다. CI 합성 workload는
+날짜 조건 없음/생성일/수정일/둘 다의 후보 수·후보 본문 byte 합계·candidate query 시간을 출력한다.
+이는 운영 latency 또는 실제 본문 읽기량 측정이 아니다. SQL 실행 계획과 운영 규모를 확인한 후
+필요한 인덱스 또는 후보 조회 구조 변경을 별도 검토한다.
+
+별도 API/Search 배포에서는 날짜 조건을 이해하는 Search 버전을 먼저 배포한 후 API를 배포한다.
+이전 API의 날짜 조건 없는 요청은 새 Search에서 계속 처리할 수 있다.
+
 ## Two-stage search pipeline
 
 Search는 두 단계로 동작한다.
@@ -205,7 +228,7 @@ type SearchCursor = {
 
 `after_sort_path`는 마지막 match가 아니라 마지막으로 소비한 candidate의 내부 DFS 정렬 위치다. 다음 page는 같은 조건에서 `after_sort_path` 이후 candidate부터 이어서 검사한다.
 
-`fingerprint`는 `space`, scope folder, `q`, match mode, kind filter, include/exclude, case policy, traversal order를 묶은 값이다. 다른 조건에 cursor를 재사용하면 invalid cursor다.
+`fingerprint`는 `space`, scope folder, `q`, match mode, kind filter, include/exclude, date filters, case policy, traversal order를 묶은 값이다. 다른 조건에 cursor를 재사용하면 invalid cursor다.
 
 `sort_path`는 응답 schema나 DB 저장 model이 아니다. Search pagination을 위한 내부 정렬 키다. Tree가 pagination 중 변경되면 결과 일관성은 best-effort다.
 

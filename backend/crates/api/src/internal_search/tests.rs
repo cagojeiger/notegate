@@ -297,6 +297,7 @@ async fn search_runtime_routes_authority_and_queries_to_their_configured_stores(
         )
     };
     let request = || FindRequest {
+        date_filters: Default::default(),
         q: "anything".to_owned(),
         path: None,
         kind: None,
@@ -476,6 +477,7 @@ async fn search_runtime_uses_replica_content_but_primary_access_policy()
         false,
     );
     let grep_request = || GrepRequest {
+        date_filters: Default::default(),
         q: "query-only needle".to_owned(),
         path: None,
         match_mode: GrepMatchMode::Literal,
@@ -506,6 +508,7 @@ async fn search_runtime_uses_replica_content_but_primary_access_policy()
     );
 
     let find_request = || FindRequest {
+        date_filters: Default::default(),
         q: "Query".to_owned(),
         path: None,
         kind: None,
@@ -658,6 +661,7 @@ fn wire_commands_round_trip_without_losing_search_options() -> Result<(), serde_
         account_id,
         space_id,
         FindRequest {
+            date_filters: Default::default(),
             q: "note".to_owned(),
             path: Some("/docs".to_owned()),
             kind: Some(notegate_model::NodeKind::Text),
@@ -689,6 +693,7 @@ fn wire_commands_round_trip_without_losing_search_options() -> Result<(), serde_
         account_id,
         space_id,
         GrepRequest {
+            date_filters: Default::default(),
             q: "needle".to_owned(),
             path: None,
             match_mode: GrepMatchMode::Regex,

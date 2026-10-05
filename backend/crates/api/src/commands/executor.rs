@@ -206,6 +206,7 @@ pub async fn search(
     input: SearchInput,
 ) -> Result<Value, CommandError> {
     validate_search_operation(&input)?;
+    let date_filters = search::parse_date_filters(&input)?;
     match input.op.as_str() {
         SEARCH_OP_FIND => {
             search::find(
@@ -217,6 +218,7 @@ pub async fn search(
                 input.match_mode,
                 input.include,
                 input.exclude,
+                date_filters,
                 input.limit,
                 input.cursor,
             )
@@ -232,6 +234,7 @@ pub async fn search(
                 input.lines,
                 input.include,
                 input.exclude,
+                date_filters,
                 input.limit,
                 input.cursor,
             )
@@ -249,6 +252,7 @@ pub(crate) fn validate_search_operation(input: &SearchInput) -> Result<(), Comma
             if let Some(kind) = input.kind.as_deref() {
                 search::parse_kind(kind)?;
             }
+            search::parse_date_filters(input)?;
             let match_mode = search::parse_find_match_mode(input.match_mode.as_deref())?;
             validate_find_input(
                 &input.q,
@@ -261,6 +265,7 @@ pub(crate) fn validate_search_operation(input: &SearchInput) -> Result<(), Comma
         }
         SEARCH_OP_GREP => {
             parse_input_target(&input.target)?;
+            search::parse_date_filters(input)?;
             let match_mode = search::parse_grep_match_mode(input.match_mode.as_deref())?;
             search::parse_grep_line_mode(input.lines.as_deref())?;
             validate_grep_input(
@@ -690,6 +695,10 @@ mod tests {
             lines: None,
             include: None,
             exclude: None,
+            created_from: None,
+            created_to: None,
+            updated_from: None,
+            updated_to: None,
             limit: None,
             cursor: None,
         })

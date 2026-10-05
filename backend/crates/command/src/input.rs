@@ -207,6 +207,22 @@ pub struct SearchInput {
     /// Optional path glob excludes.
     #[serde(default)]
     pub exclude: Option<Vec<String>>,
+    /// Inclusive creation time lower bound. RFC 3339 with timezone; omit for no lower bound.
+    #[serde(default)]
+    #[schemars(extend("format" = "date-time"))]
+    pub created_from: Option<String>,
+    /// Exclusive creation time upper bound. RFC 3339 with timezone; must be later than created_from.
+    #[serde(default)]
+    #[schemars(extend("format" = "date-time"))]
+    pub created_to: Option<String>,
+    /// Inclusive last node-change time lower bound (body, name, move, or settings). RFC 3339 with timezone.
+    #[serde(default)]
+    #[schemars(extend("format" = "date-time"))]
+    pub updated_from: Option<String>,
+    /// Exclusive last node-change time upper bound. RFC 3339 with timezone; must be later than updated_from.
+    #[serde(default)]
+    #[schemars(extend("format" = "date-time"))]
+    pub updated_to: Option<String>,
     /// Page size.
     #[serde(default)]
     pub limit: Option<i64>,
@@ -363,6 +379,17 @@ mod tests {
         assert_schema_enum::<WriteInput>("/properties/op", WRITE_OPERATIONS);
         assert_schema_enum::<ManageInput>("/properties/op", MANAGE_OPERATIONS);
         assert_schema_enum::<FileUploadInput>("/properties/op", FILE_UPLOAD_OPERATIONS);
+    }
+
+    #[test]
+    #[allow(clippy::indexing_slicing)]
+    fn search_date_fields_are_optional_and_documented_as_timestamps() {
+        let schema = serde_json::to_value(schema_for!(SearchInput)).expect("schema");
+        let required = schema["required"].as_array().expect("required fields");
+        for field in ["created_from", "created_to", "updated_from", "updated_to"] {
+            assert!(!required.contains(&json!(field)));
+            assert_eq!(schema["properties"][field]["format"], "date-time");
+        }
     }
 
     fn assert_schema_enum<T: JsonSchema>(pointer: &str, expected: &[&str]) {

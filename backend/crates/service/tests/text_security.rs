@@ -453,6 +453,7 @@ async fn server_encrypted_text_stays_readable_and_searchable()
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "searchable secret".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -483,6 +484,7 @@ async fn server_encrypted_text_stays_readable_and_searchable()
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "searchable secret".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -541,6 +543,7 @@ async fn server_encrypted_text_stays_readable_and_searchable()
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "searchable secret".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,

@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use notegate_db::FilesRepo;
 use notegate_model::files::{FileStats, TextStats};
-use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
+use notegate_model::search::{SearchDateFilters, SearchNodeCandidate, SearchTextCandidate};
 use notegate_model::{NodeKind, Permission, TextObject};
 use uuid::Uuid;
 
@@ -78,11 +78,19 @@ impl PostgresSearchStore {
         scope_node_id: Uuid,
         scope_path: &str,
         after_sort_path: Option<&str>,
+        date_filters: &SearchDateFilters,
         limit: i64,
     ) -> SearchResult<Vec<SearchNodeCandidate>> {
         Ok(self
             .authority_repo
-            .search_node_candidates(space_id, scope_node_id, scope_path, after_sort_path, limit)
+            .search_node_candidates(
+                space_id,
+                scope_node_id,
+                scope_path,
+                after_sort_path,
+                date_filters,
+                limit,
+            )
             .await?)
     }
 
@@ -92,11 +100,19 @@ impl PostgresSearchStore {
         scope_node_id: Uuid,
         scope_path: &str,
         after_sort_path: Option<&str>,
+        date_filters: &SearchDateFilters,
         limit: i64,
     ) -> SearchResult<Vec<SearchTextCandidate>> {
         Ok(self
             .authority_repo
-            .search_text_candidates(space_id, scope_node_id, scope_path, after_sort_path, limit)
+            .search_text_candidates(
+                space_id,
+                scope_node_id,
+                scope_path,
+                after_sort_path,
+                date_filters,
+                limit,
+            )
             .await?)
     }
 

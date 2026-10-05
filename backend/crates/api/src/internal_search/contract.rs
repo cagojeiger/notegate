@@ -3,7 +3,7 @@ use notegate_core::WriteLockScope;
 use notegate_model::NodeKind;
 use notegate_search::{
     FindMatchMode, FindPage, FindRequest, GrepLineMode, GrepMatchMode, GrepPage, GrepRequest,
-    SearchCapacity, SearchError,
+    SearchCapacity, SearchDateFilters, SearchError,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -20,6 +20,8 @@ pub(super) struct InternalSearchRequest<T> {
 pub(super) struct FindCommand {
     pub caller_account_id: Uuid,
     pub space_id: Uuid,
+    #[serde(default)]
+    pub date_filters: SearchDateFilters,
     pub q: String,
     pub path: Option<String>,
     pub kind: Option<NodeKind>,
@@ -37,6 +39,7 @@ impl FindCommand {
         Self {
             caller_account_id,
             space_id,
+            date_filters: request.date_filters,
             q: request.q,
             path: request.path,
             kind: request.kind,
@@ -50,6 +53,7 @@ impl FindCommand {
 
     pub(super) fn into_request(self) -> FindRequest {
         FindRequest {
+            date_filters: self.date_filters,
             q: self.q,
             path: self.path,
             kind: self.kind,
@@ -66,6 +70,8 @@ impl FindCommand {
 pub(super) struct GrepCommand {
     pub caller_account_id: Uuid,
     pub space_id: Uuid,
+    #[serde(default)]
+    pub date_filters: SearchDateFilters,
     pub q: String,
     pub path: Option<String>,
     pub match_mode: GrepMatchMode,
@@ -83,6 +89,7 @@ impl GrepCommand {
         Self {
             caller_account_id,
             space_id,
+            date_filters: request.date_filters,
             q: request.q,
             path: request.path,
             match_mode: request.match_mode,
@@ -96,6 +103,7 @@ impl GrepCommand {
 
     pub(super) fn into_request(self) -> GrepRequest {
         GrepRequest {
+            date_filters: self.date_filters,
             q: self.q,
             path: self.path,
             match_mode: self.match_mode,
@@ -434,5 +442,59 @@ mod tests {
             assert_eq!(error.code(), code);
             assert_eq!(error.status(), status);
         }
+    }
+}
+
+#[cfg(test)]
+mod date_filter_tests {
+    #![allow(clippy::indexing_slicing)]
+    use super::*;
+
+    #[test]
+    fn wire_dates_round_trip_and_legacy_requests_default_to_no_filter()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dates: SearchDateFilters = serde_json::from_value(
+            serde_json::json!({"created_from":"2026-10-01T00:00:00Z", "created_to":null, "updated_from":null, "updated_to":"2026-10-06T00:00:00Z"}),
+        )?;
+        let request = FindRequest {
+            date_filters: dates,
+            q: "note".to_owned(),
+            path: None,
+            kind: None,
+            match_mode: FindMatchMode::Contains,
+            include: Vec::new(),
+            exclude: Vec::new(),
+            limit: None,
+            cursor: None,
+        };
+        let mut value =
+            serde_json::to_value(FindCommand::new(Uuid::new_v4(), Uuid::new_v4(), request))?;
+        let command: FindCommand = serde_json::from_value(value.clone())?;
+        assert_eq!(command.into_request().date_filters, dates);
+        value
+            .as_object_mut()
+            .ok_or("expected object")?
+            .remove("date_filters");
+        let command: FindCommand = serde_json::from_value(value)?;
+        assert_eq!(
+            command.into_request().date_filters,
+            SearchDateFilters::default()
+        );
+        let request = GrepRequest {
+            date_filters: dates,
+            q: "note".to_owned(),
+            path: None,
+            match_mode: GrepMatchMode::Literal,
+            line_mode: GrepLineMode::None,
+            include: Vec::new(),
+            exclude: Vec::new(),
+            limit: None,
+            cursor: None,
+        };
+        let command: GrepCommand = serde_json::from_value(serde_json::to_value(
+            GrepCommand::new(Uuid::new_v4(), Uuid::new_v4(), request),
+        )?)?;
+        assert_eq!(command.into_request().date_filters, dates);
+        Ok(())
     }
 }

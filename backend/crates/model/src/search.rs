@@ -1,13 +1,24 @@
 //! Search command and result data shared by service, db, and api.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::files::{ChildrenCursor, NodeView};
 use crate::{Node, NodeKind, TextAtRestEncryption};
 
+/// Optional half-open date ranges. Dates are normalized to UTC at the command boundary.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchDateFilters {
+    pub created_from: Option<DateTime<Utc>>,
+    pub created_to: Option<DateTime<Utc>>,
+    pub updated_from: Option<DateTime<Utc>>,
+    pub updated_to: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct FindRequest {
+    pub date_filters: SearchDateFilters,
     pub q: String,
     pub path: Option<String>,
     pub kind: Option<NodeKind>,
@@ -47,6 +58,7 @@ impl FindMatchMode {
 
 #[derive(Debug, Clone)]
 pub struct GrepRequest {
+    pub date_filters: SearchDateFilters,
     pub q: String,
     pub path: Option<String>,
     pub match_mode: GrepMatchMode,

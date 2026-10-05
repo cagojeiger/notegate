@@ -127,6 +127,10 @@ type SearchInput = {
   lines?: "none" | "first" | "all"
   include?: string[]
   exclude?: string[]
+  created_from?: string // inclusive RFC 3339 timestamp with timezone
+  created_to?: string   // exclusive RFC 3339 timestamp with timezone
+  updated_from?: string // inclusive last node-change timestamp
+  updated_to?: string   // exclusive last node-change timestamp
   limit?: number
   cursor?: string
 }
@@ -136,6 +140,9 @@ type SearchInput = {
 - `op=grep`: plain Text content를 검색한다. `match`는 `literal`(기본), `regex`이다.
 - `find`와 `grep` match는 Space 내부에서 대소문자를 구분하지 않는다.
 - `include`/`exclude`는 결과 path에 적용하는 glob list다.
+- 날짜 필드는 모두 선택 조건이며 AND로 결합한다. 생략한 경계에는 제한이 없다. 같은 날짜 종류에서 `from >= to`는 입력 오류다. 날짜만 또는 시간대 없는 시각은 받지 않는다.
+- `updated_*`는 현재 node의 마지막 변경 시각이다. 본문·이름·이동·설정 변경을 포함하며, 기간 중 과거에 한 번이라도 수정됐는지를 조회하는 기능은 아니다.
+- 날짜 조건을 바꾸면 이전 cursor를 재사용할 수 없다. 같은 시각의 다른 timezone 표기는 동일한 조건이다.
 - `grep lines=none`은 line 정보를 반환하지 않는다. `first`는 첫 matching line number, `all`은 모든 matching line number를 반환한다. snippet은 반환하지 않는다.
 - File, client-side encrypted Text, metadata는 `grep` 대상이 아니다. 서버 관리 방식으로 at-rest 암호화된 plain Text는 복호화 후 검색한다.
 
