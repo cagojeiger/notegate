@@ -101,6 +101,12 @@ notegate-cli run_read_sequence \
   --input '{"purpose":"inspect notes","commands":[{"tool":"read","op":"spaces"},{"tool":"search","op":"find","target":"daily:/","q":"notes"}]}'
 ```
 
+날짜 조건도 MCP와 동일한 선택 JSON 필드로 전달한다. 아래 예시는 한국 시간 10월 5일에 마지막으로 수정된 문서를 검색한다.
+
+```bash
+notegate-cli search --input '{"purpose":"find recently updated notes","op":"find","target":"daily:/","q":"notes","updated_from":"2026-10-05T00:00:00+09:00","updated_to":"2026-10-06T00:00:00+09:00"}'
+```
+
 CLI command surface는 `me`, `read`, `search`, `write`, `manage`, `file_download`, `file_upload`, `run_read_sequence`, `run_write_sequence`다. 각 JSON 명령은 MCP가 사용하는 동일한 공통 Rust input type을 그대로 사용한다. `--schema`는 그 type에서 생성된 JSON Schema를 출력하므로 별도의 CLI 필드 정의가 없다.
 
 `read --all`은 `op=read` 전용 CLI 안전 옵션이다. 공통 command contract의 Text 상한을 한 번에 요청하고 `truncated`, byte 길이, 줄 수와 SHA-256을 모두 검증한 뒤에만 성공한다. CLI와 서버의 상한이 달라 완전성을 확인할 수 없으면 실패한다. `start_line`, `max_lines`, `max_bytes`, `if_none_match_sha256`와 함께 사용할 수 없다. 일반 범위 읽기가 `truncated=true`를 반환하면 `next_action`을 따라 마지막 page까지 읽어야 한다.

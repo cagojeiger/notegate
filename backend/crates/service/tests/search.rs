@@ -172,6 +172,7 @@ async fn external_access_policy_excludes_private_subtrees() -> Result<(), Box<dy
             owner,
             ws,
             FindRequest {
+                date_filters: Default::default(),
                 q: "hidden".to_owned(),
                 path: None,
                 kind: None,
@@ -190,6 +191,7 @@ async fn external_access_policy_excludes_private_subtrees() -> Result<(), Box<dy
             owner,
             ws,
             FindRequest {
+                date_filters: Default::default(),
                 q: "visible".to_owned(),
                 path: None,
                 kind: None,
@@ -208,6 +210,7 @@ async fn external_access_policy_excludes_private_subtrees() -> Result<(), Box<dy
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "hidden marker".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -226,6 +229,7 @@ async fn external_access_policy_excludes_private_subtrees() -> Result<(), Box<dy
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "visible marker".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -255,6 +259,7 @@ async fn external_access_policy_excludes_private_subtrees() -> Result<(), Box<dy
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "marker".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -297,6 +302,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
             owner,
             ws,
             FindRequest {
+                date_filters: Default::default(),
                 q: "note".to_owned(),
                 path: None,
                 kind: None,
@@ -333,6 +339,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
             owner,
             ws,
             FindRequest {
+                date_filters: Default::default(),
                 q: "note".to_owned(),
                 path: Some("/".to_owned()),
                 kind: None,
@@ -361,6 +368,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
             owner,
             ws,
             FindRequest {
+                date_filters: Default::default(),
                 q: "note".to_owned(),
                 path: None,
                 kind: None,
@@ -380,6 +388,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
             owner,
             ws,
             FindRequest {
+                date_filters: Default::default(),
                 q: "note".to_owned(),
                 path: None,
                 kind: None,
@@ -402,6 +411,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
             owner,
             ws,
             FindRequest {
+                date_filters: Default::default(),
                 q: "projects".to_owned(),
                 path: None,
                 kind: None,
@@ -433,6 +443,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
             owner,
             ws,
             FindRequest {
+                date_filters: Default::default(),
                 q: "note".to_owned(),
                 path: None,
                 kind: Some(notegate_model::NodeKind::Folder),
@@ -455,6 +466,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
             owner,
             ws,
             FindRequest {
+                date_filters: Default::default(),
                 q: "projects".to_owned(),
                 path: None,
                 kind: Some(notegate_model::NodeKind::Folder),
@@ -479,6 +491,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
             owner,
             ws,
             FindRequest {
+                date_filters: Default::default(),
                 q: "note".to_owned(),
                 path: Some("/projects".to_owned()),
                 kind: None,
@@ -537,6 +550,7 @@ needle
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "needle".to_owned(),
                 path: Some("/note.md".to_owned()),
                 match_mode: GrepMatchMode::Literal,
@@ -559,6 +573,7 @@ needle
             owner,
             ws,
             FindRequest {
+                date_filters: Default::default(),
                 q: "note".to_owned(),
                 path: Some("/missing".to_owned()),
                 kind: None,
@@ -605,6 +620,7 @@ l7
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "  needle  ".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -637,6 +653,7 @@ l7
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "needle".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -655,6 +672,7 @@ l7
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "needle".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -720,6 +738,7 @@ async fn grep_does_not_decrypt_server_encrypted_rows_rejected_by_path_filters()
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "needle".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -753,6 +772,7 @@ async fn grep_reuses_cached_encrypted_body_until_content_sha_changes()
     let node_id = write_doc(&files, owner, ws, root, "cached.md", "original marker").await;
 
     let request = |q: &str| GrepRequest {
+        date_filters: Default::default(),
         q: q.to_owned(),
         path: None,
         match_mode: GrepMatchMode::Literal,
@@ -850,6 +870,7 @@ async fn grep_body_cache_can_be_disabled() -> Result<(), Box<dyn std::error::Err
     enable_default_text_encryption(&db, &ws_repo, owner, ws).await?;
     let node_id = write_doc(&files, owner, ws, root, "uncached.md", "uncached marker").await;
     let request = || GrepRequest {
+        date_filters: Default::default(),
         q: "uncached marker".to_owned(),
         path: None,
         match_mode: GrepMatchMode::Literal,
@@ -937,6 +958,7 @@ async fn grep_does_not_decrypt_server_encrypted_rows_beyond_byte_budget()
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "needle".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -975,6 +997,7 @@ async fn grep_does_not_decrypt_server_encrypted_rows_beyond_byte_budget()
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "needle".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -1017,6 +1040,7 @@ async fn find_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std:
     let _last = write_doc(&files, owner, ws, c, "z-match.md", "needle last\n").await;
 
     let find_request = |path, limit, cursor| FindRequest {
+        date_filters: Default::default(),
         q: "match".to_owned(),
         path,
         kind: None,
@@ -1055,6 +1079,7 @@ async fn find_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std:
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "needle".to_owned(),
                 path: Some("/a/b/c".to_owned()),
                 match_mode: GrepMatchMode::Literal,
@@ -1206,6 +1231,7 @@ async fn grep_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std:
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "needle".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -1226,6 +1252,7 @@ async fn grep_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std:
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "needle".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -1283,6 +1310,7 @@ async fn find_cursor_pages_without_dup_or_loss() -> Result<(), Box<dyn std::erro
                 owner,
                 ws,
                 FindRequest {
+                    date_filters: Default::default(),
                     q: "match".to_owned(),
                     path: None,
                     kind: None,
@@ -1392,6 +1420,7 @@ hit-{index}
                 owner,
                 ws,
                 GrepRequest {
+                    date_filters: Default::default(),
                     q: "hit-".to_owned(),
                     path: None,
                     match_mode: GrepMatchMode::Literal,
@@ -1455,6 +1484,7 @@ async fn garbage_cursor_is_rejected() -> Result<(), Box<dyn std::error::Error>> 
             owner,
             ws,
             FindRequest {
+                date_filters: Default::default(),
                 q: "x".to_owned(),
                 path: None,
                 kind: None,
@@ -1480,6 +1510,7 @@ async fn garbage_cursor_is_rejected() -> Result<(), Box<dyn std::error::Error>> 
             owner,
             ws,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "x".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
@@ -1526,6 +1557,7 @@ async fn cursor_rejects_colliding_filter_arrays_for_find_and_grep()
     assert_eq!(original_filters.join(","), colliding_filters.join(","));
 
     let find_request = FindRequest {
+        date_filters: Default::default(),
         q: "match".to_owned(),
         path: None,
         kind: None,
@@ -1555,6 +1587,7 @@ async fn cursor_rejects_colliding_filter_arrays_for_find_and_grep()
     ));
 
     let grep_request = GrepRequest {
+        date_filters: Default::default(),
         q: "needle".to_owned(),
         path: None,
         match_mode: GrepMatchMode::Literal,
@@ -1704,6 +1737,348 @@ async fn tree_cursor_rechecks_sibling_visibility_on_the_next_request()
         vec!["/d.md"]
     );
     assert!(!next.has_more);
+    db.cleanup().await;
+    Ok(())
+}
+
+fn fixed_date(value: &str) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+}
+
+#[tokio::test]
+async fn date_filters_cover_all_optional_combinations_and_preserve_paging()
+-> Result<(), Box<dyn std::error::Error>> {
+    use notegate_search::SearchDateFilters;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (spaces, files, search) = services(&db);
+    let owner = insert_user_account(&db.pool, "date-filters", "date-filters@example.test").await?;
+    let (space, root) = setup_space(&spaces, owner, "date-filters").await;
+    let folder = mkdir(&files, owner, space, root, "old-folder").await;
+    sqlx::query(
+        "UPDATE nodes SET created_at = '2020-01-01T00:00:00Z', updated_at = '2020-01-01T00:00:00Z' WHERE id = $1",
+    )
+    .bind(folder)
+    .execute(&db.pool)
+    .await?;
+    for (name, created, updated) in [
+        (
+            "a-note.md",
+            "2026-09-30T23:59:59+09:00",
+            "2026-10-05T00:00:00+09:00",
+        ),
+        (
+            "b-note.md",
+            "2026-10-01T00:00:00+09:00",
+            "2026-10-04T00:00:00+09:00",
+        ),
+        (
+            "c-note.md",
+            "2026-10-05T23:59:59.999999+09:00",
+            "2026-10-06T23:59:59.999999+09:00",
+        ),
+        (
+            "d-note.md",
+            "2026-10-06T00:00:00+09:00",
+            "2026-10-07T00:00:00+09:00",
+        ),
+    ] {
+        let id = write_doc(&files, owner, space, folder, name, "needle\n").await;
+        sqlx::query("UPDATE nodes SET created_at = $2, updated_at = $3 WHERE id = $1")
+            .bind(id)
+            .bind(fixed_date(created))
+            .bind(fixed_date(updated))
+            .execute(&db.pool)
+            .await?;
+    }
+    let expected = [
+        "abcd", "bcd", "abc", "bc", "acd", "cd", "ac", "c", "abc", "bc", "abc", "bc", "ac", "c",
+        "ac", "c",
+    ];
+    for (mask, expected) in expected.into_iter().enumerate() {
+        let date_filters = SearchDateFilters {
+            created_from: (mask & 1 != 0).then(|| fixed_date("2026-10-01T00:00:00+09:00")),
+            created_to: (mask & 2 != 0).then(|| fixed_date("2026-10-06T00:00:00+09:00")),
+            updated_from: (mask & 4 != 0).then(|| fixed_date("2026-10-05T00:00:00+09:00")),
+            updated_to: (mask & 8 != 0).then(|| fixed_date("2026-10-07T00:00:00+09:00")),
+        };
+        for grep in [false, true] {
+            let mut cursor = None;
+            let mut found = String::new();
+            loop {
+                let (nodes, has_more, next) = if grep {
+                    let page = search
+                        .grep(
+                            owner,
+                            space,
+                            GrepRequest {
+                                date_filters,
+                                q: "needle".to_owned(),
+                                path: None,
+                                match_mode: GrepMatchMode::Literal,
+                                line_mode: GrepLineMode::First,
+                                include: Vec::new(),
+                                exclude: Vec::new(),
+                                limit: Some(1),
+                                cursor,
+                            },
+                        )
+                        .await?;
+                    assert!(page.items.iter().all(|hit| hit.match_lines == vec![1]));
+                    (
+                        page.items
+                            .into_iter()
+                            .map(|hit| hit.node)
+                            .collect::<Vec<_>>(),
+                        page.has_more,
+                        page.next_cursor,
+                    )
+                } else {
+                    let page = search
+                        .find(
+                            owner,
+                            space,
+                            FindRequest {
+                                date_filters,
+                                q: "note".to_owned(),
+                                path: None,
+                                kind: None,
+                                match_mode: FindMatchMode::Contains,
+                                include: Vec::new(),
+                                exclude: Vec::new(),
+                                limit: Some(1),
+                                cursor,
+                            },
+                        )
+                        .await?;
+                    (page.items, page.has_more, page.next_cursor)
+                };
+                for node in nodes {
+                    found.push(node.node.name.chars().next().unwrap());
+                }
+                if !has_more {
+                    break;
+                }
+                assert!(next.is_some());
+                cursor = next;
+                assert!(found.len() < 5, "paging must progress without duplicates");
+            }
+            assert_eq!(found, expected, "mask={mask}, grep={grep}");
+        }
+    }
+    // No dates in 2030 match. This must be a completed empty page, not a stuck cursor.
+    let dates = SearchDateFilters {
+        updated_from: Some(fixed_date("2030-01-01T00:00:00Z")),
+        ..Default::default()
+    };
+    let page = search
+        .grep(
+            owner,
+            space,
+            GrepRequest {
+                date_filters: dates,
+                q: "needle".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: Some(1),
+                cursor: None,
+            },
+        )
+        .await?;
+    assert!(page.items.is_empty() && !page.has_more && page.next_cursor.is_none());
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn date_filters_bind_each_bound_to_cursors_and_validate_typed_ranges()
+-> Result<(), Box<dyn std::error::Error>> {
+    use notegate_search::SearchDateFilters;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (spaces, files, search) = services(&db);
+    let owner = insert_user_account(&db.pool, "date-cursors", "date-cursors@example.test").await?;
+    let (space, root) = setup_space(&spaces, owner, "date-cursors").await;
+    write_doc(&files, owner, space, root, "a-note.md", "needle").await;
+    write_doc(&files, owner, space, root, "b-note.md", "needle").await;
+    let dates = SearchDateFilters {
+        created_from: Some(fixed_date("2000-01-01T00:00:00Z")),
+        created_to: Some(fixed_date("2030-01-01T00:00:00Z")),
+        updated_from: Some(fixed_date("2000-01-01T00:00:00Z")),
+        updated_to: Some(fixed_date("2030-01-01T00:00:00Z")),
+    };
+    let find = FindRequest {
+        date_filters: dates,
+        q: "note".to_owned(),
+        path: None,
+        kind: None,
+        match_mode: FindMatchMode::Contains,
+        include: Vec::new(),
+        exclude: Vec::new(),
+        limit: Some(1),
+        cursor: None,
+    };
+    let grep = GrepRequest {
+        date_filters: dates,
+        q: "needle".to_owned(),
+        path: None,
+        match_mode: GrepMatchMode::Literal,
+        line_mode: GrepLineMode::None,
+        include: Vec::new(),
+        exclude: Vec::new(),
+        limit: Some(1),
+        cursor: None,
+    };
+    let find_cursor = search.find(owner, space, find.clone()).await?.next_cursor;
+    let grep_cursor = search.grep(owner, space, grep.clone()).await?.next_cursor;
+    assert!(find_cursor.is_some() && grep_cursor.is_some());
+    for field in 0..4 {
+        let mut changed = dates;
+        match field {
+            0 => changed.created_from = Some(fixed_date("2001-01-01T00:00:00Z")),
+            1 => changed.created_to = Some(fixed_date("2029-01-01T00:00:00Z")),
+            2 => changed.updated_from = Some(fixed_date("2001-01-01T00:00:00Z")),
+            _ => changed.updated_to = Some(fixed_date("2029-01-01T00:00:00Z")),
+        }
+        for error in [
+            search
+                .find(
+                    owner,
+                    space,
+                    FindRequest {
+                        date_filters: changed,
+                        cursor: find_cursor.clone(),
+                        ..find.clone()
+                    },
+                )
+                .await
+                .unwrap_err(),
+            search
+                .grep(
+                    owner,
+                    space,
+                    GrepRequest {
+                        date_filters: changed,
+                        cursor: grep_cursor.clone(),
+                        ..grep.clone()
+                    },
+                )
+                .await
+                .unwrap_err(),
+        ] {
+            assert!(
+                matches!(error, SearchError::InvalidInput(ref message) if message.contains("cursor"))
+            );
+        }
+    }
+    // Internal callers cannot bypass range validation with a typed invalid request.
+    for upper in ["2000-01-01T00:00:00Z", "1999-01-01T00:00:00Z"] {
+        let invalid = SearchDateFilters {
+            created_to: Some(fixed_date(upper)),
+            ..dates
+        };
+        assert!(matches!(
+            search
+                .find(
+                    owner,
+                    space,
+                    FindRequest {
+                        date_filters: invalid,
+                        ..find.clone()
+                    }
+                )
+                .await,
+            Err(SearchError::InvalidInput(_))
+        ));
+        let invalid = SearchDateFilters {
+            updated_to: Some(fixed_date(upper)),
+            ..dates
+        };
+        assert!(matches!(
+            search
+                .grep(
+                    owner,
+                    space,
+                    GrepRequest {
+                        date_filters: invalid,
+                        ..grep.clone()
+                    }
+                )
+                .await,
+            Err(SearchError::InvalidInput(_))
+        ));
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "Synthetic workload measurement; run explicitly in CI with --nocapture"]
+async fn search_date_filters_measure_candidate_work() -> Result<(), Box<dyn std::error::Error>> {
+    use notegate_search::SearchDateFilters;
+    let db = TestDb::setup()
+        .await?
+        .ok_or("performance measurement requires PostgreSQL")?;
+    let (spaces, _files, _search) = services(&db);
+    let owner = insert_user_account(&db.pool, "date-measure", "date-measure@example.test").await?;
+    let (space, root) = setup_space(&spaces, owner, "date-measure").await;
+    let body = "x".repeat(8192);
+    let hash = notegate_text::content::sha256_hex(body.as_bytes());
+    sqlx::query("WITH inserted AS (
+        INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id, created_at, updated_at)
+        SELECT $1, $2, 'note-' || lpad(i::text, 4, '0') || '.md', 'text', $3, $3,
+            CASE WHEN i > 1990 THEN '2026-10-05T00:00:00Z'::timestamptz ELSE '2020-01-01T00:00:00Z'::timestamptz END,
+            CASE WHEN i > 1990 THEN '2026-10-05T00:00:00Z'::timestamptz ELSE '2020-01-01T00:00:00Z'::timestamptz END
+        FROM generate_series(1, 2000) i RETURNING id
+    ) INSERT INTO text_objects (node_id, space_id, content_text, content_sha256, byte_len, line_count, created_by_account_id, updated_by_account_id)
+      SELECT id, $1, $4, $5, 8192, 1, $3, $3 FROM inserted")
+        .bind(space).bind(root).bind(owner).bind(&body).bind(&hash).execute(&db.pool).await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    for (label, dates) in [
+        ("no-date", SearchDateFilters::default()),
+        (
+            "created-only",
+            SearchDateFilters {
+                created_from: Some(fixed_date("2026-10-01T00:00:00Z")),
+                ..Default::default()
+            },
+        ),
+        (
+            "updated-only",
+            SearchDateFilters {
+                updated_from: Some(fixed_date("2026-10-01T00:00:00Z")),
+                ..Default::default()
+            },
+        ),
+        (
+            "both",
+            SearchDateFilters {
+                created_from: Some(fixed_date("2026-10-01T00:00:00Z")),
+                updated_from: Some(fixed_date("2026-10-01T00:00:00Z")),
+                ..Default::default()
+            },
+        ),
+    ] {
+        let started = std::time::Instant::now();
+        let candidates = repo
+            .search_text_candidates(space, root, "/", None, &dates, 1001)
+            .await?;
+        let elapsed = started.elapsed();
+        let bytes: i64 = candidates.iter().map(|candidate| candidate.byte_len).sum();
+        println!(
+            "date-filter-measurement {label}: candidates={}, candidate_body_bytes={bytes}, query_ms={:.3}",
+            candidates.len(),
+            elapsed.as_secs_f64() * 1000.0
+        );
+        assert_eq!(candidates.len(), if label == "no-date" { 1001 } else { 10 });
+    }
     db.cleanup().await;
     Ok(())
 }

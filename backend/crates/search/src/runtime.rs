@@ -136,6 +136,7 @@ mod tests {
 
     fn find_request() -> FindRequest {
         FindRequest {
+            date_filters: Default::default(),
             q: "note".to_owned(),
             path: None,
             kind: None,
@@ -149,6 +150,7 @@ mod tests {
 
     fn grep_request() -> GrepRequest {
         GrepRequest {
+            date_filters: Default::default(),
             q: "needle".to_owned(),
             path: None,
             match_mode: GrepMatchMode::Literal,

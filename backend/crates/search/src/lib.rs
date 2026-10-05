@@ -10,7 +10,7 @@ use notegate_model::files::{NodeView, TextStats};
 use notegate_model::search::SearchTextCandidate;
 pub use notegate_model::search::{
     FindMatchMode, FindPage, FindRequest, GrepLineMode, GrepMatchMode, GrepPage, GrepRequest,
-    SearchCursor,
+    SearchCursor, SearchDateFilters,
 };
 use notegate_model::{Node, NodeKind, Permission, TextStorageFormat};
 use uuid::Uuid;
@@ -203,6 +203,40 @@ pub fn validate_grep_input(
     ContentMatcher::new(q, match_mode)?;
     PathFilters::new(include, exclude)?;
     Ok(())
+}
+
+/// Validate typed ranges too, including requests received by a standalone search role.
+pub fn validate_date_filters(dates: &SearchDateFilters) -> SearchResult<()> {
+    for (name, from, to) in [
+        ("created", dates.created_from, dates.created_to),
+        ("updated", dates.updated_from, dates.updated_to),
+    ] {
+        if let (Some(from), Some(to)) = (from, to)
+            && from >= to
+        {
+            return Err(SearchError::InvalidInput(format!(
+                "{name}_from must be earlier than {name}_to"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn dated_search_fingerprint(parts: &[String], dates: &SearchDateFilters) -> String {
+    if *dates == SearchDateFilters::default() {
+        return search_fingerprint(parts);
+    }
+    let mut parts = parts.to_vec();
+    parts.push("date-filters-v1".to_owned());
+    for value in [
+        dates.created_from,
+        dates.created_to,
+        dates.updated_from,
+        dates.updated_to,
+    ] {
+        parts.push(value.map(|date| date.to_rfc3339()).unwrap_or_default());
+    }
+    search_fingerprint(&parts)
 }
 
 fn search_fingerprint(parts: &[String]) -> String {
@@ -668,5 +702,41 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod date_fingerprint_tests {
+    use super::*;
+
+    #[test]
+    fn omitted_dates_preserve_existing_cursors_and_equivalent_offsets_share_fingerprint()
+    -> Result<(), chrono::ParseError> {
+        let parts = vec!["existing query".to_owned()];
+        assert_eq!(
+            dated_search_fingerprint(&parts, &SearchDateFilters::default()),
+            search_fingerprint(&parts)
+        );
+        let utc = chrono::DateTime::parse_from_rfc3339("2026-10-04T15:00:00Z")?
+            .with_timezone(&chrono::Utc);
+        let korean = chrono::DateTime::parse_from_rfc3339("2026-10-05T00:00:00+09:00")?
+            .with_timezone(&chrono::Utc);
+        let dates = SearchDateFilters {
+            updated_from: Some(utc),
+            ..Default::default()
+        };
+        let equivalent = SearchDateFilters {
+            updated_from: Some(korean),
+            ..Default::default()
+        };
+        assert_eq!(
+            dated_search_fingerprint(&parts, &dates),
+            dated_search_fingerprint(&parts, &equivalent)
+        );
+        assert_ne!(
+            dated_search_fingerprint(&parts, &dates),
+            search_fingerprint(&parts)
+        );
+        Ok(())
     }
 }

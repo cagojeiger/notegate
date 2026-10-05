@@ -24,7 +24,17 @@ pub async fn find(
     let context = adapter::context(parts)?;
     adapter::result(
         commands::search::find(
-            state, &context, target, q, kind, match_mode, include, exclude, limit, cursor,
+            state,
+            &context,
+            target,
+            q,
+            kind,
+            match_mode,
+            include,
+            exclude,
+            Default::default(),
+            limit,
+            cursor,
         )
         .await,
     )
@@ -46,7 +56,17 @@ pub async fn grep(
     let context = adapter::context(parts)?;
     adapter::result(
         commands::search::grep(
-            state, &context, target, q, match_mode, lines, include, exclude, limit, cursor,
+            state,
+            &context,
+            target,
+            q,
+            match_mode,
+            lines,
+            include,
+            exclude,
+            Default::default(),
+            limit,
+            cursor,
         )
         .await,
     )

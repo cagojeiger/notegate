@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
 use notegate_core::security::PiiCrypto;
-use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
+use notegate_model::search::{SearchDateFilters, SearchNodeCandidate, SearchTextCandidate};
 use notegate_model::{FileObject, Node, NodeKind, NodeSummary, Permission, TextObject};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -462,6 +462,7 @@ impl FilesRepo {
         scope_node_id: Uuid,
         scope_path: &str,
         after_sort_path: Option<&str>,
+        date_filters: &SearchDateFilters,
         limit: i64,
     ) -> Result<Vec<SearchNodeCandidate>> {
         queries::search::node_candidates(
@@ -470,6 +471,7 @@ impl FilesRepo {
             scope_node_id,
             scope_path,
             after_sort_path,
+            date_filters,
             limit,
         )
         .await
@@ -481,6 +483,7 @@ impl FilesRepo {
         scope_node_id: Uuid,
         scope_path: &str,
         after_sort_path: Option<&str>,
+        date_filters: &SearchDateFilters,
         limit: i64,
     ) -> Result<Vec<SearchTextCandidate>> {
         queries::search::text_candidates(
@@ -489,6 +492,7 @@ impl FilesRepo {
             scope_node_id,
             scope_path,
             after_sort_path,
+            date_filters,
             limit,
         )
         .await

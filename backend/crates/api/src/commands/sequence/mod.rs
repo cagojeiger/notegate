@@ -29,7 +29,21 @@ const READ_COMMAND_FIELDS: &[&str] = &[
     "if_none_match_sha256",
 ];
 const SEARCH_COMMAND_FIELDS: &[&str] = &[
-    "tool", "op", "target", "q", "kind", "match", "lines", "include", "exclude", "limit", "cursor",
+    "tool",
+    "op",
+    "target",
+    "q",
+    "kind",
+    "match",
+    "lines",
+    "include",
+    "exclude",
+    "created_from",
+    "created_to",
+    "updated_from",
+    "updated_to",
+    "limit",
+    "cursor",
 ];
 const WRITE_COMMAND_FIELDS: &[&str] = &[
     "tool",
@@ -510,6 +524,11 @@ fn search_input(
         lines: command.lines,
         include: command.include,
         exclude: command.exclude,
+        created_from: command.created_from,
+        created_to: command.created_to,
+        updated_from: command.updated_from,
+        updated_to: command.updated_to,
+
         limit: command.limit,
         cursor: command.cursor,
     })
@@ -630,3 +649,50 @@ async fn dispatch_command(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod date_filter_tests {
+    #![allow(clippy::indexing_slicing)]
+    use super::*;
+
+    #[test]
+    fn sequence_preserves_dates_and_rejects_invalid_ranges_before_execution()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let command = json!({"tool":"search", "op":"grep", "target":"daily:/", "q":"note", "created_from":"2026-10-01T00:00:00+09:00", "updated_to":"2026-10-06T00:00:00+09:00"});
+        let prepared =
+            prepare_sequence_commands(vec![command.clone()], "search dates", SequenceKind::Read)
+                .map_err(|error| error.message)?;
+        let input = search_input(
+            prepared
+                .into_iter()
+                .next()
+                .ok_or("missing prepared command")?
+                .command,
+            "search dates",
+        )
+        .map_err(|error| error.message)?;
+        assert_eq!(
+            input.created_from.as_deref(),
+            Some("2026-10-01T00:00:00+09:00")
+        );
+        assert_eq!(
+            input.updated_to.as_deref(),
+            Some("2026-10-06T00:00:00+09:00")
+        );
+        for (from, to) in [
+            ("created_from", "created_to"),
+            ("updated_from", "updated_to"),
+        ] {
+            for end in ["2026-10-01T00:00:00Z", "2026-09-30T00:00:00Z"] {
+                let mut invalid = command.clone();
+                invalid[from] = json!("2026-10-01T00:00:00Z");
+                invalid[to] = json!(end);
+                assert!(
+                    prepare_sequence_commands(vec![invalid], "search dates", SequenceKind::Read)
+                        .is_err()
+                );
+            }
+        }
+        Ok(())
+    }
+}

@@ -161,6 +161,7 @@ async fn inherited_lock_is_reported_without_blocking_reads() -> TestResult {
             fixture.owner,
             fixture.space_id,
             GrepRequest {
+                date_filters: Default::default(),
                 q: "alpha".to_owned(),
                 path: Some("/Policies".to_owned()),
                 match_mode: GrepMatchMode::Literal,

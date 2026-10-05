@@ -7,8 +7,8 @@ use notegate_model::{Node, NodeKind};
 use super::matcher::{NameMatcher, PathFilters};
 use super::telemetry::{SearchOperation, SearchStage};
 use super::{
-    FindPage, FindRequest, SearchError, SearchResult, SearchService, decode_search_cursor,
-    encode_search_cursor, search_fingerprint, validate_query,
+    FindPage, FindRequest, SearchError, SearchResult, SearchService, dated_search_fingerprint,
+    decode_search_cursor, encode_search_cursor, search_fingerprint, validate_query,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -70,6 +70,7 @@ impl SearchService {
                     self.authorize(space_id, caller_account_id),
                 )
                 .await?;
+            super::validate_date_filters(&request.date_filters)?;
             let q = validate_query(&request.q)?.to_owned();
             let limit = clamp_limit(
                 request.limit,
@@ -87,21 +88,24 @@ impl SearchService {
             let (fingerprint, after_sort_path, matcher, path_filters) =
                 self.telemetry
                     .stage_sync(operation, SearchStage::Prepare, || {
-                        let fingerprint = search_fingerprint(&[
-                            space_id.to_string(),
-                            "find".to_owned(),
-                            q.clone(),
-                            request
-                                .kind
-                                .map(|kind| kind.as_str().to_owned())
-                                .unwrap_or_default(),
-                            request.match_mode.as_str().to_owned(),
-                            search_fingerprint(&request.include),
-                            search_fingerprint(&request.exclude),
-                            scope_node_id.to_string(),
-                            "case-insensitive".to_owned(),
-                            "dfs-sort_order-name-id".to_owned(),
-                        ]);
+                        let fingerprint = dated_search_fingerprint(
+                            &[
+                                space_id.to_string(),
+                                "find".to_owned(),
+                                q.clone(),
+                                request
+                                    .kind
+                                    .map(|kind| kind.as_str().to_owned())
+                                    .unwrap_or_default(),
+                                request.match_mode.as_str().to_owned(),
+                                search_fingerprint(&request.include),
+                                search_fingerprint(&request.exclude),
+                                scope_node_id.to_string(),
+                                "case-insensitive".to_owned(),
+                                "dfs-sort_order-name-id".to_owned(),
+                            ],
+                            &request.date_filters,
+                        );
                         let after_sort_path = decode_search_cursor(
                             request.cursor.as_deref(),
                             "find",
@@ -122,6 +126,7 @@ impl SearchService {
                         scope_node_id,
                         &scope_path,
                         after_sort_path.as_deref(),
+                        &request.date_filters,
                         limits::SEARCH_CANDIDATE_PAGE_MAX + 1,
                     ),
                 )

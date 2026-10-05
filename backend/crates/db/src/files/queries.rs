@@ -1075,7 +1075,7 @@ pub mod search {
     use chrono::{DateTime, Utc};
     use notegate_core::Result;
     use notegate_core::security::PiiCrypto;
-    use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
+    use notegate_model::search::{SearchDateFilters, SearchNodeCandidate, SearchTextCandidate};
     use notegate_model::{TextAtRestEncryption, TextObject};
     use serde_json::Value;
     use sqlx::{Executor, FromRow, PgPool, Postgres};
@@ -1383,6 +1383,7 @@ pub mod search {
         scope_node_id: Uuid,
         scope_path: &str,
         after_sort_path: Option<&str>,
+        date_filters: &SearchDateFilters,
         limit: i64,
     ) -> Result<Vec<SearchNodeCandidate>> {
         let rows: Vec<NodeCandidateRow> = sqlx::query_as(sqlx::AssertSqlSafe(candidate_cte(
@@ -1390,6 +1391,10 @@ pub mod search {
                  FROM subtree \
                  WHERE id <> $2 AND external_access_enabled = true \
                    AND ($4::text IS NULL OR sort_path > $4) \
+                   AND ($6::timestamptz IS NULL OR created_at >= $6) \
+                   AND ($7::timestamptz IS NULL OR created_at < $7) \
+                   AND ($8::timestamptz IS NULL OR updated_at >= $8) \
+                   AND ($9::timestamptz IS NULL OR updated_at < $9) \
                  ORDER BY sort_path \
                  LIMIT $5",
             "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.external_access_enabled, n.write_locked, \
@@ -1404,6 +1409,10 @@ pub mod search {
         .bind(scope_path)
         .bind(after_sort_path)
         .bind(limit)
+        .bind(date_filters.created_from)
+        .bind(date_filters.created_to)
+        .bind(date_filters.updated_from)
+        .bind(date_filters.updated_to)
         .fetch_all(pool)
         .await
         .map_err(map_sqlx_error)?;
@@ -1419,6 +1428,7 @@ pub mod search {
         scope_node_id: Uuid,
         scope_path: &str,
         after_sort_path: Option<&str>,
+        date_filters: &SearchDateFilters,
         limit: i64,
     ) -> Result<Vec<SearchTextCandidate>> {
         let rows: Vec<TextCandidateRow> = sqlx::query_as(
@@ -1435,6 +1445,10 @@ pub mod search {
                    AND s.external_access_enabled = true \
                    AND t.storage_format = 'plain' \
                    AND ($4::text IS NULL OR s.sort_path > $4) \
+                   AND ($6::timestamptz IS NULL OR s.created_at >= $6) \
+                   AND ($7::timestamptz IS NULL OR s.created_at < $7) \
+                   AND ($8::timestamptz IS NULL OR s.updated_at >= $8) \
+                   AND ($9::timestamptz IS NULL OR s.updated_at < $9) \
                  ORDER BY s.sort_path \
                  LIMIT $5",
                 "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.external_access_enabled, n.write_locked, \
@@ -1451,6 +1465,10 @@ pub mod search {
         .bind(scope_path)
         .bind(after_sort_path)
         .bind(limit)
+        .bind(date_filters.created_from)
+        .bind(date_filters.created_to)
+        .bind(date_filters.updated_from)
+        .bind(date_filters.updated_to)
         .fetch_all(pool)
         .await
         .map_err(map_sqlx_error)?;
@@ -1553,14 +1571,14 @@ pub mod search {
     fn candidate_cte(selected_sql: &'static str, result_sql: &'static str) -> String {
         format!(
             "WITH RECURSIVE subtree AS ( \
-                SELECT id, kind, external_access_enabled, \
+                SELECT id, kind, external_access_enabled, created_at, updated_at, \
                        $3::text AS path, \
                        ''::text AS sort_path \
                 FROM nodes \
                 WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                   AND node_external_access_allowed(space_id, id) \
                 UNION ALL \
-                SELECT n.id, n.kind, n.external_access_enabled, \
+                SELECT n.id, n.kind, n.external_access_enabled, n.created_at, n.updated_at, \
                        CASE WHEN s.path = '/' THEN '/' || n.name ELSE s.path || '/' || n.name END, \
                        CASE WHEN s.sort_path = '' \
                             THEN concat(lpad((n.sort_order::bigint + 2147483648)::text, 10, '0'), E'\\x1f', n.name, E'\\x1f', n.id::text) \

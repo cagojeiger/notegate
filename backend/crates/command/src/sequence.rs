@@ -73,6 +73,14 @@ pub struct SequenceCommand {
     #[serde(default)]
     pub exclude: Option<Vec<String>>,
     #[serde(default)]
+    pub created_from: Option<String>,
+    #[serde(default)]
+    pub created_to: Option<String>,
+    #[serde(default)]
+    pub updated_from: Option<String>,
+    #[serde(default)]
+    pub updated_to: Option<String>,
+    #[serde(default)]
     pub content: Option<String>,
     #[serde(default)]
     pub edits: Option<Vec<Value>>,
@@ -178,6 +186,18 @@ struct SequenceSearchCommandSchema {
     lines: Option<String>,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    /// Inclusive creation time lower bound. RFC 3339 with timezone; omit for no lower bound.
+    #[schemars(extend("format" = "date-time"))]
+    created_from: Option<String>,
+    /// Exclusive creation time upper bound. RFC 3339 with timezone; must be later than created_from.
+    #[schemars(extend("format" = "date-time"))]
+    created_to: Option<String>,
+    /// Inclusive last node-change time lower bound (body, name, move, or settings). RFC 3339 with timezone.
+    #[schemars(extend("format" = "date-time"))]
+    updated_from: Option<String>,
+    /// Exclusive last node-change time upper bound. RFC 3339 with timezone; must be later than updated_from.
+    #[schemars(extend("format" = "date-time"))]
+    updated_to: Option<String>,
     limit: Option<i64>,
     cursor: Option<String>,
 }

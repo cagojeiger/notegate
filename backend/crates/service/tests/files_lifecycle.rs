@@ -617,6 +617,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
             owner,
             ws,
             FindRequest {
+                date_filters: Default::default(),
                 q: "note".to_owned(),
                 path: None,
                 kind: None,
