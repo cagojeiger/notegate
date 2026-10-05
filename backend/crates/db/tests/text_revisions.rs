@@ -6,6 +6,7 @@
     clippy::panic
 )]
 mod common;
+use chrono::{DateTime, Duration, Utc};
 use common::{TestDb, space_with_root};
 use notegate_core::{Error, security::PiiCrypto};
 use notegate_db::{FilesRepo, TextMutationKind, files::revisions};
@@ -37,6 +38,299 @@ async fn save(
         TextMutationKind::Write,
     )
     .await?;
+    Ok(())
+}
+
+fn policy_time() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc)
+}
+
+type RevisionHead = (Uuid, DateTime<Utc>, Uuid, DateTime<Utc>);
+async fn revision_head(pool: &sqlx::PgPool, node: Uuid) -> Result<RevisionHead, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT revision_id, revision_written_at, revision_group_id, revision_group_started_at \
+         FROM text_objects WHERE node_id=$1",
+    )
+    .bind(node)
+    .fetch_one(pool)
+    .await
+}
+
+async fn assert_history_usage(pool: &sqlx::PgPool, space: Uuid) -> TestResult {
+    let (recorded, actual): (i64, i64) = sqlx::query_as(
+        "SELECT u.stored_bytes, (SELECT COALESCE(SUM(r.stored_bytes),0)::bigint \
+         FROM text_revisions r WHERE r.space_id=u.space_id) \
+         FROM text_revision_usage u WHERE u.space_id=$1",
+    )
+    .bind(space)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(recorded, actual);
+    Ok(())
+}
+
+#[tokio::test]
+async fn editing_time_limits_are_strict_at_microsecond_boundaries() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (actor, space, root) = space_with_root(&db.pool, "revision-time-boundaries").await?;
+    let start = policy_time() + Duration::seconds(1);
+    for (limit, seconds) in [("idle", 120), ("group", 600)] {
+        for offset in [-1, 0, 1] {
+            let repo = FilesRepo::new(db.pool.clone()).with_revision_time(policy_time());
+            let (node, _) = repo
+                .insert_text(
+                    space,
+                    root,
+                    &format!("{limit}-{offset}.md"),
+                    &body("a"),
+                    actor,
+                )
+                .await?;
+            assert_eq!(revision_head(&db.pool, node.id).await?.1, policy_time());
+            let editing = repo.with_revision_context("browser", Some(Uuid::new_v4()));
+            save(
+                &editing.clone().with_revision_time(start),
+                space,
+                node.id,
+                actor,
+                "b",
+            )
+            .await?;
+            let first = revision_head(&db.pool, node.id).await?;
+            if limit == "group" {
+                // Keep idle time under two minutes while the group approaches ten minutes.
+                for elapsed in [90, 180, 270, 360, 450, 540] {
+                    save(
+                        &editing
+                            .clone()
+                            .with_revision_time(start + Duration::seconds(elapsed)),
+                        space,
+                        node.id,
+                        actor,
+                        &format!("edit-{elapsed}"),
+                    )
+                    .await?;
+                    assert_eq!(revision_head(&db.pool, node.id).await?.3, start);
+                }
+            }
+            let previous = revision_head(&db.pool, node.id).await?;
+            let now = start + Duration::seconds(seconds) + Duration::microseconds(offset);
+            save(
+                &editing.with_revision_time(now),
+                space,
+                node.id,
+                actor,
+                "final",
+            )
+            .await?;
+            let head = revision_head(&db.pool, node.id).await?;
+            let continues = offset < 0;
+            assert_eq!(head.1, now, "{limit}: offset {offset}");
+            assert_eq!(head.2 == first.2, continues, "{limit}: offset {offset}");
+            assert_eq!(head.3, if continues { start } else { now });
+            let snapshot: (DateTime<Utc>, DateTime<Utc>, bool, DateTime<Utc>) = sqlx::query_as(
+                "SELECT written_at, superseded_at, checkpoint, cleanup_at FROM text_revisions WHERE id=$1",
+            ).bind(previous.0).fetch_one(&db.pool).await?;
+            assert_eq!(snapshot.0, previous.1);
+            assert_eq!(snapshot.1, now);
+            assert_eq!(snapshot.2, !continues, "{limit}: offset {offset}");
+            assert_eq!(
+                snapshot.3,
+                now + Duration::days(if continues { 1 } else { 30 })
+            );
+            assert_history_usage(&db.pool, space).await?;
+        }
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn retention_expires_at_the_exact_replacement_based_deadline() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    for (checkpoint, days) in [(false, 1), (true, 30)] {
+        for offset in [-1, 0, 1] {
+            // Separate Spaces keep the global cleanup selector independent for each case.
+            let (actor, space, root) =
+                space_with_root(&db.pool, &format!("revision-retention-{days}-{offset}")).await?;
+            let repo = FilesRepo::new(db.pool.clone()).with_revision_time(policy_time());
+            let (node, _) = repo
+                .insert_text(space, root, "note.md", &body("a"), actor)
+                .await?;
+            // The initial body is old; retention must still start when it is replaced.
+            let replacement = policy_time() + Duration::days(90);
+            let editing = repo.with_revision_context("browser", Some(Uuid::new_v4()));
+            save(
+                &editing
+                    .clone()
+                    .with_revision_time(replacement - Duration::seconds(1)),
+                space,
+                node.id,
+                actor,
+                "b",
+            )
+            .await?;
+            let target = revision_head(&db.pool, node.id).await?.0;
+            if !checkpoint {
+                save(
+                    &editing.clone().with_revision_time(replacement),
+                    space,
+                    node.id,
+                    actor,
+                    "c",
+                )
+                .await?;
+            }
+            let (id, written_at, superseded_at, cleanup_at): (
+                Uuid,
+                DateTime<Utc>,
+                DateTime<Utc>,
+                DateTime<Utc>,
+            ) = sqlx::query_as(
+                "SELECT id, written_at, superseded_at, cleanup_at FROM text_revisions \
+                 WHERE space_id=$1 AND checkpoint=$2",
+            )
+            .bind(space)
+            .bind(checkpoint)
+            .fetch_one(&db.pool)
+            .await?;
+            let expected_replacement = if checkpoint {
+                replacement - Duration::seconds(1)
+            } else {
+                replacement
+            };
+            let deadline = expected_replacement + Duration::days(days);
+            assert_eq!(
+                written_at,
+                if checkpoint {
+                    policy_time()
+                } else {
+                    replacement - Duration::seconds(1)
+                }
+            );
+            assert_eq!(superseded_at, expected_replacement);
+            assert_eq!(cleanup_at, deadline);
+            if !checkpoint {
+                assert_eq!(id, target);
+            }
+            let before = revision_head(&db.pool, node.id).await?;
+            let cutoff = deadline + Duration::microseconds(offset);
+            assert_eq!(
+                revisions::cleanup_at(&db.pool, cutoff).await?,
+                u64::from(offset >= 0),
+                "{days} days: offset {offset}"
+            );
+            assert_eq!(revisions::cleanup_at(&db.pool, cutoff).await?, 0);
+            let retained: bool =
+                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM text_revisions WHERE id=$1)")
+                    .bind(id)
+                    .fetch_one(&db.pool)
+                    .await?;
+            assert_eq!(retained, offset < 0, "{days} days: offset {offset}");
+            assert_eq!(revision_head(&db.pool, node.id).await?, before);
+            assert_eq!(
+                repo_body(&editing, space, node.id).await?,
+                if checkpoint { "b" } else { "c" }
+            );
+            assert_history_usage(&db.pool, space).await?;
+            if !checkpoint {
+                let initial: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM text_revisions WHERE space_id=$1 AND checkpoint",
+                )
+                .bind(space)
+                .fetch_one(&db.pool)
+                .await?;
+                assert_eq!(initial, 1);
+            }
+            sqlx::query("DELETE FROM spaces WHERE id=$1")
+                .bind(space)
+                .execute(&db.pool)
+                .await?;
+        }
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+async fn repo_body(repo: &FilesRepo, space: Uuid, node: Uuid) -> Result<String, Error> {
+    Ok(repo
+        .find_text(space, node)
+        .await?
+        .unwrap()
+        .1
+        .content
+        .unwrap())
+}
+
+#[tokio::test]
+async fn unsuccessful_writes_do_not_refresh_the_editing_clock() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (actor, space, root) = space_with_root(&db.pool, "revision-attempt-clock").await?;
+    let repo = FilesRepo::new(db.pool.clone()).with_revision_time(policy_time());
+    let (node, _) = repo
+        .insert_text(space, root, "note.md", &body("a"), actor)
+        .await?;
+    let start = policy_time() + Duration::seconds(1);
+    let editing = repo
+        .with_revision_context("browser", Some(Uuid::new_v4()))
+        .with_revision_time(start);
+    save(&editing, space, node.id, actor, "b").await?;
+    let head = revision_head(&db.pool, node.id).await?;
+    let snapshots: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM text_revisions ORDER BY id")
+        .fetch_all(&db.pool)
+        .await?;
+    let attempt = editing
+        .clone()
+        .with_revision_time(start + Duration::seconds(119));
+    sqlx::raw_sql("CREATE FUNCTION reject_revision_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.content_text = 'c' THEN RAISE EXCEPTION 'injected write failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_revision_write BEFORE UPDATE ON text_objects FOR EACH ROW EXECUTE FUNCTION reject_revision_write();").execute(&db.pool).await?;
+    for kind in ["unchanged", "conflict", "rollback"] {
+        match kind {
+            "unchanged" => save(&attempt, space, node.id, actor, "b").await?,
+            "conflict" => assert!(matches!(
+                attempt
+                    .save_text_content(
+                        space,
+                        node.id,
+                        &body("c"),
+                        Some(&body("a").content_sha256),
+                        actor,
+                        TextMutationKind::Write
+                    )
+                    .await,
+                Err(Error::Conflict(_))
+            )),
+            _ => assert!(save(&attempt, space, node.id, actor, "c").await.is_err()),
+        }
+        assert_eq!(revision_head(&db.pool, node.id).await?, head, "{kind}");
+        let actual: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM text_revisions ORDER BY id")
+            .fetch_all(&db.pool)
+            .await?;
+        assert_eq!(actual, snapshots, "{kind}");
+        assert_eq!(repo_body(&editing, space, node.id).await?, "b");
+        assert_history_usage(&db.pool, space).await?;
+    }
+    sqlx::query("DROP TRIGGER reject_revision_write ON text_objects")
+        .execute(&db.pool)
+        .await?;
+    let now = start + Duration::seconds(120);
+    save(&editing.with_revision_time(now), space, node.id, actor, "c").await?;
+    let next = revision_head(&db.pool, node.id).await?;
+    assert_ne!(next.2, head.2);
+    assert_eq!((next.1, next.3), (now, now));
+    let checkpoint: bool = sqlx::query_scalar("SELECT checkpoint FROM text_revisions WHERE id=$1")
+        .bind(head.0)
+        .fetch_one(&db.pool)
+        .await?;
+    assert!(checkpoint);
+    db.cleanup().await;
     Ok(())
 }
 
@@ -185,21 +479,46 @@ async fn grouping_preserves_boundaries_and_cleanup_is_repeatable() -> TestResult
         return Ok(());
     };
     let (actor, space, root) = space_with_root(&db.pool, "revision-group").await?;
-    let repo = FilesRepo::new(db.pool.clone());
+    let repo = FilesRepo::new(db.pool.clone()).with_revision_time(policy_time());
     let (node, _) = repo
         .insert_text(space, root, "note.md", &body("a"), actor)
         .await?;
     let editing = repo
         .clone()
         .with_revision_context("browser", Some(Uuid::new_v4()));
-    for value in ["b", "c", "d"] {
-        save(&editing, space, node.id, actor, value).await?;
+    for (second, value) in [(1, "b"), (2, "c"), (3, "d")] {
+        save(
+            &editing
+                .clone()
+                .with_revision_time(policy_time() + Duration::seconds(second)),
+            space,
+            node.id,
+            actor,
+            value,
+        )
+        .await?;
     }
     let ai = repo
         .clone()
         .with_revision_context("mcp", Some(Uuid::new_v4()));
-    save(&ai, space, node.id, actor, "e").await?;
-    save(&repo, space, node.id, actor, "f").await?;
+    save(
+        &ai.with_revision_time(policy_time() + Duration::seconds(4)),
+        space,
+        node.id,
+        actor,
+        "e",
+    )
+    .await?;
+    save(
+        &repo
+            .clone()
+            .with_revision_time(policy_time() + Duration::seconds(5)),
+        space,
+        node.id,
+        actor,
+        "f",
+    )
+    .await?;
     let flags: Vec<(String, bool)> = sqlx::query_as(
         "SELECT content_sha256,checkpoint FROM text_revisions ORDER BY superseded_at",
     )
@@ -209,11 +528,13 @@ async fn grouping_preserves_boundaries_and_cleanup_is_repeatable() -> TestResult
         flags.iter().map(|v| v.1).collect::<Vec<_>>(),
         vec![true, false, false, true, true]
     );
-    assert_eq!(revisions::cleanup(&db.pool).await?, 0);
-    // Advance only stored timestamps; no sleeps or changes to the production clock.
-    sqlx::query("UPDATE text_revisions SET superseded_at=superseded_at-interval '25 hours', cleanup_at=cleanup_at-interval '25 hours'").execute(&db.pool).await?;
-    assert_eq!(revisions::cleanup(&db.pool).await?, 2);
-    assert_eq!(revisions::cleanup(&db.pool).await?, 0);
+    assert_eq!(
+        revisions::cleanup_at(&db.pool, policy_time() + Duration::seconds(5)).await?,
+        0
+    );
+    let recent_cutoff = policy_time() + Duration::hours(25);
+    assert_eq!(revisions::cleanup_at(&db.pool, recent_cutoff).await?, 2);
+    assert_eq!(revisions::cleanup_at(&db.pool, recent_cutoff).await?, 0);
     let left = repo.list_text_revisions(space, node.id, 10, None).await?;
     assert_eq!(
         left.revisions
@@ -226,10 +547,10 @@ async fn grouping_preserves_boundaries_and_cleanup_is_repeatable() -> TestResult
             body("a").content_sha256
         ]
     );
-    sqlx::query("UPDATE text_revisions SET cleanup_at=cleanup_at-interval '31 days'")
-        .execute(&db.pool)
-        .await?;
-    assert_eq!(revisions::cleanup(&db.pool).await?, 3);
+    assert_eq!(
+        revisions::cleanup_at(&db.pool, policy_time() + Duration::days(31)).await?,
+        3
+    );
     assert_eq!(
         repo.find_text(space, node.id)
             .await?
@@ -250,37 +571,38 @@ async fn grouping_preserves_boundaries_and_cleanup_is_repeatable() -> TestResult
 }
 
 #[tokio::test]
-async fn time_actor_and_channel_boundaries_cannot_coalesce() -> TestResult {
+async fn actor_channel_and_session_boundaries_cannot_coalesce() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let (actor, space, root) = space_with_root(&db.pool, "revision-time").await?;
+    let (actor, space, root) = space_with_root(&db.pool, "revision-identity").await?;
     let other =
         common::insert_user_account(&db.pool, "revision-other", "other@example.com").await?;
     let session = Some(Uuid::new_v4());
-    let repo = FilesRepo::new(db.pool.clone()).with_revision_context("browser", session);
+    let repo = FilesRepo::new(db.pool.clone()).with_revision_time(policy_time());
     let (node, _) = repo
         .insert_text(space, root, "note.md", &body("a"), actor)
         .await?;
-    save(&repo, space, node.id, actor, "b").await?;
-    sqlx::query(
-        "UPDATE text_objects SET revision_written_at=now()-interval '2 minutes' WHERE node_id=$1",
-    )
-    .bind(node.id)
-    .execute(&db.pool)
-    .await?;
-    save(&repo, space, node.id, actor, "c").await?;
-    sqlx::query("UPDATE text_objects SET revision_group_started_at=now()-interval '10 minutes' WHERE node_id=$1").bind(node.id).execute(&db.pool).await?;
-    save(&repo, space, node.id, actor, "d").await?;
-    save(&repo, space, node.id, other, "e").await?;
-    save(
-        &repo.clone().with_revision_context("mcp", session),
-        space,
-        node.id,
-        other,
-        "f",
-    )
-    .await?;
+    for (second, source, id, author, value) in [
+        (1, "browser", session, actor, "b"),
+        (2, "browser", session, other, "c"),
+        (3, "mcp", session, other, "d"),
+        (4, "mcp", Some(Uuid::new_v4()), other, "e"),
+        (5, "mcp", None, other, "f"),
+        (6, "mcp", None, other, "g"),
+    ] {
+        save(
+            &repo
+                .clone()
+                .with_revision_context(source, id)
+                .with_revision_time(policy_time() + Duration::seconds(second)),
+            space,
+            node.id,
+            author,
+            value,
+        )
+        .await?;
+    }
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM text_revisions WHERE NOT checkpoint")
         .fetch_one(&db.pool)
         .await?;
@@ -295,20 +617,33 @@ async fn quota_failure_keeps_current_and_cascade_releases_history() -> TestResul
         return Ok(());
     };
     let (actor, space, root) = space_with_root(&db.pool, "revision-quota").await?;
-    let repo = FilesRepo::new(db.pool.clone());
+    let repo = FilesRepo::new(db.pool.clone()).with_revision_time(policy_time());
     let (node, _) = repo
         .insert_text(space, root, "note.md", &body("a"), actor)
         .await?;
-    save(&repo, space, node.id, actor, "b").await?;
+    let editing = repo
+        .clone()
+        .with_revision_context("browser", Some(Uuid::new_v4()))
+        .with_revision_time(policy_time() + Duration::seconds(1));
+    save(&editing, space, node.id, actor, "b").await?;
+    let head = revision_head(&db.pool, node.id).await?;
     sqlx::query("UPDATE text_revision_usage SET stored_bytes=$1 WHERE space_id=$2")
         .bind(revisions::SPACE_HISTORY_BYTES)
         .bind(space)
         .execute(&db.pool)
         .await?;
     assert!(matches!(
-        save(&repo, space, node.id, actor, "c").await,
+        save(
+            &editing.with_revision_time(policy_time() + Duration::seconds(120)),
+            space,
+            node.id,
+            actor,
+            "c"
+        )
+        .await,
         Err(Error::TextRevisionStorageFull)
     ));
+    assert_eq!(revision_head(&db.pool, node.id).await?, head);
     assert_eq!(
         repo.find_text(space, node.id)
             .await?
@@ -342,18 +677,20 @@ async fn encryption_identity_tampering_and_old_current_protection() -> TestResul
         return Ok(());
     };
     let (actor, space, root) = space_with_root(&db.pool, "revision-crypto").await?;
-    let repo = FilesRepo::new(db.pool.clone());
+    let repo = FilesRepo::new(db.pool.clone()).with_revision_time(policy_time());
     let (node, _) = repo
         .insert_text(space, root, "note.md", &body("a"), actor)
         .await?;
-    sqlx::query(
-        "UPDATE text_objects SET revision_written_at=now()-interval '90 days' WHERE node_id=$1",
+    let replacement = policy_time() + Duration::days(90);
+    save(
+        &repo.clone().with_revision_time(replacement),
+        space,
+        node.id,
+        actor,
+        "b",
     )
-    .bind(node.id)
-    .execute(&db.pool)
     .await?;
-    save(&repo, space, node.id, actor, "b").await?;
-    assert_eq!(revisions::cleanup(&db.pool).await?, 0);
+    assert_eq!(revisions::cleanup_at(&db.pool, replacement).await?, 0);
     let page = repo.list_text_revisions(space, node.id, 10, None).await?;
     let id = page.revisions[0].id;
     assert_eq!(
@@ -485,7 +822,7 @@ async fn cleanup_is_bounded_and_space_cascade_removes_usage() -> TestResult {
         return Ok(());
     };
     let (actor, space, root) = space_with_root(&db.pool, "revision-batch").await?;
-    let repo = FilesRepo::new(db.pool.clone());
+    let repo = FilesRepo::new(db.pool.clone()).with_revision_time(policy_time());
     let (node, _) = repo
         .insert_text(space, root, "note.md", &body("a"), actor)
         .await?;
@@ -499,12 +836,10 @@ async fn cleanup_is_bounded_and_space_cascade_removes_usage() -> TestResult {
         )
         .await?;
     }
-    sqlx::query("UPDATE text_revisions SET cleanup_at=now()-interval '1 second'")
-        .execute(&db.pool)
-        .await?;
-    assert_eq!(revisions::cleanup(&db.pool).await?, 100);
-    assert_eq!(revisions::cleanup(&db.pool).await?, 5);
-    assert_eq!(revisions::cleanup(&db.pool).await?, 0);
+    let cutoff = policy_time() + Duration::days(31);
+    assert_eq!(revisions::cleanup_at(&db.pool, cutoff).await?, 100);
+    assert_eq!(revisions::cleanup_at(&db.pool, cutoff).await?, 5);
+    assert_eq!(revisions::cleanup_at(&db.pool, cutoff).await?, 0);
     save(&repo, space, node.id, actor, "c").await?;
     sqlx::query("DELETE FROM spaces WHERE id=$1")
         .bind(space)
