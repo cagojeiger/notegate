@@ -429,7 +429,10 @@ mod date_filter_tests {
     fn dates_require_timezone_and_normalize_offsets() -> Result<(), Box<dyn std::error::Error>> {
         let base = json!({"purpose":"search dates","op":"find","target":"daily:/","q":"note"});
         let input: SearchInput = serde_json::from_value(base.clone())?;
-        assert_eq!(parse_date_filters(&input)?, Default::default());
+        assert_eq!(
+            parse_date_filters(&input).map_err(|error| error.message)?,
+            Default::default()
+        );
         for field in ["created_from", "created_to", "updated_from", "updated_to"] {
             for invalid in ["2026-10-05", "2026-10-05T00:00:00", "yesterday", ""] {
                 let mut value = base.clone();
@@ -443,8 +446,8 @@ mod date_filter_tests {
         let mut utc = base;
         utc["updated_from"] = json!("2026-10-04T15:00:00Z");
         assert_eq!(
-            parse_date_filters(&serde_json::from_value(korean)?)?,
-            parse_date_filters(&serde_json::from_value(utc)?)?
+            parse_date_filters(&serde_json::from_value(korean)?).map_err(|error| error.message)?,
+            parse_date_filters(&serde_json::from_value(utc)?).map_err(|error| error.message)?
         );
         Ok(())
     }

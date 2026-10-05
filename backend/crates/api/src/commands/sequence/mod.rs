@@ -660,7 +660,8 @@ mod date_filter_tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let command = json!({"tool":"search", "op":"grep", "target":"daily:/", "q":"note", "created_from":"2026-10-01T00:00:00+09:00", "updated_to":"2026-10-06T00:00:00+09:00"});
         let prepared =
-            prepare_sequence_commands(vec![command.clone()], "search dates", SequenceKind::Read)?;
+            prepare_sequence_commands(vec![command.clone()], "search dates", SequenceKind::Read)
+                .map_err(|error| error.message)?;
         let input = search_input(
             prepared
                 .into_iter()
@@ -668,7 +669,8 @@ mod date_filter_tests {
                 .ok_or("missing prepared command")?
                 .command,
             "search dates",
-        )?;
+        )
+        .map_err(|error| error.message)?;
         assert_eq!(
             input.created_from.as_deref(),
             Some("2026-10-01T00:00:00+09:00")
