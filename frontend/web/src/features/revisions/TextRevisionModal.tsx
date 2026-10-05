@@ -60,7 +60,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
         <p className="max-w-xl text-xs text-muted" role="status">{confirming
           ? "Restore this entire version? The current saved content will remain in history."
           : "Comparing with the current saved version. Unsaved edits are not included."}</p>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button secondary disabled={restore.isPending} onClick={() => confirming ? setConfirming(false) : onClose()}>{confirming ? "Cancel" : "Close"}</Button>
           <Button disabled={blocked || showingCurrent} onClick={submit}>{restore.isPending ? "Restoring…" : confirming ? "Confirm restore" : "Restore this version"}</Button>
         </div>
@@ -83,7 +83,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
           ))}
           {list.hasNextPage ? <Button secondary size="sm" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>Load more</Button> : null}
         </nav>
-        <section aria-label="Version content" className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <section aria-label="Version content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-visible">
           <Tabs items={[{ id: "diff", label: "Compare changes" }, { id: "full", label: "Full version" }]} value={view} onChange={setView} label="Version view" />
           <p aria-label="Change reason" className="mb-2 whitespace-pre-wrap break-words text-sm text-muted"><span className="font-medium">Change reason:</span> {purpose ?? "Not recorded"}</p>
           {dirty ? <p role="status" className="mb-2 text-sm text-warning">Unsaved edits are preserved. Close this window and save or cancel your edits before restoring.</p> : null}
@@ -112,7 +112,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
 
 function VersionPreview({ node, content, identity }: { node: RestNode; content: string; identity: string }) {
   const showToast = useUiStore((state) => state.showToast);
-  return <div className="flex min-h-0 flex-1 overflow-auto rounded-workbench border border-seam" onClickCapture={(event) => {
+  return <div className="flex min-h-36 flex-1 shrink-0 overflow-auto rounded-workbench border border-seam md:min-h-0 md:shrink" onClickCapture={(event) => {
     if (event.target instanceof Element && event.target.closest("a[href]")) {
       event.preventDefault();
       event.stopPropagation();

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
+import { expectNoAccessibilityViolations } from "./support/accessibility";
 import { routeJsonApi } from "./support/api";
 import { usageResponse } from "./support/usage";
 
@@ -27,7 +28,7 @@ const revision = {
 const textPath = `/api/v1/spaces/${space.id}/text/${initialNode.id}`;
 const pageInfo = (returned: number) => ({ limit: 50, returned, has_more: false, next_cursor: null });
 
-async function setup(page: Page, options: { mobile?: boolean; readOnly?: boolean } = {}) {
+async function setup(page: Page, options: { mobile?: boolean; readOnly?: boolean; purpose?: string } = {}) {
   await page.emulateMedia({ colorScheme: options.mobile ? "light" : "dark" });
   await page.setViewportSize(options.mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
   let content = newContent;
@@ -42,7 +43,7 @@ async function setup(page: Page, options: { mobile?: boolean; readOnly?: boolean
     if (url.pathname === `/api/v1/spaces/${space.id}/nodes`) return { nodes: [node], page: pageInfo(1) };
     if (url.pathname.endsWith(`/nodes/${node.id}`)) return node;
     if (url.pathname.endsWith(`/nodes/${node.id}/reveal`)) return { ancestors: [], target: node };
-    if (url.pathname === `${textPath}/revisions`) return { current: { content_sha256: node.content_sha256, purpose: node.content_sha256 === initialNode.content_sha256 ? "Correct MTU to 1450 after verifying the overlay network." : null }, revisions: [revision], page: pageInfo(1) };
+    if (url.pathname === `${textPath}/revisions`) return { current: { content_sha256: node.content_sha256, purpose: node.content_sha256 === initialNode.content_sha256 ? "Correct MTU to 1450 after verifying the overlay network." : null }, revisions: [{ ...revision, purpose: options.purpose ?? revision.purpose }], page: pageInfo(1) };
     if (url.pathname === `${textPath}/revisions/${revision.id}`) return { revision, content: oldContent };
     if (url.pathname === `${textPath}/revisions/${revision.id}/restore`) {
       content = oldContent;
@@ -85,6 +86,10 @@ test("lazily opens revision comparison and restores with the reviewed current ha
   await dialog.getByRole("button", { name: "Restore this version" }).click();
   expect(requests.filter((r) => r.method === "POST")).toHaveLength(0);
   await page.screenshot({ path: "test-results/text-revisions-confirm-restore.png" });
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeEnabled();
+  expect(requests.filter((r) => r.method === "POST")).toHaveLength(0);
+  await dialog.getByRole("button", { name: "Restore this version" }).click();
   await dialog.getByRole("button", { name: "Confirm restore" }).click();
   await expect(dialog).not.toBeVisible();
   expect(requests.find((r) => r.path.endsWith("/restore"))?.body).toEqual({ expected_sha256: initialNode.content_sha256 });
@@ -156,6 +161,7 @@ test("mobile opens history from More actions and keeps read-only history accessi
   await expect(dialog.getByLabel("Version comparison", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeDisabled();
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await expectNoAccessibilityViolations(page);
   await page.screenshot({ path: "test-results/text-revisions-mobile.png" });
 });
 
@@ -174,5 +180,102 @@ test("a stale restore asks for review instead of retrying or overwriting", async
   await expect(dialog.getByText(/The current document changed/)).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Confirm restore" })).toBeDisabled();
   expect(restoreCalls).toBe(1);
+  expect(requests.filter((r) => r.method === "PUT")).toHaveLength(0);
+});
+
+
+test("keyboard navigation stays in history and returns to the header trigger", async ({ page }) => {
+  await setup(page);
+  const trigger = page.getByRole("button", { name: "Version history", exact: true });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Version comparison", { exact: true })).toBeVisible();
+  const closeIcon = dialog.getByRole("button", { name: "Close", exact: true }).first();
+  const restore = dialog.getByRole("button", { name: "Restore this version" });
+  await expect(closeIcon).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(restore).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(closeIcon).toBeFocused();
+  const compare = dialog.getByRole("tab", { name: "Compare changes" });
+  await compare.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(dialog.getByRole("tab", { name: "Full version" })).toBeFocused();
+  await expect(dialog.getByRole("heading", { name: "Network", exact: true })).toBeVisible();
+  await page.keyboard.press("ArrowLeft");
+  await expect(compare).toBeFocused();
+  await expectNoAccessibilityViolations(page);
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+});
+
+test("small phones keep long reasons and restore controls usable and return focus to More", async ({ page }) => {
+  const purpose = "검증된 네트워크 설정과 원인을 문서에 반영하고 변경 내용을 다시 확인합니다. ".repeat(5).slice(0, 200);
+  const requests = await setup(page, { mobile: true, purpose });
+  await page.setViewportSize({ width: 320, height: 568 });
+  const more = page.getByRole("button", { name: "More actions", exact: true }).first();
+  await more.focus();
+  await page.keyboard.press("Enter");
+  await page.getByRole("button", { name: "Version history", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog");
+  const comparison = dialog.getByLabel("Version comparison", { exact: true });
+  await expect(comparison).toBeVisible();
+  await expect(dialog.getByLabel("Change reason")).toContainText(purpose);
+  expect((await comparison.boundingBox())?.height).toBeGreaterThanOrEqual(100);
+  expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await dialog.getByRole("button", { name: "Restore this version" }).click();
+  await expect(dialog.getByRole("button", { name: "Confirm restore" })).toBeInViewport();
+  expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/text-revisions-small-phone.png" });
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(requests.filter((r) => r.method === "POST")).toHaveLength(0);
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await expect(more).toBeFocused();
+});
+
+test("a conflicted restore reloads the new baseline and requires another confirmation", async ({ page }) => {
+  const requests = await setup(page);
+  const changedHash = "c".repeat(64);
+  let restoreCalls = 0;
+  await page.route(`**${textPath}/revisions/${revision.id}/restore`, async (route) => {
+    restoreCalls++;
+    if (restoreCalls === 1) {
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ kind: "conflict", message: "stale" }) });
+    } else {
+      expect(route.request().postDataJSON()).toEqual({ expected_sha256: changedHash });
+      await route.fallback();
+    }
+  });
+  await page.getByRole("button", { name: "Version history", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeEnabled();
+  await dialog.getByRole("button", { name: "Restore this version" }).click();
+  await dialog.getByRole("button", { name: "Confirm restore" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("The current document changed");
+  await dialog.getByRole("button", { name: "Current saved version", exact: true }).click();
+  await dialog.getByRole("button", { name: /Edited via MCP/ }).click();
+  await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeDisabled();
+  expect(restoreCalls).toBe(1);
+  await page.route(`**${textPath}?*`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      node: { id: initialNode.id, path: initialNode.path }, text: { node_id: initialNode.id, storage_format: "plain", content: newContent.replace("1450", "1400"),
+        content_sha256: changedHash, byte_len: newContent.length, line_count: 4, start_line: 1, end_line: 4,
+        returned_lines: 4, truncated: false, next_start_line: null, updated_by: me.account, updated_at: "2026-10-04T05:25:00Z" }
+    }) });
+  });
+  await dialog.getByRole("button", { name: "Reload saved version" }).click();
+  await expect(dialog.getByText("MTU: 1400", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("alert")).not.toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeEnabled();
+  expect(restoreCalls).toBe(1);
+  await dialog.getByRole("button", { name: "Restore this version" }).click();
+  expect(restoreCalls).toBe(1);
+  await dialog.getByRole("button", { name: "Confirm restore" }).click();
+  await expect(dialog).not.toBeVisible();
+  expect(restoreCalls).toBe(2);
   expect(requests.filter((r) => r.method === "PUT")).toHaveLength(0);
 });

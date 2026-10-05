@@ -238,7 +238,11 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
             showStructuredActions={mode === "preview" && structured && !encrypted}
             structuredActionsDisabled={showSource}
             onClose={() => setEditorMenu(null)}
-            onVersionHistory={!encrypted && textQuery.isSuccess ? () => setHistoryOpen(true) : undefined}
+            onVersionHistory={!encrypted && textQuery.isSuccess ? () => {
+              // The menu item unmounts; let the modal restore focus to its persistent trigger.
+              editorActionsRef.current?.querySelector("button")?.focus();
+              setHistoryOpen(true);
+            } : undefined}
             onCopyContent={() => { void copyContent(); }}
             onEditText={editText}
             onSaveDraft={saveDraft}
