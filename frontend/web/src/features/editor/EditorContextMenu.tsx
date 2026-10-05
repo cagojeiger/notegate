@@ -1,4 +1,4 @@
-import { ChevronsDownUp, ChevronsUpDown, Copy, Move, PanelRightOpen, Pencil, Save, Trash2, Undo2, X } from "lucide-react";
+import { ChevronsDownUp, ChevronsUpDown, Copy, History, Move, PanelRightOpen, Pencil, Save, Trash2, Undo2, X } from "lucide-react";
 import { useEffect } from "react";
 
 import type { RestNode } from "../../api/types";
@@ -19,6 +19,7 @@ export default function EditorContextMenu({
   structuredActionsDisabled,
   onClose,
   onCopyContent,
+  onVersionHistory,
   onEditText,
   onSaveDraft,
   onCancelEdit,
@@ -45,6 +46,7 @@ export default function EditorContextMenu({
   structuredActionsDisabled: boolean;
   onClose: () => void;
   onCopyContent: () => void;
+  onVersionHistory?: () => void;
   onEditText: () => void;
   onSaveDraft: () => void;
   onCancelEdit: () => void;
@@ -58,7 +60,7 @@ export default function EditorContextMenu({
   onDeleteNode: () => void;
 }) {
   const menuWidth = 208;
-  const menuHeight = (mode === "edit" ? 332 : 296) + (showStructuredActions ? 64 : 0);
+  const menuHeight = (mode === "edit" ? 332 : 296) + (showStructuredActions ? 64 : 0) + (onVersionHistory ? 32 : 0);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -95,6 +97,7 @@ export default function EditorContextMenu({
         ) : (
           <MenuButton onClick={() => run(onEditText)} disabled={!canEditText}><Pencil size={14} /> Edit</MenuButton>
         )}
+        {onVersionHistory ? <MenuButton onClick={() => run(onVersionHistory)}><History size={14} /> Version history</MenuButton> : null}
         <MenuButton onClick={() => run(onOpenInNewGroup)} disabled={!canOpenInNewGroup}><PanelRightOpen size={14} /> Open in new group</MenuButton>
         <MenuButton onClick={() => run(onCopyPath)} disabled={!canCopyPath}><Copy size={14} /> Copy path</MenuButton>
         {canCloseGroup ? <MenuButton onClick={() => run(onCloseGroup)}><X size={14} /> Close group</MenuButton> : null}

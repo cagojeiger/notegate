@@ -41,6 +41,7 @@ pub(crate) struct TextRevisionOut {
     author_id: Uuid,
     group_id: Uuid,
     source: String,
+    purpose: Option<String>,
     superseded_at: DateTime<Utc>,
 }
 impl From<TextRevision> for TextRevisionOut {
@@ -55,12 +56,19 @@ impl From<TextRevision> for TextRevisionOut {
             author_id: r.author_id,
             group_id: r.group_id,
             source: r.source,
+            purpose: r.purpose,
             superseded_at: r.superseded_at,
         }
     }
 }
 #[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct CurrentTextRevisionOut {
+    content_sha256: String,
+    purpose: Option<String>,
+}
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct TextRevisionListResponse {
+    current: Option<CurrentTextRevisionOut>,
     revisions: Vec<TextRevisionOut>,
     page: Page,
 }
@@ -112,6 +120,10 @@ pub(crate) async fn list(
         page.next_cursor,
     );
     Ok(Json(TextRevisionListResponse {
+        current: page.current.map(|head| CurrentTextRevisionOut {
+            content_sha256: head.content_sha256,
+            purpose: head.purpose,
+        }),
         revisions: page.revisions.into_iter().map(Into::into).collect(),
         page: pagination,
     }))

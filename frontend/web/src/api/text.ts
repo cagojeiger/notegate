@@ -8,11 +8,12 @@ export function readText(client: ApiClient, spaceId: string, nodeId: string): Pr
   return client.get<ReadTextResponse>(`/api/v1/spaces/${spaceId}/text/${nodeId}?max_lines=${TEXT_READ_MAX_LINES}&max_bytes=${TEXT_READ_MAX_BYTES}`);
 }
 
-export function replaceText(client: ApiClient, spaceId: string, nodeId: string, content: string, expectedSha256?: string): Promise<TextResponse> {
+export function replaceText(client: ApiClient, spaceId: string, nodeId: string, content: string, expectedSha256?: string, editSessionId?: string): Promise<TextResponse> {
   return client.put<TextResponse>(`/api/v1/spaces/${spaceId}/text/${nodeId}`, {
     storage_format: "plain",
     content,
-    expected_sha256: expectedSha256
+    expected_sha256: expectedSha256,
+    edit_session_id: editSessionId
   });
 }
 

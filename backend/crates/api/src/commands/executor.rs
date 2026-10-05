@@ -283,7 +283,10 @@ pub async fn write(
 ) -> Result<Value, CommandError> {
     validate_write_operation(&input)?;
     let session = write_session_id(&input)?;
-    let scoped = context.clone().with_edit_session(session);
+    let scoped = context
+        .clone()
+        .with_edit_session(session)
+        .with_write_purpose(input.purpose.clone());
     let context = &scoped;
     match input.op.as_str() {
         WRITE_OP_WRITE => {
@@ -700,6 +703,92 @@ mod tests {
             error.data.expect("action data")["next_action"]["choices"],
             json!(SEARCH_OPERATIONS)
         );
+    }
+
+    #[tokio::test]
+    async fn api_and_mcp_writes_attach_the_existing_purpose_to_versions()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space, _) = crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space, caller.account_id(), None, None, Some(true))
+            .await?;
+        for (channel, name) in [
+            (notegate_model::Channel::Api, "api"),
+            (notegate_model::Channel::Mcp, "mcp"),
+        ] {
+            let mut caller = caller.clone();
+            caller.channel = channel;
+            let actor = caller.account_id();
+            let context = CommandContext::new(caller, None);
+            let target = format!("rest-test:/{name}.md");
+            let created = write(&state, &context, serde_json::from_value(json!({
+                "purpose":"Record the initial configuration", "op":"write", "target":target, "content":"MTU: 1500", "create":true
+            }))?).await.expect("command write succeeds");
+            let node: uuid::Uuid = serde_json::from_value(created["node"]["node_id"].clone())?;
+            write(&state, &context, serde_json::from_value(json!({
+                "purpose":"Correct MTU after checking the overlay", "op":"write", "target":target, "content":"MTU: 1450"
+            }))?).await.expect("command write succeeds");
+            let history = state
+                .files
+                .text_revisions(actor, space, node, 10, None)
+                .await?;
+            assert_eq!(
+                history.current.expect("current version").purpose.as_deref(),
+                Some("Correct MTU after checking the overlay")
+            );
+            assert_eq!(
+                history.revisions[0].purpose.as_deref(),
+                Some("Record the initial configuration")
+            );
+            assert_eq!(history.revisions[0].source, name);
+            for (reason, operation) in [
+                (
+                    "Append a verification note",
+                    json!({"op":"append", "content":"\nChecked"}),
+                ),
+                (
+                    "Clarify the verification note",
+                    json!({"op":"patch", "edits":[{"old_text":"Checked", "new_text":"Verified"}]}),
+                ),
+                (
+                    "Update the verification line",
+                    json!({"op":"edit", "edits":[{"op":"replace_lines", "start_line":2, "end_line":2, "content":"Validated"}]}),
+                ),
+            ] {
+                let mut input = operation;
+                input["purpose"] = json!(reason);
+                input["target"] = json!(target);
+                write(&state, &context, serde_json::from_value(input)?)
+                    .await
+                    .expect("text mutation succeeds");
+                let page = state
+                    .files
+                    .text_revisions(actor, space, node, 10, None)
+                    .await?;
+                assert_eq!(
+                    page.current.expect("current version").purpose.as_deref(),
+                    Some(reason)
+                );
+            }
+            super::super::sequence::run_write(&state, &context, serde_json::from_value(json!({
+                "purpose":"Record the final verification outcome",
+                "commands":[{"tool":"write", "op":"append", "target":target, "content":"\nFinal"}]
+            }))?).await.expect("sequence executes");
+            let page = state
+                .files
+                .text_revisions(actor, space, node, 10, None)
+                .await?;
+            assert_eq!(
+                page.current.expect("current version").purpose.as_deref(),
+                Some("Record the final verification outcome")
+            );
+        }
+        db.cleanup().await;
+        Ok(())
     }
 
     #[tokio::test]

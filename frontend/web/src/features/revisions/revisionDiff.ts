@@ -1,0 +1,49 @@
+// Bounded line LCS. This runs in a disposable Worker, never in the editor render path.
+export type DiffLine = { number: number; text: string };
+export type DiffRow = { kind: "same" | "change"; before: DiffLine | null; after: DiffLine | null };
+export type RevisionDiff = { status: "ready"; rows: DiffRow[] } | { status: "limited" };
+const MAX_CHARS = 256_000;
+const MAX_LINES = 1_500;
+const MAX_CELLS = 1_000_000;
+
+export function compareRevisions(before: string, after: string): RevisionDiff {
+  if (before.length + after.length > MAX_CHARS) return { status: "limited" };
+  // Preserve trailing empty lines and CR characters: newline-only changes must be visible.
+  const left = before.split("\n");
+  const right = after.split("\n");
+  if (left.length + right.length > MAX_LINES) return { status: "limited" };
+  const width = right.length + 1;
+  if ((left.length + 1) * width > MAX_CELLS) return { status: "limited" };
+  const lengths = new Uint16Array((left.length + 1) * width);
+  for (let i = left.length - 1; i >= 0; i--) {
+    for (let j = right.length - 1; j >= 0; j--) {
+      lengths[i * width + j] = left[i] === right[j]
+        ? lengths[(i + 1) * width + j + 1] + 1
+        : Math.max(lengths[(i + 1) * width + j], lengths[i * width + j + 1]);
+    }
+  }
+  const rows: DiffRow[] = [];
+  let i = 0;
+  let j = 0;
+  let removed: DiffLine[] = [];
+  let added: DiffLine[] = [];
+  function flush() {
+    for (let k = 0; k < Math.max(removed.length, added.length); k++) {
+      rows.push({ kind: "change", before: removed[k] ?? null, after: added[k] ?? null });
+    }
+    removed = [];
+    added = [];
+  }
+  while (i < left.length || j < right.length) {
+    if (i < left.length && j < right.length && left[i] === right[j]) {
+      flush();
+      rows.push({ kind: "same", before: { number: i + 1, text: left[i++] }, after: { number: j + 1, text: right[j++] } });
+    } else if (i < left.length && (j === right.length || lengths[(i + 1) * width + j] >= lengths[i * width + j + 1])) {
+      removed.push({ number: i + 1, text: left[i++] });
+    } else {
+      added.push({ number: j + 1, text: right[j++] });
+    }
+  }
+  flush();
+  return { status: "ready", rows };
+}

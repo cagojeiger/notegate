@@ -14,6 +14,7 @@ pub struct TextRevision {
     pub author_id: Uuid,
     pub group_id: Uuid,
     pub source: String,
+    pub purpose: Option<String>,
     pub superseded_at: DateTime<Utc>,
 }
 
@@ -23,8 +24,15 @@ pub struct TextRevisionCursor {
     pub id: Uuid,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct CurrentTextRevision {
+    pub content_sha256: String,
+    pub purpose: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct TextRevisionPage {
+    pub current: Option<CurrentTextRevision>,
     pub revisions: Vec<TextRevision>,
     pub next_cursor: Option<TextRevisionCursor>,
 }

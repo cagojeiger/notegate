@@ -115,4 +115,4 @@ grep        plain Text content가 query를 포함하는 text node 후보 검색
 
 ## Text revision recording
 
-Changed text writes preserve the prior body transactionally. Optional `edit_session_id` groups consecutive direct writes only within actor/channel and time boundaries. Version list/read/restore and the separate history capacity policy are described in [Text revisions](text-revisions.md); a full history budget returns 409 without saving the new body.
+Changed text writes preserve the prior body transactionally. MCP/CLI command `purpose` is recorded on the resulting body and follows it into history when replaced; sequence commands inherit the top-level purpose. Failed or unchanged writes do not replace the saved reason. Optional `edit_session_id` groups consecutive direct writes only within actor/channel and time boundaries. Version list/read/restore and the separate history capacity policy are described in [Text revisions](text-revisions.md); a full history budget returns 422 (`text_revision_storage_full`) without saving the new body.

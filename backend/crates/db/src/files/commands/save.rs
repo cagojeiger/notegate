@@ -32,6 +32,7 @@ pub struct SaveTextContentArgs<'a> {
     pub caps: Limits,
     pub revision_session: Option<Uuid>,
     pub revision_source: &'static str,
+    pub revision_purpose: Option<&'a str>,
 }
 
 /// Replace a live text's content + metrics, attributing the update to
@@ -49,6 +50,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         mutation_kind,
         revision_session,
         revision_source,
+        revision_purpose,
         caps,
     } = args;
 
@@ -151,6 +153,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         updated_by,
         revision_source,
         revision_session,
+        revision_purpose,
         matches!(
             &content.body,
             notegate_model::files::WriteTextBody::Plain(_)

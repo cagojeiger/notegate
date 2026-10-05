@@ -12,6 +12,7 @@ use crate::internal_search::RequestContext;
 pub struct CommandContext {
     caller: Caller,
     edit_session_id: Option<uuid::Uuid>,
+    write_purpose: Option<String>,
     internal_search: Option<RequestContext>,
 }
 
@@ -20,6 +21,7 @@ impl CommandContext {
         Self {
             caller,
             edit_session_id: None,
+            write_purpose: None,
             internal_search,
         }
     }
@@ -27,6 +29,15 @@ impl CommandContext {
     pub fn with_edit_session(mut self, session: Option<uuid::Uuid>) -> Self {
         self.edit_session_id = session;
         self
+    }
+
+    pub fn with_write_purpose(mut self, purpose: String) -> Self {
+        self.write_purpose = Some(purpose);
+        self
+    }
+
+    pub fn write_purpose(&self) -> Option<String> {
+        self.write_purpose.clone()
     }
 
     pub fn edit_session_id(&self) -> Option<uuid::Uuid> {

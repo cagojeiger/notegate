@@ -38,6 +38,7 @@ pub struct FilesRepo {
     external_only: bool,
     revision_session: Option<Uuid>,
     revision_source: &'static str,
+    revision_purpose: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -101,6 +102,7 @@ impl FilesRepo {
             external_only: false,
             revision_session: None,
             revision_source: "unknown",
+            revision_purpose: None,
         }
     }
 
@@ -112,6 +114,12 @@ impl FilesRepo {
     pub fn with_revision_context(mut self, source: &'static str, session: Option<Uuid>) -> Self {
         self.revision_source = source;
         self.revision_session = session;
+        self.revision_purpose = None;
+        self
+    }
+
+    pub fn with_revision_purpose(mut self, purpose: Option<String>) -> Self {
+        self.revision_purpose = purpose;
         self
     }
 
@@ -535,6 +543,8 @@ impl FilesRepo {
             name,
             content,
             created_by,
+            revision_source: self.revision_source,
+            revision_purpose: self.revision_purpose.as_deref(),
             caps: self.limits,
         })
         .await
@@ -683,6 +693,7 @@ impl FilesRepo {
             mutation_kind,
             revision_source: self.revision_source,
             revision_session: self.revision_session,
+            revision_purpose: self.revision_purpose.as_deref(),
             caps: self.limits,
         })
         .await

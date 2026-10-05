@@ -8,13 +8,15 @@ Text revisions preserve recoverable bodies separately from audit events and live
 
 Existing documents are backfilled with their last known author/time; pre-feature overwritten bodies cannot be recovered. New documents start with an independent initial state. Copying creates independent history; rename/move and encryption-policy changes create no body revision. Body attribution is stored separately from metadata `updated_at`.
 
+MCP and CLI write commands already require a top-level `purpose` (at most 200 characters). The shared command executor now attaches it to the resulting saved body as well as the existing invocation log. Creation records its purpose immediately; subsequent changed writes atomically carry the old body's purpose into its historical snapshot and record the new purpose on the current body. Failed/conflicting and unchanged saves do not replace the saved purpose. Sequence writes inherit their top-level purpose. Browser/raw REST writes without a command purpose and historical data from before this feature show no recorded reason; reasons are never reconstructed by guessing from timestamps or paths. Restore starts a new body with no inherited AI purpose. These caller-supplied reasons describe the declared intent, not independently verified reasoning.
+
 REST v1/v2 text mutations and command/MCP `write` inputs (direct and sequence) accept optional `edit_session_id` (UUID). Clients must use a new ID for a new editing session or AI operation. This identifier is a grouping hint, never an authorization credential. The server also requires the same document, authenticated account and transport channel. Backend callers with no channel use `unknown`.
 
 - Missing session ID: every changed save is independent. Existing clients remain compatible.
 - Same actor, channel and ID: continue only while the last content save is less than 120 seconds old and the group is less than 600 seconds old.
 - At either boundary, or when actor/channel/ID changes: start a new group, even if an old ID is reused.
 - Restore: independent group, never coalesced into ordinary edits.
-- Sequence write commands support the same optional ID and validate it during preflight, before executing earlier writes. No frontend change is included in this implementation.
+- Sequence write commands support the same optional ID and validate it during preflight, before executing earlier writes. The web editor retains an editing-session ID for retries of the current edit; a successful save, cancel, document switch, and restore reset it. Re-entering Edit after saving starts an independent group. Backend idle/group limits still apply.
 
 For `A -> B -> C -> D` in one editing group followed by another group's `D -> E -> F`, keep the initial `A`, boundary `D`, and final `F`; `B`, `C`, and `E` are intermediate states. The last state stays in `text_objects` until it is replaced. At replacement, whether the old state is a checkpoint is recorded permanently, so repeated cleanup cannot merge formerly separate groups. This is snapshot selection, not text merging or diff compression.
 
@@ -42,7 +44,9 @@ Browser endpoints (under `/api`):
 
 Lists return metadata only, newest first, with the shared `page` object (`limit`, `returned`, `has_more`, `next_cursor`) and a signed document-scoped cursor; limit is 1–100. A selected body is loaded/decrypted separately. Current content is obtained through the existing Text read API. An expired and already deleted revision returns 404.
 
-The service checks current Space permission, document visibility and external-access policy for every call. A revision ID does not bypass document/Space scoping. Restore requires write permission and uses the existing guarded write path, including current write locks, format validation, quotas and encryption policy. A stale current hash returns 409. Restoring identical content is a no-op; otherwise the replaced current body is preserved. Restore does not rewind or erase history. Public v2/MCP history browsing tools and frontend UI are later integrations; all existing mutation surfaces already record history.
+Revision metadata includes nullable `purpose`. Lists also return nullable `current` metadata (`content_sha256`, `purpose`) without reading or decrypting a body. The web modal displays the selected version's change reason, and shows the current reason only when its hash matches the comparison baseline. Missing reasons are displayed as `Not recorded`. Purpose is bounded, caller-supplied metadata under the same current document/Space access checks; it is stored as plaintext like the existing invocation purpose and must not contain secrets.
+
+The service checks current Space permission, document visibility and external-access policy for every call. A revision ID does not bypass document/Space scoping. Restore requires write permission and uses the existing guarded write path, including current write locks, format validation, quotas and encryption policy. A stale current hash returns 409. Restoring identical content is a no-op; otherwise the replaced current body is preserved. Restore does not rewind or erase history. Public v2/MCP history browsing tools remain later integrations; all existing mutation surfaces already record history.
 
 ## Encryption
 
@@ -61,3 +65,13 @@ A cleanup failure retains extra history rather than losing a checkpoint. It can 
 ## Validation
 
 CI exercises atomic rollback, no-op and competing writes, group boundaries, recent protection of old current content, repeated cleanup, expiration, quota accounting, cascade deletion, encrypted identity binding, access controls, write locks, encryption transitions, pagination and guarded restore. Local builds/tests are not required for this change.
+
+## Web version history
+
+The document header has a Version history button between Edit and More actions. The same action is available in the editor menu, including narrow screens. It opens the shared modal shell; no Inspector tab is added. The editor stays mounted so opening and closing history preserves unsaved drafts.
+
+The modal loads metadata in 50-row pages and one selected body on demand. It compares a selected historical body with a separately fetched, stable current saved body. Comparison never uses an unsaved draft. Full version reuses existing format previews. Preview links do not navigate the active window, preserving any unsaved editor draft; users can copy a link address separately. Restore needs write permission, an unlocked document, no dirty draft or pending save, and a confirmation. After a successful restore, cancel older in-flight editor reads and publish the selected body and returned hash to the canonical text cache before closing the modal. Background reads refresh attribution and other metadata without replacing a new draft. A 409 asks the user to reload and review; it is never retried with a fresh hash automatically. A 422 `text_revision_storage_full` is a capacity error, not an overwrite prompt.
+
+Line comparison runs in a disposable module Worker with a two-second deadline, at most 256,000 UTF-16 code units, 1,500 combined source lines and 1,000,000 LCS cells. Exceeding a bound or Worker failure leaves Full version available. Wide screens align old and current source side by side; narrow screens show a unified view with explicit addition/removal markers. Historical bodies and comparison baselines are evicted when their query observers are gone. No extra polling, package dependency or server diff endpoint is added.
+
+CI covers lossless diff reconstruction, changed/inserted lines, newline differences, input bounds, lazy history loading, guarded restore, draft preservation, read-only/mobile access and stale-hash recovery. Browser-generated desktop/mobile screenshots are retained as the `text-revisions-ui` CI artifact.

@@ -1,4 +1,4 @@
-import { ChevronsDownUp, ChevronsUpDown, Copy, FileText, MoreHorizontal, Pencil, Save, Undo2 } from "lucide-react";
+import { ChevronsDownUp, ChevronsUpDown, Copy, FileText, History, MoreHorizontal, Pencil, Save, Undo2 } from "lucide-react";
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 
 import type { RestNode } from "../../api/types";
@@ -16,11 +16,13 @@ import { useMarkdownImageLoader } from "./useFilePreviewQueries";
 import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
 import { useTextEditorSession } from "./useTextEditorSession";
 
+const TextRevisionModal = lazy(() => import("../revisions/TextRevisionModal"));
 const EditorContextMenu = lazy(() => import("./EditorContextMenu"));
 
 export function TextEditorView({ active, groupId, navigationActions, node, latestNode, qualifiedPath, mode, canWriteActiveSpace, canOpenInNewGroup, canClose, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; navigationActions?: ReactNode; node: RestNode; latestNode?: RestNode; qualifiedPath: string | null; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canOpenInNewGroup: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
   const loadMarkdownImage = useMarkdownImageLoader(node);
   const [editorMenu, setEditorMenu] = useState<{ x: number; y: number } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [sourceView, setSourceView] = useState(false);
   const [structuredExpansionMode, setStructuredExpansionMode] = useState<StructuredExpansionMode>("expanded");
   const {
@@ -36,6 +38,8 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
     conflict,
     externalUpdate,
     canSave,
+    saving,
+    resetRevisionSession,
     saveDraft,
     overwriteDraft,
     cancelEdit,
@@ -78,6 +82,7 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
   }), [groupId, node.id, node.space_id]);
 
   useEffect(() => {
+    setHistoryOpen(false);
     setSourceView(false);
     setStructuredExpansionMode("expanded");
     setEditorMenu(null);
@@ -143,6 +148,9 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           <Pencil size={15} />
         </IconButton>
       )}
+      {!encrypted && textQuery.isSuccess ? <span className="max-md:hidden" title="Version history">
+        <IconButton label="Version history" size="sm" hasPopup="dialog" expanded={historyOpen} onClick={() => setHistoryOpen(true)}><History size={15} /></IconButton>
+      </span> : null}
       <div ref={editorActionsRef}>
         <IconButton label="More actions" expanded={Boolean(editorMenu)} hasPopup="menu" onClick={openEditorActions}>
           <MoreHorizontal size={16} />
@@ -210,6 +218,10 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           )}
         </div>
       )}
+      {historyOpen && !encrypted ? <Suspense fallback={null}>
+        <TextRevisionModal key={`${node.space_id}:${node.id}`} node={latestNode ?? node} canRestore={canEditText} dirty={dirty} saving={saving}
+          onClose={() => setHistoryOpen(false)} onRestored={() => { resetRevisionSession(); setHistoryOpen(false); onSetMode("preview"); }} />
+      </Suspense> : null}
       {editorMenu ? (
         <Suspense fallback={null}>
           <EditorContextMenu
@@ -226,6 +238,11 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
             showStructuredActions={mode === "preview" && structured && !encrypted}
             structuredActionsDisabled={showSource}
             onClose={() => setEditorMenu(null)}
+            onVersionHistory={!encrypted && textQuery.isSuccess ? () => {
+              // The menu item unmounts; let the modal restore focus to its persistent trigger.
+              editorActionsRef.current?.querySelector("button")?.focus();
+              setHistoryOpen(true);
+            } : undefined}
             onCopyContent={() => { void copyContent(); }}
             onEditText={editText}
             onSaveDraft={saveDraft}

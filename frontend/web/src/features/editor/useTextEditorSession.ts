@@ -23,6 +23,7 @@ export function useTextEditorSession({
 }) {
   const textQuery = useTextDocument(node);
   const [draft, setDraft] = useState("");
+  const [editSessionId, setEditSessionId] = useState(() => crypto.randomUUID());
   const [conflict, setConflict] = useState(false);
   const [externalUpdate, setExternalUpdate] = useState<RestNode | null>(null);
   const previousMode = useRef<EditorMode>(mode);
@@ -45,6 +46,7 @@ export function useTextEditorSession({
   const dirty = mode === "edit" && draftNodeId.current === node.id && draft !== content;
 
   useEffect(() => {
+    setEditSessionId(crypto.randomUUID());
     setConflict(false);
     setExternalUpdate(null);
     lastAutoReloadSha.current = null;
@@ -112,13 +114,16 @@ export function useTextEditorSession({
     draft,
     sha,
     () => {
+      setEditSessionId(crypto.randomUUID());
       setConflict(false);
       onSetMode("preview");
     },
-    () => setConflict(true)
+    () => setConflict(true),
+    editSessionId
   );
 
   function cancelEdit() {
+    setEditSessionId(crypto.randomUUID());
     if (dirty) {
       setDraft(content);
       showToast("Edit canceled");
@@ -140,6 +145,8 @@ export function useTextEditorSession({
     dirty,
     conflict,
     externalUpdate,
+    saving: saveMutation.isPending,
+    resetRevisionSession: () => setEditSessionId(crypto.randomUUID()),
     canSave: canEdit && dirty && !saveMutation.isPending,
     saveDraft: () => saveMutation.mutate(false),
     overwriteDraft: () => saveMutation.mutate(true),

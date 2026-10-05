@@ -8,6 +8,7 @@ use crate::{ServiceError, ServiceResult, cursor};
 
 #[derive(Debug, Serialize)]
 pub struct RevisionHistoryPage {
+    pub current: Option<notegate_model::text_revision::CurrentTextRevision>,
     pub revisions: Vec<TextRevision>,
     pub next_cursor: Option<String>,
 }
@@ -47,6 +48,11 @@ impl FilesService {
         self
     }
 
+    pub fn with_revision_purpose(mut self, purpose: Option<String>) -> Self {
+        self.store = self.store.with_revision_purpose(purpose);
+        self
+    }
+
     pub async fn text_revisions(
         &self,
         actor: Uuid,
@@ -82,6 +88,7 @@ impl FilesService {
             .transpose()
             .map_err(|_| ServiceError::Internal("failed to encode revision cursor".to_owned()))?;
         Ok(RevisionHistoryPage {
+            current: page.current,
             revisions: page.revisions,
             next_cursor,
         })

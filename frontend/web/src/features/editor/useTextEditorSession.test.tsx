@@ -249,6 +249,64 @@ describe("useTextEditorSession", () => {
     expect(result.current.draft).toBe("unsaved");
     expect(result.current.canSave).toBe(true);
   });
+  it("retains the editing session while saving and resets it on cancel, restore and navigation", async () => {
+    editorQueryMocks.useTextDocument.mockReturnValue({ data: textResponse, isSuccess: true, refetch: vi.fn() });
+    const { result, rerender } = renderHook(({ currentNode }) => useTextEditorSession({
+      node: currentNode, mode: "edit", canWrite: true, onSetMode: vi.fn()
+    }), { initialProps: { currentNode: node } });
+    const session = () => editorQueryMocks.useSaveTextDocument.mock.lastCall?.[5];
+    const initial = session();
+    expect(initial).toMatch(/^[0-9a-f-]{36}$/);
+    act(() => result.current.setDraft("change one"));
+    expect(session()).toBe(initial);
+    act(() => result.current.saveDraft());
+    expect(session()).toBe(initial);
+    act(() => result.current.cancelEdit());
+    expect(session()).not.toBe(initial);
+    const afterCancel = session();
+    act(() => result.current.resetRevisionSession());
+    expect(session()).not.toBe(afterCancel);
+    const beforeNavigation = session();
+    rerender({ currentNode: { ...node, id: "another-node" } });
+    expect(session()).not.toBe(beforeNavigation);
+  });
+
+  it("starts an independent session after a successful save and re-entering Edit", () => {
+    editorQueryMocks.useTextDocument.mockReturnValue({ data: textResponse, isSuccess: true, refetch: vi.fn() });
+    const onSetMode = vi.fn();
+    const { result, rerender } = renderHook(({ mode }: { mode: "preview" | "edit" }) => useTextEditorSession({
+      node, mode, canWrite: true, onSetMode
+    }), { initialProps: { mode: "edit" as "preview" | "edit" } });
+    const session = () => editorQueryMocks.useSaveTextDocument.mock.lastCall?.[5];
+    const first = session();
+    act(() => result.current.setDraft("first save"));
+    act(() => result.current.saveDraft());
+    expect(session()).toBe(first);
+    act(() => editorQueryMocks.useSaveTextDocument.mock.lastCall![3]());
+    expect(onSetMode).toHaveBeenCalledWith("preview");
+    expect(session()).not.toBe(first);
+    const next = session();
+    rerender({ mode: "preview" });
+    rerender({ mode: "edit" });
+    act(() => result.current.setDraft("second save"));
+    act(() => result.current.saveDraft());
+    expect(session()).toBe(next);
+  });
+
+  it("keeps the session ID for a conflicting save and its retry", () => {
+    editorQueryMocks.useTextDocument.mockReturnValue({ data: textResponse, isSuccess: true, refetch: vi.fn() });
+    const { result } = renderHook(() => useTextEditorSession({ node, mode: "edit", canWrite: true, onSetMode: vi.fn() }));
+    const session = () => editorQueryMocks.useSaveTextDocument.mock.lastCall?.[5];
+    const initial = session();
+    act(() => result.current.setDraft("retry this edit"));
+    act(() => result.current.saveDraft());
+    act(() => editorQueryMocks.useSaveTextDocument.mock.lastCall![4]());
+    expect(result.current.conflict).toBe(true);
+    expect(session()).toBe(initial);
+    act(() => result.current.overwriteDraft());
+    expect(session()).toBe(initial);
+  });
+
 });
 
 function textDocumentQuery(
