@@ -162,6 +162,12 @@ test("mobile opens history from More actions and keeps read-only history accessi
   await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeDisabled();
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await expectNoAccessibilityViolations(page);
+  const comparison = dialog.getByRole("region", { name: "Version comparison", exact: true });
+  await comparison.focus();
+  await page.keyboard.press("End");
+  await expect.poll(() => comparison.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await page.keyboard.press("Home");
+  await expect.poll(() => comparison.evaluate((el) => el.scrollTop)).toBe(0);
   await page.screenshot({ path: "test-results/text-revisions-mobile.png" });
 });
 

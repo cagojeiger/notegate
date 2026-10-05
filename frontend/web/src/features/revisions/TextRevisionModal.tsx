@@ -112,7 +112,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
 
 function VersionPreview({ node, content, identity }: { node: RestNode; content: string; identity: string }) {
   const showToast = useUiStore((state) => state.showToast);
-  return <div className="flex min-h-36 flex-1 shrink-0 overflow-auto rounded-workbench border border-seam md:min-h-0 md:shrink" onClickCapture={(event) => {
+  return <div role="region" aria-label="Version preview" tabIndex={0} className="flex min-h-36 flex-1 shrink-0 overflow-auto rounded-workbench border border-seam outline-none focus-visible:ring-2 focus-visible:ring-primary/45 md:min-h-0 md:shrink" onClickCapture={(event) => {
     if (event.target instanceof Element && event.target.closest("a[href]")) {
       event.preventDefault();
       event.stopPropagation();

@@ -35,7 +35,7 @@ export function RevisionComparison({ before, after }: { before: string; after: s
   if (result.status === "loading") return <p role="status" className="p-4 text-muted">Comparing versions…</p>;
   if (result.status === "limited") return <p role="status" className="p-4 text-muted">Comparison is unavailable or exceeds the size limit. Use Full version to read the selected content.</p>;
   return (
-    <div className="min-h-36 flex-1 shrink-0 overflow-auto rounded-workbench border border-seam md:min-h-0 md:shrink" aria-label="Version comparison">
+    <div role="region" tabIndex={0} className="min-h-36 flex-1 shrink-0 overflow-auto rounded-workbench border border-seam outline-none focus-visible:ring-2 focus-visible:ring-primary/45 md:min-h-0 md:shrink" aria-label="Version comparison">
       <div className="sticky top-0 z-10 hidden grid-cols-2 border-b border-seam bg-panel text-workbench font-medium md:grid">
         <div className="p-3">Selected version · − removed</div><div className="border-l border-seam p-3">Current saved version · + added</div>
       </div>
