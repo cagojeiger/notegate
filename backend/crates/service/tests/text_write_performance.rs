@@ -133,6 +133,10 @@ async fn compare_text_writes() -> TestResult {
                     write(&files, writer, &a).await?;
                     writers.push(writer);
                 }
+                // Start both revisions at the same checkpoint phase. Earlier cases
+                // generate enough WAL to otherwise trigger background checkpoints
+                // during unrelated samples. Durability remains enabled. CI only.
+                sqlx::query("CHECKPOINT").execute(&db.pool).await?;
                 let barrier = Arc::new(Barrier::new(workers));
                 let started = Instant::now();
                 let results = join_all(writers.iter().map(|writer| {
