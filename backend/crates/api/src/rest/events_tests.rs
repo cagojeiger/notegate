@@ -255,8 +255,7 @@ async fn background_jobs_return_owned_queue_history_and_attempts()
     .await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list["jobs"], serde_json::json!([]));
-    let (status, _) =
-        get_json(rest_app(state, stranger), format!("/v1/me/jobs/{job_id}")).await?;
+    let (status, _) = get_json(rest_app(state, stranger), format!("/v1/me/jobs/{job_id}")).await?;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     db.cleanup().await;

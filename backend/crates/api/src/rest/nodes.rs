@@ -27,8 +27,8 @@ use crate::state::AppState;
 
 use notegate_service::files::{
     BatchChildrenRequest, BatchChildrenResult, ChildrenRequest, CreateFolder, CreateText,
-    DeleteNode, ListNodesRequest, MoveNode, NodeListSort, UpdateNode, UpdateNodeExternalAccessPolicy,
-    UpdateNodeWriteLock, WriteTarget, WriteText, WriteTextBody,
+    DeleteNode, ListNodesRequest, MoveNode, NodeListSort, UpdateNode,
+    UpdateNodeExternalAccessPolicy, UpdateNodeWriteLock, WriteTarget, WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
