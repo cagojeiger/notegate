@@ -18,117 +18,62 @@
 
 | 상태 | 소유자 | 저장 |
 |---|---|---|
-| 서버 자원 | React Query | cache only |
-| active space id | UI store | local storage |
-| editor groups, active group, mode, navigation history | UI store | space별 local storage snapshot |
-| opened node snapshot | UI store | space별 local storage snapshot |
-| primary/aux sidebar visibility | UI store | local storage |
-| primary sidebar width | UI store | session only |
-| Files/Recent ratio, section open, density | UI store | session only |
-| expanded folders | UI/component state | session only |
-| theme | UI store | local storage |
-| text draft | draft/component state | session only |
+| 서버 자원 | React Query | Cache only |
+| active space id | UI store | Local storage |
+| editor groups, active group, mode, navigation history | UI store | Space별 local storage snapshot |
+| opened node snapshot | UI store | Space별 local storage snapshot |
+| primary/aux sidebar visibility | UI store | Local storage |
+| primary sidebar width | UI store | Session only |
+| Files/Recent ratio, section open, density | UI store | Session only |
+| expanded folders | UI/component state | Session only |
+| theme | UI store | Local storage |
+| text draft | draft/component state | Session only |
 | hover/menu/drag/scroll | component state | 저장 안 함 |
 
-규칙:
-
-- 서버 collection은 UI store에 복제하지 않는다.
-- EditorGroup은 현재 열린 node snapshot과 해당 pane의 최근 navigation history를 보관한다.
-- navigation history는 node ID, 당시 이름, kind만 저장하며 현재 node를 포함해 최대 50개다.
-- text body와 file content는 UI store에 보관하지 않는다.
-- space별 workbench snapshot은 browser-local best-effort 상태다. 계정/서버 정본이 아니며 다른 브라우저로 동기화하지 않는다.
-- workbench snapshot은 최근 20개 space까지만 유지한다. 손상됐거나 현재 space와 맞지 않는 snapshot은 폐기한다.
-- space 전환 시 현재 space snapshot을 저장하고, 선택한 space snapshot이 있으면 복원한다. 없으면 빈 editor group으로 시작한다.
-- Settings의 Saved workspace reset은 browser에 저장된 pane snapshot과 panel visibility만 지운다. note, file, space, 서버 자원은 삭제하지 않는다.
-- cursor와 scroll position은 reload 후 복원하지 않는다.
+- Server collection과 Text/File content를 UI store에 복제하지 않는다.
+- EditorGroup은 현재 Node snapshot과 pane별 navigation history를 보관한다. History는 ID·당시 이름·kind만, 현재 Node 포함 최대 50개다.
+- Workbench snapshot은 browser-local best-effort이며 계정/서버 정본이나 다른 브라우저와의 동기화 대상이 아니다.
+- 최근 20개 Space snapshot만 유지한다. 손상되거나 현재 Space와 맞지 않으면 폐기한다.
+- Space 전환 시 이전 snapshot을 저장하고 선택 Space의 snapshot을 복원한다. 없으면 빈 group으로 시작한다.
+- Saved workspace reset은 저장된 pane snapshot과 panel visibility만 지운다. Note/File/Space와 서버 자원은 삭제하지 않는다.
+- Cursor·scroll position은 reload 후 복원하지 않는다.
 
 ## Auth
 
-```text
-App load
--> GET /api/v1/me
--> success: AppShell
--> 401: AuthScreen
-```
+| 사건 | 처리 |
+|---|---|
+| App load | `GET /api/v1/me` 성공 시 AppShell |
+| V1의 401 | Session reset → AuthScreen |
+| Logout | `POST /auth/logout` → session reset → AuthScreen |
+| `/me` 503 `auth_unavailable` | Session 유지, 일시 장애/재시도 표시 |
 
-```text
-Logout
--> POST /auth/logout
--> reset session
--> AuthScreen
-```
-
-```text
-any /api/v1/* returns 401
--> reset session
--> AuthScreen
-```
-
-Browser session refresh는 server-side flow다. FE는 refresh token을 저장하거나 직접 refresh endpoint를 호출하지 않는다. `/api/v1/me` 401은 재로그인 필요 상태로 처리하고, 503 `auth_unavailable`은 세션을 지우지 않는 일시 장애/재시도 상태로 처리한다.
+Session refresh는 BE가 처리한다. FE는 refresh token을 저장하거나 refresh endpoint를 직접 호출하지 않는다.
 
 ## Space
 
 ### ActivityRail
 
-표시:
-
-- space initials.
-- selected state.
-- add-space button.
-- settings button.
-
-규칙:
-
-- space 정렬은 `sort_order` 기준.
-- drag reorder는 `POST /api/v1/spaces:reorder`로 일괄 저장한다.
-- account/settings는 SettingsModal에 둔다.
+Space initials, selected state, add-space와 settings를 표시한다. 정렬은 `sort_order`, account/settings는 SettingsModal에 둔다.
 
 ### Select
 
-```text
-click space
--> persist previous space workbench snapshot
--> set activeSpaceId
--> restore selected space workbench snapshot or empty editor groups
--> persist lastActiveSpaceId
--> close mobile sheets
-```
+이전 snapshot 저장 → `activeSpaceId` 변경 → 선택 snapshot/빈 group 복원 → `lastActiveSpaceId` 저장 → mobile sheets 닫기.
 
 ### Create
 
-```text
-SpaceAddButton
--> dialog
--> POST /api/v1/spaces
--> refresh spaces
--> select created space
-```
+SpaceAddButton → dialog → `POST /api/v1/spaces` → 목록 refresh → 새 Space 선택.
 
 ### Reorder
 
-```text
-drag space
--> show drop indicator
--> compute sort_order
--> POST /api/v1/spaces:reorder
--> refresh spaces
-```
+Drag/drop indicator → `sort_order` 계산 → `POST /api/v1/spaces:reorder`로 일괄 저장 → 목록 refresh.
 
 ### Delete
 
-```text
-explicit delete
--> confirm
--> DELETE /api/v1/spaces/{space_id}
--> refresh spaces
--> clear related editor groups
-```
+Confirm → `DELETE /api/v1/spaces/{space_id}` → 목록 refresh → 관련 editor groups 제거.
 
 ## PrimarySidebar
 
 ### FilesSection
-
-데이터:
 
 ```text
 GET /api/v1/spaces/{space_id}/nodes/{folder_id}/children?view=summary&limit=100&cursor=...
@@ -136,375 +81,195 @@ POST /api/v1/spaces/{space_id}/nodes:batchListChildren
 GET /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
 ```
 
-규칙:
-
-- root `/`는 보이지 않는다.
-- folder row click은 editor node를 열지 않고 expand/collapse만 수행한다.
-- text/file row click은 active EditorGroup에 연다.
-- drag/drop은 node를 folder 안으로 이동한다.
-- sibling manual reorder는 하지 않는다.
-- root/empty/folder context에서 create/upload를 제공한다. writable empty editor는 root 대상 `Record audio`도 함께 제공한다.
+- Root `/`는 숨긴다. Folder click은 expand/collapse만, Text/File click은 active EditorGroup 열기다.
+- Drag/drop은 folder 안으로 이동하며 sibling manual reorder는 없다.
+- Root/empty/folder context에 create/upload를 제공한다. Writable empty editor에는 root 대상 `Record audio`도 제공한다.
 
 ### Files load more
 
-```text
-restore root and multiple expanded folders with missing cache
--> fetch their first pages in batches of at most 16 parents
--> seed each folder's existing children query cache
+| 상황 | 조회·cache |
+|---|---|
+| Cold tree 복원 | Cache 없는 root/expanded folder의 첫 page를 최대 16 parents씩 batch; folder별 children cache에 채움 |
+| Batch 실패 | Folder별 query로 복구 |
+| Folder 펼치기 | 첫 page 조회 |
+| Visible sentinel이 viewport 근처 도달 | 해당 folder cursor의 다음 page를 append |
+| 구조 변경 | Continuation을 버리고 첫 page만 재조회; 이전 cursor로 모든 page refetch 안 함 |
 
-expand root/folder
--> fetch first children page for that folder
--> scroll near folder page end
--> fetch next cursor page for that folder
--> append visible child rows
-```
-
-규칙:
-
-- children pagination은 folder별로 독립적이다.
-- cold tree 복원만 first-page batch API를 사용한다. Batch 실패 시 기존 folder별 query로 복구한다.
-- root와 각 expanded folder는 같은 children API cursor를 사용한다.
-- 자동 load-more는 visible sentinel이 viewport 근처에 들어올 때 수행한다.
-- 구조 변경 후 이미 여러 page가 열린 folder는 기존 continuation page를
-  버리고 첫 page만 다시 읽는다. 이전 cursor로 모든 page를 순차 refetch하지 않는다.
+Pagination은 folder별로 독립적이며 root/expanded folder 모두 같은 children API cursor를 사용한다. Batch는 cold 복원에만 쓴다.
 
 ### RecentSection
-
-데이터:
 
 ```text
 GET /api/v1/spaces/{space_id}/nodes?view=summary&sort=updated_at_desc&limit=50&cursor=...
 ```
 
-규칙:
+Recent는 항상 PrimarySidebar에 표시한다. Generic node-list와 visible sentinel로 page를 이어 읽고 invalidation 시 continuation을 버려 첫 page만 다시 읽는다.
 
-- Recent는 항상 PrimarySidebar에 있다.
-- generic node-list API를 사용한다.
-- visible load-more sentinel을 통해 cursor page를 이어서 표시한다.
-- invalidation 시 기존 continuation page를 버리고 첫 page만 다시 읽는다.
-- row 선택 시 node를 열고 Files reveal을 시도한다.
-- reveal 응답의 target을 canonical node query에 채운 뒤 editor를 연다.
-- reveal 실패는 open을 막지 않으며, 이때만 canonical node detail 조회로
-  fallback한다.
+선택 → Files reveal → 응답 target을 canonical node query에 저장 → editor 열기. Reveal 실패 시에만 canonical detail 조회로 fallback하며 실패 자체가 open을 막지는 않는다.
 
 ## Node actions
 
 ### Create
 
-```text
-folder/text create
--> choose parent folder
--> POST node/text API
--> refresh affected children/recent
--> open created node when applicable
-```
+Parent folder 선택 → folder/text `POST` → 해당 children/Recent refresh → 필요 시 생성 Node 열기.
 
 ### Upload file
 
 ```text
-select file
--> confirm node name
--> POST /file-uploads
--> single: PUT all bytes to the presigned URL
--> multipart: request part URLs, PUT at most 4 parts concurrently
--> POST /file-uploads/{upload_id}/complete with multipart ETags
--> cache completed node + refresh destination children/recent
+파일 선택·이름 확인 -> POST /file-uploads
+-> single PUT 또는 multipart part URLs/PUT
+-> POST /file-uploads/{upload_id}/complete (multipart ETags)
+-> 완성 Node cache + 대상 children/Recent refresh
 ```
 
-규칙:
-
-- upload는 앱 범위의 memory queue에서 최대 2개 파일까지 실행하므로 space나 node를 이동해도 계속된다. Multipart는 파일당 최대 4개 part를 병렬 전송한다.
-- 새로고침이나 tab 종료 뒤에는 이어서 전송하지 않는다. 완료되지 않은 object 정리는 backend 정책을 따른다.
-- 100MiB 초과 파일은 64MiB part로 나누고 URL은 16개씩 발급받는다. 실패한 part만 새 URL로 최대 3회 전송한다.
-- 취소하거나 최종 실패하면 backend에 upload 정리를 요청한다. 요청 실패 시 backend의 inactivity cleanup이 처리한다.
-- 진행 중이거나 실패한 항목은 전역 UploadProgressDock에서 확인한다. 시작 시 대상 space와 folder path를 snapshot으로 보관한다.
-- 실패한 항목은 처음부터 재시도하거나 목록에서 제거할 수 있다.
-- 완료 항목은 잠시 표시한 뒤 제거한다. 완료 기록의 정본은 Changes event다.
-- 완료 시 현재 editor를 file node로 이동하지 않는다.
+| 정책 | 동작 |
+|---|---|
+| Queue | 앱 memory에 최대 2 files; Space/Node 이동 중 계속 실행. Multipart는 file당 4 parts 병렬 |
+| Multipart | 100 MiB 초과는 64 MiB parts, URL 16개씩; 실패 part만 새 URL로 최대 3회 전송 |
+| 취소/최종 실패 | Backend 정리 요청; 요청 실패 시 inactivity cleanup |
+| 새로고침/tab 종료 | 이어서 전송하지 않음; 미완료 object는 backend 정리 |
+| UploadProgressDock | 진행/실패 항목 표시, 시작 시 대상 Space/folder path snapshot |
+| 실패 항목 | 처음부터 재시도 또는 제거 |
+| 완료 항목 | 잠시 표시 후 제거, Changes event가 기록 정본. 현재 editor를 File로 이동하지 않음 |
 
 ### Play audio
 
-```text
-open a verified audio File
--> GET /api/v1/spaces/{space_id}/files/{node_id}/audio-preview-url
--> receive a short-lived inline object URL with a server-selected audio media type
--> stream with the native browser player
--> retain Download as the fallback action
-```
+Backend가 검증한 audio/container만 `GET /api/v1/spaces/{space_id}/files/{node_id}/audio-preview-url`의 짧은 inline URL로 native player에서 stream한다. Declared media type만 신뢰하지 않는다.
 
-규칙:
-
-- declared media type만 신뢰하지 않고 backend가 확인한 audio/container 조합에만 URL을 발급한다.
-- browser player는 `preload="metadata"`를 사용하며 전체 File을 application memory의 Blob으로 복사하지 않는다.
-- 재생, 일시정지, seek를 browser native control로 제공한다. URL 만료 뒤 media request가 실패하면 새 URL을 한 번 발급받아 복구한다.
-- client-side encrypted File과 확인되지 않은 media type은 inline 재생하지 않고 Download만 제공한다.
+Player는 `preload="metadata"`와 native 재생/일시정지/seek를 사용하고 전체 File을 Blob으로 복사하지 않는다. URL 만료 후 실패는 새 URL을 한 번 받아 복구한다. Download는 항상 fallback이며 client-side encrypted/미검증 File은 Download만 제공한다.
 
 ### Preview DOCX
 
-```text
-open a verified DOCX File
--> GET /api/v1/spaces/{space_id}/files/{node_id}/docx-preview-url
--> render the document in a scriptless sandbox
--> flow content continuously within the current editor width
--> retain Download for exact print layout
-```
+검증된 DOCX → `GET /api/v1/spaces/{space_id}/files/{node_id}/docx-preview-url` → scriptless sandbox에서 editor 폭에 맞춰 연속 렌더링.
 
-- DOCX preview는 page width, height와 page break를 화면에 강제하지 않는다.
-- 일반 내용은 editor 폭에 맞춰 재배치하고, 넓은 embedded content만 문서 안에서 가로로 탐색할 수 있게 한다.
-- 원본의 표, 이미지와 문단 서식은 유지하되 정확한 인쇄 배치는 Download한 원본이 정본이다.
+Page width/height/break를 강제하지 않는다. 넓은 embedded content만 문서 안에서 가로 탐색한다. 표·이미지·문단 서식은 유지하며 정확한 인쇄 배치는 Download 원본이 정본이다.
 
 ### Record audio
 
 ```text
-Create > Record audio
--> verify secure context + getUserMedia + WebM/Opus MediaRecorder + browser lock manager
--> acquire the same-origin notegate:audio-recording lock without waiting
-   -> unavailable: report another NoteGate tab is recording and do not request microphone permission
--> request microphone permission
--> request 48 kHz mono capture with echo cancellation, noise suppression, and AGC disabled
--> record WebM/Opus at 64 kbps
--> target the active Space root with YYYY-MM-DD-HHmmss-record.webm
--> record 5-second chunks in memory
--> Pause: stop gathering bytes into the current Blob and close the active timeline segment
--> Resume: continue gathering into the same Blob and open the next timeline segment
--> Stop & save
--> create one File with requested/actual capture settings, timeline summary, ordered recording segments, and use the existing upload queue
--> release Screen Wake Lock after upload completes or fails
+Create > Record audio -> runtime 지원 확인 -> same-origin lock -> microphone 권한
+-> WebM/Opus 녹음 (5초 chunks) -> Pause/Resume -> Stop & save
+-> 활성 Space root의 YYYY-MM-DD-HHmmss-record.webm 생성 -> 기존 upload queue
 ```
 
-규칙:
+| 항목 | 규칙 |
+|---|---|
+| 지원 확인 | Secure context, `getUserMedia`, `MediaRecorder.isTypeSupported("audio/webm;codecs=opus")`, `navigator.locks`, `navigator.wakeLock`을 runtime 검사. Browser 이름/버전 추정이나 조용한 codec 변경 금지. 필수 secure context/capture/lock 또는 WebM/Opus 미지원이면 녹음 차단 |
+| Recording lock | Same-origin `notegate:audio-recording`을 대기 없이 획득. 실패하면 다른 tab 녹음 안내만 표시하고 microphone 권한 요청 안 함 |
+| Capture/encode | `ideal` 48 kHz mono, echo cancellation/noise suppression/AGC off; WebM/Opus 64 kbps |
+| Metadata | `notegate-meeting-llm-v1` profile에 요청·실제 sampleRate/sampleSize/channelCount, echo/noise/AGC, MIME/bitrate 저장. Device ID/group ID/label 저장 금지 |
+| 보존본 | 최초 WebM/Opus이며 raw/lossless는 아님. LLM별 downmix/resample은 별도 파생본 |
+| Pause/Resume | 같은 Blob의 data 수집 중단/재개와 활성 timeline segment 닫기/새 segment 열기, File 분리 안 함. Pause도 Stop/Discard 가능하며 mic·recording lock·Wake Lock 유지 |
+| Timeline clock | Duration/offset은 `performance.now()` monotonic ms, session 시작/종료만 ISO 8601 wall clock. Recorded duration은 pause 제외, wall duration은 포함 |
+| Timeline metadata | Top-level `recording_timeline` object와 `recording_segments` array. Segment는 `wall_start_offset_ms`, `wall_end_offset_ms`, `media_start_offset_ms`, `media_end_offset_ms`; wall gap이 pause |
+| Segment 상한 | 16 KiB metadata 상한 때문에 최대 64개. 초과 시 최초 32 + 최근 32개, `segment_count`, `segments_included_count`, `segments_omitted_count` 기록 |
+| RecordingDock | Desktop/tablet bottom-right의 UploadProgressDock 위, mobile full-width bottom stack. 접어도 Recording/elapsed header 유지. Mic level 최대 15 fps, 상태의 유일한 신호로 사용 안 함 |
+| 녹음 중 허용 | 현재 Space Files 탐색, 문서 열기/스크롤, Outline, 검색, 복사 |
+| 녹음 중 차단 | Create/edit/move/delete, Space/Settings 전환 |
+| Stop & save | Queue 등록 즉시 dock 닫고 일반 작업 복귀, mic/recording lock 해제. 공통 2 files queue로 전송 중 다음 녹음 가능 |
+| Wake Lock | 녹음 시작부터 upload 완료/실패까지 요청 후 해제. OS 거부/해제는 녹음을 막지 않으며 visible 복귀 시 진행 중 녹음/upload에 재요청 |
+| Background | Upload 완료 전 foreground 유지 필요. Backend가 완료 확인한 뒤 후처리는 화면 상태와 독립 |
+| 복구 | Chunks는 memory뿐. 저장 전 reload/tab 종료/browser·OS 강제 종료는 복구 불가 |
 
-- browser 이름/버전을 추정하지 않고 `getUserMedia`, `MediaRecorder.isTypeSupported("audio/webm;codecs=opus")`, `navigator.locks`, `navigator.wakeLock`을 runtime에 검사한다. 고정 format을 지원하지 않으면 다른 codec으로 조용히 변경하지 않고 녹음을 막는다.
-- 48 kHz와 mono, 음성 가공 비활성화는 `ideal` capture constraint다. 장치/OS/browser가 선택한 실제 `sampleRate`, `sampleSize`, `channelCount`, echo cancellation, noise suppression, AGC와 recorder MIME/bitrate는 `notegate-meeting-llm-v1` profile metadata로 File Node 생성 시 함께 저장한다. Privacy/fingerprinting surface인 device ID, group ID, device label은 저장하지 않는다.
-- WebM/Opus File은 최초 보존본이지만 raw/lossless audio는 아니다. LLM별 downmix/resample은 후처리에서 파생본으로 만들고 보존본을 대체하지 않는다.
-- pause/resume은 File을 나누지 않는다. `MediaRecorder.pause()`는 현재 Blob을 유지한 채 data 수집을 멈추고 `resume()`은 같은 Blob에 이어서 수집한다.
-- timeline duration과 segment offset은 `performance.now()` 기반 monotonic milliseconds로 계산하고, session 시작/종료만 ISO 8601 wall-clock timestamp로 저장한다. recorded duration은 pause를 제외하며 wall duration은 pause를 포함한다.
-- metadata는 depth 제한을 지키기 위해 summary를 top-level `recording_timeline` object로, interval 목록을 top-level `recording_segments` array로 둔다. 각 segment는 `wall_start_offset_ms`, `wall_end_offset_ms`, `media_start_offset_ms`, `media_end_offset_ms`를 가진다. pause 구간은 인접 segment 사이의 wall-time gap으로 계산한다.
-- `recording_segments`는 16 KiB 상한을 위해 최대 64개를 저장한다. 이를 넘으면 최초 32개와 최근 32개를 보존하고 `segment_count`, `segments_included_count`, `segments_omitted_count`로 생략 여부를 명시한다.
-- paused 상태에서도 `Stop & save`와 `Discard`를 허용하고 Screen Wake Lock, microphone stream, same-origin recording lock은 유지한다.
-- 녹음 중에는 `RecordingDock`을 desktop/tablet의 bottom-right transfer stack에서 `UploadProgressDock` 위에 표시한다. panel은 접을 수 있지만 `Recording`과 elapsed time은 header에 남는다. mobile에서는 full-width bottom stack을 사용한다. 실제 microphone level은 최대 15 fps로 표시하며 녹음 상태의 유일한 신호로 사용하지 않는다.
-- 녹음 중에는 현재 Space의 Files 탐색, 문서 열기/스크롤, Outline, 검색, 복사를 유지하고 create/edit/move/delete와 Space/Settings 전환을 막는다.
-- `Stop & save`가 File을 upload queue에 넣으면 `RecordingDock`을 즉시 닫고 일반 작업 상태로 돌아간다. 다른 upload와 녹음 File은 같은 최대 2개 병렬 queue를 사용하므로 이전 녹음이 전송되는 동안 다음 녹음을 시작할 수 있다.
-- 녹음 시작부터 NoteGate upload 종료까지 Screen Wake Lock을 요청한다. Wake Lock은 보조 기능이므로 OS가 거부하거나 해제해도 녹음 자체는 계속된다.
-- 문서가 다시 visible 상태가 되면 진행 중인 녹음/upload의 Wake Lock을 다시 요청한다.
-- 브라우저 background upload는 보장하지 않으므로 upload 완료 전에는 NoteGate를 foreground에 유지해야 한다. 서버가 upload 완료를 확인한 뒤의 후처리는 화면 상태와 무관하다.
-- 녹음 chunk는 memory에 보관한다. tab 새로고침, 종료, browser/OS 강제 종료 시 저장 전 녹음은 복구하지 않는다.
-- 표준 근거는 [MediaStream Recording](https://www.w3.org/TR/mediastream-recording/), [Web Locks](https://www.w3.org/TR/web-locks/), [Screen Wake Lock](https://www.w3.org/TR/screen-wake-lock/)이다. iOS/iPadOS Home Screen Web App의 Screen Wake Lock은 [Safari 18.4](https://webkit.org/blog/16574/webkit-features-in-safari-18-4/)부터 지원된다.
+표준: [MediaStream Recording](https://www.w3.org/TR/mediastream-recording/), [Web Locks](https://www.w3.org/TR/web-locks/), [Screen Wake Lock](https://www.w3.org/TR/screen-wake-lock/). iOS/iPadOS Home Screen Web App Wake Lock은 [Safari 18.4](https://webkit.org/blog/16574/webkit-features-in-safari-18-4/)부터 지원한다.
 
 ### Download file
 
-- 파일 다운로드는 브라우저 기본 다운로드 관리자를 사용한다.
+Browser 기본 다운로드 관리자를 사용한다.
 
 ### Rename
 
-```text
-rename
--> PATCH /nodes/{node_id}
--> refresh node, children, recent
--> update opened node snapshot
-```
+`PATCH /nodes/{node_id}` → node/children/Recent refresh → 열린 Node snapshot 갱신.
 
 ### Move
 
-```text
-move into folder
--> POST /nodes/{node_id}/move
--> refresh old/new parents, reveal, recent
--> update opened node snapshot
-```
+`POST /nodes/{node_id}/move` → 이전/새 parent, reveal, Recent refresh → 열린 Node snapshot 갱신.
 
 ### Delete
 
-```text
-delete
--> confirm
--> DELETE /nodes/{node_id}
--> refresh children/recent
--> clear deleted node from opened editor groups and navigation history
-```
+Confirm → `DELETE /nodes/{node_id}` → children/Recent refresh → 열린 groups/history의 삭제 Node 제거.
 
 ## EditorArea
 
-node kind별 데이터:
+| Kind | 조회 |
+|---|---|
+| Folder | Node detail |
+| Text | Detail + Text content |
+| File | Detail + metadata/download |
 
-```text
-folder -> node detail
-text   -> node detail + text content
-file   -> node detail + file metadata/download
-```
+Header 왼쪽에 이름·pane별 Back/Forward와 `<space>:/path` 복사 아이콘을 표시한다. Path/metrics는 Inspector에 둔다.
 
-규칙:
-
-- header 왼쪽에는 node name과 pane별 Back/Forward를 표시한다.
-- header의 node name 옆에는 내부 `<space>:/path`를 복사하는 `Copy path` 아이콘을 둔다.
-- path와 metrics는 Inspector에 둔다.
-- text preview가 기본이다.
-- plain text는 단순 메모처럼 보여준다.
-- markdown은 GFM, code highlight, Mermaid를 지원한다.
-- markdown preview는 leading YAML frontmatter object를 Obsidian-style Properties로 표시하고 raw YAML block은 본문 prose로 렌더링하지 않는다.
-- markdown frontmatter는 Text content이며 Inspector metadata와 동기화하지 않는다.
-- JSON/JSONL/YAML/TOML은 Tree/Source view를 제공한다.
-- structured tree는 기본 expanded 상태다.
-- edit mode는 line number를 보여준다.
+Text는 preview가 기본이며 plain text는 메모처럼 표시한다. Markdown은 GFM/code highlight/Mermaid, leading YAML object는 Obsidian-style Properties로 표시하고 raw YAML prose는 렌더링하지 않는다. Frontmatter는 content이며 Inspector metadata와 동기화하지 않는다. JSON/JSONL/YAML/TOML은 기본 expanded Tree/Source, edit mode는 line number를 제공한다.
 
 ### Open
 
-```text
-open node
--> push current node reference to the active EditorGroup back history
--> clear forward history
--> set active EditorGroup node snapshot
--> fetch detail/content by kind
--> show Inspector for active node
-```
-
-같은 node를 다시 열면 history에 중복 추가하지 않는다.
+현재 reference를 active group back history에 추가 → forward 비우기 → 열린 snapshot 설정 → kind별 detail/content 조회 → active Node Inspector 표시. 같은 Node를 다시 열면 history에 추가하지 않는다.
 
 ### Back/Forward
 
-```text
-click Back/Forward
--> read the nearest node reference from that EditorGroup
--> reveal target and ancestors
--> success: cache target, move current node reference to the opposite history, open target
--> reveal failure: GET canonical node detail as fallback
--> reveal/detail 404: discard missing reference and continue in the same direction
--> other detail failure: keep current node and both histories, then show toast
-```
+| 단계/결과 | 동작 |
+|---|---|
+| 최근 reference 선택 | Target/ancestor reveal |
+| Reveal 성공 | Target cache, 현재 reference를 반대 history로 이동 후 열기 |
+| Reveal 실패 | Canonical detail 조회로 fallback |
+| Reveal/detail 404 | Missing reference 버리고 같은 방향의 다음 항목 탐색 |
+| 그 외 detail 실패 | 현재 Node와 두 histories 유지, toast |
+| 요청 중 group/Space 변경 | 늦은 응답 무시 |
 
-규칙:
-
-- history는 EditorGroup별로 독립적이다.
-- 새 node를 연 뒤에는 forward history를 비운다.
-- 새 group은 현재 node 또는 선택한 node만 가지며 기존 group history를 복사하지 않는다.
-- space 전환과 reload 후에도 space별 workbench snapshot에서 복원한다.
-- node rename/move는 저장된 이름 snapshot을 갱신하고 delete는 해당 reference를 제거한다.
-- 요청 중 group이나 space가 바뀌면 늦게 도착한 응답을 적용하지 않는다.
+History는 group별 독립적이다. 새 Node를 열면 forward를 비우고 새 group에는 현재/선택 Node만 넣으며 history를 복사하지 않는다. Space 전환/reload는 snapshot에서 복원한다. Rename/move는 이름 snapshot을 갱신하고 delete는 reference를 제거한다.
 
 ### Markdown image preview
 
-```text
-near-viewport image paths
--> same microtask requests coalesce
--> POST /file-previews:batchResolve
--> cache each ordered path result and each ready node preview URL
--> render ready results; isolate missing, unsupported, and transient failures per image
-```
+Near-viewport path 요청을 같은 microtask에서 병합 → `POST /file-previews:batchResolve` → 순서대로 path별 결과와 ready Node URL cache → 이미지별 missing/unsupported/transient 실패를 독립 처리.
 
-로컬 단일 file rename/move는 이전 path cache만 제거한다. Folder 변경과 외부 path change event는 영향받은 하위 path를 직접 알 수 없으므로 active Space의 Markdown image preview cache를 제거한다. 만료된 presigned URL은 해당 path만 다시 배치 조회한다.
+단일 File rename/move는 이전 path cache만 제거한다. Folder 변경/외부 path event는 active Space preview cache를 제거한다. Presigned URL 만료는 해당 path만 재조회한다. Batch 상한은 [구현 규칙](03-implementation.md#external-sync)을 따른다.
 
 ### Split
 
-```text
-split
--> if group count < 3: add group to the right
--> new group starts with current active node or empty state and empty navigation history
-```
+최대 3 groups. 오른쪽에 현재 active Node/빈 상태와 빈 history의 group을 추가한다.
 
 ### Save text
 
-```text
-edit text
--> PUT /text/{node_id} with expected_sha256
--> success: preview mode + patch cached node representations + refresh text/recent
--> conflict: show conflict state
-```
+`PUT /text/{node_id}` + `expected_sha256` → 성공 시 preview 전환·Node cache 갱신·Text/Recent refresh. Conflict는 충돌 상태로 표시한다.
 
 ### External sync
 
-```text
-visible tab: poll active-space changes after the last applied event id
--> drain every page in ascending event order
--> invalidate changed node/content + affected parent children + Recent
--> expired/unknown token: refresh file-related cache families once and establish a new token
--> opened node 404: clear editor group
-```
+Visible tab은 active Space event를 마지막 적용 ID 이후부터 모든 page 오름차순으로 읽어 Node/content·해당 parent children·Recent를 invalidate한다. Expired/unknown token은 file-related cache family를 한 번 refresh하고 새 token을 설정한다. 열린 Node 404는 group을 비운다. Interval/token 적용 규칙은 [External sync 구현](03-implementation.md#external-sync)이 정본이다.
 
 ## Structured preview
 
-```text
-Tree/Source toggle
--> change preview mode only
-```
-
-```text
-Expand all / Collapse all
--> applies only in Tree mode
-```
+Tree/Source toggle은 preview mode만 바꾼다. Expand/Collapse all은 Tree mode에서만 적용한다.
 
 ## Inspector
 
-표시:
+| 표시 | 내용 |
+|---|---|
+| 기본 | Name, path, kind, folder child count/File size/Text line count, metadata JSON |
+| 설정 | 현재 Node 검색 포함 여부, Text 서버 암호화 상태 |
+| 접힌 System details | Created/updated attribution, internal ID |
 
-- name, path, kind.
-- folder child count 또는 file size와 Text line count.
-- metadata JSON.
-- 현재 node의 검색 포함 여부.
-- Text의 현재 서버 관리 암호화 상태.
-- 접힌 System details 안의 created/updated attribution과 internal id.
-
-규칙:
-
-- 선택 node가 없어도 빈 Inspector를 렌더링한다.
-- 검색과 Text 암호화 설정은 서로 독립적으로 변경한다.
-- 검색 포함 여부는 `PUT /nodes/{node_id}/external-access-policy`로 변경한다.
-- Text 암호화는 `PUT /text/{node_id}/encryption`으로 변경한다.
-- Space의 기본값은 새 node 생성에만 적용하고 Inspector는 선택한 node의 현재 상태를 즉시 변경한다.
-- metadata는 encrypted content가 아니며 읽기 전용으로 표시한다.
+선택 없어도 빈 Inspector를 표시한다. 검색 포함은 `PUT /nodes/{node_id}/external-access-policy`, Text 암호화는 `PUT /text/{node_id}/encryption`으로 독립 변경한다. Space 기본값은 새 Node에만, Inspector 변경은 현재 Node에 즉시 적용한다. Metadata는 암호화된 content가 아니며 읽기 전용이다.
 
 ## Settings
 
-Tabs:
+| Tab | 내용 |
+|---|---|
+| General | Saved workspace reset, About의 루트 `VERSION`과 공식 GitHub 링크 |
+| Account | User/account, theme, User MCP OAuth 2.1 URL, sign out |
+| Agents | 공용 Agent MCP URL, REST API `/api/v2` base URL/문서, agent list |
 
-```text
-General | Account | Agents
-```
-
-General:
-
-- saved workspace reset.
-- About에 `VERSION` 파일 기준의 현재 NoteGate 버전과 공식 GitHub 저장소 링크를 표시한다.
-
-Account:
-
-- current user/account.
-- theme.
-- user MCP OAuth 2.1 server URL.
-- sign out.
-
-Agents:
-
-- 모든 agent가 공유하는 agent MCP server URL.
-- 모든 agent가 공유하는 REST API base URL과 API 문서 링크.
-- agent list.
-- 한 번에 하나의 agent만 펼친다.
-- 펼친 agent 안에는 space permission과 agent API keys만 둔다.
-
-규칙:
-
-- agent 연결 URL은 agent마다 반복하지 않고 Agents 상단 공용 영역에 한 번만 둔다.
-- 제품 표시는 `REST API`로 통일하고 실제 versioned base URL은 `/api/v2`를 사용한다.
-- API 문서는 새 탭으로 연다.
-- agent API key는 해당 agent 아래에 둔다.
-- `scopes`는 현재 정책상 표시하지 않는다.
-- Agents tab은 agent 관리 권한이 있는 caller에게만 표시한다.
+Agent 관리 권한이 있는 caller에게만 Agents를 표시한다. 공용 URL은 상단 한 번만 표시한다. 한 번에 한 Agent만 펼치고 그 아래에 Space permission/API keys만 둔다. `scopes`는 표시하지 않는다. 제품 표시는 `REST API`, 문서는 새 tab으로 연다.
 
 ## Context menus
 
-규칙:
-
-- 우클릭은 shortcut이다.
-- 같은 action은 버튼, overflow, dialog, touch fallback 중 하나로도 가능해야 한다.
-- text editing 영역에서는 native context menu를 막지 않는다.
-- destructive action은 confirm이 필요하다.
-- touch는 long-press 또는 visible overflow를 사용한다.
+우클릭은 shortcut이며 같은 action에 버튼/overflow/dialog/touch 대안을 제공한다. Text editor native menu는 유지한다. Destructive action은 confirm, touch는 long-press/visible overflow를 사용한다.
 
 | Surface | Target | Actions |
 |---|---|---|
-| ActivityRail | space | select, rename, delete, copy id |
-| Files | empty/root | new folder, new document, upload file |
-| Files | folder | open/toggle, create child, upload, rename, move, copy path, delete |
-| Files | text | open, open in new group, rename, move, copy path, delete |
-| Files | file | open, open in new group, download, rename, move, copy path, delete |
-| EditorHeader | node | rename, move, delete, download if file |
-| Inspector | metadata | view system metadata |
+| ActivityRail | Space | Select, rename, delete, copy id |
+| Files | Empty/root | New folder, new document, upload file |
+| Files | Folder | Open/toggle, create child, upload, rename, move, copy path, delete |
+| Files | Text | Open, open in new group, rename, move, copy path, delete |
+| Files | File | Open, open in new group, download, rename, move, copy path, delete |
+| EditorHeader | Node | Rename, move, delete, download if File |
+| Inspector | Metadata | View system metadata |

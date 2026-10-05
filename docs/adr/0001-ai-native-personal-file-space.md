@@ -25,4 +25,4 @@ File   = binary/object content; Text content operation과 grep 대상이 아님
 - Markdown, JSON, JSONL, YAML, TXT 등은 모두 `Text`다.
 - 이미지, 음성, PDF, 압축 파일 등은 `File`이다.
 - 검색 본문 검색은 `Text`만 대상으로 한다.
-- `File`에서 OCR, transcription, embedding 등 파생 text를 만들 수 있지만 원본 file과 별도 lifecycle로 다룬다.
+- Text와 File은 별도 Node와 lifecycle을 가진다.

@@ -32,14 +32,16 @@ cp .env.example .env
 make dev-infra
 ```
 
-기본 `NOTEGATE_PROCESS_MODE=all`은 public HTTP, background job worker, reconciliation runtime과 private search HTTP를
-함께 실행한다. Public listener와 search listener는 같은 process에서도 각각 `9191`, `9192`로
-분리된다. 운영에서는 같은 image를 `api`, `worker`, `reconciler`, `search` mode로 나눌 수 있다.
-Worker와 reconciler mode의 HTTP listener 및 search mode의 private listener는 `/health`, `/ready`,
-활성화된 `/metrics`만 control plane으로 제공한다. Process mode는 실행할 component만 선택하며, 모든 mode가 동일한
-전체 runtime 설정을 읽고 검증한다. Database migration과 usage bootstrap은 `all`/`api` mode가
-소유한다. 독립 `worker`/`reconciler`/`search` process는 schema readiness와 active crypto key
-epoch를 read-only로 검증한다.
+기본 `NOTEGATE_PROCESS_MODE=all`이며 같은 image를 다음 process role로 실행한다. 모든 role은 전체 runtime 설정을 읽고 검증한다.
+
+| Mode | 실행·DB 초기화 |
+|---|---|
+| `all` | Public HTTP + worker + reconciler + local/remote Search; migration/usage bootstrap |
+| `api` | Public HTTP + local/remote Search; migration/usage bootstrap |
+| `worker` / `reconciler` | 해당 background runtime; schema/active crypto epoch read-only 검증 |
+| `search` | Private Search; schema/active crypto epoch read-only 검증 |
+
+Local Search가 있으면 Public/Search는 같은 process에서도 기본 `9191`/`9192`의 별도 socket이다. Worker/reconciler listener와 독립 `search` mode의 private listener는 `/health`, `/ready`, 활성화된 `/metrics`를 control plane으로 제공한다. Local Search를 포함한 `all`/`api`의 `/metrics`는 public listener에만 등록한다.
 
 ```text
 NOTEGATE_SEARCH_BIND_ADDR=127.0.0.1:9192  # default, all/api local search
@@ -50,8 +52,7 @@ NOTEGATE_SEARCH_BIND_ADDR=127.0.0.1:9192  # default, all/api local search
 # NOTEGATE_READ_DB_MAX_CONNECTIONS=10
 ```
 
-동일 binary는 다음 네 topology를 지원한다. 이 표는 runtime 조립 계약이며 Helm이나 특정 배포
-도구를 전제로 하지 않는다.
+특정 Helm/배포 도구에 의존하지 않는 runtime topology:
 
 | Topology | Main process | Search URL | Additional processes |
 |---|---|---|---|
@@ -66,15 +67,7 @@ NOTEGATE_SEARCH_BIND_ADDR=127.0.0.1:9192  # default, all/api local search
 검색 전용 pod는 `NOTEGATE_PROCESS_MODE=search`와 `NOTEGATE_SEARCH_BIND_ADDR=0.0.0.0:9192`를
 사용한다. API pod는 `NOTEGATE_PROCESS_MODE=api`와 내부 Service의 root URL인
 `NOTEGATE_SEARCH_SERVICE_URL=http://notegate-search:9192`를 사용한다. 이 URL에는 path, query,
-credential을 넣지 않는다. Private request와 response는 LOOKUP root에서 분리 파생된 HMAC key로
-서명되며 public listener에는 `/internal/*` route가 등록되지 않는다.
-
-`NOTEGATE_READ_DATABASE_URL`이 없으면 search는 primary pool handle을 공유한다. 값이 있으면 search
-본문 로딩과 content stats는 별도 read pool을 사용하지만 권한, scope, candidate, 경로와 잠금은 primary에서
-조회한다. 쓰기, queue worker와 reconciliation도 primary pool을 사용한다. 별도 read endpoint를 선택하면
-권한 철회의 즉시성은 유지되지만 변경 직후 검색 결과 자체에는 replica lag가 보일 수 있다. Read pool은
-로컬 search listener를 소유한 process에서만 생성되며, remote search를 호출하는 API와 background role은
-불필요한 read connection을 만들지 않는다.
+credential을 넣지 않는다. 서명·private route·DB 읽기 경계는 [Search](spec/search.md#execution-boundary)가 정본이다. `NOTEGATE_READ_DATABASE_URL`이 없으면 primary handle을 공유한다. 별도 read endpoint는 권한 철회의 즉시성을 유지하지만 본문 검색에 replica lag가 보일 수 있다. 쓰기·worker·reconciler는 primary를 사용하며 remote Search를 호출하는 API/background role은 read pool을 만들지 않는다.
 
 ```sh
 cargo run --bin notegate-api
@@ -210,16 +203,12 @@ make test-integration
 deploy/ci/test-rust.sh -p notegate-api rest::file_upload_tests
 ```
 
-각 실행은 고유 `NOTEGATE_TEST_RUN_ID`를 생성하며, 각 테스트의 DB 스키마도 계속 독립적이다.
-개별 테스트의 정상 cleanup은 유지하고, cargo 종료 후 해당 실행 ID의 잔여 스키마만
-추가 정리한다. assertion 실패, 오류 반환, 마이그레이션 중 오류로 남은 스키마도 대상이다.
-정리 실패는 명령 실패로 보고하며 다른 실행이나 기존 스키마를 일괄 삭제하지 않는다.
-이 종료 시 정리는 통합 실행 명령을 통할 때 적용된다. 프로세스 강제 종료(SIGKILL)나
-DB 장애 시 정리는 보장할 수 없다. S3 객체 정리는 기존 개별 테스트가 담당한다.
-
-DB/S3 없이 빠르게 확인하려면 `make test-fast`를 사용한다. DB/S3 환경변수를 해제하고
-통합 테스트를 제외한다는 안내를 출력하므로, 전체 검증 완료로 취급하지 않는다.
-직접 `cargo test`를 실행할 때는 기존처럼 환경변수가 없는 통합 테스트가 조기 종료할 수 있다.
+| 검증 범위 | 조건·정리 |
+|---|---|
+| 통합 실행 | 고유 `NOTEGATE_TEST_RUN_ID`, 테스트별 독립 schema. 개별 cleanup 후 cargo 종료 시 해당 run 잔여 schema만 정리; 다른 실행/기존 schema 유지 |
+| 실패 정리 | Assertion/반환 오류/migration 오류도 대상. Cleanup 실패는 명령 실패. SIGKILL/DB 장애는 보장 불가; S3는 개별 테스트가 정리 |
+| `make test-fast` | DB/S3 환경변수를 해제하고 통합 테스트 제외 안내; 전체 검증으로 취급하지 않음 |
+| 직접 `cargo test` | 환경변수 없는 통합 테스트가 조기 종료할 수 있고 run 종료 cleanup은 통합 실행 명령에만 적용 |
 
 `make frontend-check`는 dependency audit, theme contrast, typecheck, lint, unit test와 production build를 실행한다.
 
@@ -285,15 +274,16 @@ cargo test -p notegate-media
   재검사하고, 실제 배포 확인에는 Argo 상태와 Pod imageID를 확인한다.
 - `.cargo/audit.toml`의 `RUSTSEC-2023-0071` 예외는 openidconnect의 RSA 서명 검증 경로에
   한정한다. 네트워크에서 관찰 가능한 RSA 개인키 연산을 추가하거나 upstream 수정 버전이
-  나오면 즉시 재검토한다. 현재 lockfile에 없는 extract-zip의 npm 감사 예외는 제거했다.
+  나오면 즉시 재검토한다.
 
-GitHub 저장소 설정은 소스 파일과 별도로 관리된다. 2026-09-23 기준 main ruleset은 최신
-base에서 `Hygiene`, `Rust`, `Web`, `Browser E2E`, `Dependency Review`, `RustSec Audit`의
-통과를 요구하며 검사 제공자는 GitHub Actions로 제한한다. CodeQL 분석도 필수이며 새로
-추가되는 medium 이상 보안 경고와 error 수준 분석 경고를 차단한다. Actions는 전체 commit SHA 고정을
-요구하고 기본 토큰 권한은 read-only이며 PR 승인 권한은 없다. Secret scanning, push
-protection, Dependabot security updates, 비공개 취약점 제보를 사용한다.
-새 `PR Image Gate`를 병합 차단 조건으로 삼으려면 main ruleset의 필수 검사에도 추가해야 한다.
+GitHub 설정은 소스와 별도로 관리한다. 아래는 운영 설정 확인 목록이며 현재 UI 상태의 증거가 아니다.
+
+| 설정 | 확인할 항목 |
+|---|---|
+| Main ruleset | 최신 base, GitHub Actions 제공자의 `Hygiene`, `Rust`, `Web`, `Browser E2E`, `Dependency Review`, `RustSec Audit`, `PR Image Gate` required checks |
+| CodeQL | 필수 분석, 새 medium 이상 보안 경고/error 분석 경고 차단 |
+| Actions | Full commit SHA, 기본 token read-only, PR 승인 권한 없음 |
+| Security | Secret scanning, push protection, Dependabot security updates, 비공개 취약점 제보 |
 
 CodeQL 기본 설정은 Actions와 JS/TS의 extended query suite와 remote/local threat model을
 사용한다. Rust는 현재 기본 설정 API가 허용하지 않아 이 CodeQL 범위에 포함되지 않는다.

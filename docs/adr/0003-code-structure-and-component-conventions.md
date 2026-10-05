@@ -1,9 +1,5 @@
 # ADR 0003: 코드 구조와 테스트 전략
 
-## 상태
-
-채택됨
-
 ## 맥락
 
 notegate 백엔드는 `core · text · media · model · db · service · search · command · api`를 중심으로 구성하고,
@@ -12,8 +8,7 @@ notegate 백엔드는 `core · text · media · model · db · service · search
 
 두 가지 사실이 구조와 테스트 방향을 결정한다.
 
-- **DB는 PostgreSQL로 고정한다.** 다른 DB로 교체할 계획이 없다. 따라서 repository를 추상화해
-  교체 가능하게 둘 이유가 없다.
+- **DB는 PostgreSQL로 고정한다.** Service와 search는 PostgreSQL concrete repo를 사용한다.
 - **DB의 정확성은 SQL 제약·트리거·recursive CTE·트랜잭션 경쟁·UNIQUE에 있다.** 이 부분은 mock이
   충실히 흉내낼 수 없고, mock 기반 테스트는 거짓 안심을 준다.
 
@@ -93,7 +88,7 @@ api transport adapters ──▶ api commands ──┬─▶ service ──▶ 
 ## 결과
 
 - service store trait과 mock store 테스트는 두지 않는다.
-- 순수 함수 테스트(content/patch/policy/validation/cursor/pagination)는 유지·확장한다.
+- 순수 함수(content/patch/policy/validation/cursor/pagination)는 유닛테스트로 검증한다.
 - repo 자체 동작은 db 통합 테스트, files/search/permissions/lifecycle 같은 end-to-end 성격은
   service 통합 테스트로 둔다.
 - 테스트 속도 최적화는 테스트 인프라 레벨에서 한다.

@@ -13,7 +13,7 @@ Space에 서로 독립적인 두 상태를 둔다.
 
 REST는 owner가 소유한 모든 live Space를 두 상태와 함께 반환한다. User MCP는 `user_mcp_enabled`가 활성화된 Space만 조회하고 접근한다. Agent MCP는 이 값을 무시하고 명시적으로 연결된 Space만 접근한다.
 
-새 Space는 탐색 영역에 고정하고 User MCP에는 노출하지 않는다. 기존 Space는 이전 Pin 상태를 두 상태에 각각 복사해 기존 탐색 표시와 MCP 접근을 보존한다.
+새 Space는 탐색 영역에 고정하고 User MCP에는 노출하지 않는다.
 
 User MCP에서 비활성화된 Space와 존재하지 않는 Space는 같은 not-found 응답을 사용한다. 이 권한은 목록뿐 아니라 target 해석과 진행 중 transfer의 후속 작업에도 적용한다.
 

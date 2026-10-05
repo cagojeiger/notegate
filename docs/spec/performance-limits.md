@@ -282,8 +282,6 @@ tier0_logical_content_10000_users = 2.5 TiB
 
 운영 sizing은 평균 사용률을 별도로 가정한다. PostgreSQL은 Text와 metadata를, object storage는 File과 완료 전 upload 및 삭제 재시도 중인 object를 기준으로 각각 산정한다. PostgreSQL physical estimate는 row overhead, index, TOAST, WAL, dead tuple, vacuum과 backup 여유를 포함한다.
 
-1만 user 규모에서는 PgBouncer와 connection pool 상한을 전제로 한다. File content가 hard-limit worst case에 가까워지면 object storage와 backup/restore 전략을 별도로 둔다.
-
 ## Purge limits
 
 ```text

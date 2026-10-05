@@ -14,7 +14,7 @@ User 삭제는 live owned space가 없을 때만 허용한다. Space는 user가 
 live owned spaces 없음 확인
 user account deactivate
 owned agents deactivate
-owned user API keys revoke
+owned browser sessions revoke
 owned agent API keys revoke
 owned agent connections disconnect
 ```
@@ -35,4 +35,4 @@ account/user shell 유지
 - 삭제된 user는 재활성화하지 않는다.
 - 개인용 product model이므로 공동 owner/팀 멤버 정리 정책은 두지 않는다.
 - Space 삭제는 user의 명시적 space delete lifecycle에서 처리한다.
-- Space hard delete는 purge job이 처리한다.
+- Space hard delete는 `system.purge` reconciliation이 처리한다.
