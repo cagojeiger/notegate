@@ -36,6 +36,6 @@ for round in 1 2 3; do
       | tee "$results_dir/$label-$round.log"
   done
 done
-python3 deploy/ci/summarize-text-write.py "$results_dir" > "$results_dir/summary.md"
+python3 deploy/ci/summarize-text-write.py > "$results_dir/summary.md"
 cat "$results_dir/summary.md" >> "${GITHUB_STEP_SUMMARY:?GitHub summary is required}"
 rm "$results_dir/baseline-bench" "$results_dir/candidate-bench"

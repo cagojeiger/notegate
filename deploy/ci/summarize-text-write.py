@@ -1,10 +1,9 @@
 """Summarize paired CI measurements; noisy timing is informational, not a gate."""
 import json
 import statistics
-import sys
 from pathlib import Path
 
-root = Path(sys.argv[1])
+root = Path(__file__).resolve().parents[2] / "text-write-results"
 measurements = {}
 for label in ("baseline", "candidate"):
     cases = {}
