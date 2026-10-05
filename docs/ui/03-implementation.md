@@ -16,160 +16,87 @@ frontend/web/src
 
 ## State ownership
 
-- `/api/v1/me`, Space, Node, Text, File과 metadata 같은 server state는 React Query가 소유한다.
-- active Space, editor group과 탐색 기록, 열린 Node snapshot, layout, theme과 section 비율은 UI store가 소유한다.
-- expanded folder와 cursor는 query 또는 component state, Text draft는 draft/component state, hover·menu·drag는 component state가 소유한다.
-
-Browser 저장 여부, 수명과 reset 범위는 [`02-data-and-flows.md`](./02-data-and-flows.md#상태-분류)가 소유한다.
+Server state는 React Query, UI 상태는 UI store, draft와 일시적인 상호작용은 draft/component state가 소유한다. 세부 저장 여부·수명·reset 범위는 [상태 분류](02-data-and-flows.md#상태-분류)가 정본이다.
 
 ## Auth boundary
 
-- `useSessionQuery`가 `/api/v1/me`의 authority다.
-- `/me` 401은 AuthScreen을 렌더링한다.
-- 일반 query/mutation 401은 session reset을 유발한다.
-- Browser UI는 V1에 API key를 보내지 않는다.
-- browser session refresh는 BE가 HttpOnly cookie와 encrypted refresh token으로 처리한다.
-- FE는 refresh token을 저장하지 않고, refresh 불가 상태에서 반환되는 401만 처리한다.
+`useSessionQuery`가 `/api/v1/me`의 authority다. Session query는 중복 401 처리를 피한다. 로그인·401/503·server-side refresh 동작은 [Auth](02-data-and-flows.md#auth)를 따른다. Browser V1에 API key를 보내지 않는다.
 
 ## React Query
 
-- query key는 `api/queryKeys.ts`에 둔다.
-- cold tree 복원은 cache가 없는 root/expanded folder의 첫 page를 최대 16개씩 batch 조회하고, 요청 중 children invalidation이 없었던 경우에만 기존 folder별 children cache에 채운다.
-- children query는 local mutation과 forward sync가 명시적으로 reset하므로 observer mount만으로 재조회하지 않는다.
-- 구조 변경은 Recent와 영향받은 parent children의 continuation page를 버리고
-  활성 observer의 첫 page만 다시 읽는다.
-- folder rename/move/recursive delete는 descendant path가 바뀌므로 해당 Space의 node/children/path cache family를 invalidate한다.
-- 동일 node가 node/Recent/children/path cache에 있으면 공통 cache updater로
-  함께 갱신한다. Collection cache에는 compact summary field만 유지한다.
-- tree/Recent collection은 `view=summary`를 사용한다. Editor store에는 summary를
-  넣지 않고 canonical node query 결과만 넣는다.
-- external sync는 typed parent 범위로 invalidate하고, 유효하지 않은 token만 file-related cache family fallback을 사용한다.
-- active Space 전체 invalidation은 수동 refresh에만 사용한다.
-- global mutation error는 toast로 보여준다.
-- session query는 중복 401 처리를 피한다.
+- Query key는 `api/queryKeys.ts`에 둔다.
+- Cold tree의 cache 없는 root/expanded folder 첫 page를 최대 16개씩 batch 조회한다. 요청 중 children invalidation이 없었을 때만 folder별 cache에 채운다.
+- Children은 mutation/forward sync가 명시적으로 reset하므로 observer mount만으로 재조회하지 않는다.
+- 구조 변경은 Recent와 영향받은 parent children의 continuation을 버리고 active observer의 첫 page만 읽는다.
+- Folder rename/move/recursive delete는 descendant path가 바뀌므로 해당 Space의 node/children/path cache family를 invalidate한다.
+- 공통 updater로 node/Recent/children/path의 같은 Node를 갱신한다. Collection은 `view=summary`와 compact field만, editor store는 canonical node query 결과만 사용한다.
+- External sync는 typed parent 범위로 invalidate하고 invalid token만 file-related cache family로 fallback한다. Active Space 전체 invalidation은 수동 refresh에만 쓴다.
+- Global mutation error는 toast로 표시한다.
 
 ## External sync
 
-Dashboard sync는 active Space 단위 polling + focus/reconnect refetch만 사용한다.
-WebSocket과 SSE는 사용하지 않는다.
+Active Space polling + focus/reconnect refetch를 사용하며 WebSocket/SSE는 없다. Polling은 `document.visibilityState === "visible"`에서만 실행한다.
 
-Polling은 `document.visibilityState === "visible"`일 때만 돈다.
+| 상황 | Token / interval |
+|---|---|
+| 첫 요청 | Latest event ID를 baseline으로 설정, 과거 이력 재생 안 함; 30초 |
+| 변경 없음 | 30 → 60 → 120 → 300초 cap, 각 ±5초 |
+| 변경/resync/error, 화면 복귀, focus/reconnect, Space 전환 | 30초로 reset |
+| Forward sync | 마지막 적용 ID 이후 event를 오름차순으로 모든 page 수신 후 token 전진; 같은 parent invalidation 병합 |
+| Token retention 초과 | node/children/text/file/path/preview cache만 한 번 재동기화 |
 
-| Query | Interval |
-|---|---:|
-| active Space forward file-change sync | idle 30s → 60s → 120s → 300s cap, each ±5s |
+Opened node·Recent·expanded folder는 개별 polling하지 않는다. Folder/Text/File 모두 freshness를 적용하고 opened node가 404면 group을 비운다. Text body는 직접 polling하지 않고 change event로 query를 invalidate한다.
 
-규칙:
-
-- 첫 요청은 현재 latest event ID를 baseline token으로 설정하고 과거 이력을 재생하지 않는다.
-- 첫 baseline과 reset 직후의 polling interval은 30초다.
-- 변경이 없는 응답마다 interval을 한 단계 늘리고 300초에서 유지한다.
-- 변경/resync/error, 화면 복귀, focus/reconnect, active Space 전환은 interval을 30초로 reset한다.
-- 이후에는 마지막 적용 ID 이후의 event를 오름차순으로 모두 가져온다.
-- 여러 page는 전부 받은 뒤 token을 전진시키며 같은 parent invalidation은 한 번으로 병합한다.
-- token이 retention 범위를 벗어나면 node/children/text/file/path/preview cache만 한 번 재동기화한다.
-- opened node, Recent, expanded folder는 개별 polling을 하지 않는다.
-- opened node freshness는 folder/text/file 모두에 적용한다.
-- opened node가 404면 editor group을 비운다.
-- text body는 직접 polling하지 않는다.
-- text change event가 해당 node의 text content query를 invalidate한다.
-- 같은 렌더 단계에서 요청된 Markdown image path는 64개 또는 UTF-8 16 KiB 단위로 합쳐 한 번에 조회한다.
-- Markdown image 결과는 path별 query cache에 저장하고, ready URL은 node ID별 preview cache에도 공유한다.
-- batch 응답 순서와 개수가 요청 계약과 다르면 결과를 캐시하지 않는다.
+Markdown image path는 같은 렌더 단계에서 최대 64개 또는 UTF-8 16 KiB로 batch 조회한다. Path별 query cache와 ready URL의 Node별 preview cache를 공유한다. 응답 순서/개수가 계약과 다르면 캐시하지 않는다. 표시·실패 처리는 [Markdown image preview](02-data-and-flows.md#markdown-image-preview)를 따른다.
 
 ## Zustand
 
-Zustand가 소유하는 것:
-
-- active space id.
-- active editor group.
-- editor groups.
-- layout visibility/size.
-- theme.
-- section open/ratio.
-
-Zustand가 소유하지 않는 것:
-
-- node collection.
-- text body.
-- file content.
-- API key secret.
-
-규칙:
-
-- 일부 Zustand state는 browser-local storage helper를 통해 저장한다.
-- 저장 수명과 reset 범위는 이 문서에 중복 정의하지 않고 `02-data-and-flows.md`의 상태 분류를 따른다.
+Active Space/group, editor groups, layout visibility/size, theme, section open/ratio를 소유한다. Node collection, Text body, File content, API key secret은 넣지 않는다. Browser-local 저장은 [State ownership](#state-ownership)의 정본을 따른다.
 
 ## Visual source
 
-실제 token 정본은 코드다.
-
-```text
-frontend/web/src/design/theme.css
-```
-
-문서는 role만 고정한다.
+Token 값의 정본은 `frontend/web/src/design/theme.css`다. 문서는 role만 고정한다.
 
 | Role | CSS variable |
 |---|---|
-| background | `--ng-bg` |
-| surface | `--ng-surface` |
-| editor | `--ng-editor` |
-| panel | `--ng-panel` |
-| border | `--ng-border` |
-| seam | `--ng-seam` |
-| selection | `--ng-selection` |
-| hover | `--ng-hover` |
-| text | `--ng-text` |
-| muted | `--ng-muted` |
-| faint | `--ng-faint` |
-| primary | `--ng-primary` |
-| danger/success/warning | `--ng-danger`, `--ng-success`, `--ng-warning` |
+| background / surface / editor / panel | `--ng-bg`, `--ng-surface`, `--ng-editor`, `--ng-panel` |
+| border / seam / selection / hover | `--ng-border`, `--ng-seam`, `--ng-selection`, `--ng-hover` |
+| text / muted / faint / primary | `--ng-text`, `--ng-muted`, `--ng-faint`, `--ng-primary` |
+| danger / success / warning | `--ng-danger`, `--ng-success`, `--ng-warning` |
 
 ## Visual rules
 
-- Light mode는 brand paper와 cool-neutral surface.
-- Dark mode는 brand ink와 graphite 계열.
-- 읽기 영역은 가장 깨끗한 surface로 둔다.
-- 불필요한 nested card를 만들지 않는다.
-- primary color는 selected state와 primary action에만 쓴다.
-- hover/focus 시 클릭 가능성이 보여야 한다.
-- 일반 텍스트는 WCAG 2.2 AA 4.5:1, 의미 있는 UI 경계와 포커스는 3:1 이상을 유지한다.
-- 상태는 색상만으로 전달하지 않고 text, icon, shape 중 하나를 함께 사용한다.
-- 브랜드 자산은 제품 식별에만 사용하고 기능 icon은 Lucide로 통일한다.
-- UI font는 Apple/system sans stack.
-- Space Library 스크린샷 기준 이미지는 Linux CI의 시각적 회귀 검사에 사용한다. 운영체제별 시스템 글꼴의 모양을 동일하게 보장하는 기준은 아니다.
-- editor/code font는 monospace stack.
-- 붙어 있는 Workbench control과 row는 4px, section surface는 6px radius를 사용한다. 독립 입력 필드는 8px을 사용한다.
-- 독립 card는 16px, 중앙 modal은 8px radius를 사용한다. Panel은 section surface 규칙을 따른다.
-- shadow는 popover/dialog/focus에만 사용한다.
+Palette, typography, 상태 표시, 접근성은 [DESIGN.md](../../DESIGN.md)가 정본이다.
+
+- Space Library 스크린샷 기준은 Linux CI의 회귀 검사다. OS별 시스템 글꼴 모양의 동일성을 보장하지 않는다.
+- Workbench control/row 4px, section surface와 Panel 6px, 독립 입력·중앙 modal 8px, 독립 card 16px radius.
+- Shadow는 popover/dialog/focus에만 사용한다.
 
 ## Area style
 
 | Area | 규칙 |
 |---|---|
-| TitleBar | 중앙은 비우고 layout/theme controls는 오른쪽에 둔다 |
-| ActivityRail | selected space, add-space, settings 위치를 명확히 둔다 |
-| PrimarySidebar | source-list density, row border 없음, subtle hover/selected |
-| EditorArea | plain text는 메모처럼, markdown frontmatter/code/mermaid/structured preview 지원 |
-| AuxiliarySidebar | 빈 Inspector도 보여주고 metadata warning은 과하게 강조하지 않는다 |
+| TitleBar | 중앙은 비우고 layout/theme controls는 오른쪽 |
+| ActivityRail | Selected space, add-space, settings 위치 명확히 표시 |
+| PrimarySidebar | Source-list density, row border 없음, subtle hover/selected |
+| EditorArea | Plain text는 메모처럼, markdown frontmatter/code/mermaid/structured preview |
+| AuxiliarySidebar | 빈 Inspector도 표시, metadata warning 과도한 강조 금지 |
 
 ## Brand assets
 
-- 정본: `frontend/web/public/brand/`
-- 워드마크는 호스트 폰트에 의존하지 않는 SVG path로 유지한다.
-- 32px 미만 제품 표시는 app icon을 사용한다.
-- 32px 이상에서는 symbol 또는 horizontal lockup을 사용한다.
-- `pnpm --dir frontend/web export:icons`로 favicon, Apple touch, PWA, maskable, Windows tile 출력을 다시 생성한다.
-- 제품명은 항상 `NoteGate`로 쓴다.
-- 로그인 CTA는 `Continue with Google`로 표시하고 AuthGate를 사용자-facing provider로 노출하지 않는다.
-- Google G는 `frontend/web/public/google-g.png`의 Google 공식 배포본을 사용한다.
-- Google CTA의 크기, 색상, pill shape, Roboto/Arial font stack은 Google 공식 HTML button configurator 출력을 따른다.
-- 자세한 제품 및 접근성 결정은 root `DESIGN.md`를 따른다.
+| 항목 | 정본·규칙 |
+|---|---|
+| 자산 | `frontend/web/public/brand/`; wordmark는 host font에 의존하지 않는 SVG path |
+| 크기 | 32px 미만 app icon, 이상 symbol/horizontal lockup |
+| 출력 | `pnpm --dir frontend/web export:icons`: favicon, Apple touch, PWA, maskable, Windows tile |
+| 제품명 | `NoteGate` |
+| 로그인 | `Continue with Google`; AuthGate를 사용자 provider로 노출하지 않음 |
+| Google G | `frontend/web/public/google-g.png` 공식 배포본 |
+| Google CTA | 공식 HTML button configurator의 크기·색상·pill shape·Roboto/Arial stack |
+
+제품·접근성 결정은 [DESIGN.md](../../DESIGN.md)를 따른다.
 
 ## Tests
-
-필수 확인:
 
 ```text
 pnpm --filter web typecheck
@@ -178,14 +105,4 @@ pnpm --filter web build
 pnpm --filter web test:e2e
 ```
 
-화면 변경은 desktop `1440×900`, tablet `900×1024`, mobile `390×844`에서 light/dark 모드를 모두 확인한다. 로그인과 reflow는 `320 CSS px` 최소 폭도 추가 확인한다.
-
-우선 테스트 대상:
-
-- pure helper.
-- state reducer.
-- auth boundary.
-- settings/key manager.
-- editor preview/parser.
-
-Playwright smoke는 실제 layout, hover, drag, split pane, browser session이 필요할 때만 사용한다.
+화면 변경은 desktop `1440×900`, tablet `900×1024`, mobile `390×844`의 light/dark와 login/reflow의 최소 `320 CSS px`를 확인한다. Pure helper, reducer, auth boundary, settings/key manager, preview/parser를 우선 검증한다. Playwright는 실제 layout·hover·drag·split·browser session이 필요한 경우에 사용한다.

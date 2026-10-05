@@ -1,33 +1,22 @@
 # Observability
 
-NoteGate exposes process-local Prometheus metrics on each active process control plane when
-`NOTEGATE_METRICS_ENABLED=true`. Public/worker processes use their application listener;
-`search` mode uses the private search listener. Metrics are disabled by default. When disabled,
-`/metrics` is not registered and the HTTP middleware skips metric recording.
-Every exported series carries the bounded global label `process_mode`, whose value is the configured
-process mode: `all`, `api`, `search`, `worker`, or `reconciler`.
+Metrics are process-local, enabled only by `NOTEGATE_METRICS_ENABLED=true` (default: disabled). When disabled, `/metrics` is not registered and the HTTP middleware skips recording. Every series has `process_mode=all|api|search|worker|reconciler`.
 
-Combined `all`/local `api` mode intentionally exposes one process-local scrape endpoint on the
-public listener. Search operation and cache metrics are recorded in the shared process recorder and
-appear there; the private listener does not register a duplicate `/metrics`. A standalone `search`
-process exposes its scrape endpoint on the private listener instead.
+| Process | Scrape endpoint |
+|---|---|
+| Combined `all` / local `api` | Public listener; shared Search/cache recorder, no duplicate private `/metrics` |
+| Standalone `search` | Private Search listener |
+| Other active roles | Application control-plane listener |
 
-`/metrics` is a control-plane route. It has the control-plane timeout and is excluded
-from the data-plane body limit and rate limit. It is not an authenticated user API;
-deployments must expose it only to a trusted monitoring network.
+`/metrics` uses the control-plane timeout, outside data-plane body/rate limits. It is unauthenticated and must be exposed only to a trusted monitoring network.
 
 ## HTTP RED metrics
 
-```text
-notegate_http_requests_total
-  labels: method, route, status_class
-
-notegate_http_request_duration_seconds
-  labels: method, route, status_class
-
-notegate_http_requests_in_flight
-  labels: method, route
-```
+| Metric | Labels |
+|---|---|
+| `notegate_http_requests_total` | `method, route, status_class` |
+| `notegate_http_request_duration_seconds` | `method, route, status_class` |
+| `notegate_http_requests_in_flight` | `method, route` |
 
 - `route` is the Axum route template, for example
   `/api/v1/spaces/{space_id}/nodes/{node_id}`.
@@ -49,16 +38,11 @@ MCP tool dispatch and Command API requests share one bounded command-invocation
 metric family. The Command API surface is labelled `cli` because it is the
 machine JSON surface used by `notegate-cli`.
 
-```text
-notegate_command_invocations_total
-  labels: surface, tool, outcome
-
-notegate_command_invocation_duration_seconds
-  labels: surface, tool, outcome
-
-notegate_command_invocations_in_flight
-  labels: surface, tool
-```
+| Metric | Labels |
+|---|---|
+| `notegate_command_invocations_total` | `surface, tool, outcome` |
+| `notegate_command_invocation_duration_seconds` | `surface, tool, outcome` |
+| `notegate_command_invocations_in_flight` | `surface, tool` |
 
 - `surface` is `mcp` or `cli`.
 - `tool` is one of `me`, `read`, `search`, `write`, `manage`,
@@ -72,17 +56,13 @@ notegate_command_invocations_in_flight
 
 ## Resource utilization metrics
 
-```text
-notegate_db_pool_connections
-  labels: pool (primary, read), state (in_use, idle)
-
-notegate_db_pool_max_connections
-  labels: pool (primary, read)
-
-notegate_search_body_cache_size_bytes
-notegate_search_body_cache_capacity_bytes
-notegate_search_body_cache_entries
-```
+| Metric | Labels |
+|---|---|
+| `notegate_db_pool_connections` | `pool (primary, read), state (in_use, idle)` |
+| `notegate_db_pool_max_connections` | `pool (primary, read)` |
+| `notegate_search_body_cache_size_bytes` | — |
+| `notegate_search_body_cache_capacity_bytes` | — |
+| `notegate_search_body_cache_entries` | — |
 
 DB pool gauges are read when `/metrics` is scraped. `read` is emitted only when the process owns a
 separate read pool; an aliased read handle is reported once as `primary`. Search cache gauges are initialized by the
@@ -99,33 +79,16 @@ waits and `notegate_db_pool_acquire_timeouts_total` counts acquisition timeouts.
 
 ## Background job metrics
 
-Background runtime은 active process listener의 `/metrics`에 metric을 함께 제공한다. `NOTEGATE_METRICS_ENABLED=true`일 때만 기록과 노출을 활성화한다.
-
-```text
-notegate_background_jobs
-  labels: kind, state
-
-notegate_background_job_oldest_ready_age_seconds
-  labels: kind
-
-notegate_background_jobs_in_flight
-  labels: kind
-
-notegate_background_job_attempts_total
-  labels: kind, outcome
-
-notegate_background_job_transitions_total
-  labels: kind, transition
-
-notegate_background_job_state_transition_errors_total
-  labels: kind, operation
-
-notegate_background_job_queue_errors_total
-  labels: operation
-
-notegate_background_job_duration_seconds
-  labels: kind
-```
+| Metric | Labels |
+|---|---|
+| `notegate_background_jobs` | `kind, state` |
+| `notegate_background_job_oldest_ready_age_seconds` | `kind` |
+| `notegate_background_jobs_in_flight` | `kind` |
+| `notegate_background_job_attempts_total` | `kind, outcome` |
+| `notegate_background_job_transitions_total` | `kind, transition` |
+| `notegate_background_job_state_transition_errors_total` | `kind, operation` |
+| `notegate_background_job_queue_errors_total` | `operation` |
+| `notegate_background_job_duration_seconds` | `kind` |
 
 - `kind`는 API background runtime에 등록된 bounded job kind다. Lease 복구 중 발견한 미등록 kind는 `unregistered`로 합친다.
 - `state`는 `ready`, `delayed`, `running`, `lease_expired`, `dead` 중 하나다. 90일간 보관되는 `succeeded` 이력은 scrape 비용이 누적되지 않도록 gauge에서 제외한다.
@@ -140,16 +103,11 @@ notegate_background_job_duration_seconds
 
 ## Metadata write-behind metrics
 
-```text
-notegate_metadata_write_flushes_total
-  labels: outcome
-
-notegate_metadata_write_flush_duration_seconds
-  labels: outcome
-
-notegate_metadata_write_items_total
-  labels: kind, disposition
-```
+| Metric | Labels |
+|---|---|
+| `notegate_metadata_write_flushes_total` | `outcome` |
+| `notegate_metadata_write_flush_duration_seconds` | `outcome` |
+| `notegate_metadata_write_items_total` | `kind, disposition` |
 
 - `outcome` is `success`, `error`, or `timeout`.
 - `kind` is `api_key`, `browser_session`, or `media_type`.
@@ -161,33 +119,23 @@ notegate_metadata_write_items_total
 
 Metric labels use only bounded domains declared for each family in this document. Allowed values come from fixed enums such as process mode, method, status class, outcome, state, operation and stage, or from bounded code-registered catalogs such as route templates, tool names, job kinds and reconciler kinds. New metrics define their label domains here before implementation.
 
-Labels do not derive from user, request or content data. IDs, raw paths and query strings, search input and cursors, filenames, content and payloads, and error or exception text belong in structured logs or traces. Request and trace IDs are not metric labels.
+Labels must not derive from user, request, or content data. They must not contain IDs, raw paths/query strings, search inputs/cursors, filenames, content/payloads, or error/exception text. Request and trace IDs are not labels. Logs/traces follow the [security data policy](security.md#기본-원칙).
 
 ## Reconciliation 메트릭
 
-```text
-notegate_reconciliation_active
-  labels: kind
-
-notegate_reconciliation_runs_total
-  labels: kind, outcome
-
-notegate_reconciliation_duration_seconds
-  labels: kind, outcome
-
-notegate_reconciliation_last_completed_timestamp_seconds
-  labels: kind
-
-notegate_reconciliation_last_success_timestamp_seconds
-  labels: kind
-```
+| Metric | Labels |
+|---|---|
+| `notegate_reconciliation_active` | `kind` |
+| `notegate_reconciliation_runs_total` | `kind, outcome` |
+| `notegate_reconciliation_duration_seconds` | `kind, outcome` |
+| `notegate_reconciliation_last_completed_timestamp_seconds` | `kind` |
+| `notegate_reconciliation_last_success_timestamp_seconds` | `kind` |
 
 - `kind`는 `system.purge`, `object_storage.cleanup`,
   `background_jobs.lease_recovery`, `background_jobs.history_retention` 중 하나다.
 - `outcome`은 `succeeded`, `failed`, `timed_out`, `panicked`, `cancelled`,
   `lock_held`, `lock_error` 중 하나다.
 - 실행 시간은 advisory lock을 획득한 결과에만 기록한다.
-- ID, payload, 파일 이름, 문서 본문, 오류 문구는 metric label로 사용하지 않는다.
 - `active`는 process-local gauge이며 등록 시 kind별 `0` series를 만든다. Fleet 상태는 `sum by (kind)`으로 집계하며 advisory lock이 정상일 때 값은 `0` 또는 `1`이다.
 - `runs_total`은 process-local counter다. Fleet 실행 수는 `sum by (kind)`으로 replica별 `increase`를 합산한다. `max`는 실행 수를 누락하므로 사용하지 않는다.
 - `duration_seconds`는 process-local histogram이다. Fleet percentile은 먼저 `sum by (kind, le)`로 replica별 bucket 증가량을 합산한 뒤 `histogram_quantile`을 적용한다. Replica별 percentile의 평균이나 최댓값을 사용하지 않는다.
@@ -199,37 +147,19 @@ notegate_reconciliation_last_success_timestamp_seconds
 
 ## Search metrics
 
-Search metrics are recorded only when `NOTEGATE_METRICS_ENABLED=true`. Disabled
-metrics do not start search timers or update counters.
+Disabled metrics do not start search timers or update counters.
 
-```text
-notegate_search_operations_total
-  labels: operation, mode, outcome
-
-notegate_search_operation_duration_seconds
-  labels: operation, mode, outcome
-
-notegate_search_stage_duration_seconds
-  labels: operation, stage
-
-notegate_search_match_reduce_duration_seconds
-  labels: operation, mode, line_mode
-
-notegate_search_candidates_total
-  labels: operation
-
-notegate_search_results_total
-  labels: operation
-
-notegate_search_scanned_bytes_total
-  labels: operation
-
-notegate_search_body_load_bytes_total
-  labels: operation
-
-notegate_search_cache_lookups_total
-  labels: result
-```
+| Metric | Labels |
+|---|---|
+| `notegate_search_operations_total` | `operation, mode, outcome` |
+| `notegate_search_operation_duration_seconds` | `operation, mode, outcome` |
+| `notegate_search_stage_duration_seconds` | `operation, stage` |
+| `notegate_search_match_reduce_duration_seconds` | `operation, mode, line_mode` |
+| `notegate_search_candidates_total` | `operation` |
+| `notegate_search_results_total` | `operation` |
+| `notegate_search_scanned_bytes_total` | `operation` |
+| `notegate_search_body_load_bytes_total` | `operation` |
+| `notegate_search_cache_lookups_total` | `result` |
 
 - `operation` is `find` or `grep`.
 - `mode` is `contains`, `glob`, `literal`, or `regex`; only modes valid for the
