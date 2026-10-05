@@ -225,6 +225,9 @@ test("small phones keep long reasons and restore controls usable and return focu
   await expect(comparison).toBeVisible();
   await expect(dialog.getByLabel("Change reason")).toContainText(purpose);
   expect((await comparison.boundingBox())?.height).toBeGreaterThanOrEqual(100);
+  await comparison.scrollIntoViewIfNeeded();
+  await expect(comparison.getByText("MTU: 1500", { exact: true })).toBeInViewport();
+  await page.screenshot({ path: "test-results/text-revisions-small-phone-comparison.png" });
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await dialog.getByRole("button", { name: "Restore this version" }).click();
   await expect(dialog.getByRole("button", { name: "Confirm restore" })).toBeInViewport();
