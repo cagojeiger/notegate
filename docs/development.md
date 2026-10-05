@@ -36,12 +36,12 @@ make dev-infra
 
 | Mode | 실행·DB 초기화 |
 |---|---|
-| `all` | Public HTTP + worker + reconciler + private Search; migration/usage bootstrap |
+| `all` | Public HTTP + worker + reconciler + local/remote Search; migration/usage bootstrap |
 | `api` | Public HTTP + local/remote Search; migration/usage bootstrap |
 | `worker` / `reconciler` | 해당 background runtime; schema/active crypto epoch read-only 검증 |
 | `search` | Private Search; schema/active crypto epoch read-only 검증 |
 
-Public/Search는 같은 process에서도 기본 `9191`/`9192`의 별도 socket이다. Worker/reconciler listener와 Search private listener는 `/health`, `/ready`, 활성화된 `/metrics`를 control plane으로 제공한다.
+Local Search가 있으면 Public/Search는 같은 process에서도 기본 `9191`/`9192`의 별도 socket이다. Worker/reconciler listener와 독립 `search` mode의 private listener는 `/health`, `/ready`, 활성화된 `/metrics`를 control plane으로 제공한다. Local Search를 포함한 `all`/`api`의 `/metrics`는 public listener에만 등록한다.
 
 ```text
 NOTEGATE_SEARCH_BIND_ADDR=127.0.0.1:9192  # default, all/api local search

@@ -4,7 +4,7 @@ Metrics are process-local, enabled only by `NOTEGATE_METRICS_ENABLED=true` (defa
 
 | Process | Scrape endpoint |
 |---|---|
-| Combined `all` / local `api` | Public listener; shared Search/cache recorder, no duplicate private `/metrics` |
+| Local Search를 포함한 `all` / `api` | Public listener; shared Search/cache recorder, no duplicate private `/metrics` |
 | Standalone `search` | Private Search listener |
 | Other active roles | Application control-plane listener |
 

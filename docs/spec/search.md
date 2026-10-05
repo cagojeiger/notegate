@@ -15,7 +15,7 @@ Runtime은 admission, service, 복호화 body cache와 telemetry를 소유한다
 
 | 실행 방식 | Listener와 호출 |
 |---|---|
-| `all` / local `api` | Public와 Search를 다른 socket으로 실행 |
+| Local Search를 포함한 `all` / `api` | Public와 Search를 다른 socket으로 실행 |
 | `search` | Private Search listener만 실행; 같은 image로 별도 pod 구성 가능 |
 | Remote Search | API의 `search_service_url`로 내부 service 호출 |
 
