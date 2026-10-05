@@ -39,6 +39,7 @@ pub struct FilesRepo {
     revision_session: Option<Uuid>,
     revision_source: &'static str,
     revision_purpose: Option<String>,
+    revision_time: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -103,6 +104,7 @@ impl FilesRepo {
             revision_session: None,
             revision_source: "unknown",
             revision_purpose: None,
+            revision_time: None,
         }
     }
 
@@ -115,6 +117,13 @@ impl FilesRepo {
         self.revision_source = source;
         self.revision_session = session;
         self.revision_purpose = None;
+        self
+    }
+
+    /// Pin the revision policy clock without changing the database or runtime clock.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn with_revision_time(mut self, now: DateTime<Utc>) -> Self {
+        self.revision_time = Some(now);
         self
     }
 
@@ -545,6 +554,7 @@ impl FilesRepo {
             created_by,
             revision_source: self.revision_source,
             revision_purpose: self.revision_purpose.as_deref(),
+            revision_time: self.revision_time,
             caps: self.limits,
         })
         .await
@@ -694,6 +704,7 @@ impl FilesRepo {
             revision_source: self.revision_source,
             revision_session: self.revision_session,
             revision_purpose: self.revision_purpose.as_deref(),
+            revision_time: self.revision_time,
             caps: self.limits,
         })
         .await

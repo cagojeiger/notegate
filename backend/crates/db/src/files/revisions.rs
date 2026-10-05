@@ -32,16 +32,19 @@ pub(crate) async fn capture(
     session: Option<Uuid>,
     purpose: Option<&str>,
     next_plain: bool,
+    now: Option<DateTime<Utc>>,
 ) -> Result<()> {
+    // Sample wall time once, after the write transaction acquired its locks.
     let head = sqlx::query(
-        "SELECT revision_id, revision_written_at, revision_author_id, revision_group_id, \
-         revision_group_started_at, revision_source, revision_purpose, clock_timestamp() AS saved_at, \
+        "WITH clock AS MATERIALIZED (SELECT COALESCE($6::timestamptz, clock_timestamp()) AS saved_at) \
+         SELECT revision_id, revision_written_at, revision_author_id, revision_group_id, \
+         revision_group_started_at, revision_source, revision_purpose, clock.saved_at, \
          ($3::uuid IS NOT NULL AND revision_session_id = $3 AND revision_author_id = $4 \
-          AND revision_source = $5 AND revision_written_at > clock_timestamp() - make_interval(secs => $6) \
-          AND revision_group_started_at > clock_timestamp() - make_interval(secs => $7)) AS same_group \
-         FROM text_objects WHERE space_id = $1 AND node_id = $2",
+          AND revision_source = $5 AND revision_written_at > clock.saved_at - make_interval(secs => $7) \
+          AND revision_group_started_at > clock.saved_at - make_interval(secs => $8)) AS same_group \
+         FROM text_objects CROSS JOIN clock WHERE space_id = $1 AND node_id = $2",
     ).bind(current.space_id).bind(current.node_id).bind(session).bind(actor).bind(source)
-        .bind(IDLE_SECONDS).bind(GROUP_SECONDS).fetch_one(&mut *tx).await.map_err(map_sqlx_error)?;
+        .bind(now).bind(IDLE_SECONDS).bind(GROUP_SECONDS).fetch_one(&mut *tx).await.map_err(map_sqlx_error)?;
     let id: Uuid = head.try_get("revision_id").map_err(map_sqlx_error)?;
     let saved_at: DateTime<Utc> = head.try_get("saved_at").map_err(map_sqlx_error)?;
     let same_group = next_plain
@@ -243,11 +246,25 @@ pub async fn read(
 /// One Space, at most 100 rows, one transaction. Uses the normal mutation lock order.
 /// Space deletion owns its cascade; skip deleted Spaces rather than obstructing purge.
 pub async fn cleanup(pool: &PgPool) -> Result<u64> {
-    let space: Option<Uuid> = sqlx::query_scalar(
-        "SELECT r.space_id FROM text_revisions r JOIN spaces s ON s.id = r.space_id \
-         WHERE r.cleanup_at <= now() AND s.deleted_at IS NULL ORDER BY r.cleanup_at, r.id LIMIT 1",
+    cleanup_with_time(pool, None).await
+}
+
+/// Exercise the same selection and deletion queries against an exact policy cutoff.
+#[cfg(any(test, feature = "test-util"))]
+pub async fn cleanup_at(pool: &PgPool, now: DateTime<Utc>) -> Result<u64> {
+    cleanup_with_time(pool, Some(now)).await
+}
+
+async fn cleanup_with_time(pool: &PgPool, now: Option<DateTime<Utc>>) -> Result<u64> {
+    // Keep selection and deletion on one cutoff, even if lock acquisition takes time.
+    let (cutoff, space): (DateTime<Utc>, Option<Uuid>) = sqlx::query_as(
+        "WITH clock AS MATERIALIZED (SELECT COALESCE($1::timestamptz, clock_timestamp()) AS cutoff) \
+         SELECT clock.cutoff, (SELECT r.space_id FROM text_revisions r JOIN spaces s ON s.id = r.space_id \
+         WHERE r.cleanup_at <= clock.cutoff AND s.deleted_at IS NULL ORDER BY r.cleanup_at, r.id LIMIT 1) \
+         FROM clock",
     )
-    .fetch_optional(pool)
+    .bind(now)
+    .fetch_one(pool)
     .await
     .map_err(map_sqlx_error)?;
     let Some(space) = space else { return Ok(0) };
@@ -259,10 +276,11 @@ pub async fn cleanup(pool: &PgPool) -> Result<u64> {
     checks::lock_space(&mut tx, space).await?;
     let deleted = sqlx::query(
         "DELETE FROM text_revisions WHERE id IN (SELECT id FROM text_revisions \
-         WHERE space_id = $1 AND cleanup_at <= now() ORDER BY cleanup_at, id LIMIT $2)",
+         WHERE space_id = $1 AND cleanup_at <= $3 ORDER BY cleanup_at, id LIMIT $2)",
     )
     .bind(space)
     .bind(CLEANUP_BATCH)
+    .bind(cutoff)
     .execute(&mut *tx)
     .await
     .map_err(map_sqlx_error)?

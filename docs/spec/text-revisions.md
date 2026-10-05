@@ -64,6 +64,10 @@ A cleanup failure retains extra history rather than losing a checkpoint. It can 
 
 ## Validation
 
+The database is the revision policy clock in production. Creation and each changed save sample it once after acquiring the write locks; cleanup samples one cutoff shared by candidate selection and deletion. The `test-util` feature exposes fixed-time injection for the same queries, without changing the database clock or accepting a client timestamp.
+
+CI checks one microsecond before, exactly at, and one microsecond after the 120-second idle, 600-second group, 24-hour intermediate and 30-day checkpoint boundaries. Continued writes isolate the group-age limit from the idle limit. Tests also verify replacement-based retention, unchanged current content during cleanup, transactional usage accounting, and that no-op, hash-conflict, quota-rejected and rolled-back writes do not refresh an editing group.
+
 CI exercises atomic rollback, no-op and competing writes, group boundaries, recent protection of old current content, repeated cleanup, expiration, quota accounting, cascade deletion, encrypted identity binding, access controls, write locks, encryption transitions, pagination and guarded restore. Local builds/tests are not required for this change.
 
 ## Web version history

@@ -5,6 +5,7 @@
 //! shared content byte budget — then inserts the node (and content row) with
 //! attribution = the caller.
 
+use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
 use notegate_core::security::PiiCrypto;
@@ -82,6 +83,7 @@ pub struct InsertTextArgs<'a> {
     pub caps: Limits,
     pub revision_source: &'static str,
     pub revision_purpose: Option<&'a str>,
+    pub revision_time: Option<DateTime<Utc>>,
 }
 
 pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)> {
@@ -97,6 +99,7 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
         caps,
         revision_source,
         revision_purpose,
+        revision_time,
     } = args;
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -138,11 +141,12 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
         node_row.id,
     )?;
     let doc_row = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
-            "INSERT INTO text_objects \
+            "WITH clock AS MATERIALIZED (SELECT COALESCE($17::timestamptz, clock_timestamp()) AS written_at) \
+         INSERT INTO text_objects \
             (node_id, space_id, storage_format, content_text, encrypted_payload, content_sha256, byte_len, line_count, \
              at_rest_encryption, content_ciphertext, content_nonce, content_enc_key_id, content_enc_version, \
-             created_by_account_id, updated_by_account_id, revision_source, revision_purpose) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14, $15, $16) \
+             created_by_account_id, updated_by_account_id, revision_source, revision_purpose, revision_written_at, revision_group_started_at) \
+         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14, $15, $16, clock.written_at, clock.written_at FROM clock \
          RETURNING {TEXT_COLUMNS}"
         )))
         .bind(node_row.id)
@@ -161,6 +165,7 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
         .bind(created_by)
         .bind(revision_source)
         .bind(revision_purpose)
+        .bind(revision_time)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;

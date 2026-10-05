@@ -4,6 +4,7 @@
 //! the space byte budget for the replacement, updates `text_objects` content +
 //! metrics + attribution, and bumps the node's `updated_by`/`updated_at`.
 
+use chrono::{DateTime, Utc};
 use notegate_core::limits::Limits;
 use notegate_core::security::PiiCrypto;
 use notegate_core::{Error, Result};
@@ -33,6 +34,7 @@ pub struct SaveTextContentArgs<'a> {
     pub revision_session: Option<Uuid>,
     pub revision_source: &'static str,
     pub revision_purpose: Option<&'a str>,
+    pub revision_time: Option<DateTime<Utc>>,
 }
 
 /// Replace a live text's content + metrics, attributing the update to
@@ -51,6 +53,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         revision_session,
         revision_source,
         revision_purpose,
+        revision_time,
         caps,
     } = args;
 
@@ -158,6 +161,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
             &content.body,
             notegate_model::files::WriteTextBody::Plain(_)
         ),
+        revision_time,
     )
     .await?;
 
