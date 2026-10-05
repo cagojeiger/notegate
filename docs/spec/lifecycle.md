@@ -27,6 +27,7 @@ accounts.is_active=false
 accounts.deleted_at/deleted_by_account_id 설정
 owned agents deactivate
 owned agent API keys revoke
+owned browser sessions revoke
 owned agent connections disconnect
 ```
 

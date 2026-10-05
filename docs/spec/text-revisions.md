@@ -1,18 +1,18 @@
 # Text revisions
 
-Text revisions preserve recoverable bodies separately from audit events and live-text usage. The initial API supports plain and server-encrypted Text. Client-encrypted payloads are not recorded or decoded; history is unavailable while the current document uses client encryption. Binary attachments are out of scope.
+Text revisions preserve recoverable bodies separately from audit events and live-text usage. The API supports plain and server-encrypted Text. Client-encrypted payloads are not recorded or decoded; history is unavailable while the current document uses client encryption. Binary attachments are out of scope.
 
 ## Save and editing groups
 
-`write`, `append`, `patch`, and `edit` converge on `save_text_content`. After the existing checks, one transaction reserves history capacity, snapshots the old body, updates current content and body attribution/group metadata in one statement, and records the existing file-change event. Any failure rolls back all of these. Unchanged or conflicting saves add no history.
+`write`, `append`, `patch`, and `edit` converge on `save_text_content`. After validation, one transaction reserves history capacity, snapshots the old body, updates current content and body attribution/group metadata in one statement, and records the file-change event. Any failure rolls back all of these. Unchanged or conflicting saves add no history.
 
-Existing documents are backfilled with their last known author/time; pre-feature overwritten bodies cannot be recovered. New documents start with an independent initial state. Copying creates independent history; rename/move and encryption-policy changes create no body revision. Body attribution is stored separately from metadata `updated_at`.
+Only recorded revision bodies can be restored. New documents start with an independent initial state. Copying creates independent history; rename/move and encryption-policy changes create no body revision. Body attribution is stored separately from metadata `updated_at`.
 
-MCP and CLI write commands already require a top-level `purpose` (at most 200 characters). The shared command executor now attaches it to the resulting saved body as well as the existing invocation log. Creation records its purpose immediately; subsequent changed writes atomically carry the old body's purpose into its historical snapshot and record the new purpose on the current body. Failed/conflicting and unchanged saves do not replace the saved purpose. Sequence writes inherit their top-level purpose. Browser/raw REST writes without a command purpose and historical data from before this feature show no recorded reason; reasons are never reconstructed by guessing from timestamps or paths. Restore starts a new body with no inherited AI purpose. These caller-supplied reasons describe the declared intent, not independently verified reasoning.
+MCP and CLI write commands require a top-level `purpose` (at most 200 characters). The shared command executor records it on the saved body and invocation log. Creation records its purpose immediately; subsequent changed writes atomically carry the old body's purpose into its historical snapshot and record the new purpose on the current body. Failed/conflicting and unchanged saves do not replace the saved purpose. Sequence writes inherit their top-level purpose. Bodies without a recorded purpose show no reason; reasons are never reconstructed by guessing from timestamps or paths. Restore starts a new body with no inherited AI purpose. These caller-supplied reasons describe the declared intent, not independently verified reasoning.
 
 REST v1/v2 text mutations and command/MCP `write` inputs (direct and sequence) accept optional `edit_session_id` (UUID). Clients must use a new ID for a new editing session or AI operation. This identifier is a grouping hint, never an authorization credential. The server also requires the same document, authenticated account and transport channel. Backend callers with no channel use `unknown`.
 
-- Missing session ID: every changed save is independent. Existing clients remain compatible.
+- Missing session ID: every changed save is independent.
 - Same actor, channel and ID: continue only while the last content save is less than 120 seconds old and the group is less than 600 seconds old.
 - At either boundary, or when actor/channel/ID changes: start a new group, even if an old ID is reused.
 - Restore: independent group, never coalesced into ordinary edits.
@@ -32,7 +32,7 @@ Policy constants live together in `backend/crates/db/src/files/revisions.rs`:
 - When a changed save would exceed that budget, return `422` (`text_revision_storage_full`) and leave current content/history unchanged. Do not silently delete protected revisions or save without history. Identical saves remain no-ops.
 - Successful expiration/hard deletion releases the budget transactionally. Soft deletion hides history but retains it until normal expiration or document purge.
 
-The budget is intentionally separate from tier-dependent live text/file quotas and their existing recalculation. Operators can inspect `text_revision_usage` and compare it with `SUM(text_revisions.stored_bytes)` per Space. History bytes are not yet added to the frontend usage display.
+The budget is intentionally separate from tier-dependent live text/file quotas and their existing recalculation. Operators can inspect `text_revision_usage` and compare it with `SUM(text_revisions.stored_bytes)` per Space. The frontend usage display excludes history bytes.
 
 ## History API and restore
 
@@ -46,17 +46,17 @@ Lists return metadata only, newest first, with the shared `page` object (`limit`
 
 Revision metadata includes nullable `purpose`. Lists also return nullable `current` metadata (`content_sha256`, `purpose`) without reading or decrypting a body. The web modal displays the selected version's change reason, and shows the current reason only when its hash matches the comparison baseline. Missing reasons are displayed as `Not recorded`. Purpose is bounded, caller-supplied metadata under the same current document/Space access checks; it is stored as plaintext like the existing invocation purpose and must not contain secrets.
 
-The service checks current Space permission, document visibility and external-access policy for every call. A revision ID does not bypass document/Space scoping. Restore requires write permission and uses the existing guarded write path, including current write locks, format validation, quotas and encryption policy. A stale current hash returns 409. Restoring identical content is a no-op; otherwise the replaced current body is preserved. Restore does not rewind or erase history. Public v2/MCP history browsing tools remain later integrations; all existing mutation surfaces already record history.
+The service checks current Space permission, document visibility and external-access policy for every call. A revision ID does not bypass document/Space scoping. Restore requires write permission and uses the existing guarded write path, including current write locks, format validation, quotas and encryption policy. A stale current hash returns 409. Restoring identical content is a no-op; otherwise the replaced current body is preserved. Restore does not rewind or erase history. History list/read/restore are Browser V1 endpoints; Public V2 and MCP expose no history browsing tools. All text mutation surfaces record revisions.
 
 ## Encryption
 
 All historical bodies, including those of otherwise plaintext documents, are AES-GCM encrypted with the configured server key. Authentication data binds Space, document and revision ID, preventing ciphertext from being substituted across revisions. Lists and cleanup do not decrypt bodies. Turning current-document encryption on/off never leaves plaintext history behind and does not change historical attribution.
 
-This reuses the existing single configured encryption-key model; it does not add key rotation or an old-key fallback. A key mismatch fails closed. Encryption-root replacement must account for historical bodies as well as existing encrypted data; simply changing/removing the key will make them unreadable. Backups must preserve the required key through their own retention window.
+Revision bodies use the configured encryption key without key rotation or an old-key fallback. A key mismatch fails closed. Encryption-root replacement must account for historical bodies as well as existing encrypted data; simply changing/removing the key will make them unreadable. Backups must preserve the required key through their own retention window.
 
 ## Reconciliation
 
-One `text_revisions.retention` kind uses the existing reconciliation runtime, schedule, advisory lock and metrics. No new queue, worker, crate, process or per-document timer is created.
+The `text_revisions.retention` kind runs in the shared reconciliation runtime with its schedule, advisory lock and metrics.
 
 Every ten minutes, process at most 100 eligible rows from one live Space in one transaction, using the existing Space mutation lock order. Indexes support due-time selection and per-Space cleanup. If rows were deleted, release the runtime lock and request a follow-up after one second. Lock acquisition is bounded to two seconds; failure/timeout retries on the next normal schedule. Space purge owns cascades for deleted Spaces.
 
@@ -68,37 +68,26 @@ The database is the revision policy clock in production. Creation and each chang
 
 CI checks one microsecond before, exactly at, and one microsecond after the 120-second idle, 600-second group, 24-hour intermediate and 30-day checkpoint boundaries. Continued writes isolate the group-age limit from the idle limit. Tests also verify replacement-based retention, unchanged current content during cleanup, transactional usage accounting, and that no-op, hash-conflict, quota-rejected and rolled-back writes do not refresh an editing group.
 
-CI exercises atomic rollback, no-op and competing writes, group boundaries, recent protection of old current content, repeated cleanup, expiration, quota accounting, cascade deletion, encrypted identity binding, access controls, write locks, encryption transitions, pagination and guarded restore. Local builds/tests are not required for this change.
+CI exercises atomic rollback, no-op and competing writes, group boundaries, recent protection of old current content, repeated cleanup, expiration, quota accounting, cascade deletion, encrypted identity binding, access controls, write locks, encryption transitions, pagination and guarded restore.
 
 ## Write cost and CI comparison
 
-Full replacement loads node and text metrics for preflight, without fetching/decrypting the previous body. The transaction still locks and loads that body to preserve the recoverable snapshot. Append, patch and edit retain their required content reads. Changed saves update current content and revision attribution together once; a trigger-based regression test checks the actual row-update count. No-op, conflict, rollback, quota, channel/session and encryption contracts are unchanged.
+Full replacement loads node and text metrics for preflight, without fetching/decrypting the previous body. The transaction still locks and loads that body to preserve the recoverable snapshot. Append, patch and edit retain their required content reads. Changed saves update current content and revision attribution together once; a trigger-based regression test checks the actual row-update count.
 
-Account-deletion safety still locks the active Space owner's account before locking the Space. Consequently, concurrent writes to different Spaces owned by the same user can also serialize. This change shortens work in that transaction; it does not remove that safety boundary.
+Account-deletion safety locks the active Space owner's account before the Space. Concurrent writes to different Spaces owned by the same user can therefore serialize.
 
 The `Text Write Performance` workflow compares a PR's base and candidate on one Linux runner and PostgreSQL 17 using the same ignored service benchmark. It builds the release profile once per revision, then alternates three paired trials. Cases cover 10 KiB, 100 KiB and 1 MiB bodies, plain/server encryption, sequential saves, four writers in one Space, different Spaces under one owner, and different owners. Each writer uses a separate document and performs two warmup saves followed by 20 changed saves through a four-connection pool. An untimed CHECKPOINT after warmup starts each case at the same checkpoint phase; durability remains enabled. This avoids carryover from earlier cases triggering WAL checkpoints in unrelated samples. History bodies/counts and usage are verified after timing. The summary and raw measurements are retained as `text-write-performance`.
 
-Measurements are service-call p95 and throughput for synthetic repeated-character bodies; they include pool/row-lock waits and crypto, but exclude HTTP middleware, production networking, real workload distributions and long-running cleanup. Reported figures are medians across three trial percentiles/rates. Timing is informational and has no noisy CI pass/fail threshold; compilation, fixture correctness and complete measurement coverage must pass. Local benchmarks are not required.
+Measurements are service-call p95 and throughput for synthetic repeated-character bodies; they include pool/row-lock waits and crypto, but exclude HTTP middleware, production networking, real workload distributions and long-running cleanup. Reported figures are medians across three trial percentiles/rates. Timing is informational and has no noisy CI pass/fail threshold; compilation, fixture correctness and complete measurement coverage must pass.
 
-## First deployment
+## Deployment compatibility
 
-The first rollout from a binary without revision recording requires a controlled write pause. Pre-feature writers neither preserve snapshots nor advance revision attribution; concurrent old/new writes and a rollback to a pre-feature writer cannot provide these history guarantees. Forward fixes retain the existing encryption root/key ID. This is a first-feature rollout requirement, not a new migration in the write optimization.
-
-1. Inspect the actual database's applied migration versions, backup/recovery readiness and `text_objects` size. A cheap size estimate is:
-
-   ```sql
-   SELECT reltuples::bigint AS estimated_rows,
-          pg_size_pretty(pg_total_relation_size(oid)) AS total_size
-   FROM pg_class WHERE oid = 'text_objects'::regclass;
-   ```
-
-   `estimated_rows` is planner statistics, not an exact count. Migration 0042 adds volatile random-UUID defaults, which rewrite the existing table/indexes, and then updates every existing text's attribution. ALTER TABLE holds an exclusive lock; migration time and temporary disk/WAL requirements depend on real data size. Rehearse on a representative restored database when the table is large. See [PostgreSQL ALTER TABLE](https://www.postgresql.org/docs/17/sql-altertable.html#SQL-ALTERTABLE-NOTES). CI's small migration fixture proves correctness, not production downtime.
-2. Pause ingress for text writes, drain in-flight mutations and terminate all pre-feature `all`/`api` writers. Updating a mutable image tag or relying on an overlapping rolling update does not establish this boundary.
-3. Start one new `api`/`all` process with traffic held; it owns migration application. Wait for schema readiness, then start/upgrade the other process roles. Do not edit/reapply an already recorded migration checksum.
-4. Verify a controlled document's guarded save, previous-body read and guarded restore, followed by history usage consistency and retention reconciliation. These checks create real revisions; choose an operational test document deliberately.
-5. Restore replicas/traffic and watch write-route latency/errors, DB-pool acquisition latency/timeouts, database lock waits, history capacity, and `text_revisions.retention` results. Fix forward rather than restarting pre-feature writers against newly recorded history.
-
-This runbook does not establish that any cluster has been migrated or deployed. Confirm release digest, GitOps desired digest, and running Pod `imageID` separately when performing the rollout.
+- Every active Text writer must support revision recording and body attribution. Do not run or roll back to writers that bypass these guarantees; a mutable tag or overlapping rollout alone does not prove compatibility.
+- Preserve the configured encryption root/key ID and recovery keys for retained revisions and backups.
+- `api`/`all` applies migrations; other roles start after schema readiness. Do not edit or reapply recorded migration checksums. Schema recovery follows the [database deployment contract](db.md#deployment-and-rollback).
+- Validate a controlled document's guarded save, revision read/restore, usage consistency and retention reconciliation. These operations create real revisions.
+- Monitor write latency/errors, DB-pool acquisition waits/timeouts, lock waits, history capacity and `text_revisions.retention` results.
+- Release digest, GitOps desired digest and running Pod `imageID` are separate deployment evidence.
 
 ## Web version history
 
@@ -106,6 +95,6 @@ The document header has a Version history button between Edit and More actions. 
 
 The modal loads metadata in 50-row pages and one selected body on demand. It compares a selected historical body with a separately fetched, stable current saved body. Comparison never uses an unsaved draft. Full version reuses existing format previews. Preview links do not navigate the active window, preserving any unsaved editor draft; users can copy a link address separately. Restore needs write permission, an unlocked document, no dirty draft or pending save, and a confirmation. After a successful restore, cancel older in-flight editor reads and publish the selected body and returned hash to the canonical text cache before closing the modal. Background reads refresh attribution and other metadata without replacing a new draft. A 409 asks the user to reload and review; it is never retried with a fresh hash automatically. A 422 `text_revision_storage_full` is a capacity error, not an overwrite prompt.
 
-Line comparison runs in a disposable module Worker with a two-second deadline, at most 256,000 UTF-16 code units, 1,500 combined source lines and 1,000,000 LCS cells. Exceeding a bound or Worker failure leaves Full version available. Wide screens align old and current source side by side; narrow screens show a unified view with explicit addition/removal markers. Historical bodies and comparison baselines are evicted when their query observers are gone. No extra polling, package dependency or server diff endpoint is added.
+Line comparison runs in a disposable module Worker with a two-second deadline, at most 256,000 UTF-16 code units, 1,500 combined source lines and 1,000,000 LCS cells. Exceeding a bound or Worker failure leaves Full version available. Wide screens align old and current source side by side; narrow screens show a unified view with explicit addition/removal markers. Historical bodies and comparison baselines are evicted when their query observers are gone. The modal uses no polling or server diff endpoint.
 
 CI covers lossless diff reconstruction, changed/inserted lines, newline differences, input bounds, lazy history loading, guarded restore, draft preservation, read-only/mobile access and stale-hash recovery. Browser-generated desktop/mobile screenshots are retained as the `text-revisions-ui` CI artifact.

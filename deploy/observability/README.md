@@ -154,9 +154,7 @@ packaging it:
   embedded in the JSON, so configure a Kubernetes-side folder explicitly if
   folder parity is required.
 
-If NoteGate later runs in more than one cluster, add a `cluster` variable and
-matcher before treating the aggregated Thanos datasource as a multi-cluster
-dashboard.
+Dashboard queries have no `cluster` selector. Scope the datasource to one cluster; the dashboard does not isolate clusters in an aggregated Thanos datasource.
 
 ## Validate changes
 

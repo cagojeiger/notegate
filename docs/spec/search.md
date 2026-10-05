@@ -59,7 +59,7 @@ Deadline은 ingress에서 한 번 설정한 30초를 monotonic clock으로 계�
 | 필수 필드 누락 / type 오류 | 거부 |
 | 기존 필드·enum | 이름, type, 의미 유지; 호환되지 않는 변경은 새 version path |
 
-선택 필드는 **Search 배포 → readiness 확인 → API 배포** 순서로 활성화한다. 날짜 없는 이전 API 요청도 새 Search가 처리한다.
+선택 필드는 **Search 배포 → readiness 확인 → API 배포** 순서로 활성화한다. 날짜 조건을 생략한 요청도 지원한다.
 
 API client는 서명된 status/body가 모순되거나 성공 status가 `200 OK`가 아니면 `search_unavailable`로 처리한다.
 

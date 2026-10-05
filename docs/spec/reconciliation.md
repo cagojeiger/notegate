@@ -65,7 +65,7 @@ system.purge (1시간 주기, 전체 실행 timeout 1시간)
 
 트랜잭션 분리는 실행 시간이나 프로세스 장애의 격리를 뜻하지 않는다. 앞의 묶음이 느리면 뒤의 묶음도 기다린다. 전체 timeout, 종료 또는 panic으로 실행이 중단되면 뒤의 묶음은 실행되지 않을 수 있고, 이미 커밋한 결과는 유지된다. 커밋 응답 중 연결이 끊기면 결과가 불확실할 수 있으므로 재실행은 현재 DB 상태를 기준으로 수렴한다.
 
-기존 보존 기간과 묶음별 SQL의 batch 제한은 유지한다. 한 번의 실행에서 남은 backlog는 다음 고정 주기에 처리하며, `system.purge`는 짧은 후속 실행을 요청하지 않는다. 화면에서 제외하는 논리 삭제와 S3 객체를 실제 삭제하는 `object_storage.cleanup`의 실행 방식도 바뀌지 않는다.
+보존 기간과 묶음별 SQL batch 상한은 `performance-limits.md`를 따른다. 실행에서 남은 backlog는 다음 고정 주기에 처리하며, `system.purge`는 짧은 후속 실행을 요청하지 않는다. 논리 삭제는 화면에서 자원을 제외하고, S3 물리 삭제는 `object_storage.cleanup`이 처리한다.
 
 각 묶음의 커밋 후 `purge.group_completed`에 `group`과 처리 건수를 기록하고, 오류는 `purge.group_failed`에 해당 `group`과 함께 기록한다. 모든 묶음이 성공한 경우에만 기존 `purge.completed`가 기록된다. 부분 성공을 전체 성공으로 보고하지 않는다.
 

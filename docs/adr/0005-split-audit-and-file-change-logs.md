@@ -2,7 +2,7 @@
 
 ## Context
 
-notegate는 사용자가 자기 계정과 space의 관리 변경을 확인하고 agent owner가 agent의 작업을 되돌아볼 수 있도록 durable한 작업 이력이 필요하다. 기존 테이블은 현재 상태와 `created_at`, `updated_at`, `deleted_at`, `revoked_at`, `disconnected_at` 같은 lifecycle marker를 보존하지만 append-only operation history를 제공하지 않는다.
+notegate는 사용자가 자기 계정과 space의 관리 변경을 확인하고 agent owner가 agent의 작업을 되돌아볼 수 있도록 durable한 작업 이력이 필요하다. Domain table은 현재 상태와 lifecycle marker를, event table은 append-only 작업 이력을 보관한다.
 
 이력에는 서로 다른 검토 목적이 있다.
 
