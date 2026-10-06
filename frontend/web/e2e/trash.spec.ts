@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { makeMe, makeSpace } from "../src/test/fixtures";
+import { makeSpace } from "../src/test/fixtures";
 import type { TrashItem } from "../src/api/trash";
 import { routeJsonApi } from "./support/api";
 import { usageResponse } from "./support/usage";
@@ -19,7 +19,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     let deletionRequests = 0;
     const meta = { limit: 50, returned: 0, has_more: false, next_cursor: null };
     await routeJsonApi(page, (url, request) => {
-      if (url.pathname === "/api/v1/me") return makeMe();
+      if (url.pathname === "/api/v1/me") return { account: { id: "user-1", kind: "user", display_name: "User" }, user: { email: "user@example.com" }, capabilities: { can_create_space: true, can_manage_agents: true } };
       if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
       if (url.pathname === "/api/v1/spaces") return { spaces: [space], page: meta };
       if (url.pathname === "/api/v1/me/trash") return { items: current ? [current] : [], page: meta };

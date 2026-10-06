@@ -908,6 +908,30 @@ async fn object_upload_round_trips_through_s3_presigned_urls()
     assert!(downloaded.status().is_success());
     assert_eq!(downloaded.bytes().await?.as_ref(), payload);
 
+    let repo = FilesRepo::new(db.pool.clone());
+    repo.soft_delete_node(space_id, node_id, caller.account_id(), false)
+        .await?;
+    run_cleanup(&db, &state).await;
+    assert_eq!(object_state(&db, upload.id).await?, "attached");
+    assert_eq!(
+        reqwest::get(get_url).await?.bytes().await?.as_ref(),
+        payload
+    );
+    let (status, _) = empty_request(
+        rest_app(state.clone(), caller.clone()),
+        "GET",
+        format!("/v1/spaces/{space_id}/files/{node_id}/content"),
+    )
+    .await?;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "trash content is not served through live access"
+    );
+    repo.restore_trashed_node(caller.account_id(), space_id, node_id)
+        .await?;
+    assert_eq!(object_state(&db, upload.id).await?, "attached");
+
     delete_attached_file(&db, &state, &caller, space_id, node_id).await?;
 
     assert_eq!(object_state(&db, upload.id).await?, "deleted");

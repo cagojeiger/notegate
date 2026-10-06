@@ -358,3 +358,60 @@ async fn purge_restore_race_never_leaves_a_live_file_queued_for_deletion() -> Te
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn space_restore_obeys_current_owner_limits_and_conflicts() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, _) = space_with_root(&db.pool, "trash-space-quota").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let spaces = SpaceRepo::new(db.pool.clone());
+    spaces.delete_space(space, owner, owner).await?;
+    let replacement = spaces
+        .create_space(
+            owner,
+            &notegate_model::CreateSpace {
+                name: "ws-trash-space-quota".to_owned(),
+            },
+        )
+        .await?;
+    assert!(matches!(
+        repo.restore_trashed_space(owner, space).await,
+        Err(Error::Conflict(_))
+    ));
+    common::set_user_tier(&db.pool, owner, "system_max").await?;
+    assert!(
+        matches!(
+            repo.restore_trashed_space(owner, space).await,
+            Err(Error::Conflict(_))
+        ),
+        "name collision still rejected with spare quota"
+    );
+    spaces.delete_space(replacement.id, owner, owner).await?;
+    repo.restore_trashed_space(owner, space).await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn locked_parent_prevents_restore() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "trash-locked-parent").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let item = folder(&repo, owner, space, root, "notes").await?;
+    repo.soft_delete_node(space, item.id, owner, true).await?;
+    sqlx::query("UPDATE nodes SET write_locked = true WHERE id = $1")
+        .bind(root)
+        .execute(&db.pool)
+        .await?;
+    assert!(matches!(
+        repo.restore_trashed_node(owner, space, item.id).await,
+        Err(Error::WriteLocked { .. })
+    ));
+    assert!(repo.find_node(space, item.id).await?.is_none());
+    db.cleanup().await;
+    Ok(())
+}
