@@ -14,6 +14,7 @@ pub mod connections;
 pub mod cursor;
 pub mod error;
 pub mod files;
+pub mod history;
 pub mod identity;
 pub mod link_graph;
 mod pagination;
