@@ -42,6 +42,19 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     await expect(dialog.getByText("meeting.md", { exact: true })).toBeVisible();
     await expect(dialog.getByText("/notes/meeting.md", { exact: false })).toBeVisible();
     await testInfo.attach(`trash-${viewport.name}`, { body: await page.screenshot({ path: `test-results/trash-${viewport.name}.png` }), contentType: "image/png" });
+    const restorePath = "**/api/v1/me/trash/spaces/*/nodes/deleted-node/restore";
+    const conflictMessage = "a node named 'meeting.md' already exists in this folder";
+    await page.route(restorePath, (route) => route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "conflict", kind: "conflict", message: conflictMessage })
+    }));
+    await dialog.getByRole("button", { name: "Restore meeting.md" }).click();
+    await expect(dialog.getByRole("alert")).toHaveText(conflictMessage);
+    await expect(dialog.getByText("meeting.md", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Restore meeting.md" })).toBeEnabled();
+    await page.screenshot({ path: `test-results/trash-${viewport.name}-restore-conflict.png` });
+    await page.unroute(restorePath);
     await dialog.getByRole("button", { name: "Restore meeting.md" }).click();
     await expect(dialog.getByText("Trash is empty.")).toBeVisible();
     current = item;
