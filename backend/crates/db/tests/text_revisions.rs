@@ -7,7 +7,7 @@
 )]
 mod common;
 use chrono::{DateTime, Duration, Utc};
-use common::{TestDb, space_with_root};
+use common::{TestDb, legacy_space_with_root, space_with_root};
 use notegate_core::{Error, security::PiiCrypto};
 use notegate_db::{FilesRepo, TextMutationKind, files::revisions};
 use notegate_model::files::{StoredContent, WriteTextBody};
@@ -780,7 +780,7 @@ async fn migration_backfills_existing_documents_without_inventing_history() -> T
     let Some(db) = TestDb::setup_before(42).await? else {
         return Ok(());
     };
-    let (actor, space, root) = space_with_root(&db.pool, "revision-migration").await?;
+    let (actor, space, root) = legacy_space_with_root(&db.pool, "revision-migration").await?;
     let repo = FilesRepo::new(db.pool.clone());
     // Model the old binary's schema directly; the current writer requires the latest migration.
     let node_id: Uuid = sqlx::query_scalar("INSERT INTO nodes (space_id,parent_id,name,kind,created_by_account_id,updated_by_account_id) VALUES ($1,$2,'legacy.md','text',$3,$3) RETURNING id")
@@ -795,6 +795,8 @@ async fn migration_backfills_existing_documents_without_inventing_history() -> T
     let backfilled: bool=sqlx::query_scalar("SELECT revision_author_id=updated_by_account_id AND revision_written_at=updated_at FROM text_objects WHERE node_id=$1").bind(node_id).fetch_one(&db.pool).await?;
     assert!(backfilled);
     db.apply_migration(43).await?;
+    db.apply_migration(44).await?;
+    db.apply_migration(45).await?;
     assert!(
         repo.list_text_revisions(space, node_id, 10, None)
             .await?

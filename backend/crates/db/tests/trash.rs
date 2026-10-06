@@ -8,7 +8,7 @@
 mod common;
 
 use chrono::Duration;
-use common::{TestDb, attach_file, insert_user_account, space_with_root};
+use common::{TestDb, attach_file, insert_user_account, legacy_space_with_root, space_with_root};
 use notegate_core::{Error, limits::Limits};
 use notegate_db::{AgentRepo, AuditEventRepo, ConnectionRepo, FilesRepo, PurgeRepo, SpaceRepo};
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
@@ -33,6 +33,41 @@ async fn folder(
         owner,
     )
     .await
+}
+
+#[tokio::test]
+async fn operation_migration_preserves_legacy_trash_without_inventing_event_links() -> TestResult {
+    let Some(db) = TestDb::setup_before(45).await? else {
+        return Ok(());
+    };
+    let (owner, space, root) =
+        legacy_space_with_root(&db.pool, "trash-operation-migration").await?;
+    let item = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO nodes (id, space_id, parent_id, name, kind, created_by_account_id, \
+             updated_by_account_id, deleted_by_account_id, deleted_at, purge_after, deletion_root_id) \
+         VALUES ($1, $2, $3, 'notes', 'folder', $4, $4, $4, now(), now() + interval '30 days', $1)",
+    ).bind(item).bind(space).bind(root).bind(owner).execute(&db.pool).await?;
+    sqlx::query("INSERT INTO file_change_events (space_id, node_id, actor_account_id, op_type) VALUES ($1, $2, $3, 'item.delete')")
+        .bind(space).bind(item).bind(owner).execute(&db.pool).await?;
+    db.apply_migration(45).await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let list = repo.list_trash(owner, 100, None).await?;
+    assert!(list[0].recoverable);
+    assert_eq!(list[0].deletion_operation_id, None);
+    let events = repo
+        .list_file_change_events(space, Some(item), 100, None)
+        .await?;
+    assert_eq!(events[0].operation_id, None);
+    repo.restore_trashed_node(owner, space, item).await?;
+    let events = repo
+        .list_file_change_events(space, Some(item), 100, None)
+        .await?;
+    assert_eq!(events[0].op_type, "item.restore");
+    assert!(events[0].operation_id.is_some());
+    assert!(events[0].metadata["related_deletion_operation_id"].is_null());
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
