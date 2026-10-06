@@ -10,8 +10,9 @@ mod common;
 use chrono::Duration;
 use common::{TestDb, attach_file, insert_user_account, space_with_root};
 use notegate_core::{Error, limits::Limits};
-use notegate_db::{FilesRepo, PurgeRepo, SpaceRepo};
+use notegate_db::{AgentRepo, ConnectionRepo, FilesRepo, PurgeRepo, SpaceRepo};
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
+use notegate_model::{ConnectAgent, CreateAgent, Permission};
 use uuid::Uuid;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -272,11 +273,32 @@ async fn space_restore_preserves_nodes_but_does_not_restore_previously_deleted_c
     repo.soft_delete_node(space, old.id, owner, true).await?;
     let (file, _) = attach_file(&repo, space, root, "data.bin", 9, owner).await?;
     let spaces = SpaceRepo::new(db.pool.clone());
+    let agent = AgentRepo::new(db.pool.clone())
+        .insert_agent(
+            &CreateAgent {
+                name: "reader".to_owned(),
+            },
+            owner,
+        )
+        .await?;
+    ConnectionRepo::new(db.pool.clone())
+        .upsert_connection(
+            &ConnectAgent {
+                space_id: space,
+                agent_id: agent.id,
+                permission: Permission::Read,
+            },
+            owner,
+        )
+        .await?;
     spaces.delete_space(space, owner, owner).await?;
     let list = repo.list_trash(owner, 100, None).await?;
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].kind, "space");
     repo.restore_trashed_space(owner, space).await?;
+    let disconnected: bool = sqlx::query_scalar("SELECT disconnected_at IS NOT NULL FROM space_agent_connections WHERE space_id = $1 AND agent_id = $2")
+        .bind(space).bind(agent.id).fetch_one(&db.pool).await?;
+    assert!(disconnected);
     assert!(repo.find_node(space, file.id).await?.is_some());
     assert!(repo.find_node(space, old.id).await?.is_none());
     assert_eq!(repo.list_trash(owner, 100, None).await?.len(), 1);
