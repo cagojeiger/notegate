@@ -67,7 +67,7 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
               const queued = item.deletion_pending;
               return (
                 <li key={`${item.kind}:${item.id}`} className="rounded-workbench-surface border border-seam p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1">
                       <p className="break-all font-medium">{item.name}</p>
                       <p className="break-all text-muted">{item.space_name} · {item.path} · {item.kind}</p>
@@ -75,7 +75,7 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
                       <p className="text-muted">{queued ? "Deletion queued · recovery unavailable" : `Kept until ${new Date(item.purge_after).toLocaleString()}`}</p>
                       {!queued && !item.recoverable ? <p className="text-muted">Restore unavailable: parent deleted or content predates recovery support.</p> : null}
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex justify-end gap-2">
                       <Button secondary size="sm" disabled={mutation.isPending || queued || !item.recoverable} aria-label={`Restore ${item.name}`} onClick={() => mutation.mutate({ item, action: "restore" })}>Restore</Button>
                       <Button variant="danger" size="sm" disabled={mutation.isPending || queued} aria-label={`Permanently delete ${item.name}`} onClick={() => { mutation.reset(); setConfirmation(item); }}>Delete permanently</Button>
                     </div>
