@@ -49,6 +49,7 @@ struct DeletedNode {
     parent_id: Uuid,
     purge_after: DateTime<Utc>,
     deletion_root_id: Option<Uuid>,
+    purge_requested_at: Option<DateTime<Utc>>,
 }
 
 impl FilesRepo {
@@ -68,13 +69,14 @@ impl FilesRepo {
         let rows = sqlx::query_as::<_, TrashRow>(
             "WITH items AS ( \
                 SELECT s.id, s.id AS space_id, s.name AS space_name, 'space'::text AS kind, \
-                       s.name, s.deleted_at, s.purge_after, s.trash_recoverable AS recoverable \
+                       s.name, s.deleted_at, s.purge_after, s.purge_requested_at, \
+                       s.trash_recoverable AND s.purge_requested_at IS NULL AS recoverable \
                 FROM spaces s JOIN accounts a ON a.id = s.owner_user_id \
                 WHERE s.owner_user_id = $1 AND s.deleted_at IS NOT NULL \
                   AND a.is_active AND a.deleted_at IS NULL \
                 UNION ALL \
-                SELECT n.id, n.space_id, s.name, n.kind, n.name, n.deleted_at, n.purge_after, \
-                       n.deletion_root_id = n.id AND p.deleted_at IS NULL AS recoverable \
+                SELECT n.id, n.space_id, s.name, n.kind, n.name, n.deleted_at, n.purge_after, n.purge_requested_at, \
+                       n.deletion_root_id = n.id AND p.deleted_at IS NULL AND n.purge_requested_at IS NULL AS recoverable \
                 FROM nodes n JOIN spaces s ON s.id = n.space_id \
                 JOIN accounts a ON a.id = s.owner_user_id \
                 JOIN nodes p ON p.id = n.parent_id \
@@ -90,7 +92,7 @@ impl FilesRepo {
                     page.deleted_at, page.purge_after, \
                     COALESCE(page.recoverable, false) \
                         AND page.purge_after > COALESCE($5, now()) AS recoverable, \
-                    page.purge_after <= COALESCE($5, now()) AS deletion_pending, \
+                    (page.purge_requested_at IS NOT NULL OR page.purge_after <= COALESCE($5, now())) AS deletion_pending, \
                     CASE WHEN page.kind = 'space' THEN '/' ELSE ( \
                         WITH RECURSIVE chain AS ( \
                             SELECT id, parent_id, '/' || name AS path FROM nodes WHERE id = page.id \
@@ -125,7 +127,10 @@ impl FilesRepo {
         lock_owned_space(&mut tx, owner, space_id, false).await?;
         let now = trash_now(&mut tx, self.trash_time).await?;
         let node = deleted_node(&mut tx, space_id, node_id).await?;
-        if node.deletion_root_id != Some(node_id) || node.purge_after <= now {
+        if node.deletion_root_id != Some(node_id)
+            || node.purge_requested_at.is_some()
+            || node.purge_after <= now
+        {
             return Err(Error::conflict("item is no longer recoverable"));
         }
         let caps = effective_file_tree_limits(tier, self.limits);
@@ -192,7 +197,7 @@ impl FilesRepo {
         lock_owned_space(&mut tx, owner, space_id, true).await?;
         let now = trash_now(&mut tx, self.trash_time).await?;
         let recoverable: bool = sqlx::query_scalar(
-            "SELECT trash_recoverable AND purge_after > $2 FROM spaces WHERE id = $1",
+            "SELECT trash_recoverable AND purge_requested_at IS NULL AND purge_after > $2 FROM spaces WHERE id = $1",
         )
         .bind(space_id)
         .bind(now)
@@ -271,11 +276,11 @@ impl FilesRepo {
             sqlx::query(
                 "WITH RECURSIVE subtree AS (SELECT id FROM nodes WHERE id = $2 AND space_id = $1 \
                     UNION ALL SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id WHERE n.space_id = $1) \
-                 UPDATE nodes SET purge_after = LEAST(purge_after, $3) \
+                 UPDATE nodes SET purge_after = LEAST(purge_after, $3), purge_requested_at = COALESCE(purge_requested_at, $3) \
                  WHERE space_id = $1 AND deleted_at IS NOT NULL AND id IN (SELECT id FROM subtree)",
             ).bind(space_id).bind(node_id).bind(now).execute(&mut *tx).await.map_err(map_sqlx_error)?;
         } else {
-            sqlx::query("UPDATE spaces SET purge_after = LEAST(purge_after, $2) WHERE id = $1")
+            sqlx::query("UPDATE spaces SET purge_after = LEAST(purge_after, $2), purge_requested_at = COALESCE(purge_requested_at, $2) WHERE id = $1")
                 .bind(space_id)
                 .bind(now)
                 .execute(&mut *tx)
@@ -331,7 +336,7 @@ async fn deleted_node(
     node: Uuid,
 ) -> Result<DeletedNode> {
     sqlx::query_as(
-        "SELECT name, kind, parent_id, purge_after, deletion_root_id FROM nodes \
+        "SELECT name, kind, parent_id, purge_after, deletion_root_id, purge_requested_at FROM nodes \
          WHERE space_id = $1 AND id = $2 AND parent_id IS NOT NULL AND deleted_at IS NOT NULL FOR UPDATE",
     ).bind(space).bind(node).fetch_optional(&mut **tx).await.map_err(map_sqlx_error)?
         .ok_or_else(|| Error::not_found("trash item not found"))

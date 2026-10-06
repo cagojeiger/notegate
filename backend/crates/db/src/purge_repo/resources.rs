@@ -23,10 +23,10 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedResources> {
     // share this serialization boundary; queue and cascade use one snapshot.
     let candidates: Vec<Uuid> = sqlx::query_scalar(
         "WITH due_spaces AS (SELECT id AS space_id FROM spaces \
-             WHERE deleted_at IS NOT NULL AND purge_after <= now() \
+             WHERE deleted_at IS NOT NULL AND (purge_requested_at IS NOT NULL OR purge_after <= now()) \
              ORDER BY purge_after, id LIMIT $1), \
          due_nodes AS (SELECT space_id FROM nodes \
-             WHERE deleted_at IS NOT NULL AND purge_after <= now() \
+             WHERE deleted_at IS NOT NULL AND (purge_requested_at IS NOT NULL OR purge_after <= now()) \
              ORDER BY purge_after, id LIMIT $2) \
          SELECT space_id FROM due_spaces UNION SELECT space_id FROM due_nodes ORDER BY space_id",
     )
@@ -51,12 +51,12 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedResources> {
         }
     }
     let due_spaces: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM spaces WHERE id = ANY($1) AND deleted_at IS NOT NULL AND purge_after <= now() \
+        "SELECT id FROM spaces WHERE id = ANY($1) AND deleted_at IS NOT NULL AND (purge_requested_at IS NOT NULL OR purge_after <= now()) \
          ORDER BY purge_after, id LIMIT $2",
     ).bind(&locked_spaces).bind(SPACE_PURGE_BATCH)
         .fetch_all(&mut *tx).await.map_err(map_sqlx_error)?;
     let due_nodes: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM nodes WHERE space_id = ANY($1) AND deleted_at IS NOT NULL AND purge_after <= now() \
+        "SELECT id FROM nodes WHERE space_id = ANY($1) AND deleted_at IS NOT NULL AND (purge_requested_at IS NOT NULL OR purge_after <= now()) \
          ORDER BY purge_after, id LIMIT $2",
     ).bind(&locked_spaces).bind(NODE_PURGE_BATCH)
         .fetch_all(&mut *tx).await.map_err(map_sqlx_error)?;
