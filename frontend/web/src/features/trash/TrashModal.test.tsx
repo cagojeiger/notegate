@@ -34,7 +34,7 @@ describe("TrashModal", () => {
     expect(fetchMock.mock.calls.some(([, options]) => options?.method === "DELETE")).toBe(false);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await user.click(screen.getByRole("button", { name: "Permanently delete note.md" }));
-    await user.click(screen.getByRole("button", { name: "Permanently delete", exact: true }));
+    await user.click(screen.getByRole("button", { name: /^Permanently delete$/ }));
     await screen.findByText("Deletion queued · recovery unavailable");
     expect(screen.getByRole("button", { name: "Restore note.md" })).toBeDisabled();
     expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "DELETE")).toHaveLength(1);
