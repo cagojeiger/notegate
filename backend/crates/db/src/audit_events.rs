@@ -14,6 +14,7 @@ use uuid::Uuid;
 pub(crate) struct AuditContext {
     actor_account_id: Uuid,
     source: &'static str,
+    operation_id: Option<Uuid>,
 }
 
 impl AuditContext {
@@ -21,7 +22,13 @@ impl AuditContext {
         Self {
             actor_account_id,
             source: "rest",
+            operation_id: None,
         }
+    }
+
+    pub(crate) fn with_operation_id(mut self, operation_id: Uuid) -> Self {
+        self.operation_id = Some(operation_id);
+        self
     }
 }
 
@@ -37,6 +44,7 @@ async fn event(
     insert_audit_event(
         tx,
         NewAuditEvent {
+            operation_id: ctx.operation_id,
             owner_user_id: Some(owner_user_id),
             actor_account_id: Some(ctx.actor_account_id),
             source: ctx.source,
@@ -470,6 +478,7 @@ pub(crate) async fn space_restored(
     ctx: AuditContext,
     owner: Uuid,
     space: Uuid,
+    deletion_operation_id: Option<Uuid>,
 ) -> Result<()> {
     event(
         tx,
@@ -478,7 +487,7 @@ pub(crate) async fn space_restored(
         "space.restore",
         "space",
         Some(space),
-        json!({}),
+        json!({ "related_deletion_operation_id": deletion_operation_id }),
     )
     .await
 }
@@ -489,6 +498,7 @@ pub(crate) async fn trash_purge_requested(
     owner: Uuid,
     space: Uuid,
     node: Option<Uuid>,
+    deletion_operation_id: Option<Uuid>,
 ) -> Result<()> {
     event(
         tx,
@@ -497,7 +507,7 @@ pub(crate) async fn trash_purge_requested(
         "trash.purge.request",
         if node.is_some() { "node" } else { "space" },
         Some(node.unwrap_or(space)),
-        json!({ "space_id": space }),
+        json!({ "space_id": space, "related_deletion_operation_id": deletion_operation_id }),
     )
     .await
 }

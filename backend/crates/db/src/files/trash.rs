@@ -21,6 +21,7 @@ struct TrashRow {
     path: String,
     deleted_at: DateTime<Utc>,
     purge_after: DateTime<Utc>,
+    deletion_operation_id: Option<Uuid>,
     recoverable: bool,
     deletion_pending: bool,
 }
@@ -36,6 +37,7 @@ impl From<TrashRow> for TrashItem {
             path: row.path,
             deleted_at: row.deleted_at,
             purge_after: row.purge_after,
+            deletion_operation_id: row.deletion_operation_id,
             recoverable: row.recoverable,
             deletion_pending: row.deletion_pending,
         }
@@ -49,6 +51,7 @@ struct DeletedNode {
     parent_id: Uuid,
     purge_after: DateTime<Utc>,
     deletion_root_id: Option<Uuid>,
+    deletion_operation_id: Option<Uuid>,
     purge_requested_at: Option<DateTime<Utc>>,
 }
 
@@ -69,13 +72,13 @@ impl FilesRepo {
         let rows = sqlx::query_as::<_, TrashRow>(
             "WITH items AS ( \
                 SELECT s.id, s.id AS space_id, s.name AS space_name, 'space'::text AS kind, \
-                       s.name, s.deleted_at, s.purge_after, s.purge_requested_at, \
+                       s.name, s.deleted_at, s.purge_after, s.purge_requested_at, s.deletion_operation_id, \
                        s.trash_recoverable AND s.purge_requested_at IS NULL AS recoverable \
                 FROM spaces s JOIN accounts a ON a.id = s.owner_user_id \
                 WHERE s.owner_user_id = $1 AND s.deleted_at IS NOT NULL \
                   AND a.is_active AND a.deleted_at IS NULL \
                 UNION ALL \
-                SELECT n.id, n.space_id, s.name, n.kind, n.name, n.deleted_at, n.purge_after, n.purge_requested_at, \
+                SELECT n.id, n.space_id, s.name, n.kind, n.name, n.deleted_at, n.purge_after, n.purge_requested_at, n.deletion_operation_id, \
                        n.deletion_root_id = n.id AND p.deleted_at IS NULL AND n.purge_requested_at IS NULL AS recoverable \
                 FROM nodes n JOIN spaces s ON s.id = n.space_id \
                 JOIN accounts a ON a.id = s.owner_user_id \
@@ -89,7 +92,7 @@ impl FilesRepo {
                 ORDER BY deleted_at DESC, id DESC LIMIT $4 \
              ) \
              SELECT page.id, page.space_id, page.space_name, page.kind, page.name, \
-                    page.deleted_at, page.purge_after, \
+                    page.deleted_at, page.purge_after, page.deletion_operation_id, \
                     COALESCE(page.recoverable, false) \
                         AND page.purge_after > COALESCE($5, now()) AS recoverable, \
                     (page.purge_requested_at IS NOT NULL OR page.purge_after <= COALESCE($5, now())) AS deletion_pending, \
@@ -168,7 +171,7 @@ impl FilesRepo {
         .await?;
         sqlx::query(
             "UPDATE nodes SET deleted_at = NULL, deleted_by_account_id = NULL, purge_after = NULL, \
-                 deletion_root_id = NULL, updated_at = now(), updated_by_account_id = $3 \
+                 deletion_root_id = NULL, deletion_operation_id = NULL, updated_at = now(), updated_by_account_id = $3 \
              WHERE space_id = $1 AND deletion_root_id = $2",
         )
         .bind(space_id)
@@ -179,11 +182,12 @@ impl FilesRepo {
         .map_err(map_sqlx_error)?;
         file_change_events::node_restored(
             &mut tx,
-            file_change_events::context(owner, space_id),
+            file_change_events::context(owner, space_id).with_operation_id(Uuid::new_v4()),
             node_id,
             &node.kind,
             node.parent_id,
             count,
+            node.deletion_operation_id,
         )
         .await?;
         tx.commit().await.map_err(map_sqlx_error)
@@ -196,8 +200,9 @@ impl FilesRepo {
             tier_lookup::lock_active_user_tier(&mut tx, owner, "trash item not found").await?;
         lock_owned_space(&mut tx, owner, space_id, true).await?;
         let now = trash_now(&mut tx, self.trash_time).await?;
-        let recoverable: bool = sqlx::query_scalar(
-            "SELECT trash_recoverable AND purge_requested_at IS NULL AND purge_after > $2 FROM spaces WHERE id = $1",
+        let (recoverable, deletion_operation_id): (bool, Option<Uuid>) = sqlx::query_as(
+            "SELECT trash_recoverable AND purge_requested_at IS NULL AND purge_after > $2, \
+                deletion_operation_id FROM spaces WHERE id = $1",
         )
         .bind(space_id)
         .bind(now)
@@ -250,13 +255,20 @@ impl FilesRepo {
         ).bind(space_id).bind(owner).execute(&mut *tx).await.map_err(map_sqlx_error)?;
         sqlx::query(
             "UPDATE spaces SET deleted_at = NULL, deleted_by_user_id = NULL, purge_after = NULL, \
-                 trash_recoverable = false, updated_at = now() WHERE id = $1",
+                 trash_recoverable = false, deletion_operation_id = NULL, updated_at = now() WHERE id = $1",
         )
         .bind(space_id)
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        audit_events::space_restored(&mut tx, AuditContext::rest(owner), owner, space_id).await?;
+        audit_events::space_restored(
+            &mut tx,
+            AuditContext::rest(owner).with_operation_id(Uuid::new_v4()),
+            owner,
+            space_id,
+            deletion_operation_id,
+        )
+        .await?;
         tx.commit().await.map_err(map_sqlx_error)
     }
 
@@ -271,7 +283,7 @@ impl FilesRepo {
         tier_lookup::lock_active_user_tier(&mut tx, owner, "trash item not found").await?;
         lock_owned_space(&mut tx, owner, space_id, node_id.is_none()).await?;
         let now = trash_now(&mut tx, self.trash_time).await?;
-        if let Some(node_id) = node_id {
+        let deletion_operation_id = if let Some(node_id) = node_id {
             let node = deleted_node(&mut tx, space_id, node_id).await?;
             if node.deletion_root_id.is_some_and(|root| root != node_id) {
                 return Err(Error::conflict(
@@ -284,20 +296,22 @@ impl FilesRepo {
                  UPDATE nodes SET purge_after = LEAST(purge_after, $3), purge_requested_at = COALESCE(purge_requested_at, $3) \
                  WHERE space_id = $1 AND deleted_at IS NOT NULL AND id IN (SELECT id FROM subtree)",
             ).bind(space_id).bind(node_id).bind(now).execute(&mut *tx).await.map_err(map_sqlx_error)?;
+            node.deletion_operation_id
         } else {
-            sqlx::query("UPDATE spaces SET purge_after = LEAST(purge_after, $2), purge_requested_at = COALESCE(purge_requested_at, $2) WHERE id = $1")
+            sqlx::query_scalar("UPDATE spaces SET purge_after = LEAST(purge_after, $2), purge_requested_at = COALESCE(purge_requested_at, $2) WHERE id = $1 RETURNING deletion_operation_id")
                 .bind(space_id)
                 .bind(now)
-                .execute(&mut *tx)
+                .fetch_one(&mut *tx)
                 .await
-                .map_err(map_sqlx_error)?;
-        }
+                .map_err(map_sqlx_error)?
+        };
         audit_events::trash_purge_requested(
             &mut tx,
-            AuditContext::rest(owner),
+            AuditContext::rest(owner).with_operation_id(Uuid::new_v4()),
             owner,
             space_id,
             node_id,
+            deletion_operation_id,
         )
         .await?;
         tx.commit().await.map_err(map_sqlx_error)
@@ -341,7 +355,7 @@ async fn deleted_node(
     node: Uuid,
 ) -> Result<DeletedNode> {
     sqlx::query_as(
-        "SELECT name, kind, parent_id, purge_after, deletion_root_id, purge_requested_at FROM nodes \
+        "SELECT name, kind, parent_id, purge_after, deletion_root_id, deletion_operation_id, purge_requested_at FROM nodes \
          WHERE space_id = $1 AND id = $2 AND parent_id IS NOT NULL AND deleted_at IS NOT NULL FOR UPDATE",
     ).bind(space).bind(node).fetch_optional(&mut **tx).await.map_err(map_sqlx_error)?
         .ok_or_else(|| Error::not_found("trash item not found"))

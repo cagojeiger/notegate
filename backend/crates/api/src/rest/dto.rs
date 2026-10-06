@@ -693,6 +693,7 @@ mod tests {
     fn audit_event_out_from_audit_event_maps_all_fields() {
         let event = AuditEvent {
             id: 7,
+            operation_id: Some(Uuid::new_v4()),
             created_at: Utc::now(),
             actor_account_id: Some(Uuid::new_v4()),
             source: "web".to_owned(),
@@ -714,6 +715,7 @@ mod tests {
         let out = AuditEventOut::from_event(&event, &refs);
 
         assert_eq!(out.id, event.id);
+        assert_eq!(out.operation_id, event.operation_id);
         assert_eq!(out.created_at, event.created_at);
         assert_eq!(out.actor_account_id, event.actor_account_id);
         assert_eq!(
@@ -731,6 +733,7 @@ mod tests {
     fn file_change_event_out_from_file_change_event_maps_all_fields() {
         let event = FileChangeEvent {
             id: 11,
+            operation_id: Some(Uuid::new_v4()),
             created_at: Utc::now(),
             space_id: Uuid::new_v4(),
             node_id: Some(Uuid::new_v4()),
@@ -751,6 +754,7 @@ mod tests {
         let out = FileChangeEventOut::from_event(&event, &refs);
 
         assert_eq!(out.id, event.id);
+        assert_eq!(out.operation_id, event.operation_id);
         assert_eq!(out.created_at, event.created_at);
         assert_eq!(out.space_id, event.space_id);
         assert_eq!(out.node_id, event.node_id);

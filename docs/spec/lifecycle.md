@@ -170,6 +170,7 @@ Folder recursive delete는 subtree node를 같은 transaction에서 soft delete�
 
 ### 휴지통
 
+- 삭제마다 새 `deletion_operation_id`를 저장하고 삭제 event의 `operation_id`와 연결한다. 복원/영구 삭제 요청은 새 작업 ID와 원래 삭제 참조를 기록한다. 기존 행은 NULL을 유지한다. 복원 범위는 기존 `deletion_root_id` 기준을 유지하며 로그 보존 여부에 의존하지 않는다.
 - Browser owner user 전용: `GET /api/v1/me/trash`는 삭제 시각/id 순으로 cursor pagination한다. 삭제된 Space 내부 항목은 Space 복원 이후 별도로 조회한다.
 - `POST /api/v1/me/trash/spaces/{space_id}/restore` 또는 `/nodes/{node_id}/restore`로 원래 위치에 복원한다. 이름 충돌, 삭제된 부모, write lock, 현재 tier/usage/path 제한은 복원을 거절한다.
 - Space 복원은 기존 agent 연결을 해제한다. 외부 접근은 owner가 다시 연결해야 한다. 기존 node external-access 정책은 유지한다.

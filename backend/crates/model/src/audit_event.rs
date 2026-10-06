@@ -11,6 +11,7 @@ use crate::EventCursor;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuditEvent {
     pub id: i64,
+    pub operation_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub actor_account_id: Option<Uuid>,
     pub source: String,

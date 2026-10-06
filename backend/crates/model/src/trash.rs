@@ -13,6 +13,7 @@ pub struct TrashItem {
     pub path: String,
     pub deleted_at: DateTime<Utc>,
     pub purge_after: DateTime<Utc>,
+    pub deletion_operation_id: Option<Uuid>,
     pub recoverable: bool,
     pub deletion_pending: bool,
 }

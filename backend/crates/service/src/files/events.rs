@@ -246,6 +246,7 @@ mod tests {
     fn event(id: i64) -> FileChangeEvent {
         FileChangeEvent {
             id,
+            operation_id: None,
             created_at: Utc::now(),
             space_id: Uuid::nil(),
             node_id: None,

@@ -40,6 +40,8 @@ async fn dashboard_trash_lists_restores_and_returns_accepted_for_permanent_delet
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list["items"][0]["id"], item.id.to_string());
     assert_eq!(list["items"][0]["recoverable"], true);
+    let deletion =
+        uuid::Uuid::parse_str(list["items"][0]["deletion_operation_id"].as_str().unwrap())?;
     let path = format!("/v1/me/trash/spaces/{space}/nodes/{}", item.id);
     let (status, _) = empty_request(
         rest_app(state.clone(), caller.clone()),
@@ -48,6 +50,22 @@ async fn dashboard_trash_lists_restores_and_returns_accepted_for_permanent_delet
     )
     .await?;
     assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, events) = get_json(
+        rest_app(state.clone(), caller.clone()),
+        format!("/v1/spaces/{space}/file-change-events?node_id={}", item.id),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(events["events"][0]["op_type"], "item.restore");
+    assert_eq!(
+        events["events"][0]["metadata"]["related_deletion_operation_id"],
+        deletion.to_string()
+    );
+    assert_ne!(
+        events["events"][0]["operation_id"],
+        events["events"][1]["operation_id"]
+    );
+    assert_eq!(events["events"][1]["operation_id"], deletion.to_string());
     repo.soft_delete_node(space, item.id, caller.account_id(), true)
         .await?;
     let (status, result) = empty_request(
@@ -65,9 +83,25 @@ async fn dashboard_trash_lists_restores_and_returns_accepted_for_permanent_delet
     )
     .await?;
     assert_eq!(status, StatusCode::CONFLICT);
+    let (status, audit) = get_json(
+        rest_app(state.clone(), caller.clone()),
+        "/v1/me/audit-events".to_owned(),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(audit["events"][0]["op_type"], "trash.purge.request");
+    uuid::Uuid::parse_str(audit["events"][0]["operation_id"].as_str().unwrap())?;
     let (status, list) = get_json(rest_app(state, caller), "/v1/me/trash".to_owned()).await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list["items"][0]["deletion_pending"], true);
+    assert_ne!(
+        list["items"][0]["deletion_operation_id"],
+        deletion.to_string()
+    );
+    assert_eq!(
+        audit["events"][0]["metadata"]["related_deletion_operation_id"],
+        list["items"][0]["deletion_operation_id"]
+    );
     db.cleanup().await;
     Ok(())
 }

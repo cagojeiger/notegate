@@ -10,6 +10,7 @@ export type TrashItem = {
   path: string;
   deleted_at: string;
   purge_after: string;
+  deletion_operation_id?: string | null;
   recoverable: boolean;
   deletion_pending: boolean;
 };

@@ -330,6 +330,7 @@ fn event_json(event: &FileChangeEvent) -> Value {
     let impact = FileChangeImpact::from_event(event);
     json!({
         "event_id": event.id,
+        "operation_id": event.operation_id,
         "created_at": event.created_at,
         "node_id": event.node_id,
         "actor_account_id": event.actor_account_id,
@@ -464,6 +465,7 @@ mod tests {
         let after = Uuid::from_u128(11);
         let event = FileChangeEvent {
             id: 41,
+            operation_id: Some(Uuid::from_u128(42)),
             created_at: Utc
                 .with_ymd_and_hms(2026, 8, 2, 3, 4, 5)
                 .single()
@@ -481,6 +483,7 @@ mod tests {
 
         let output = event_json(&event);
         assert_eq!(output["event_id"], 41);
+        assert_eq!(output["operation_id"], json!(event.operation_id));
         assert_eq!(output["created_at"], "2026-08-02T03:04:05Z");
         assert_eq!(output["affected_parent_ids"], json!([before, after]));
         assert_eq!(output["path_changed"], true);

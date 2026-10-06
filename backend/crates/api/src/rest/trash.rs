@@ -50,6 +50,7 @@ pub(crate) struct TrashItemOut {
     path: String,
     deleted_at: DateTime<Utc>,
     purge_after: DateTime<Utc>,
+    deletion_operation_id: Option<Uuid>,
     recoverable: bool,
     deletion_pending: bool,
 }
@@ -65,6 +66,7 @@ impl From<TrashItem> for TrashItemOut {
             path: item.path,
             deleted_at: item.deleted_at,
             purge_after: item.purge_after,
+            deletion_operation_id: item.deletion_operation_id,
             recoverable: item.recoverable,
             deletion_pending: item.deletion_pending,
         }

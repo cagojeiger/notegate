@@ -10,7 +10,7 @@ mod common;
 use chrono::Duration;
 use common::{TestDb, attach_file, insert_user_account, space_with_root};
 use notegate_core::{Error, limits::Limits};
-use notegate_db::{AgentRepo, ConnectionRepo, FilesRepo, PurgeRepo, SpaceRepo};
+use notegate_db::{AgentRepo, AuditEventRepo, ConnectionRepo, FilesRepo, PurgeRepo, SpaceRepo};
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
 use notegate_model::{ConnectAgent, CreateAgent, Permission};
 use uuid::Uuid;
@@ -64,6 +64,29 @@ async fn folder_restore_keeps_original_text_and_file_but_not_previously_deleted_
     ));
     let trash = repo.list_trash(owner, 100, None).await?;
     assert_eq!(trash.len(), 2);
+    let deletion = trash
+        .iter()
+        .find(|i| i.id == parent.id)
+        .unwrap()
+        .deletion_operation_id
+        .unwrap();
+    let old_deletion = trash
+        .iter()
+        .find(|i| i.id == old.id)
+        .unwrap()
+        .deletion_operation_id
+        .unwrap();
+    assert_ne!(deletion, old_deletion);
+    let grouped: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM nodes WHERE space_id = $1 AND deletion_operation_id = $2 ORDER BY id",
+    )
+    .bind(space)
+    .bind(deletion)
+    .fetch_all(&db.pool)
+    .await?;
+    let mut expected = vec![parent.id, text.id, file.id];
+    expected.sort();
+    assert_eq!(grouped, expected);
     assert!(
         trash
             .iter()
@@ -78,6 +101,12 @@ async fn folder_restore_keeps_original_text_and_file_but_not_previously_deleted_
         0
     );
     repo.restore_trashed_node(owner, space, parent.id).await?;
+    let old_deletion_after: Uuid =
+        sqlx::query_scalar("SELECT deletion_operation_id FROM nodes WHERE id = $1")
+            .bind(old.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(old_deletion_after, old_deletion);
     assert!(repo.find_node(space, old.id).await?.is_none());
     assert!(repo.find_node(space, text.id).await?.is_some());
     assert!(repo.find_node(space, file.id).await?.is_some());
@@ -98,6 +127,181 @@ async fn folder_restore_keeps_original_text_and_file_but_not_previously_deleted_
     .await?;
     assert_eq!(restores, 1);
     repo.restore_trashed_node(owner, space, old.id).await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn deletion_operations_link_redelete_restore_purge_and_survive_node_cleanup() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "trash-operations").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let (item, object) = attach_file(&repo, space, root, "data.bin", 9, owner).await?;
+    repo.soft_delete_node(space, item.id, owner, false).await?;
+    let first = repo.list_trash(owner, 100, None).await?[0]
+        .deletion_operation_id
+        .unwrap();
+    let events = repo
+        .list_file_change_events(space, Some(item.id), 100, None)
+        .await?;
+    assert_eq!(events[0].op_type, "item.delete");
+    assert_eq!(events[0].operation_id, Some(first));
+
+    repo.restore_trashed_node(owner, space, item.id).await?;
+    let cleared: Option<Uuid> =
+        sqlx::query_scalar("SELECT deletion_operation_id FROM nodes WHERE id = $1")
+            .bind(item.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(cleared, None);
+    let events = repo
+        .list_file_change_events(space, Some(item.id), 100, None)
+        .await?;
+    assert_eq!(events[0].op_type, "item.restore");
+    let restored = events[0].operation_id.unwrap();
+    assert_ne!(restored, first);
+    assert_eq!(
+        events[0].metadata["related_deletion_operation_id"],
+        first.to_string()
+    );
+
+    repo.soft_delete_node(space, item.id, owner, false).await?;
+    let second = repo.list_trash(owner, 100, None).await?[0]
+        .deletion_operation_id
+        .unwrap();
+    assert_ne!(second, first);
+    assert_ne!(second, restored);
+    repo.request_trash_purge(owner, space, Some(item.id))
+        .await?;
+    let events = AuditEventRepo::new(db.pool.clone())
+        .list_by_owner(owner, 100, None)
+        .await?;
+    let requested = events
+        .iter()
+        .find(|e| e.op_type == "trash.purge.request")
+        .unwrap();
+    assert!(requested.operation_id.is_some());
+    assert_ne!(requested.operation_id, Some(second));
+    assert_eq!(
+        requested.metadata["related_deletion_operation_id"],
+        second.to_string()
+    );
+    PurgeRepo::new(db.pool.clone()).run_once().await?;
+    let (node_id, state, linked): (Option<Uuid>, String, Option<Uuid>) = sqlx::query_as(
+        "SELECT node_id, state, deletion_operation_id FROM object_storage_objects WHERE object_key = $1",
+    ).bind(&object.object_key).fetch_one(&db.pool).await?;
+    assert_eq!(node_id, None);
+    assert_eq!(state, "delete_pending");
+    assert_eq!(linked, Some(second));
+    let retained = repo
+        .list_file_change_events(space, Some(item.id), 100, None)
+        .await?;
+    assert!(retained.iter().any(|e| e.operation_id == Some(first)));
+    assert!(retained.iter().any(|e| e.operation_id == Some(second)));
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn restore_does_not_depend_on_retained_logs_or_a_legacy_operation_id() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "trash-log-lifetime").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let item = folder(&repo, owner, space, root, "notes").await?;
+    repo.soft_delete_node(space, item.id, owner, true).await?;
+    let first = repo.list_trash(owner, 100, None).await?[0]
+        .deletion_operation_id
+        .unwrap();
+    sqlx::query("DELETE FROM file_change_events WHERE space_id = $1")
+        .bind(space)
+        .execute(&db.pool)
+        .await?;
+    repo.restore_trashed_node(owner, space, item.id).await?;
+    let events = repo
+        .list_file_change_events(space, Some(item.id), 100, None)
+        .await?;
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].metadata["related_deletion_operation_id"],
+        first.to_string()
+    );
+
+    repo.soft_delete_node(space, item.id, owner, true).await?;
+    // A recoverable deletion created before the correlation migration.
+    sqlx::query("UPDATE nodes SET deletion_operation_id = NULL WHERE space_id = $1 AND deletion_root_id = $2")
+        .bind(space).bind(item.id).execute(&db.pool).await?;
+    let trash = repo.list_trash(owner, 100, None).await?;
+    assert!(trash[0].recoverable);
+    assert_eq!(trash[0].deletion_operation_id, None);
+    repo.restore_trashed_node(owner, space, item.id).await?;
+    let events = repo
+        .list_file_change_events(space, Some(item.id), 100, None)
+        .await?;
+    assert_eq!(events[0].op_type, "item.restore");
+    assert!(events[0].operation_id.is_some());
+    assert!(events[0].metadata["related_deletion_operation_id"].is_null());
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn operation_state_and_event_roll_back_together_when_capture_fails() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "trash-operation-rollback").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let item = folder(&repo, owner, space, root, "notes").await?;
+    sqlx::query("CREATE FUNCTION reject_trash_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'capture unavailable'; END; $$")
+        .execute(&db.pool).await?;
+    let trigger = "CREATE TRIGGER reject_trash_event BEFORE INSERT ON file_change_events FOR EACH ROW WHEN (NEW.op_type IN ('item.delete', 'item.restore')) EXECUTE FUNCTION reject_trash_event()";
+    sqlx::query(trigger).execute(&db.pool).await?;
+    assert!(
+        repo.soft_delete_node(space, item.id, owner, true)
+            .await
+            .is_err()
+    );
+    assert!(repo.find_node(space, item.id).await?.is_some());
+    let operation: Option<Uuid> =
+        sqlx::query_scalar("SELECT deletion_operation_id FROM nodes WHERE id = $1")
+            .bind(item.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(operation, None);
+    sqlx::query("DROP TRIGGER reject_trash_event ON file_change_events")
+        .execute(&db.pool)
+        .await?;
+    repo.soft_delete_node(space, item.id, owner, true).await?;
+    let deletion = repo.list_trash(owner, 100, None).await?[0]
+        .deletion_operation_id
+        .unwrap();
+    sqlx::query(trigger).execute(&db.pool).await?;
+    assert!(
+        repo.restore_trashed_node(owner, space, item.id)
+            .await
+            .is_err()
+    );
+    assert!(repo.find_node(space, item.id).await?.is_none());
+    assert_eq!(
+        repo.list_trash(owner, 100, None).await?[0].deletion_operation_id,
+        Some(deletion)
+    );
+    let events = repo
+        .list_file_change_events(space, Some(item.id), 100, None)
+        .await?;
+    assert_eq!(
+        events.iter().filter(|e| e.op_type == "item.delete").count(),
+        1
+    );
+    assert!(!events.iter().any(|e| e.op_type == "item.restore"));
+    sqlx::query("DROP TRIGGER reject_trash_event ON file_change_events")
+        .execute(&db.pool)
+        .await?;
+    repo.restore_trashed_node(owner, space, item.id).await?;
     db.cleanup().await;
     Ok(())
 }
@@ -290,7 +494,7 @@ async fn space_restore_preserves_nodes_but_does_not_restore_previously_deleted_c
     let repo = FilesRepo::new(db.pool.clone());
     let old = folder(&repo, owner, space, root, "old").await?;
     repo.soft_delete_node(space, old.id, owner, true).await?;
-    let (file, _) = attach_file(&repo, space, root, "data.bin", 9, owner).await?;
+    let (file, object) = attach_file(&repo, space, root, "data.bin", 9, owner).await?;
     let spaces = SpaceRepo::new(db.pool.clone());
     let agent = AgentRepo::new(db.pool.clone())
         .insert_agent(
@@ -314,7 +518,23 @@ async fn space_restore_preserves_nodes_but_does_not_restore_previously_deleted_c
     let list = repo.list_trash(owner, 100, None).await?;
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].kind, "space");
+    let first_deletion = list[0].deletion_operation_id.unwrap();
     repo.restore_trashed_space(owner, space).await?;
+    let events = AuditEventRepo::new(db.pool.clone())
+        .list_by_owner(owner, 100, None)
+        .await?;
+    let deleted = events.iter().find(|e| e.op_type == "space.delete").unwrap();
+    assert_eq!(deleted.operation_id, Some(first_deletion));
+    let restored = events
+        .iter()
+        .find(|e| e.op_type == "space.restore")
+        .unwrap();
+    assert!(restored.operation_id.is_some());
+    assert_ne!(restored.operation_id, deleted.operation_id);
+    assert_eq!(
+        restored.metadata["related_deletion_operation_id"],
+        first_deletion.to_string()
+    );
     let disconnected: bool = sqlx::query_scalar("SELECT disconnected_at IS NOT NULL FROM space_agent_connections WHERE space_id = $1 AND agent_id = $2")
         .bind(space).bind(agent.id).fetch_one(&db.pool).await?;
     assert!(disconnected);
@@ -322,6 +542,10 @@ async fn space_restore_preserves_nodes_but_does_not_restore_previously_deleted_c
     assert!(repo.find_node(space, old.id).await?.is_none());
     assert_eq!(repo.list_trash(owner, 100, None).await?.len(), 1);
     spaces.delete_space(space, owner, owner).await?;
+    let second_deletion = repo.list_trash(owner, 100, None).await?[0]
+        .deletion_operation_id
+        .unwrap();
+    assert_ne!(second_deletion, first_deletion);
     repo.request_trash_purge(owner, space, None).await?;
     let past: chrono::DateTime<chrono::Utc> =
         sqlx::query_scalar("SELECT deleted_at - interval '1 day' FROM spaces WHERE id = $1")
@@ -347,6 +571,13 @@ async fn space_restore_preserves_nodes_but_does_not_restore_previously_deleted_c
             .spaces_deleted,
         1
     );
+    let ledger_operation: Uuid = sqlx::query_scalar(
+        "SELECT deletion_operation_id FROM object_storage_objects WHERE object_key = $1",
+    )
+    .bind(&object.object_key)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(ledger_operation, second_deletion);
     db.cleanup().await;
     Ok(())
 }

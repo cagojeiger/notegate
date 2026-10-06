@@ -66,6 +66,10 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedResources> {
              UNION SELECT child.id FROM nodes child JOIN due_nodes parent ON child.parent_id = parent.id \
          ) UPDATE object_storage_objects f SET state = 'delete_pending', \
              delete_requested_at = COALESCE(delete_requested_at, now()), \
+             deletion_operation_id = COALESCE(f.deletion_operation_id, ( \
+                 SELECT COALESCE(n.deletion_operation_id, s.deletion_operation_id) \
+                 FROM spaces s LEFT JOIN nodes n ON n.id = f.node_id AND n.space_id = s.id \
+                 WHERE s.id = f.space_id)), \
              retry_after = NULL, last_error_code = NULL \
          WHERE f.state = 'attached' AND (f.space_id = ANY($1) OR f.node_id IN (SELECT id FROM due_nodes))",
     ).bind(&due_spaces).bind(&due_nodes).execute(&mut *tx).await.map_err(map_sqlx_error)?.rows_affected();

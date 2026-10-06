@@ -2,6 +2,8 @@
 
 Event history는 self-review를 위한 이력이다. User caller는 자기 계정과 space에 어떤 관리 변경과 파일 변경이 있었는지 확인하고, MCP·Command API 호출 목적과 결과를 검토한다. 스키마와 capture 계약은 `docs/spec/event-logging.md`가 정본이다.
 
+Audit/파일 변경 history에는 nullable `operation_id`를 추가로 반환한다. 휴지통 삭제·복원·영구 삭제 요청의 작업 ID이며 기존 기록과 다른 작업은 `null`일 수 있다. 복원/영구 삭제 요청의 `metadata.related_deletion_operation_id`는 원래 삭제를 가리킨다. Pagination은 기존 event `id`를 사용한다.
+
 ## List my audit events
 
 ```http

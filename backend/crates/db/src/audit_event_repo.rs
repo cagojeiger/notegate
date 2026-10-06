@@ -13,6 +13,7 @@ use uuid::Uuid;
 /// Write-side row for capture; the read shape is `notegate_model::AuditEvent`.
 #[derive(Debug)]
 pub(crate) struct NewAuditEvent {
+    pub operation_id: Option<Uuid>,
     pub owner_user_id: Option<Uuid>,
     pub actor_account_id: Option<Uuid>,
     pub source: &'static str,
@@ -28,8 +29,8 @@ pub(crate) async fn insert_audit_event(
 ) -> Result<()> {
     sqlx::query(
         "INSERT INTO audit_events \
-         (owner_user_id, actor_account_id, source, op_type, resource_type, resource_id, metadata) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+         (owner_user_id, actor_account_id, source, op_type, resource_type, resource_id, metadata, operation_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(event.owner_user_id)
     .bind(event.actor_account_id)
@@ -38,6 +39,7 @@ pub(crate) async fn insert_audit_event(
     .bind(event.resource_type)
     .bind(event.resource_id)
     .bind(event.metadata)
+    .bind(event.operation_id)
     .execute(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
@@ -87,6 +89,7 @@ impl AuditEventRepo {
 #[derive(Debug, FromRow)]
 struct AuditEventRow {
     id: i64,
+    operation_id: Option<Uuid>,
     created_at: DateTime<Utc>,
     actor_account_id: Option<Uuid>,
     source: String,
@@ -100,6 +103,7 @@ impl From<AuditEventRow> for notegate_model::AuditEvent {
     fn from(row: AuditEventRow) -> Self {
         Self {
             id: row.id,
+            operation_id: row.operation_id,
             created_at: row.created_at,
             actor_account_id: row.actor_account_id,
             source: row.source,
@@ -111,5 +115,4 @@ impl From<AuditEventRow> for notegate_model::AuditEvent {
     }
 }
 
-const AUDIT_EVENT_COLUMNS: &str =
-    "id, created_at, actor_account_id, source, op_type, resource_type, resource_id, metadata";
+const AUDIT_EVENT_COLUMNS: &str = "id, operation_id, created_at, actor_account_id, source, op_type, resource_type, resource_id, metadata";
