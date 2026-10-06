@@ -94,6 +94,8 @@ session.revoke
 space.create
 space.update
 space.delete
+space.restore
+trash.purge.request
 
 agent.create
 agent.delete
@@ -187,6 +189,7 @@ item.move
 item.update
 item.copy
 item.delete
+item.restore
 ```
 
 File change event metadata는 제한된 structural fact와 metric만 담는다. 허용 가능한 예:
@@ -195,6 +198,7 @@ File change event metadata는 제한된 structural fact와 metric만 담는다. 
 item_kind: "folder" | "text" | "file"
 item_name: string
 parent_node_id: uuid
+restored_nodes: integer
 copied_from_node_id: uuid
 parent_node_id_before: uuid
 parent_node_id_after: uuid

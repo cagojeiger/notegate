@@ -415,3 +415,30 @@ async fn locked_parent_prevents_restore() -> TestResult {
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn restoration_obeys_current_folder_child_limit() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "trash-fanout").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let parent = folder(&repo, owner, space, root, "parent").await?;
+    folder(&repo, owner, space, parent.id, "first").await?;
+    folder(&repo, owner, space, parent.id, "second").await?;
+    repo.soft_delete_node(space, parent.id, owner, true).await?;
+    let limited = FilesRepo::with_limits(
+        db.pool.clone(),
+        Limits {
+            folder_max_children: 1,
+            ..Limits::default()
+        },
+    );
+    assert!(matches!(
+        limited.restore_trashed_node(owner, space, parent.id).await,
+        Err(Error::Conflict(_))
+    ));
+    assert!(repo.find_node(space, parent.id).await?.is_none());
+    db.cleanup().await;
+    Ok(())
+}

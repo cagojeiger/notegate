@@ -152,6 +152,7 @@ impl FilesRepo {
                 bytes: crate::to_usize(bytes, "path length")?,
             },
         )?)?;
+        require_restore_fanout(&mut tx, space_id, Some(node_id), caps.folder_max_children).await?;
         require_attached_objects(&mut tx, space_id, Some(node_id)).await?;
         space_usage::apply_quota_delta(
             &mut tx,
@@ -235,6 +236,7 @@ impl FilesRepo {
                 "restored space would exceed its current tier limits",
             ));
         }
+        require_restore_fanout(&mut tx, space_id, None, caps.folder_max_children).await?;
         require_attached_objects(&mut tx, space_id, None).await?;
         // Restoration must not silently reopen external agent access.
         sqlx::query(
@@ -348,6 +350,33 @@ async fn require_attached_objects(
     ).bind(space).bind(root).fetch_one(&mut **tx).await.map_err(map_sqlx_error)?;
     if unavailable {
         return Err(Error::conflict("file content is no longer recoverable"));
+    }
+    Ok(())
+}
+
+async fn require_restore_fanout(
+    tx: &mut Transaction<'_, Postgres>,
+    space: Uuid,
+    root: Option<Uuid>,
+    max_children: usize,
+) -> Result<()> {
+    let cap =
+        i64::try_from(max_children).map_err(|_| Error::internal("folder limit exceeds bigint"))?;
+    let exceeded: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM nodes WHERE space_id = $1 AND parent_id IS NOT NULL \
+         AND (($2::uuid IS NULL AND deleted_at IS NULL) OR deletion_root_id = $2) \
+         GROUP BY parent_id HAVING count(*) > $3)",
+    )
+    .bind(space)
+    .bind(root)
+    .bind(cap)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    if exceeded {
+        return Err(Error::conflict(
+            "restored folder would exceed its current child limit",
+        ));
     }
     Ok(())
 }

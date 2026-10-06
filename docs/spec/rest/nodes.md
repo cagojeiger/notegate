@@ -167,7 +167,7 @@ type MoveNodeBody = {
 - Root node는 rename/move/delete할 수 없다.
 - `POST /nodes/{node_id}/move`는 같은 Space 안에서만 parent/name을 변경한다.
 - Folder 삭제는 `recursive=true`가 필요하다.
-- 삭제는 soft delete이며, purge job이 retention 이후 DB metadata를 hard delete할 수 있다. S3 object File은 soft delete transaction에서 즉시 비동기 물리 삭제 대상으로 전환하며 복구를 지원하지 않는다.
+- 삭제는 30일 휴지통 이동이다. Browser owner는 `/api/v1/me/trash`에서 조회하고 복원 또는 영구 삭제를 요청한다. 보관 기간 만료 또는 영구 삭제 요청 이후 purge가 DB metadata를 제거하고 S3 삭제를 예약한다. 과거 삭제 건의 복원은 제공하지 않는다.
 
 ## Reveal node
 

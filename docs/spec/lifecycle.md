@@ -176,6 +176,7 @@ Folder recursive delete는 subtree node를 같은 transaction에서 soft delete�
 - 동일 경로의 `DELETE`는 `202 deletion_requested`를 반환하고 즉시 복원을 금지한다. 정리는 기존 purge/object-storage Reconciler가 비동기로 재시도한다. 저장소 실제 삭제 완료를 뜻하지 않는다.
 - 복원과 purge는 같은 Space gate/row lock으로 직렬화한다. 복원 시각이 `purge_after` 이상이면 복원할 수 없다.
 - 기존 삭제 건은 S3 bytes가 이미 제거됐을 수 있으므로 복원을 제공하지 않고 기존 만료 시각을 연장하지 않는다. 새 정책은 모든 이전 replica가 교체된 뒤 발생한 삭제부터 보장한다.
+- 이미 발급된 S3 presigned URL은 원본 보존 중 만료 시각까지 동작할 수 있다. 새 URL 발급과 live content API는 soft delete 직후 차단한다.
 - 현재 본문 복원과 과거 Text revision 보존 정책은 별개다. 휴지통 이동은 과거 버전의 TTL을 연장하지 않는다.
 - Usage는 현재 live counter를 유지하고 복원 시 재검증한다. 실제 저장소 제거 확인과 retained/pending 용량 집계는 별도 계약이다.
 
