@@ -201,6 +201,21 @@ async fn manual_purge_disables_restore_before_async_cleanup_and_does_not_delete_
         repo.restore_trashed_node(owner, space, item.id).await,
         Err(Error::Conflict(_))
     ));
+    let past: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT deleted_at - interval '1 day' FROM nodes WHERE id = $1")
+            .bind(item.id)
+            .fetch_one(&db.pool)
+            .await?;
+    let rolled_back_clock = repo.clone().with_trash_time(past);
+    assert!(
+        rolled_back_clock
+            .restore_trashed_node(owner, space, item.id)
+            .await
+            .is_err()
+    );
+    let queued = rolled_back_clock.list_trash(owner, 100, None).await?;
+    assert!(queued[0].deletion_pending);
+    assert!(!queued[0].recoverable);
     let before: String =
         sqlx::query_scalar("SELECT state FROM object_storage_objects WHERE node_id = $1")
             .bind(item.id)
@@ -304,6 +319,19 @@ async fn space_restore_preserves_nodes_but_does_not_restore_previously_deleted_c
     assert_eq!(repo.list_trash(owner, 100, None).await?.len(), 1);
     spaces.delete_space(space, owner, owner).await?;
     repo.request_trash_purge(owner, space, None).await?;
+    let past: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT deleted_at - interval '1 day' FROM spaces WHERE id = $1")
+            .bind(space)
+            .fetch_one(&db.pool)
+            .await?;
+    assert!(
+        repo.clone()
+            .with_trash_time(past)
+            .restore_trashed_space(owner, space)
+            .await
+            .is_err()
+    );
+
     assert!(matches!(
         repo.restore_trashed_space(owner, space).await,
         Err(Error::Conflict(_))

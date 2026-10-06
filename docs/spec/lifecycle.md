@@ -173,7 +173,7 @@ Folder recursive delete는 subtree node를 같은 transaction에서 soft delete�
 - Browser owner user 전용: `GET /api/v1/me/trash`는 삭제 시각/id 순으로 cursor pagination한다. 삭제된 Space 내부 항목은 Space 복원 이후 별도로 조회한다.
 - `POST /api/v1/me/trash/spaces/{space_id}/restore` 또는 `/nodes/{node_id}/restore`로 원래 위치에 복원한다. 이름 충돌, 삭제된 부모, write lock, 현재 tier/usage/path 제한은 복원을 거절한다.
 - Space 복원은 기존 agent 연결을 해제한다. 외부 접근은 owner가 다시 연결해야 한다. 기존 node external-access 정책은 유지한다.
-- 동일 경로의 `DELETE`는 `202 deletion_requested`를 반환하고 즉시 복원을 금지한다. 정리는 기존 purge/object-storage Reconciler가 비동기로 재시도한다. 저장소 실제 삭제 완료를 뜻하지 않는다.
+- 동일 경로의 `DELETE`는 `202 deletion_requested`를 반환하고 `purge_requested_at`을 기록해 시간과 무관하게 즉시 복원을 금지한다. 정리는 기존 purge/object-storage Reconciler가 비동기로 재시도한다. 저장소 실제 삭제 완료를 뜻하지 않는다.
 - 복원과 purge는 같은 Space gate/row lock으로 직렬화한다. 복원 시각이 `purge_after` 이상이면 복원할 수 없다.
 - 기존 삭제 건은 S3 bytes가 이미 제거됐을 수 있으므로 복원을 제공하지 않고 기존 만료 시각을 연장하지 않는다. 새 정책은 모든 이전 replica가 교체된 뒤 발생한 삭제부터 보장한다.
 - 이미 발급된 S3 presigned URL은 원본 보존 중 만료 시각까지 동작할 수 있다. 새 URL 발급과 live content API는 soft delete 직후 차단한다.
