@@ -272,7 +272,12 @@ impl FilesRepo {
         lock_owned_space(&mut tx, owner, space_id, node_id.is_none()).await?;
         let now = trash_now(&mut tx, self.trash_time).await?;
         if let Some(node_id) = node_id {
-            deleted_node(&mut tx, space_id, node_id).await?;
+            let node = deleted_node(&mut tx, space_id, node_id).await?;
+            if node.deletion_root_id.is_some_and(|root| root != node_id) {
+                return Err(Error::conflict(
+                    "permanent deletion must target the trash entry",
+                ));
+            }
             sqlx::query(
                 "WITH RECURSIVE subtree AS (SELECT id FROM nodes WHERE id = $2 AND space_id = $1 \
                     UNION ALL SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id WHERE n.space_id = $1) \

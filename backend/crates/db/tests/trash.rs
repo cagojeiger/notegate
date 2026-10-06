@@ -58,6 +58,10 @@ async fn folder_restore_keeps_original_text_and_file_but_not_previously_deleted_
     let (file, _) = attach_file(&repo, space, parent.id, "data.bin", 7, owner).await?;
     repo.soft_delete_node(space, parent.id, owner, true).await?;
     assert!(repo.find_node(space, text.id).await?.is_none());
+    assert!(matches!(
+        repo.request_trash_purge(owner, space, Some(file.id)).await,
+        Err(Error::Conflict(_))
+    ));
     let trash = repo.list_trash(owner, 100, None).await?;
     assert_eq!(trash.len(), 2);
     assert!(
