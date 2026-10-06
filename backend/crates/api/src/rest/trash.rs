@@ -102,7 +102,7 @@ pub(crate) async fn list(
         page,
     })
     .into_response();
-    set_private_no_store(response.headers_mut());
+    set_private_no_store(&mut response);
     Ok(response)
 }
 
