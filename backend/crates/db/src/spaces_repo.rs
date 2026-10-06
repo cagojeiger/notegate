@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::audit_events::{self, AuditContext};
-use crate::{map_sqlx_error, object_storage_repo, space_permission, tier_lookup};
+use crate::{map_sqlx_error, space_permission, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::tier::{TierFeatures, UserTier};
 use notegate_core::{Error, Result, limits};
@@ -607,9 +607,11 @@ impl SpaceRepo {
         deleted_by_user_id: Uuid,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let _gate = crate::space_usage::acquire_mutation_gate(&mut tx, space_id).await?;
+        tier_lookup::lock_active_user_tier(&mut tx, owner_user_id, "space not found").await?;
         let result = sqlx::query(
             "UPDATE spaces \
-             SET deleted_at = now(), deleted_by_user_id = $3, \
+             SET trash_recoverable = true, deleted_at = now(), deleted_by_user_id = $3, \
                  purge_after = now() + make_interval(days => $4::int), updated_at = now() \
              WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL",
         )
@@ -623,8 +625,6 @@ impl SpaceRepo {
         if result.rows_affected() == 0 {
             return Err(Error::not_found("space not found"));
         }
-
-        object_storage_repo::queue_space_object_deletions(&mut tx, space_id).await?;
 
         let audit_ctx = AuditContext::rest(deleted_by_user_id);
         audit_events::space_deleted(&mut tx, audit_ctx, owner_user_id, space_id).await?;

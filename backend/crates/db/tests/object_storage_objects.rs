@@ -260,7 +260,7 @@ async fn expired_history_retention_starts_at_physical_delete()
 }
 
 #[tokio::test]
-async fn subtree_soft_delete_queues_objects_and_purge_preserves_missed_requests()
+async fn subtree_soft_delete_retains_objects_until_hard_purge()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -310,19 +310,10 @@ async fn subtree_soft_delete_queues_objects_and_purge_preserves_missed_requests(
     .bind(upload_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(queued.0, "delete_pending");
-    assert!(queued.1.is_some());
+    assert_eq!(queued.0, "attached");
+    assert!(queued.1.is_none());
     assert_eq!(queued.2, Some(node.id));
 
-    // Simulate a request missed by an older application version. Hard purge is
-    // the final guard that must preserve a physical deletion request.
-    sqlx::query(
-        "UPDATE object_storage_objects \
-         SET state = 'attached', delete_requested_at = NULL WHERE id = $1",
-    )
-    .bind(upload_id)
-    .execute(&db.pool)
-    .await?;
     sqlx::query("UPDATE nodes SET purge_after = now() - interval '1 second' WHERE id = $1")
         .bind(folder.id)
         .execute(&db.pool)
@@ -350,7 +341,8 @@ async fn subtree_soft_delete_queues_objects_and_purge_preserves_missed_requests(
 }
 
 #[tokio::test]
-async fn space_soft_delete_queues_all_attached_objects() -> Result<(), Box<dyn std::error::Error>> {
+async fn space_soft_delete_retains_all_attached_objects() -> Result<(), Box<dyn std::error::Error>>
+{
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -388,8 +380,8 @@ async fn space_soft_delete_queues_all_attached_objects() -> Result<(), Box<dyn s
     .bind(upload_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(queued.0, "delete_pending");
-    assert!(queued.1.is_some());
+    assert_eq!(queued.0, "attached");
+    assert!(queued.1.is_none());
 
     db.cleanup().await;
     Ok(())

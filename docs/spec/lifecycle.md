@@ -95,7 +95,7 @@ spaces.purge_after=now()+retention
 ```
 
 - 내부 nodes/text/file/connection은 즉시 hard delete하지 않는다.
-- Space에 연결된 S3 object File은 같은 transaction에서 `delete_pending`으로 전환하고 정리 worker가 물리 삭제를 재시도한다. Object 복구는 지원하지 않는다.
+- Space와 현재 문서·파일은 휴지통에서 30일 보관한다. 만료 또는 사용자 영구 삭제 요청 이후 purge가 S3 object를 `delete_pending`으로 전환하고 정리 worker가 삭제를 재시도한다.
 - 연결 row는 즉시 disconnect하지 않는다. 삭제된 space는 live 조회와 권한 확인에서 제외되어 agent 접근이 차단된다.
 - `space_usage`는 purge까지 유지하지만 Usage 조회와 reconciliation 대상에서는 제외한다.
 - Live 조회는 deleted space를 제외한다.
@@ -166,7 +166,18 @@ nodes.purge_after=now()+retention
 
 Folder recursive delete는 subtree node를 같은 transaction에서 soft delete한다.
 
-삭제된 subtree의 S3 object File은 같은 transaction에서 `delete_pending`으로 전환한다. 정리 worker는 S3 삭제를 재시도하며 File object 복구는 지원하지 않는다. `purge_after`는 DB metadata의 hard purge 시점이며 S3 object 보존 기간이 아니다.
+삭제된 subtree의 문서·S3 object는 30일 보관한다. `deletion_root_id`로 이번 삭제 묶음만 복원하며, 먼저 별도로 삭제했던 자식은 복원하지 않는다. 보관 기간 만료 또는 영구 삭제 요청 이후 purge가 S3 삭제를 예약한다.
+
+### 휴지통
+
+- Browser owner user 전용: `GET /api/v1/me/trash`는 삭제 시각/id 순으로 cursor pagination한다. 삭제된 Space 내부 항목은 Space 복원 이후 별도로 조회한다.
+- `POST /api/v1/me/trash/spaces/{space_id}/restore` 또는 `/nodes/{node_id}/restore`로 원래 위치에 복원한다. 이름 충돌, 삭제된 부모, write lock, 현재 tier/usage/path 제한은 복원을 거절한다.
+- Space 복원은 기존 agent 연결을 해제한다. 외부 접근은 owner가 다시 연결해야 한다. 기존 node external-access 정책은 유지한다.
+- 동일 경로의 `DELETE`는 `202 deletion_requested`를 반환하고 즉시 복원을 금지한다. 정리는 기존 purge/object-storage Reconciler가 비동기로 재시도한다. 저장소 실제 삭제 완료를 뜻하지 않는다.
+- 복원과 purge는 같은 Space gate/row lock으로 직렬화한다. 복원 시각이 `purge_after` 이상이면 복원할 수 없다.
+- 기존 삭제 건은 S3 bytes가 이미 제거됐을 수 있으므로 복원을 제공하지 않고 기존 만료 시각을 연장하지 않는다. 새 정책은 모든 이전 replica가 교체된 뒤 발생한 삭제부터 보장한다.
+- 현재 본문 복원과 과거 Text revision 보존 정책은 별개다. 휴지통 이동은 과거 버전의 TTL을 연장하지 않는다.
+- Usage는 현재 live counter를 유지하고 복원 시 재검증한다. 실제 저장소 제거 확인과 retained/pending 용량 집계는 별도 계약이다.
 
 Node/Text/File mutation은 같은 transaction에서 `space_usage` counter를 갱신한다. 생성, 내용 변경, 복사, 이동, soft delete별 증감 규칙은 `usage-and-quotas.md`를 따른다.
 

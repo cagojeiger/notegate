@@ -381,6 +381,27 @@ pub(crate) async fn node_deleted(
     event(tx, ctx, Some(node_id), op_type, metadata).await
 }
 
+pub(crate) async fn node_restored(
+    tx: &mut PgConnection,
+    ctx: FileChangeContext,
+    node_id: Uuid,
+    kind: &str,
+    parent_id: Uuid,
+    restored_nodes: i64,
+) -> Result<()> {
+    event(
+        tx,
+        ctx,
+        Some(node_id),
+        "item.restore",
+        json!({
+            "item_kind": kind, "parent_node_id": parent_id,
+            "restored_nodes": restored_nodes, "recursive": kind == "folder",
+        }),
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

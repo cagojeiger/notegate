@@ -3,6 +3,7 @@ import type { CommandInvocationSurface, FilePreviewKind } from "./types";
 export const queryKeys = {
   me: ["me"] as const,
   usage: ["me", "usage"] as const,
+  trash: ["me", "trash"] as const,
   auditEvents: ["me", "audit-events"] as const,
   commandInvocations: (surface: CommandInvocationSurface) => ["me", "command-invocations", surface] as const,
   backgroundJobs: ["me", "jobs"] as const,

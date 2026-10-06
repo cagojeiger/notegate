@@ -26,3 +26,5 @@ mod usage_tests;
 
 #[cfg(test)]
 mod text_revisions_tests;
+
+pub mod trash;

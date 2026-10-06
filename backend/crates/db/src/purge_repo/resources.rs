@@ -3,6 +3,7 @@
 use crate::map_sqlx_error;
 use notegate_core::Result;
 use sqlx::{PgPool, Row as _};
+use uuid::Uuid;
 
 const SPACE_PURGE_BATCH: i64 = 100;
 const NODE_PURGE_BATCH: i64 = 1_000;
@@ -18,92 +19,68 @@ pub(super) struct PurgedResources {
 pub(super) async fn purge(pool: &PgPool) -> Result<PurgedResources> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    // Safety net for requests missed during soft delete: queue physical
-    // object deletion before semantic rows disappear. The operational
-    // ledger survives the following cascades and is processed outside this
-    // transaction by object-storage cleanup reconciliation.
-    let queued_for_spaces = sqlx::query(
-        "UPDATE object_storage_objects f SET \
-             state = 'delete_pending', \
-             delete_requested_at = COALESCE(delete_requested_at, now()), \
-             retry_after = NULL, last_error_code = NULL \
-         WHERE f.state = 'attached' AND f.space_id IN ( \
-             SELECT id FROM spaces \
+    // Lock each affected Space before selecting due IDs. Restore and delete
+    // share this serialization boundary; queue and cascade use one snapshot.
+    let candidates: Vec<Uuid> = sqlx::query_scalar(
+        "WITH due_spaces AS (SELECT id AS space_id FROM spaces \
              WHERE deleted_at IS NOT NULL AND purge_after <= now() \
-             ORDER BY purge_after, id LIMIT $1 \
-         )",
+             ORDER BY purge_after, id LIMIT $1), \
+         due_nodes AS (SELECT space_id FROM nodes \
+             WHERE deleted_at IS NOT NULL AND purge_after <= now() \
+             ORDER BY purge_after, id LIMIT $2) \
+         SELECT space_id FROM due_spaces UNION SELECT space_id FROM due_nodes ORDER BY space_id",
     )
     .bind(SPACE_PURGE_BATCH)
-    .execute(&mut *tx)
+    .bind(NODE_PURGE_BATCH)
+    .fetch_all(&mut *tx)
     .await
-    .map_err(map_sqlx_error)?
-    .rows_affected();
-
-    let queued_for_nodes = sqlx::query(
-        "WITH RECURSIVE due_roots AS ( \
-             SELECT id FROM nodes \
-             WHERE deleted_at IS NOT NULL AND purge_after <= now() \
-             ORDER BY purge_after, id LIMIT $1 \
-         ), due_nodes AS ( \
-             SELECT id FROM due_roots \
-             UNION \
-             SELECT child.id FROM nodes child \
-             JOIN due_nodes parent ON child.parent_id = parent.id \
-         ) \
-         UPDATE object_storage_objects f SET \
-             state = 'delete_pending', \
+    .map_err(map_sqlx_error)?;
+    let mut locked_spaces = Vec::new();
+    for space_id in candidates {
+        if !crate::space_usage::try_acquire_reconciliation_gate(&mut tx, space_id).await? {
+            continue;
+        }
+        let locked: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM spaces WHERE id = $1 FOR UPDATE SKIP LOCKED")
+                .bind(space_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(map_sqlx_error)?;
+        if let Some(id) = locked {
+            locked_spaces.push(id);
+        }
+    }
+    let due_spaces: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM spaces WHERE id = ANY($1) AND deleted_at IS NOT NULL AND purge_after <= now() \
+         ORDER BY purge_after, id LIMIT $2",
+    ).bind(&locked_spaces).bind(SPACE_PURGE_BATCH)
+        .fetch_all(&mut *tx).await.map_err(map_sqlx_error)?;
+    let due_nodes: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM nodes WHERE space_id = ANY($1) AND deleted_at IS NOT NULL AND purge_after <= now() \
+         ORDER BY purge_after, id LIMIT $2",
+    ).bind(&locked_spaces).bind(NODE_PURGE_BATCH)
+        .fetch_all(&mut *tx).await.map_err(map_sqlx_error)?;
+    let object_deletions_queued = sqlx::query(
+        "WITH RECURSIVE due_nodes AS ( \
+             SELECT id FROM nodes WHERE id = ANY($2) \
+             UNION SELECT child.id FROM nodes child JOIN due_nodes parent ON child.parent_id = parent.id \
+         ) UPDATE object_storage_objects f SET state = 'delete_pending', \
              delete_requested_at = COALESCE(delete_requested_at, now()), \
              retry_after = NULL, last_error_code = NULL \
-         WHERE f.state = 'attached' AND f.node_id IN (SELECT id FROM due_nodes)",
-    )
-    .bind(NODE_PURGE_BATCH)
-    .execute(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .rows_affected();
-
-    // Space hard delete cascades agent connections, nodes, text objects, and file objects.
-    let spaces_deleted: i64 = sqlx::query(
-        "WITH due AS ( \
-             SELECT id FROM spaces \
-             WHERE deleted_at IS NOT NULL AND purge_after <= now() \
-             ORDER BY purge_after, id \
-             LIMIT $1 \
-         ), deleted AS ( \
-             DELETE FROM spaces w USING due \
-             WHERE w.id = due.id \
-             RETURNING w.id \
-         ) \
-         SELECT count(*) AS deleted_count FROM deleted",
-    )
-    .bind(SPACE_PURGE_BATCH)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .get("deleted_count");
-
-    // Node hard delete cascades text/file objects and any descendant nodes. The CTE
-    // limits the number of selected due nodes; cascaded descendants may make
-    // the physical row count larger, which is acceptable and bounded by the
-    // product subtree/space limits.
-    let nodes_deleted: i64 = sqlx::query(
-        "WITH due AS ( \
-             SELECT id FROM nodes \
-             WHERE deleted_at IS NOT NULL AND purge_after <= now() \
-             ORDER BY purge_after, id \
-             LIMIT $1 \
-         ), deleted AS ( \
-             DELETE FROM nodes n USING due \
-             WHERE n.id = due.id \
-             RETURNING n.id \
-         ) \
-         SELECT count(*) AS deleted_count FROM deleted",
-    )
-    .bind(NODE_PURGE_BATCH)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .get("deleted_count");
+         WHERE f.state = 'attached' AND (f.space_id = ANY($1) OR f.node_id IN (SELECT id FROM due_nodes))",
+    ).bind(&due_spaces).bind(&due_nodes).execute(&mut *tx).await.map_err(map_sqlx_error)?.rows_affected();
+    let spaces_deleted = sqlx::query("DELETE FROM spaces WHERE id = ANY($1)")
+        .bind(&due_spaces)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .rows_affected() as i64;
+    let nodes_deleted = sqlx::query("DELETE FROM nodes WHERE id = ANY($1)")
+        .bind(&due_nodes)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .rows_affected() as i64;
 
     // This work ledger intentionally has no Space/node FK so enqueueing it
     // cannot invert mutation lock ordering. Reclaim only rows whose owners
@@ -135,7 +112,6 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedResources> {
     .map_err(map_sqlx_error)?
     .get("deleted_count");
 
-    let object_deletions_queued = queued_for_spaces + queued_for_nodes;
     tx.commit().await.map_err(map_sqlx_error)?;
     tracing::info!(
         event = "purge.group_completed",

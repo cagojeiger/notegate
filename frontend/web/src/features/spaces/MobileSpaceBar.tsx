@@ -1,10 +1,10 @@
-import { History, LayoutGrid, Plus, Settings } from "lucide-react";
+import { History, LayoutGrid, Plus, Settings, Trash2 } from "lucide-react";
 
 import type { Space } from "../../api/types";
 
 // Mobile presentation of the ActivityRail: a bottom space switcher bar.
 // Space list scrolls; ＋ hugs the list end; History and Settings stay at the far right.
-export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, navigationLocked = false, onSelectSpace, onCreateSpace, onOpenLibrary, libraryActive = false, onOpenHistory, onOpenSettings }: { spaces: Space[]; activeSpace: Space | null; canCreateSpace: boolean; navigationLocked?: boolean; onSelectSpace: (space: Space) => void; onCreateSpace: () => void; onOpenLibrary?: () => void; libraryActive?: boolean; onOpenHistory: () => void; onOpenSettings: () => void }) {
+export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, navigationLocked = false, onSelectSpace, onCreateSpace, onOpenLibrary, libraryActive = false, onOpenTrash, onOpenHistory, onOpenSettings }: { spaces: Space[]; activeSpace: Space | null; canCreateSpace: boolean; navigationLocked?: boolean; onSelectSpace: (space: Space) => void; onCreateSpace: () => void; onOpenLibrary?: () => void; libraryActive?: boolean; onOpenTrash?: () => void; onOpenHistory: () => void; onOpenSettings: () => void }) {
   return (
     <nav aria-label="Spaces" className="flex h-[calc(var(--ng-workbench-control-size)+1rem+env(safe-area-inset-bottom))] shrink-0 items-center gap-2 border-t border-seam bg-surface px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 md:hidden">
       {onOpenLibrary ? (
@@ -52,6 +52,7 @@ export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, navigation
         </div>
       ) : null}
       <div className="ml-auto flex shrink-0 items-center gap-1 border-l border-seam pl-2">
+        {onOpenTrash ? <button type="button" disabled={navigationLocked} aria-label="Trash" title="Trash" onClick={onOpenTrash} className="grid size-workbench-control place-items-center rounded-xl text-muted hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-not-allowed disabled:opacity-45"><Trash2 size={16} /></button> : null}
         <button type="button" disabled={navigationLocked} aria-label="History" title="History" onClick={onOpenHistory} className="grid size-workbench-control place-items-center rounded-xl text-muted hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-not-allowed disabled:opacity-45">
           <History size={16} />
         </button>

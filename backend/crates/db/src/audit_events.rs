@@ -465,6 +465,43 @@ pub(crate) async fn account_deleted(
     .await
 }
 
+pub(crate) async fn space_restored(
+    tx: &mut PgConnection,
+    ctx: AuditContext,
+    owner: Uuid,
+    space: Uuid,
+) -> Result<()> {
+    event(
+        tx,
+        ctx,
+        owner,
+        "space.restore",
+        "space",
+        Some(space),
+        json!({}),
+    )
+    .await
+}
+
+pub(crate) async fn trash_purge_requested(
+    tx: &mut PgConnection,
+    ctx: AuditContext,
+    owner: Uuid,
+    space: Uuid,
+    node: Option<Uuid>,
+) -> Result<()> {
+    event(
+        tx,
+        ctx,
+        owner,
+        "trash.purge.request",
+        if node.is_some() { "node" } else { "space" },
+        Some(node.unwrap_or(space)),
+        json!({ "space_id": space }),
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -35,6 +35,7 @@ type AppSurface = "workbench" | "library";
 
 const SpaceLibrary = lazy(() => import("../features/spaces/SpaceLibrary").then((module) => ({ default: module.SpaceLibrary })));
 const EventHistoryModal = lazy(() => import("../features/events/EventHistoryModal").then((module) => ({ default: module.EventHistoryModal })));
+const TrashModal = lazy(() => import("../features/trash/TrashModal").then((module) => ({ default: module.TrashModal })));
 const SettingsModal = lazy(() => import("../features/settings/SettingsModal").then((module) => ({ default: module.SettingsModal })));
 const DialogHost = lazy(() => import("../features/workbench/dialogs/DialogHost").then((module) => ({ default: module.DialogHost })));
 const RecordingDock = lazy(() => import("../features/recording/RecordingDock").then((module) => ({ default: module.RecordingDock })));
@@ -57,6 +58,7 @@ function WorkspaceStatusBar({
 export function AppShell({ me, onSignOut }: AppShellProps) {
   const workbench = useWorkbenchController({ me, onSignOut });
   const recording = useAudioRecordingState();
+  const [trashOpen, setTrashOpen] = useState(false);
   const [historyScope, setHistoryScope] = useState<HistoryScope | null>(null);
   const [surface, setSurface] = useState<AppSurface>("workbench");
   const [treeRevealRequest, setTreeRevealRequest] = useState<TreeRevealRequest | null>(null);
@@ -119,6 +121,11 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         ? mergeVisibleSpaceOrder(workbench.spaces, orderedSpaces)
         : orderedSpaces
     );
+  };
+  const openTrash = () => {
+    if (recordingActive || !libraryAvailable) return;
+    closeMobilePanels();
+    setTrashOpen(true);
   };
   const openHistory = () => {
     if (recordingActive) return;
@@ -196,6 +203,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
           onDeleteSpace={actions.confirmDeleteSpace}
           onOpenLibrary={libraryAvailable ? openLibrary : undefined}
           libraryActive={libraryOpen}
+          onOpenTrash={libraryAvailable ? openTrash : undefined}
           onOpenHistory={openHistory}
           onOpenSettings={openSettings}
         />
@@ -318,6 +326,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
           onCreateSpace={recordingActive ? () => undefined : actions.promptCreateSpace}
           onOpenLibrary={libraryAvailable ? openLibrary : undefined}
           libraryActive={libraryOpen}
+          onOpenTrash={libraryAvailable ? openTrash : undefined}
           onOpenHistory={openHistory}
           onOpenSettings={openSettings}
         />
@@ -327,6 +336,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         />
       </div>
       <Toast />
+      {trashOpen && libraryAvailable ? <Suspense fallback={null}><TrashModal onClose={() => setTrashOpen(false)} /></Suspense> : null}
       {historyScope ? <Suspense fallback={null}><EventHistoryModal spaces={workbench.spaces} initialSpaceId={historyScope.initialSpaceId} canViewAuditEvents={canViewAuditEvents(me)} onClose={() => setHistoryScope(null)} /></Suspense> : null}
       {workbench.settingsOpen ? <Suspense fallback={null}><SettingsModal me={me} onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} onResetSavedWorkspace={actions.confirmResetSavedWorkspace} /></Suspense> : null}
       {workbench.dialog ? <Suspense fallback={null}><DialogHost dialog={workbench.dialog} onClose={() => actions.setDialog(null)} /></Suspense> : null}

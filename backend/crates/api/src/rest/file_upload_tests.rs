@@ -822,6 +822,12 @@ async fn delete_attached_file(
     FilesRepo::new(db.pool.clone())
         .soft_delete_node(space_id, node_id, caller.account.id, false)
         .await?;
+    FilesRepo::new(db.pool.clone())
+        .request_trash_purge(caller.account.id, space_id, Some(node_id))
+        .await?;
+    notegate_db::PurgeRepo::new(db.pool.clone())
+        .run_once()
+        .await?;
     run_cleanup(db, state).await;
     Ok(())
 }

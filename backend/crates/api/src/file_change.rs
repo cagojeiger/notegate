@@ -44,13 +44,15 @@ impl FileChangeImpact {
                 | "item.copy"
                 | "item.move"
                 | "item.delete"
+                | "item.restore"
         ) || (event.op_type == "item.update"
             && metadata_bool(&event.metadata, "name_changed"));
         let subtree_changed = item_kind.as_deref() == Some("folder")
             && (event.op_type == "item.move"
                 || (event.op_type == "item.update"
                     && metadata_bool(&event.metadata, "name_changed"))
-                || (event.op_type == "item.delete" && metadata_bool(&event.metadata, "recursive")));
+                || (matches!(event.op_type.as_str(), "item.delete" | "item.restore")
+                    && metadata_bool(&event.metadata, "recursive")));
         let write_lock_changed =
             event.op_type == "item.update" && metadata_bool(&event.metadata, "write_lock_changed");
 

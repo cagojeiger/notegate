@@ -1,7 +1,7 @@
 //! Operational cleanup queue for S3-compatible objects.
 
 use notegate_core::Result;
-use sqlx::{FromRow, PgConnection, PgPool};
+use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::map_sqlx_error;
@@ -119,49 +119,4 @@ impl ObjectStorageRepo {
         .map_err(map_sqlx_error)?;
         Ok(result.rows_affected() == 1)
     }
-}
-
-pub(crate) async fn queue_space_object_deletions(
-    tx: &mut PgConnection,
-    space_id: Uuid,
-) -> Result<()> {
-    sqlx::query(
-        "UPDATE object_storage_objects \
-         SET state = 'delete_pending', \
-             delete_requested_at = COALESCE(delete_requested_at, now()), \
-             retry_after = NULL, last_error_code = NULL \
-         WHERE state = 'attached' AND space_id = $1",
-    )
-    .bind(space_id)
-    .execute(tx)
-    .await
-    .map_err(map_sqlx_error)?;
-    Ok(())
-}
-
-pub(crate) async fn queue_subtree_object_deletions(
-    tx: &mut PgConnection,
-    space_id: Uuid,
-    root_node_id: Uuid,
-) -> Result<()> {
-    sqlx::query(
-        "WITH RECURSIVE subtree AS ( \
-             SELECT id FROM nodes \
-             WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
-             UNION ALL \
-             SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id \
-             WHERE n.space_id = $1 AND n.deleted_at IS NULL \
-         ) \
-         UPDATE object_storage_objects \
-         SET state = 'delete_pending', \
-             delete_requested_at = COALESCE(delete_requested_at, now()), \
-             retry_after = NULL, last_error_code = NULL \
-         WHERE state = 'attached' AND node_id IN (SELECT id FROM subtree)",
-    )
-    .bind(space_id)
-    .bind(root_node_id)
-    .execute(tx)
-    .await
-    .map_err(map_sqlx_error)?;
-    Ok(())
 }

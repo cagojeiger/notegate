@@ -10,6 +10,9 @@
 //! derived by space-bounded recursive CTEs (see `files::queries`);
 //! move/rename updates only the moved node's row (O(1), no descendant rewrite).
 
+#[path = "files/trash.rs"]
+mod trash;
+
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
@@ -40,6 +43,7 @@ pub struct FilesRepo {
     revision_source: &'static str,
     revision_purpose: Option<String>,
     revision_time: Option<DateTime<Utc>>,
+    trash_time: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -105,6 +109,7 @@ impl FilesRepo {
             revision_source: "unknown",
             revision_purpose: None,
             revision_time: None,
+            trash_time: None,
         }
     }
 

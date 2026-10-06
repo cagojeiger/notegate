@@ -257,7 +257,7 @@ async fn folder_path_state(
 }
 
 /// Assert the parent is a live, writable folder and return its derived path bounds.
-pub(super) async fn require_child_write(
+pub(crate) async fn require_child_write(
     tx: &mut PgConnection,
     space_id: Uuid,
     parent_id: Uuid,
