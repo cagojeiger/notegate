@@ -429,10 +429,11 @@ async fn locked_parent_prevents_restore() -> TestResult {
     };
     let (owner, space, root) = space_with_root(&db.pool, "trash-locked-parent").await?;
     let repo = FilesRepo::new(db.pool.clone());
-    let item = folder(&repo, owner, space, root, "notes").await?;
+    let parent = folder(&repo, owner, space, root, "parent").await?;
+    let item = folder(&repo, owner, space, parent.id, "notes").await?;
     repo.soft_delete_node(space, item.id, owner, true).await?;
     sqlx::query("UPDATE nodes SET write_locked = true WHERE id = $1")
-        .bind(root)
+        .bind(parent.id)
         .execute(&db.pool)
         .await?;
     assert!(matches!(
