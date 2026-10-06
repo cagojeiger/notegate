@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use common::{TestDb, legacy_space_with_root, space_with_root};
+use common::{TestDb, legacy_space_with_root};
 use notegate_jobs::{
     AttemptOutcome, ClaimedJob, DeferTransition, FailureTransition, JobDisposition, JobFailure,
     JobHandler, JobQueue, JobRegistry, JobSpec, NewJob, Worker, WorkerConfig,
