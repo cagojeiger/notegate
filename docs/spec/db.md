@@ -462,7 +462,7 @@ object_storage_objects
   deletion_operation_id uuid null
 ```
 
-`object_storage_objects`는 업로드 연결과 물리 삭제 재시도를 위한 운영 원장이다. Node/Space soft delete는 현재 본문과 연결된 object를 30일 보존한다. 보관 기간 만료 또는 사용자 영구 삭제 요청 이후 hard purge가 object를 `delete_pending`으로 전환한 뒤 semantic rows를 제거한다. Purge는 객체 원장의 `deletion_operation_id`에 원래 node 삭제 ID(없으면 Space 삭제 ID)를 복사한다. 원장은 Node/Space purge 뒤에도 남도록 참조 FK가 `ON DELETE SET NULL`이며, `expired`/`deleted` 이력은 cluster-singleton purge가 90일 뒤 bounded batch로 삭제한다. Retention 조회는 terminal state와 `COALESCE(deleted_at, last_activity_at)` 순서의 partial index를 사용한다. `expire_pending`과 `delete_pending`은 S3 삭제 실패를 재시도하는 중간 상태다.
+`object_storage_objects`는 업로드 연결과 물리 삭제 재시도를 위한 운영 원장이다. Node/Space soft delete는 현재 본문과 연결된 object를 30일 보존한다. 보관 기간 만료 또는 사용자 영구 삭제 요청 이후 hard purge가 object를 `delete_pending`으로 전환한 뒤 semantic rows를 제거한다. Purge는 객체 원장의 `deletion_operation_id`에 원래 node 삭제 ID(없으면 Space 삭제 ID)를 복사한다. 원장은 Node/Space purge 뒤에도 남도록 참조 FK가 `ON DELETE SET NULL`이며, `expired`/`deleted` 이력은 cluster-singleton purge가 180일 뒤 bounded batch로 삭제한다. Retention 조회는 terminal state와 `COALESCE(deleted_at, last_activity_at)` 순서의 partial index를 사용한다. `expire_pending`과 `delete_pending`은 S3 삭제 실패를 재시도하는 중간 상태다.
 
 Content FK invariant:
 

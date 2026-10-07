@@ -190,9 +190,9 @@ pub const ACCOUNT_DELETION_RETENTION_DAYS: i64 = 15;
 /// Days a revoked or expired API key row is retained before the purge run deletes it.
 pub const DEAD_API_KEY_RETENTION_DAYS: i64 = 30;
 /// Days a terminal object-storage ledger row is retained before the purge run deletes it.
-pub const OBJECT_STORAGE_HISTORY_RETENTION_DAYS: i64 = 90;
+pub const OBJECT_STORAGE_HISTORY_RETENTION_DAYS: i64 = 180;
 /// Days an audit event is retained before the purge run deletes it.
-pub const AUDIT_EVENT_RETENTION_DAYS: i64 = 365;
+pub const AUDIT_EVENT_RETENTION_DAYS: i64 = 180;
 /// Days a file change event is retained before the purge run deletes it.
 pub const FILE_CHANGE_EVENT_RETENTION_DAYS: i64 = 90;
 /// Days an external command invocation summary is retained before the purge run deletes it.

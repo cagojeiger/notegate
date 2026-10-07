@@ -184,7 +184,7 @@ async fn purge_deletes_expired_event_history_in_bounded_batches()
     sqlx::query(
         "INSERT INTO audit_events \
          (created_at, owner_user_id, actor_account_id, source, op_type, resource_type, metadata) \
-         SELECT now() - interval '366 days', $1, $1, 'rest', 'test.expired', 'test', \
+         SELECT now() - interval '181 days', $1, $1, 'rest', 'test.expired', 'test', \
                 jsonb_build_object('sequence', value) \
          FROM generate_series(1, 1001) AS value",
     )
@@ -194,7 +194,7 @@ async fn purge_deletes_expired_event_history_in_bounded_batches()
     sqlx::query(
         "INSERT INTO audit_events \
          (created_at, owner_user_id, actor_account_id, source, op_type, resource_type) \
-         VALUES (now() - interval '364 days', $1, $1, 'rest', 'test.recent', 'test')",
+         VALUES (now() - interval '179 days', $1, $1, 'rest', 'test.recent', 'test')",
     )
     .bind(user)
     .execute(&db.pool)
@@ -269,7 +269,7 @@ async fn purge_deletes_terminal_object_history_in_bounded_batches()
          SELECT gen_random_uuid(), $1 || value::text, 'expired.bin', 1, \
                 'application/octet-stream', \
                 CASE WHEN value % 2 = 0 THEN 'expired' ELSE 'deleted' END, \
-                now() - interval '91 days', now() - interval '91 days' \
+                now() - interval '181 days', now() - interval '181 days' \
          FROM generate_series(1, 1001) AS value",
     )
     .bind(&object_key_prefix)
@@ -280,7 +280,7 @@ async fn purge_deletes_terminal_object_history_in_bounded_batches()
         "INSERT INTO object_storage_objects \
          (id, object_key, name, declared_byte_len, media_type, state, last_activity_at, deleted_at) \
          VALUES (gen_random_uuid(), $1, 'recent.bin', 1, 'application/octet-stream', \
-                 'deleted', now() - interval '89 days', now() - interval '89 days')",
+                 'deleted', now() - interval '179 days', now() - interval '179 days')",
     )
     .bind(&recent_object_key)
     .execute(&db.pool)
@@ -307,6 +307,118 @@ async fn purge_deletes_terminal_object_history_in_bounded_batches()
     assert_eq!(old_remaining, 0);
     assert_eq!(recent_remaining, 1);
 
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn history_retention_uses_injected_boundaries_and_keeps_pending_cleanup()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, _) = space_with_root(&db.pool, "history-boundary").await?;
+    let now =
+        chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")?.with_timezone(&chrono::Utc);
+    let audit_cutoff = now - chrono::Duration::days(180);
+    let ordinary_cutoff = now - chrono::Duration::days(90);
+    let mut audits = Vec::new();
+    let mut changes = Vec::new();
+    let mut invocations = Vec::new();
+    let mut objects = Vec::new();
+    for offset in [-1, 0, 1] {
+        let delta = chrono::Duration::microseconds(offset);
+        audits.push(sqlx::query_scalar::<_, i64>(
+            "INSERT INTO audit_events (created_at, owner_user_id, actor_account_id, source, op_type, resource_type) \
+             VALUES ($1, $2, $2, 'system', 'test.boundary', 'test') RETURNING id",
+        ).bind(audit_cutoff + delta).bind(owner).fetch_one(&db.pool).await?);
+        changes.push(
+            sqlx::query_scalar::<_, i64>(
+                "INSERT INTO file_change_events (created_at, space_id, actor_account_id, op_type) \
+             VALUES ($1, $2, $3, 'test.boundary') RETURNING id",
+            )
+            .bind(ordinary_cutoff + delta)
+            .bind(space)
+            .bind(owner)
+            .fetch_one(&db.pool)
+            .await?,
+        );
+        invocations.push(sqlx::query_scalar::<_, i64>(
+            "INSERT INTO command_invocations (created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, input, outcome, duration_ms) \
+             VALUES ($1, $2, $2, 'user', 'mcp', 'read', '{}', 'success', 0) RETURNING id",
+        ).bind(ordinary_cutoff + delta).bind(owner).fetch_one(&db.pool).await?);
+        let object = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO object_storage_objects (id, object_key, name, declared_byte_len, media_type, state, deleted_at) \
+             VALUES ($1, $2, 'boundary.bin', 1, 'application/octet-stream', 'deleted', $3)",
+        ).bind(object).bind(format!("objects/{object}")).bind(audit_cutoff + delta)
+            .execute(&db.pool).await?;
+        objects.push(object);
+    }
+    let pending = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO object_storage_objects (id, object_key, name, declared_byte_len, media_type, state, last_activity_at) \
+         VALUES ($1, $2, 'pending.bin', 1, 'application/octet-stream', 'delete_pending', $3)",
+    ).bind(pending).bind(format!("objects/{pending}")).bind(audit_cutoff - chrono::Duration::days(1))
+        .execute(&db.pool).await?;
+
+    let repo = PurgeRepo::new(db.pool.clone()).with_history_time(now);
+    let run = repo.run_once().await?;
+    assert_eq!(run.audit_events_deleted, 2);
+    assert_eq!(run.file_change_events_deleted, 2);
+    assert_eq!(run.command_invocations_deleted, 2);
+    assert_eq!(run.object_storage_history_deleted, 2);
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<i64>>(
+            "SELECT array_agg(id ORDER BY id) FROM audit_events WHERE id = ANY($1)",
+        )
+        .bind(&audits)
+        .fetch_one(&db.pool)
+        .await?,
+        vec![audits[2]]
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<i64>>(
+            "SELECT array_agg(id ORDER BY id) FROM file_change_events WHERE id = ANY($1)",
+        )
+        .bind(&changes)
+        .fetch_one(&db.pool)
+        .await?,
+        vec![changes[2]]
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<i64>>(
+            "SELECT array_agg(id ORDER BY id) FROM command_invocations WHERE id = ANY($1)",
+        )
+        .bind(&invocations)
+        .fetch_one(&db.pool)
+        .await?,
+        vec![invocations[2]]
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<Uuid>>(
+            "SELECT array_agg(id) FROM object_storage_objects WHERE id = ANY($1)",
+        )
+        .bind(&objects)
+        .fetch_one(&db.pool)
+        .await?,
+        vec![objects[2]]
+    );
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM object_storage_objects WHERE id = $1")
+            .bind(pending)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(state, "delete_pending");
+    let repeated = repo.run_once().await?;
+    assert_eq!(
+        repeated.audit_events_deleted
+            + repeated.file_change_events_deleted
+            + repeated.command_invocations_deleted
+            + repeated.object_storage_history_deleted,
+        0
+    );
     db.cleanup().await;
     Ok(())
 }
@@ -548,7 +660,7 @@ async fn assert_purge_failure_isolation(
     sqlx::query(
         "INSERT INTO audit_events \
          (created_at, owner_user_id, actor_account_id, source, op_type, resource_type) \
-         VALUES (now() - interval '366 days', $1, $1, 'system', 'test.expired', 'test')",
+         VALUES (now() - interval '181 days', $1, $1, 'system', 'test.expired', 'test')",
     )
     .bind(user)
     .execute(&db.pool)
@@ -1019,7 +1131,7 @@ async fn failed_space_batch_preserves_its_intent_but_not_other_spaces_committed_
     }
     sqlx::query(
         "INSERT INTO audit_events(created_at, owner_user_id, actor_account_id, source, op_type, resource_type) \
-         VALUES (now() - interval '366 days', $1, $1, 'system', 'test.expired', 'test')",
+         VALUES (now() - interval '181 days', $1, $1, 'system', 'test.expired', 'test')",
     ).bind(owner).execute(&db.pool).await?;
     sqlx::query("CREATE TABLE fail_node_purge(id uuid PRIMARY KEY)")
         .execute(&db.pool)

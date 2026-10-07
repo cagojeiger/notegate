@@ -1,5 +1,7 @@
 //! Reclaim terminal object records and events after their retention windows.
 
+use chrono::{DateTime, Utc};
+
 use crate::map_sqlx_error;
 use notegate_core::{Result, limits};
 use sqlx::{PgPool, Row as _};
@@ -16,7 +18,7 @@ pub(super) struct PurgedHistory {
     pub(super) command_invocations_deleted: i64,
 }
 
-pub(super) async fn purge(pool: &PgPool) -> Result<PurgedHistory> {
+pub(super) async fn purge(pool: &PgPool, now: Option<DateTime<Utc>>) -> Result<PurgedHistory> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     let object_storage_history_deleted: i64 = sqlx::query(
@@ -24,7 +26,7 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedHistory> {
              SELECT id FROM object_storage_objects \
              WHERE state IN ('expired','deleted') \
                AND COALESCE(deleted_at, last_activity_at) \
-                   <= now() - make_interval(days => $1::int) \
+                   <= COALESCE($3::timestamptz, now()) - make_interval(days => $1::int) \
              ORDER BY COALESCE(deleted_at, last_activity_at), id \
              LIMIT $2 \
              FOR UPDATE SKIP LOCKED \
@@ -37,6 +39,7 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedHistory> {
     )
     .bind(i32::try_from(limits::OBJECT_STORAGE_HISTORY_RETENTION_DAYS).unwrap_or(i32::MAX))
     .bind(OBJECT_STORAGE_HISTORY_PURGE_BATCH)
+    .bind(now)
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
@@ -45,7 +48,7 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedHistory> {
     let audit_events_deleted: i64 = sqlx::query(
         "WITH due AS ( \
              SELECT id FROM audit_events \
-             WHERE created_at <= now() - make_interval(days => $1::int) \
+             WHERE created_at <= COALESCE($3::timestamptz, now()) - make_interval(days => $1::int) \
              ORDER BY created_at, id \
              LIMIT $2 \
          ), deleted AS ( \
@@ -57,6 +60,7 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedHistory> {
     )
     .bind(i32::try_from(limits::AUDIT_EVENT_RETENTION_DAYS).unwrap_or(i32::MAX))
     .bind(AUDIT_EVENT_PURGE_BATCH)
+    .bind(now)
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
@@ -65,7 +69,7 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedHistory> {
     let file_change_events_deleted: i64 = sqlx::query(
         "WITH due AS ( \
              SELECT id FROM file_change_events \
-             WHERE created_at <= now() - make_interval(days => $1::int) \
+             WHERE created_at <= COALESCE($3::timestamptz, now()) - make_interval(days => $1::int) \
              ORDER BY created_at, id \
              LIMIT $2 \
          ), deleted AS ( \
@@ -77,6 +81,7 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedHistory> {
     )
     .bind(i32::try_from(limits::FILE_CHANGE_EVENT_RETENTION_DAYS).unwrap_or(i32::MAX))
     .bind(FILE_CHANGE_EVENT_PURGE_BATCH)
+    .bind(now)
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
@@ -85,7 +90,7 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedHistory> {
     let command_invocations_deleted: i64 = sqlx::query(
         "WITH due AS ( \
              SELECT id FROM command_invocations \
-             WHERE created_at <= now() - make_interval(days => $1::int) \
+             WHERE created_at <= COALESCE($3::timestamptz, now()) - make_interval(days => $1::int) \
              ORDER BY created_at, id \
              LIMIT $2 \
          ), deleted AS ( \
@@ -97,6 +102,7 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedHistory> {
     )
     .bind(i32::try_from(limits::COMMAND_INVOCATION_RETENTION_DAYS).unwrap_or(i32::MAX))
     .bind(COMMAND_INVOCATION_PURGE_BATCH)
+    .bind(now)
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?
