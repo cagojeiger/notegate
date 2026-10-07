@@ -122,7 +122,7 @@ pub async fn soft_delete_node(
             WHERE n.space_id = $1 AND n.deleted_at IS NULL \
          ) \
          UPDATE nodes SET deleted_at = now(), deleted_by_account_id = $3, purge_after = $4, \
-             deletion_root_id = $2, deletion_operation_id = $5 \
+             deletion_target_node_id = $2, deletion_operation_id = $5 \
          WHERE space_id = $1 AND id IN (SELECT id FROM subtree)",
     )
     .bind(space_id)

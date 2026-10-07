@@ -12,9 +12,12 @@ pub struct TrashItem {
     pub name: String,
     pub path: String,
     pub deleted_at: DateTime<Utc>,
+    /// Purge eligibility deadline; a manual purge request can advance it. Not physical completion.
     pub purge_after: DateTime<Utc>,
     pub deletion_operation_id: Option<Uuid>,
+    /// Eligible by trash metadata; restore still validates content, locks, collisions and limits.
     pub recoverable: bool,
+    /// Purge requested or retention elapsed; does not imply S3 deletion is queued or complete.
     pub deletion_pending: bool,
 }
 

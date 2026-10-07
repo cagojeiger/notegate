@@ -222,7 +222,7 @@ file_change_events
 
 `file_change_events`는 space 안의 파일/폴더/문서 변경을 기록하며 space 전체 조회와 node별 조회를 위한 index를 둔다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
-`operation_id`는 휴지통 lifecycle 작업마다 생성하는 UUID이며 event의 순서/cursor인 `id`와 별개다. `nodes`/`spaces.deletion_operation_id`는 현재 삭제 작업을 식별하고, `deletion_root_id`는 휴지통 대표 노드와 복원 범위를 유지한다. 이 식별자에는 FK를 두지 않으며 기존 행은 NULL로 유지한다.
+`operation_id`는 휴지통 lifecycle 작업마다 생성하는 UUID이며 event의 순서/cursor인 `id`와 별개다. `nodes`/`spaces.deletion_operation_id`는 현재 삭제 작업을 식별한다. `nodes.deletion_target_node_id`는 해당 노드를 포함한 삭제 요청이 직접 대상으로 삼은 노드 ID다. 대상 노드는 자기 ID를, 함께 삭제한 자손은 같은 대상 ID를 저장한다. 직접 부모나 파일 트리의 root를 뜻하지 않으며, 먼저 개별 삭제했던 자손의 값은 변경하지 않는다. 이 식별자에는 FK를 두지 않으며 기존 행은 NULL로 유지한다.
 
 `command_invocations`는 domain event와 분리된 MCP·CLI 실행 이력이다. 저장 대상과 redaction, 크기 제한, retention 계약은 `docs/spec/event-logging.md`가 소유한다.
 
@@ -302,6 +302,8 @@ spaces
 ```
 
 Live space name은 `(owner_user_id, name)` 기준 unique다. Space name은 1~63자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, `:`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다. Space 목록 기본 정렬은 `(sort_order, name, id)`다. 서비스 생성 경로는 새 space를 `max(owner live sort_order)+1000`으로 만들어 기본적으로 목록 끝에 추가한다. `navigation_pinned_at`은 탐색 영역 고정 상태이고 `user_mcp_enabled_at`은 User MCP 권한 상태이며 서로 독립적이다. `deleted_at`, `deleted_by_user_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.
+
+`trash_recoverable`은 해당 Space 삭제가 휴지통 복원 보존 정책을 지원하는지 표시한다. 현재 복원이 가능한지는 만료 시각, 영구 삭제 요청, 파일 원장 상태와 현재 제한을 별도로 검증한다.
 
 ```text
 space_usage
@@ -385,7 +387,7 @@ nodes
   updated_at timestamptz
   deleted_at timestamptz null
   purge_after timestamptz null
-  deletion_root_id uuid null
+  deletion_target_node_id uuid null
   deletion_operation_id uuid null
   purge_requested_at timestamptz null
 ```

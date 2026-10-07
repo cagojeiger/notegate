@@ -51,7 +51,7 @@ struct DeletedNode {
     kind: String,
     parent_id: Uuid,
     purge_after: DateTime<Utc>,
-    deletion_root_id: Option<Uuid>,
+    deletion_target_node_id: Option<Uuid>,
     deletion_operation_id: Option<Uuid>,
     purge_requested_at: Option<DateTime<Utc>>,
 }
@@ -80,13 +80,13 @@ impl FilesRepo {
                   AND a.is_active AND a.deleted_at IS NULL \
                 UNION ALL \
                 SELECT n.id, n.space_id, s.name, n.kind, n.name, n.deleted_at, n.purge_after, n.purge_requested_at, n.deletion_operation_id, \
-                       n.deletion_root_id = n.id AND p.deleted_at IS NULL AND n.purge_requested_at IS NULL AS recoverable \
+                       n.deletion_target_node_id = n.id AND p.deleted_at IS NULL AND n.purge_requested_at IS NULL AS recoverable \
                 FROM nodes n JOIN spaces s ON s.id = n.space_id \
                 JOIN accounts a ON a.id = s.owner_user_id \
                 JOIN nodes p ON p.id = n.parent_id \
                 WHERE s.owner_user_id = $1 AND s.deleted_at IS NULL \
                   AND a.is_active AND a.deleted_at IS NULL AND n.deleted_at IS NOT NULL \
-                  AND (n.deletion_root_id = n.id OR (n.deletion_root_id IS NULL \
+                  AND (n.deletion_target_node_id = n.id OR (n.deletion_target_node_id IS NULL \
                        AND (p.deleted_at IS NULL OR p.deleted_at <> n.deleted_at))) \
              ), page AS ( \
                 SELECT * FROM items WHERE $2::timestamptz IS NULL OR (deleted_at, id) < ($2, $3) \
@@ -133,7 +133,7 @@ impl FilesRepo {
         let now = trash_now(&mut tx, self.trash_time).await?;
         let node = deleted_node(&mut tx, space_id, node_id).await?;
         require_entry_version(node.deleted_at, node.deletion_operation_id, expected)?;
-        if node.deletion_root_id != Some(node_id)
+        if node.deletion_target_node_id != Some(node_id)
             || node.purge_requested_at.is_some()
             || node.purge_after <= now
         {
@@ -146,10 +146,10 @@ impl FilesRepo {
         let (count, text_bytes, file_bytes, depth, bytes): (i64, i64, i64, i64, i64) = sqlx::query_as(
             "WITH RECURSIVE restored AS ( \
                 SELECT id, 0::bigint AS depth, 0::bigint AS bytes FROM nodes \
-                WHERE space_id = $1 AND id = $2 AND deletion_root_id = $2 \
+                WHERE space_id = $1 AND id = $2 AND deletion_target_node_id = $2 \
                 UNION ALL SELECT n.id, r.depth + 1, r.bytes + 1 + octet_length(n.name) \
                 FROM nodes n JOIN restored r ON n.parent_id = r.id \
-                WHERE n.space_id = $1 AND n.deletion_root_id = $2 \
+                WHERE n.space_id = $1 AND n.deletion_target_node_id = $2 \
              ) SELECT count(*), \
                 COALESCE((SELECT sum(t.byte_len) FROM text_objects t JOIN restored r ON r.id = t.node_id), 0)::bigint, \
                 COALESCE((SELECT sum(f.byte_len) FROM file_objects f JOIN restored r ON r.id = f.node_id), 0)::bigint, \
@@ -174,8 +174,8 @@ impl FilesRepo {
         .await?;
         sqlx::query(
             "UPDATE nodes SET deleted_at = NULL, deleted_by_account_id = NULL, purge_after = NULL, \
-                 deletion_root_id = NULL, deletion_operation_id = NULL, updated_at = now(), updated_by_account_id = $3 \
-             WHERE space_id = $1 AND deletion_root_id = $2",
+                 deletion_target_node_id = NULL, deletion_operation_id = NULL, updated_at = now(), updated_by_account_id = $3 \
+             WHERE space_id = $1 AND deletion_target_node_id = $2",
         )
         .bind(space_id)
         .bind(node_id)
@@ -298,7 +298,10 @@ impl FilesRepo {
         let deletion_operation_id = if let Some(node_id) = node_id {
             let node = deleted_node(&mut tx, space_id, node_id).await?;
             require_entry_version(node.deleted_at, node.deletion_operation_id, expected)?;
-            if node.deletion_root_id.is_some_and(|root| root != node_id) {
+            if node
+                .deletion_target_node_id
+                .is_some_and(|target| target != node_id)
+            {
                 return Err(Error::conflict(
                     "permanent deletion must target the trash entry",
                 ));
@@ -389,7 +392,7 @@ async fn deleted_node(
     node: Uuid,
 ) -> Result<DeletedNode> {
     sqlx::query_as(
-        "SELECT deleted_at, name, kind, parent_id, purge_after, deletion_root_id, deletion_operation_id, purge_requested_at FROM nodes \
+        "SELECT deleted_at, name, kind, parent_id, purge_after, deletion_target_node_id, deletion_operation_id, purge_requested_at FROM nodes \
          WHERE space_id = $1 AND id = $2 AND parent_id IS NOT NULL AND deleted_at IS NOT NULL FOR UPDATE",
     ).bind(space).bind(node).fetch_optional(&mut **tx).await.map_err(map_sqlx_error)?
         .ok_or_else(|| Error::not_found("trash item not found"))
@@ -398,14 +401,14 @@ async fn deleted_node(
 async fn require_attached_objects(
     tx: &mut Transaction<'_, Postgres>,
     space: Uuid,
-    root: Option<Uuid>,
+    deletion_target: Option<Uuid>,
 ) -> Result<()> {
     let unavailable: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM file_objects f JOIN nodes n ON n.id = f.node_id \
          LEFT JOIN object_storage_objects o ON o.object_key = f.object_key \
-         WHERE n.space_id = $1 AND (($2::uuid IS NULL AND n.deleted_at IS NULL) OR n.deletion_root_id = $2) \
+         WHERE n.space_id = $1 AND (($2::uuid IS NULL AND n.deleted_at IS NULL) OR n.deletion_target_node_id = $2) \
            AND (o.id IS NULL OR o.state <> 'attached'))",
-    ).bind(space).bind(root).fetch_one(&mut **tx).await.map_err(map_sqlx_error)?;
+    ).bind(space).bind(deletion_target).fetch_one(&mut **tx).await.map_err(map_sqlx_error)?;
     if unavailable {
         return Err(Error::conflict("file content is no longer recoverable"));
     }
@@ -415,18 +418,18 @@ async fn require_attached_objects(
 async fn require_restore_fanout(
     tx: &mut Transaction<'_, Postgres>,
     space: Uuid,
-    root: Option<Uuid>,
+    deletion_target: Option<Uuid>,
     max_children: usize,
 ) -> Result<()> {
     let cap =
         i64::try_from(max_children).map_err(|_| Error::internal("folder limit exceeds bigint"))?;
     let exceeded: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM nodes WHERE space_id = $1 AND parent_id IS NOT NULL \
-         AND (($2::uuid IS NULL AND deleted_at IS NULL) OR deletion_root_id = $2) \
+         AND (($2::uuid IS NULL AND deleted_at IS NULL) OR deletion_target_node_id = $2) \
          GROUP BY parent_id HAVING count(*) > $3)",
     )
     .bind(space)
-    .bind(root)
+    .bind(deletion_target)
     .bind(cap)
     .fetch_one(&mut **tx)
     .await

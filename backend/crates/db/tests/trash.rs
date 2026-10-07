@@ -54,7 +54,7 @@ async fn entry_version(
 }
 
 #[tokio::test]
-async fn operation_migration_preserves_legacy_trash_without_inventing_event_links() -> TestResult {
+async fn trash_migrations_preserve_legacy_targets_and_nullable_event_links() -> TestResult {
     let Some(db) = TestDb::setup_before(45).await? else {
         return Ok(());
     };
@@ -68,7 +68,35 @@ async fn operation_migration_preserves_legacy_trash_without_inventing_event_link
     ).bind(item).bind(space).bind(root).bind(owner).execute(&db.pool).await?;
     sqlx::query("INSERT INTO file_change_events (space_id, node_id, actor_account_id, op_type) VALUES ($1, $2, $3, 'item.delete')")
         .bind(space).bind(item).bind(owner).execute(&db.pool).await?;
+    let child = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO nodes (id, space_id, parent_id, name, kind, created_by_account_id, \
+             updated_by_account_id, deleted_by_account_id, deleted_at, purge_after, deletion_root_id) \
+         SELECT $1, space_id, id, 'child', 'folder', $2, $2, $2, deleted_at, purge_after, id \
+         FROM nodes WHERE id = $3",
+    )
+    .bind(child)
+    .bind(owner)
+    .bind(item)
+    .execute(&db.pool)
+    .await?;
+    let before: Vec<(Uuid, Uuid, DateTime<Utc>, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT id, deletion_root_id, deleted_at, purge_after FROM nodes \
+         WHERE space_id = $1 AND deleted_at IS NOT NULL ORDER BY id",
+    )
+    .bind(space)
+    .fetch_all(&db.pool)
+    .await?;
     db.apply_migration(45).await?;
+    db.apply_migration(46).await?;
+    let after: Vec<(Uuid, Uuid, DateTime<Utc>, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT id, deletion_target_node_id, deleted_at, purge_after FROM nodes \
+         WHERE space_id = $1 AND deleted_at IS NOT NULL ORDER BY id",
+    )
+    .bind(space)
+    .fetch_all(&db.pool)
+    .await?;
+    assert_eq!(after, before);
     let repo = FilesRepo::new(db.pool.clone());
     let list = repo.list_trash(owner, 100, None).await?;
     assert!(list[0].recoverable);
@@ -97,6 +125,7 @@ async fn operation_migration_preserves_legacy_trash_without_inventing_event_link
         entry_version(&db.pool, space, Some(item)).await?,
     )
     .await?;
+    assert!(repo.find_node(space, child).await?.is_some());
     let events = repo
         .list_file_change_events(space, Some(item), 100, None)
         .await?;
@@ -339,7 +368,7 @@ async fn restore_does_not_depend_on_retained_logs_or_a_legacy_operation_id() -> 
 
     repo.soft_delete_node(space, item.id, owner, true).await?;
     // A recoverable deletion created before the correlation migration.
-    sqlx::query("UPDATE nodes SET deletion_operation_id = NULL WHERE space_id = $1 AND deletion_root_id = $2")
+    sqlx::query("UPDATE nodes SET deletion_operation_id = NULL WHERE space_id = $1 AND deletion_target_node_id = $2")
         .bind(space).bind(item.id).execute(&db.pool).await?;
     let trash = repo.list_trash(owner, 100, None).await?;
     assert!(trash[0].recoverable);
@@ -656,7 +685,7 @@ async fn legacy_and_unavailable_file_content_are_not_resurrected() -> TestResult
         .await,
         Err(Error::Conflict(_))
     ));
-    sqlx::query("UPDATE nodes SET deletion_root_id = NULL WHERE id = $1")
+    sqlx::query("UPDATE nodes SET deletion_target_node_id = NULL WHERE id = $1")
         .bind(item.id)
         .execute(&db.pool)
         .await?;
