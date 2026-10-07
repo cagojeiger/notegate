@@ -1,3 +1,6 @@
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { queryKeys } from "../../api/queryKeys";
+
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -9,12 +12,17 @@ import { TrashModal } from "./TrashModal";
 const item: TrashItem = {
   id: "node-1", space_id: "space-1", space_name: "Daily", kind: "text",
   name: "note.md", path: "/notes/note.md", deleted_at: "2026-10-01T00:00:00Z",
-  purge_after: "2026-10-31T00:00:00Z", recoverable: true, deletion_pending: false
+  purge_after: "2026-10-31T00:00:00Z", deletion_operation_id: "operation-1", recoverable: true, deletion_pending: false
 };
 const page = { limit: 50, returned: 1, has_more: false, next_cursor: null };
 const response = (items: TrashItem[]) => new Response(JSON.stringify({ items, page }), { status: 200, headers: { "content-type": "application/json" } });
-function show() {
-  render(<ApiProvider authCacheKey="trash-test"><TrashModal onClose={vi.fn()} /></ApiProvider>);
+function CacheProbe({ onReady }: { onReady?: (client: QueryClient) => void }) {
+  const client = useQueryClient();
+  onReady?.(client);
+  return null;
+}
+function show(onReady?: (client: QueryClient) => void) {
+  render(<ApiProvider authCacheKey="trash-test"><CacheProbe onReady={onReady} /><TrashModal onClose={vi.fn()} /></ApiProvider>);
 }
 
 describe("TrashModal", () => {
@@ -37,7 +45,11 @@ describe("TrashModal", () => {
     await user.click(screen.getByRole("button", { name: /^Permanently delete$/ }));
     await screen.findByText("Deletion queued · recovery unavailable");
     expect(screen.getByRole("button", { name: "Restore note.md" })).toBeDisabled();
-    expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "DELETE")).toHaveLength(1);
+    const requests = fetchMock.mock.calls.filter(([, options]) => options?.method === "DELETE");
+    expect(requests).toHaveLength(1);
+    const params = new URL(String(requests[0]?.[0]), "http://localhost").searchParams;
+    expect(params.get("deleted_at")).toBe(item.deleted_at);
+    expect(params.get("deletion_operation_id")).toBe(item.deletion_operation_id);
   });
 
   it("restores and refreshes the list without removing an item before server success", async () => {
@@ -53,7 +65,7 @@ describe("TrashModal", () => {
     show();
     await user.click(await screen.findByRole("button", { name: "Restore note.md" }));
     await screen.findByText("Trash is empty.");
-    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/nodes/node-1/restore"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => new URL(String(url), "http://localhost").pathname.endsWith("/nodes/node-1/restore"))).toBe(true);
   });
 
   it("keeps recoverable content visible when a restore conflicts", async () => {
@@ -80,4 +92,43 @@ describe("TrashModal", () => {
     await screen.findByText("second.md");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("cursor=next-page"))).toBe(true);
   });
+  it("refreshes the Space resources and agent connections after restoration", async () => {
+    const user = userEvent.setup();
+    let restored = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+      if (options?.method === "POST") { restored = true; return new Response(null, { status: 204 }); }
+      return response(restored ? [] : [{ ...item, kind: "space" }]);
+    });
+    let cache: QueryClient | undefined;
+    show((client) => { cache = client; });
+    await screen.findByText("note.md");
+    if (!cache) throw new Error("query client missing");
+    cache.setQueryData(queryKeys.connections(item.space_id), { connections: ["old-agent"] });
+    cache.setQueryData(queryKeys.node(item.space_id, "child"), { id: "child" });
+    cache.setQueryData(queryKeys.connections("other-space"), { connections: ["other-agent"] });
+    await user.click(screen.getByRole("button", { name: "Restore note.md" }));
+    await screen.findByText("Trash is empty.");
+    expect(cache.getQueryState(queryKeys.connections(item.space_id))?.isInvalidated).toBe(true);
+    expect(cache.getQueryState(queryKeys.node(item.space_id, "child"))?.isInvalidated).toBe(true);
+    expect(cache.getQueryState(queryKeys.connections("other-space"))?.isInvalidated).toBe(false);
+  });
+
+  it("refreshes a stale deletion after conflict without retrying permanent deletion", async () => {
+    const user = userEvent.setup();
+    let changed = false;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+      if (options?.method === "DELETE") {
+        changed = true;
+        return new Response(JSON.stringify({ message: "Trash entry has changed", kind: "conflict" }), { status: 409 });
+      }
+      return response([{ ...item, name: changed ? "new-note.md" : item.name, deletion_operation_id: changed ? "operation-2" : item.deletion_operation_id }]);
+    });
+    show();
+    await user.click(await screen.findByRole("button", { name: "Permanently delete note.md" }));
+    await user.click(screen.getByRole("button", { name: /^Permanently delete$/ }));
+    await screen.findByText("new-note.md");
+    expect(screen.getByRole("alert")).toHaveTextContent("Trash entry has changed");
+    expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "DELETE")).toHaveLength(1);
+  });
+
 });

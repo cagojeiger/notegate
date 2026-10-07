@@ -823,7 +823,12 @@ async fn delete_attached_file(
         .soft_delete_node(space_id, node_id, caller.account.id, false)
         .await?;
     FilesRepo::new(db.pool.clone())
-        .request_trash_purge(caller.account.id, space_id, Some(node_id))
+        .request_trash_purge(
+            caller.account.id,
+            space_id,
+            Some(node_id),
+            (&repo.list_trash(caller.account.id, 100, None).await?[0]).into(),
+        )
         .await?;
     notegate_db::PurgeRepo::new(db.pool.clone())
         .run_once()
@@ -928,8 +933,13 @@ async fn object_upload_round_trips_through_s3_presigned_urls()
         StatusCode::NOT_FOUND,
         "trash content is not served through live access"
     );
-    repo.restore_trashed_node(caller.account_id(), space_id, node_id)
-        .await?;
+    repo.restore_trashed_node(
+        caller.account_id(),
+        space_id,
+        node_id,
+        (&repo.list_trash(caller.account_id(), 100, None).await?[0]).into(),
+    )
+    .await?;
     assert_eq!(object_state(&db, upload.id).await?, "attached");
 
     delete_attached_file(&db, &state, &caller, space_id, node_id).await?;

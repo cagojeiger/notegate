@@ -191,6 +191,8 @@ export function useDeleteNodeMutation(onDeleted: (node: NodeSummary) => void) {
     onSuccess: async (node, { recursive }) => {
       await removeDeletedNodeQueries(queryClient, node, recursive);
       onDeleted(node);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.trash });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       if (recursive && node.kind === "folder") {
         invalidateFolderSubtree(queryClient, node.space_id);
       } else {

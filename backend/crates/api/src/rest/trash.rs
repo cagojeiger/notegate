@@ -6,7 +6,7 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use notegate_model::Caller;
-use notegate_model::trash::TrashItem;
+use notegate_model::trash::{TrashEntryVersion, TrashItem};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -110,32 +110,37 @@ pub(crate) async fn list(
 
 #[utoipa::path(
     post, path = "/api/v1/me/trash/spaces/{space_id}/nodes/{node_id}/restore", tag = "trash",
-    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path), ("deleted_at" = DateTime<Utc>, Query), ("deletion_operation_id" = Option<Uuid>, Query)),
     responses((status = 204, description = "Restored")), security(("browser_session" = []))
 )]
 pub(crate) async fn restore_node(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path((space, node)): Path<(Uuid, Uuid)>,
+    Query(expected): Query<TrashEntryVersion>,
 ) -> Result<StatusCode, ApiError> {
     state
         .files
-        .restore_trash(&caller, space, Some(node))
+        .restore_trash(&caller, space, Some(node), expected)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
     post, path = "/api/v1/me/trash/spaces/{space_id}/restore", tag = "trash",
-    params(("space_id" = Uuid, Path)),
+    params(("space_id" = Uuid, Path), ("deleted_at" = DateTime<Utc>, Query), ("deletion_operation_id" = Option<Uuid>, Query)),
     responses((status = 204, description = "Restored; agent connections require reconnection")), security(("browser_session" = []))
 )]
 pub(crate) async fn restore_space(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(space): Path<Uuid>,
+    Query(expected): Query<TrashEntryVersion>,
 ) -> Result<StatusCode, ApiError> {
-    state.files.restore_trash(&caller, space, None).await?;
+    state
+        .files
+        .restore_trash(&caller, space, None, expected)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -146,15 +151,19 @@ pub(crate) struct PurgeRequestedOut {
 
 #[utoipa::path(
     delete, path = "/api/v1/me/trash/spaces/{space_id}/nodes/{node_id}", tag = "trash",
-    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path), ("deleted_at" = DateTime<Utc>, Query), ("deletion_operation_id" = Option<Uuid>, Query)),
     responses((status = 202, description = "Deletion queued, not completed", body = PurgeRequestedOut)), security(("browser_session" = []))
 )]
 pub(crate) async fn purge_node(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path((space, node)): Path<(Uuid, Uuid)>,
+    Query(expected): Query<TrashEntryVersion>,
 ) -> Result<(StatusCode, Json<PurgeRequestedOut>), ApiError> {
-    state.files.purge_trash(&caller, space, Some(node)).await?;
+    state
+        .files
+        .purge_trash(&caller, space, Some(node), expected)
+        .await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(PurgeRequestedOut {
@@ -165,15 +174,19 @@ pub(crate) async fn purge_node(
 
 #[utoipa::path(
     delete, path = "/api/v1/me/trash/spaces/{space_id}", tag = "trash",
-    params(("space_id" = Uuid, Path)),
+    params(("space_id" = Uuid, Path), ("deleted_at" = DateTime<Utc>, Query), ("deletion_operation_id" = Option<Uuid>, Query)),
     responses((status = 202, description = "Deletion queued, not completed", body = PurgeRequestedOut)), security(("browser_session" = []))
 )]
 pub(crate) async fn purge_space(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(space): Path<Uuid>,
+    Query(expected): Query<TrashEntryVersion>,
 ) -> Result<(StatusCode, Json<PurgeRequestedOut>), ApiError> {
-    state.files.purge_trash(&caller, space, None).await?;
+    state
+        .files
+        .purge_trash(&caller, space, None, expected)
+        .await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(PurgeRequestedOut {

@@ -7,11 +7,12 @@
 )]
 mod common;
 
-use chrono::Duration;
+use chrono::{DateTime, Duration, Utc};
 use common::{TestDb, attach_file, insert_user_account, legacy_space_with_root, space_with_root};
 use notegate_core::{Error, limits::Limits};
 use notegate_db::{AgentRepo, AuditEventRepo, ConnectionRepo, FilesRepo, PurgeRepo, SpaceRepo};
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
+use notegate_model::trash::TrashEntryVersion;
 use notegate_model::{ConnectAgent, CreateAgent, Permission};
 use uuid::Uuid;
 
@@ -35,6 +36,23 @@ async fn folder(
     .await
 }
 
+async fn entry_version(
+    pool: &sqlx::PgPool,
+    space: Uuid,
+    node: Option<Uuid>,
+) -> Result<TrashEntryVersion, Box<dyn std::error::Error>> {
+    let (deleted_at, deletion_operation_id): (DateTime<Utc>, Option<Uuid>) = match node {
+        Some(node) => sqlx::query_as("SELECT COALESCE(deleted_at, created_at), deletion_operation_id FROM nodes WHERE space_id = $1 AND id = $2")
+            .bind(space).bind(node).fetch_one(pool).await?,
+        None => sqlx::query_as("SELECT COALESCE(deleted_at, created_at), deletion_operation_id FROM spaces WHERE id = $1")
+            .bind(space).fetch_one(pool).await?,
+    };
+    Ok(TrashEntryVersion {
+        deleted_at,
+        deletion_operation_id,
+    })
+}
+
 #[tokio::test]
 async fn operation_migration_preserves_legacy_trash_without_inventing_event_links() -> TestResult {
     let Some(db) = TestDb::setup_before(45).await? else {
@@ -55,11 +73,30 @@ async fn operation_migration_preserves_legacy_trash_without_inventing_event_link
     let list = repo.list_trash(owner, 100, None).await?;
     assert!(list[0].recoverable);
     assert_eq!(list[0].deletion_operation_id, None);
+    let stale = TrashEntryVersion {
+        deleted_at: list[0].deleted_at - Duration::microseconds(1),
+        deletion_operation_id: None,
+    };
+    assert!(matches!(
+        repo.restore_trashed_node(owner, space, item, stale).await,
+        Err(Error::Conflict(_))
+    ));
+    assert!(matches!(
+        repo.request_trash_purge(owner, space, Some(item), stale)
+            .await,
+        Err(Error::Conflict(_))
+    ));
     let events = repo
         .list_file_change_events(space, Some(item), 100, None)
         .await?;
     assert_eq!(events[0].operation_id, None);
-    repo.restore_trashed_node(owner, space, item).await?;
+    repo.restore_trashed_node(
+        owner,
+        space,
+        item,
+        entry_version(&db.pool, space, Some(item)).await?,
+    )
+    .await?;
     let events = repo
         .list_file_change_events(space, Some(item), 100, None)
         .await?;
@@ -94,7 +131,13 @@ async fn folder_restore_keeps_original_text_and_file_but_not_previously_deleted_
     repo.soft_delete_node(space, parent.id, owner, true).await?;
     assert!(repo.find_node(space, text.id).await?.is_none());
     assert!(matches!(
-        repo.request_trash_purge(owner, space, Some(file.id)).await,
+        repo.request_trash_purge(
+            owner,
+            space,
+            Some(file.id),
+            entry_version(&db.pool, space, Some(file.id)).await?
+        )
+        .await,
         Err(Error::Conflict(_))
     ));
     let trash = repo.list_trash(owner, 100, None).await?;
@@ -135,7 +178,13 @@ async fn folder_restore_keeps_original_text_and_file_but_not_previously_deleted_
             .object_deletions_queued,
         0
     );
-    repo.restore_trashed_node(owner, space, parent.id).await?;
+    repo.restore_trashed_node(
+        owner,
+        space,
+        parent.id,
+        entry_version(&db.pool, space, Some(parent.id)).await?,
+    )
+    .await?;
     let old_deletion_after: Uuid =
         sqlx::query_scalar("SELECT deletion_operation_id FROM nodes WHERE id = $1")
             .bind(old.id)
@@ -161,7 +210,13 @@ async fn folder_restore_keeps_original_text_and_file_but_not_previously_deleted_
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(restores, 1);
-    repo.restore_trashed_node(owner, space, old.id).await?;
+    repo.restore_trashed_node(
+        owner,
+        space,
+        old.id,
+        entry_version(&db.pool, space, Some(old.id)).await?,
+    )
+    .await?;
     db.cleanup().await;
     Ok(())
 }
@@ -184,7 +239,13 @@ async fn deletion_operations_link_redelete_restore_purge_and_survive_node_cleanu
     assert_eq!(events[0].op_type, "item.delete");
     assert_eq!(events[0].operation_id, Some(first));
 
-    repo.restore_trashed_node(owner, space, item.id).await?;
+    repo.restore_trashed_node(
+        owner,
+        space,
+        item.id,
+        entry_version(&db.pool, space, Some(item.id)).await?,
+    )
+    .await?;
     let cleared: Option<Uuid> =
         sqlx::query_scalar("SELECT deletion_operation_id FROM nodes WHERE id = $1")
             .bind(item.id)
@@ -208,8 +269,13 @@ async fn deletion_operations_link_redelete_restore_purge_and_survive_node_cleanu
         .unwrap();
     assert_ne!(second, first);
     assert_ne!(second, restored);
-    repo.request_trash_purge(owner, space, Some(item.id))
-        .await?;
+    repo.request_trash_purge(
+        owner,
+        space,
+        Some(item.id),
+        entry_version(&db.pool, space, Some(item.id)).await?,
+    )
+    .await?;
     let events = AuditEventRepo::new(db.pool.clone())
         .list_by_owner(owner, 100, None)
         .await?;
@@ -255,7 +321,13 @@ async fn restore_does_not_depend_on_retained_logs_or_a_legacy_operation_id() -> 
         .bind(space)
         .execute(&db.pool)
         .await?;
-    repo.restore_trashed_node(owner, space, item.id).await?;
+    repo.restore_trashed_node(
+        owner,
+        space,
+        item.id,
+        entry_version(&db.pool, space, Some(item.id)).await?,
+    )
+    .await?;
     let events = repo
         .list_file_change_events(space, Some(item.id), 100, None)
         .await?;
@@ -272,7 +344,13 @@ async fn restore_does_not_depend_on_retained_logs_or_a_legacy_operation_id() -> 
     let trash = repo.list_trash(owner, 100, None).await?;
     assert!(trash[0].recoverable);
     assert_eq!(trash[0].deletion_operation_id, None);
-    repo.restore_trashed_node(owner, space, item.id).await?;
+    repo.restore_trashed_node(
+        owner,
+        space,
+        item.id,
+        entry_version(&db.pool, space, Some(item.id)).await?,
+    )
+    .await?;
     let events = repo
         .list_file_change_events(space, Some(item.id), 100, None)
         .await?;
@@ -316,9 +394,14 @@ async fn operation_state_and_event_roll_back_together_when_capture_fails() -> Te
         .unwrap();
     sqlx::query(trigger).execute(&db.pool).await?;
     assert!(
-        repo.restore_trashed_node(owner, space, item.id)
-            .await
-            .is_err()
+        repo.restore_trashed_node(
+            owner,
+            space,
+            item.id,
+            entry_version(&db.pool, space, Some(item.id)).await?
+        )
+        .await
+        .is_err()
     );
     assert!(repo.find_node(space, item.id).await?.is_none());
     assert_eq!(
@@ -336,7 +419,13 @@ async fn operation_state_and_event_roll_back_together_when_capture_fails() -> Te
     sqlx::query("DROP TRIGGER reject_trash_event ON file_change_events")
         .execute(&db.pool)
         .await?;
-    repo.restore_trashed_node(owner, space, item.id).await?;
+    repo.restore_trashed_node(
+        owner,
+        space,
+        item.id,
+        entry_version(&db.pool, space, Some(item.id)).await?,
+    )
+    .await?;
     db.cleanup().await;
     Ok(())
 }
@@ -354,17 +443,34 @@ async fn restore_rejects_wrong_owner_collision_and_current_quota_without_partial
     repo.soft_delete_node(space, item.id, owner, true).await?;
     assert!(repo.list_trash(stranger, 100, None).await?.is_empty());
     assert!(matches!(
-        repo.restore_trashed_node(stranger, space, item.id).await,
+        repo.restore_trashed_node(
+            stranger,
+            space,
+            item.id,
+            entry_version(&db.pool, space, Some(item.id)).await?
+        )
+        .await,
         Err(Error::NotFound(_))
     ));
     assert!(matches!(
-        repo.request_trash_purge(stranger, space, Some(item.id))
-            .await,
+        repo.request_trash_purge(
+            stranger,
+            space,
+            Some(item.id),
+            entry_version(&db.pool, space, Some(item.id)).await?
+        )
+        .await,
         Err(Error::NotFound(_))
     ));
     let replacement = folder(&repo, owner, space, root, "notes").await?;
     assert!(matches!(
-        repo.restore_trashed_node(owner, space, item.id).await,
+        repo.restore_trashed_node(
+            owner,
+            space,
+            item.id,
+            entry_version(&db.pool, space, Some(item.id)).await?
+        )
+        .await,
         Err(Error::Conflict(_))
     ));
     assert!(repo.find_node(space, replacement.id).await?.is_some());
@@ -378,11 +484,24 @@ async fn restore_rejects_wrong_owner_collision_and_current_quota_without_partial
         },
     );
     assert!(matches!(
-        limited.restore_trashed_node(owner, space, item.id).await,
+        limited
+            .restore_trashed_node(
+                owner,
+                space,
+                item.id,
+                entry_version(&db.pool, space, Some(item.id)).await?
+            )
+            .await,
         Err(Error::Conflict(_))
     ));
     assert!(repo.find_node(space, item.id).await?.is_none());
-    repo.restore_trashed_node(owner, space, item.id).await?;
+    repo.restore_trashed_node(
+        owner,
+        space,
+        item.id,
+        entry_version(&db.pool, space, Some(item.id)).await?,
+    )
+    .await?;
     db.cleanup().await;
     Ok(())
 }
@@ -414,7 +533,12 @@ async fn restore_time_boundary_is_exclusive_and_injected() -> TestResult {
         assert_eq!(row.deletion_pending, !succeeds);
         assert_eq!(
             timed
-                .restore_trashed_node(owner, space, item.id)
+                .restore_trashed_node(
+                    owner,
+                    space,
+                    item.id,
+                    entry_version(&db.pool, space, Some(item.id)).await?
+                )
                 .await
                 .is_ok(),
             succeeds
@@ -434,14 +558,31 @@ async fn manual_purge_disables_restore_before_async_cleanup_and_does_not_delete_
     let repo = FilesRepo::new(db.pool.clone());
     let (item, _) = attach_file(&repo, space, root, "data.bin", 9, owner).await?;
     assert!(matches!(
-        repo.request_trash_purge(owner, space, Some(item.id)).await,
+        repo.request_trash_purge(
+            owner,
+            space,
+            Some(item.id),
+            entry_version(&db.pool, space, Some(item.id)).await?
+        )
+        .await,
         Err(Error::NotFound(_))
     ));
     repo.soft_delete_node(space, item.id, owner, false).await?;
-    repo.request_trash_purge(owner, space, Some(item.id))
-        .await?;
+    repo.request_trash_purge(
+        owner,
+        space,
+        Some(item.id),
+        entry_version(&db.pool, space, Some(item.id)).await?,
+    )
+    .await?;
     assert!(matches!(
-        repo.restore_trashed_node(owner, space, item.id).await,
+        repo.restore_trashed_node(
+            owner,
+            space,
+            item.id,
+            entry_version(&db.pool, space, Some(item.id)).await?
+        )
+        .await,
         Err(Error::Conflict(_))
     ));
     let past: chrono::DateTime<chrono::Utc> =
@@ -452,7 +593,12 @@ async fn manual_purge_disables_restore_before_async_cleanup_and_does_not_delete_
     let rolled_back_clock = repo.clone().with_trash_time(past);
     assert!(
         rolled_back_clock
-            .restore_trashed_node(owner, space, item.id)
+            .restore_trashed_node(
+                owner,
+                space,
+                item.id,
+                entry_version(&db.pool, space, Some(item.id)).await?
+            )
             .await
             .is_err()
     );
@@ -501,7 +647,13 @@ async fn legacy_and_unavailable_file_content_are_not_resurrected() -> TestResult
         .execute(&db.pool)
         .await?;
     assert!(matches!(
-        repo.restore_trashed_node(owner, space, item.id).await,
+        repo.restore_trashed_node(
+            owner,
+            space,
+            item.id,
+            entry_version(&db.pool, space, Some(item.id)).await?
+        )
+        .await,
         Err(Error::Conflict(_))
     ));
     sqlx::query("UPDATE nodes SET deletion_root_id = NULL WHERE id = $1")
@@ -512,7 +664,13 @@ async fn legacy_and_unavailable_file_content_are_not_resurrected() -> TestResult
     assert_eq!(list.len(), 1);
     assert!(!list[0].recoverable);
     assert!(matches!(
-        repo.restore_trashed_node(owner, space, item.id).await,
+        repo.restore_trashed_node(
+            owner,
+            space,
+            item.id,
+            entry_version(&db.pool, space, Some(item.id)).await?
+        )
+        .await,
         Err(Error::Conflict(_))
     ));
     db.cleanup().await;
@@ -553,8 +711,10 @@ async fn space_restore_preserves_nodes_but_does_not_restore_previously_deleted_c
     let list = repo.list_trash(owner, 100, None).await?;
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].kind, "space");
+    let first_version = TrashEntryVersion::from(&list[0]);
     let first_deletion = list[0].deletion_operation_id.unwrap();
-    repo.restore_trashed_space(owner, space).await?;
+    repo.restore_trashed_space(owner, space, entry_version(&db.pool, space, None).await?)
+        .await?;
     let events = AuditEventRepo::new(db.pool.clone())
         .list_by_owner(owner, 100, None)
         .await?;
@@ -581,7 +741,37 @@ async fn space_restore_preserves_nodes_but_does_not_restore_previously_deleted_c
         .deletion_operation_id
         .unwrap();
     assert_ne!(second_deletion, first_deletion);
-    repo.request_trash_purge(owner, space, None).await?;
+    assert!(matches!(
+        repo.restore_trashed_space(owner, space, first_version)
+            .await,
+        Err(Error::Conflict(_))
+    ));
+    assert!(matches!(
+        repo.request_trash_purge(owner, space, None, first_version)
+            .await,
+        Err(Error::Conflict(_))
+    ));
+    let current = entry_version(&db.pool, space, None).await?;
+    assert!(matches!(
+        repo.request_trash_purge(
+            owner,
+            space,
+            None,
+            TrashEntryVersion {
+                deletion_operation_id: None,
+                ..current
+            }
+        )
+        .await,
+        Err(Error::Conflict(_))
+    ));
+    repo.request_trash_purge(
+        owner,
+        space,
+        None,
+        entry_version(&db.pool, space, None).await?,
+    )
+    .await?;
     let past: chrono::DateTime<chrono::Utc> =
         sqlx::query_scalar("SELECT deleted_at - interval '1 day' FROM spaces WHERE id = $1")
             .bind(space)
@@ -590,13 +780,14 @@ async fn space_restore_preserves_nodes_but_does_not_restore_previously_deleted_c
     assert!(
         repo.clone()
             .with_trash_time(past)
-            .restore_trashed_space(owner, space)
+            .restore_trashed_space(owner, space, entry_version(&db.pool, space, None).await?)
             .await
             .is_err()
     );
 
     assert!(matches!(
-        repo.restore_trashed_space(owner, space).await,
+        repo.restore_trashed_space(owner, space, entry_version(&db.pool, space, None).await?)
+            .await,
         Err(Error::Conflict(_))
     ));
     assert_eq!(
@@ -635,8 +826,9 @@ async fn purge_restore_race_never_leaves_a_live_file_queued_for_deletion() -> Te
         .clone()
         .with_trash_time(deadline - Duration::microseconds(1));
     let purge = PurgeRepo::new(db.pool.clone());
+    let expected = entry_version(&db.pool, space, Some(item.id)).await?;
     let (restored, purged) = tokio::join!(
-        restore.restore_trashed_node(owner, space, item.id),
+        restore.restore_trashed_node(owner, space, item.id, expected),
         purge.run_once()
     );
     purged?;
@@ -675,19 +867,22 @@ async fn space_restore_obeys_current_owner_limits_and_conflicts() -> TestResult 
         )
         .await?;
     assert!(matches!(
-        repo.restore_trashed_space(owner, space).await,
+        repo.restore_trashed_space(owner, space, entry_version(&db.pool, space, None).await?)
+            .await,
         Err(Error::Conflict(_))
     ));
     common::set_user_tier(&db.pool, owner, "system_max").await?;
     assert!(
         matches!(
-            repo.restore_trashed_space(owner, space).await,
+            repo.restore_trashed_space(owner, space, entry_version(&db.pool, space, None).await?)
+                .await,
             Err(Error::Conflict(_))
         ),
         "name collision still rejected with spare quota"
     );
     spaces.delete_space(replacement.id, owner, owner).await?;
-    repo.restore_trashed_space(owner, space).await?;
+    repo.restore_trashed_space(owner, space, entry_version(&db.pool, space, None).await?)
+        .await?;
     db.cleanup().await;
     Ok(())
 }
@@ -707,7 +902,13 @@ async fn locked_parent_prevents_restore() -> TestResult {
         .execute(&db.pool)
         .await?;
     assert!(matches!(
-        repo.restore_trashed_node(owner, space, item.id).await,
+        repo.restore_trashed_node(
+            owner,
+            space,
+            item.id,
+            entry_version(&db.pool, space, Some(item.id)).await?
+        )
+        .await,
         Err(Error::WriteLocked { .. })
     ));
     assert!(repo.find_node(space, item.id).await?.is_none());
@@ -734,10 +935,155 @@ async fn restoration_obeys_current_folder_child_limit() -> TestResult {
         },
     );
     assert!(matches!(
-        limited.restore_trashed_node(owner, space, parent.id).await,
+        limited
+            .restore_trashed_node(
+                owner,
+                space,
+                parent.id,
+                entry_version(&db.pool, space, Some(parent.id)).await?
+            )
+            .await,
         Err(Error::Conflict(_))
     ));
     assert!(repo.find_node(space, parent.id).await?.is_none());
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn space_restore_rebuilds_links_after_deleted_space_graph_was_cleaned() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "trash-link-rebuild").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let body = StoredContent {
+        body: WriteTextBody::Plain("[root](/)".to_owned()),
+        content_sha256: "a".repeat(64),
+        byte_len: 9,
+        line_count: 1,
+    };
+    let (text, _) = repo
+        .insert_text(space, root, "links.md", &body, owner)
+        .await?;
+    SpaceRepo::new(db.pool.clone())
+        .delete_space(space, owner, owner)
+        .await?;
+    let work = notegate_db::LinkGraphWorkRepo::new(db.pool.clone());
+    work.collect_changes().await?;
+    let before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM link_graph_space_states WHERE space_id = $1")
+            .bind(space)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(before, 0);
+    repo.restore_trashed_space(owner, space, entry_version(&db.pool, space, None).await?)
+        .await?;
+    let pending: bool = sqlx::query_scalar("SELECT available_at IS NOT NULL AND full_scan_event_id IS NOT NULL FROM link_graph_space_states WHERE space_id = $1")
+        .bind(space).fetch_one(&db.pool).await?;
+    assert!(pending);
+    work.collect_changes().await?;
+    let scheduled: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM node_link_projections WHERE space_id = $1 AND source_node_id = $2 AND needs_projection AND active_job_id IS NOT NULL)")
+        .bind(space).bind(text.id).fetch_one(&db.pool).await?;
+    assert!(scheduled);
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn permanent_folder_deletion_includes_independent_trash_but_keeps_its_operation() -> TestResult
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "trash-cascade").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let parent = folder(&repo, owner, space, root, "notes").await?;
+    let (old, old_file) = attach_file(&repo, space, parent.id, "old.bin", 3, owner).await?;
+    let (current, current_file) =
+        attach_file(&repo, space, parent.id, "current.bin", 5, owner).await?;
+    repo.soft_delete_node(space, old.id, owner, false).await?;
+    let old_version = entry_version(&db.pool, space, Some(old.id)).await?;
+    repo.soft_delete_node(space, parent.id, owner, true).await?;
+    let parent_version = entry_version(&db.pool, space, Some(parent.id)).await?;
+    assert_ne!(
+        old_version.deletion_operation_id,
+        parent_version.deletion_operation_id
+    );
+    repo.request_trash_purge(owner, space, Some(parent.id), parent_version)
+        .await?;
+    let purged = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(purged.object_deletions_queued, 2);
+    for (object, expected) in [
+        (&old_file.object_key, old_version),
+        (&current_file.object_key, parent_version),
+    ] {
+        let (node, state, operation): (Option<Uuid>, String, Option<Uuid>) = sqlx::query_as("SELECT node_id, state, deletion_operation_id FROM object_storage_objects WHERE object_key = $1")
+            .bind(object).fetch_one(&db.pool).await?;
+        assert!(node.is_none());
+        assert_eq!(state, "delete_pending");
+        assert_eq!(operation, expected.deletion_operation_id);
+    }
+    assert!(repo.find_node(space, current.id).await?.is_none());
+    assert!(repo.list_trash(owner, 100, None).await?.is_empty());
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn unfinished_upload_can_attach_only_after_its_parent_is_restored() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "trash-pending-upload").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let parent = folder(&repo, owner, space, root, "uploads").await?;
+    let upload = Uuid::new_v4();
+    repo.insert_object_upload(
+        upload,
+        &format!("objects/{upload}"),
+        space,
+        owner,
+        &notegate_model::files::BeginObjectUpload {
+            parent_node_id: parent.id,
+            name: "pending.bin".to_owned(),
+            byte_len: 3,
+            media_type: "application/octet-stream".to_owned(),
+            original_filename: None,
+            encryption_mode: notegate_model::FileEncryptionMode::None,
+            encryption_metadata: None,
+        },
+    )
+    .await?;
+    repo.soft_delete_node(space, parent.id, owner, true).await?;
+    assert!(
+        repo.attach_object_upload(upload, space, owner, None, None)
+            .await
+            .is_err()
+    );
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM object_storage_objects WHERE id = $1")
+            .bind(upload)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(state, "uploading");
+    repo.restore_trashed_node(
+        owner,
+        space,
+        parent.id,
+        entry_version(&db.pool, space, Some(parent.id)).await?,
+    )
+    .await?;
+    let (node, _) = repo
+        .attach_object_upload(upload, space, owner, None, None)
+        .await?;
+    assert_eq!(node.parent_id, Some(parent.id));
+    let count: i64 =
+        sqlx::query_scalar("SELECT live_node_count FROM space_usage WHERE space_id = $1")
+            .bind(space)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(count, 3);
     db.cleanup().await;
     Ok(())
 }

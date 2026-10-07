@@ -42,7 +42,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     await expect(dialog.getByText("meeting.md", { exact: true })).toBeVisible();
     await expect(dialog.getByText("/notes/meeting.md", { exact: false })).toBeVisible();
     await testInfo.attach(`trash-${viewport.name}`, { body: await page.screenshot({ path: `test-results/trash-${viewport.name}.png` }), contentType: "image/png" });
-    const restorePath = "**/api/v1/me/trash/spaces/*/nodes/deleted-node/restore";
+    const restorePath = "**/api/v1/me/trash/spaces/*/nodes/deleted-node/restore?**";
     const conflictMessage = "a node named 'meeting.md' already exists in this folder";
     await page.route(restorePath, (route) => route.fulfill({
       status: 409,

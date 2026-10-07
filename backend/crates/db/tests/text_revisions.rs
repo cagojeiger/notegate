@@ -903,3 +903,57 @@ async fn changed_save_updates_body_and_revision_attribution_once() -> TestResult
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn trash_restore_keeps_the_current_revision_but_does_not_freeze_revision_retention()
+-> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (actor, space, root) = space_with_root(&db.pool, "revision-trash").await?;
+    let repo = FilesRepo::new(db.pool.clone()).with_revision_time(policy_time());
+    let (node, _) = repo
+        .insert_text(space, root, "note.md", &body("old"), actor)
+        .await?;
+    save(
+        &repo
+            .clone()
+            .with_revision_time(policy_time() + Duration::seconds(1)),
+        space,
+        node.id,
+        actor,
+        "current",
+    )
+    .await?;
+    let head = revision_head(&db.pool, node.id).await?;
+    repo.soft_delete_node(space, node.id, actor, false).await?;
+    let selected = repo
+        .list_trash(actor, 100, None)
+        .await?
+        .into_iter()
+        .find(|item| item.id == node.id)
+        .unwrap();
+    let cleanup_at: DateTime<Utc> =
+        sqlx::query_scalar("SELECT max(cleanup_at) FROM text_revisions WHERE node_id = $1")
+            .bind(node.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(revisions::cleanup_at(&db.pool, cleanup_at).await?, 1);
+    repo.restore_trashed_node(actor, space, node.id, (&selected).into())
+        .await?;
+    assert_eq!(revision_head(&db.pool, node.id).await?, head);
+    let history: i64 = sqlx::query_scalar("SELECT count(*) FROM text_revisions WHERE node_id = $1")
+        .bind(node.id)
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(history, 0);
+    let current: String =
+        sqlx::query_scalar("SELECT content_text FROM text_objects WHERE node_id = $1")
+            .bind(node.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(current, "current");
+    assert_history_usage(&db.pool, space).await?;
+    db.cleanup().await;
+    Ok(())
+}

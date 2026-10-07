@@ -1,5 +1,5 @@
 //! Dashboard trash operations are restricted to the active owner user.
-use notegate_model::trash::{TrashCursor, TrashPage};
+use notegate_model::trash::{TrashCursor, TrashEntryVersion, TrashPage};
 use notegate_model::{AccountKind, Caller, Channel};
 use uuid::Uuid;
 
@@ -61,17 +61,18 @@ impl FilesService {
         caller: &Caller,
         space: Uuid,
         node: Option<Uuid>,
+        expected: TrashEntryVersion,
     ) -> ServiceResult<()> {
         require_dashboard_user(caller)?;
         match node {
             Some(node) => {
                 self.store
-                    .restore_trashed_node(caller.account_id(), space, node)
+                    .restore_trashed_node(caller.account_id(), space, node, expected)
                     .await?
             }
             None => {
                 self.store
-                    .restore_trashed_space(caller.account_id(), space)
+                    .restore_trashed_space(caller.account_id(), space, expected)
                     .await?
             }
         }
@@ -83,10 +84,11 @@ impl FilesService {
         caller: &Caller,
         space: Uuid,
         node: Option<Uuid>,
+        expected: TrashEntryVersion,
     ) -> ServiceResult<()> {
         require_dashboard_user(caller)?;
         self.store
-            .request_trash_purge(caller.account_id(), space, node)
+            .request_trash_purge(caller.account_id(), space, node, expected)
             .await?;
         Ok(())
     }

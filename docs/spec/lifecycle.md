@@ -179,6 +179,9 @@ Folder recursive delete는 subtree node를 같은 transaction에서 soft delete�
 - 기존 삭제 건은 S3 bytes가 이미 제거됐을 수 있으므로 복원을 제공하지 않고 기존 만료 시각을 연장하지 않는다. 새 정책은 모든 이전 replica가 교체된 뒤 발생한 삭제부터 보장한다.
 - 이미 발급된 S3 presigned URL은 원본 보존 중 만료 시각까지 동작할 수 있다. 새 URL 발급과 live content API는 soft delete 직후 차단한다.
 - 현재 본문 복원과 과거 Text revision 보존 정책은 별개다. 휴지통 이동은 과거 버전의 TTL을 연장하지 않는다.
+- 복원·영구 삭제 요청은 조회한 `deleted_at`과 `deletion_operation_id`를 query로 전달한다. 작업 ID가 없는 기존 행도 삭제 시각은 필수이며, 잠금 안에서 현재 삭제 건과 일치하지 않으면 409로 거절한다.
+- Space 복원은 기존 agent 연결을 끊고 링크 그래프 전체 재생성을 같은 transaction에서 예약한다.
+- Folder 영구 삭제는 먼저 별도로 삭제했던 항목을 포함한 물리적 하위 트리 전체에 적용한다.
 - Usage는 현재 live counter를 유지하고 복원 시 재검증한다. 실제 저장소 제거 확인과 retained/pending 용량 집계는 별도 계약이다.
 
 Node/Text/File mutation은 같은 transaction에서 `space_usage` counter를 갱신한다. 생성, 내용 변경, 복사, 이동, soft delete별 증감 규칙은 `usage-and-quotas.md`를 따른다.

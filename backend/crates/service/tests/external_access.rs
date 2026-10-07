@@ -518,3 +518,87 @@ async fn mutation_transactions_reject_protected_subtrees() -> Result<(), Box<dyn
     .await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn restored_folder_history_does_not_expose_private_descendant_counts()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner =
+        insert_user_account(&db.pool, "restore-owner", "restore-owner@example.test").await?;
+    let (space, root) =
+        setup_space(&SpaceRepo::new(db.pool.clone()), owner, "restore-counts").await;
+    let repo = FilesRepo::new(db.pool.clone());
+    let files = FilesService::new(repo.clone());
+    let folder = files
+        .create_folder(
+            owner,
+            space,
+            CreateFolder {
+                parent_node_id: root,
+                name: "public".to_owned(),
+            },
+        )
+        .await?
+        .node
+        .id;
+    let hidden = files
+        .create_text(
+            owner,
+            space,
+            CreateText {
+                parent_node_id: folder,
+                name: "private.md".to_owned(),
+            },
+        )
+        .await?
+        .node
+        .node
+        .id;
+    files
+        .update_node_external_access_policy(
+            AccountKind::User,
+            owner,
+            space,
+            UpdateNodeExternalAccessPolicy {
+                node_id: hidden,
+                enabled: false,
+            },
+        )
+        .await?;
+    repo.soft_delete_node(space, folder, owner, true).await?;
+    let selected = repo
+        .list_trash(owner, 100, None)
+        .await?
+        .into_iter()
+        .find(|item| item.id == folder)
+        .unwrap();
+    repo.restore_trashed_node(owner, space, folder, (&selected).into())
+        .await?;
+    for channel in [Channel::Browser, Channel::Api, Channel::Mcp] {
+        let page = files
+            .for_channel(channel)
+            .list_file_change_events_by_id(
+                owner,
+                space,
+                ListFileChangeEventsById {
+                    limit: Some(100),
+                    cursor: None,
+                },
+            )
+            .await?;
+        let restored = page
+            .items
+            .iter()
+            .find(|event| event.op_type == "item.restore")
+            .unwrap();
+        if channel == Channel::Browser {
+            assert_eq!(restored.metadata["restored_nodes"], 2);
+        } else {
+            assert!(restored.metadata.get("restored_nodes").is_none());
+        }
+    }
+    db.cleanup().await;
+    Ok(())
+}

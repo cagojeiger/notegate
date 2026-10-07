@@ -28,10 +28,16 @@ function itemPath(item: TrashItem) {
   return item.kind === "space" ? space : `${space}/nodes/${item.id}`;
 }
 
+function entryVersion(item: TrashItem) {
+  const params = new URLSearchParams({ deleted_at: item.deleted_at });
+  if (item.deletion_operation_id) params.set("deletion_operation_id", item.deletion_operation_id);
+  return params;
+}
+
 export function restoreTrash(client: ApiClient, item: TrashItem) {
-  return client.post<void>(`${itemPath(item)}/restore`);
+  return client.post<void>(`${itemPath(item)}/restore?${entryVersion(item)}`);
 }
 
 export function purgeTrash(client: ApiClient, item: TrashItem) {
-  return client.delete<{ status: "deletion_requested" }>(itemPath(item));
+  return client.delete<{ status: "deletion_requested" }>(`${itemPath(item)}?${entryVersion(item)}`);
 }

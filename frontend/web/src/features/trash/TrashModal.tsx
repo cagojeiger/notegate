@@ -2,6 +2,7 @@ import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-q
 import { useState } from "react";
 
 import { useApiClient } from "../../api/ApiProvider";
+import { ApiError } from "../../api/errors";
 import { queryKeys } from "../../api/queryKeys";
 import { invalidateAuditEvents, invalidateFileSyncFallback, invalidateSpacesList } from "../../api/queryInvalidation";
 import { listTrash, purgeTrash, restoreTrash, type TrashItem } from "../../api/trash";
@@ -23,12 +24,19 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
       if (action === "restore") await restoreTrash(client, item);
       else await purgeTrash(client, item);
     },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        setConfirmation(null);
+        void queryClient.resetQueries({ queryKey: queryKeys.trash });
+      }
+    },
     onSuccess: async (_, { item, action }) => {
       setConfirmation(null);
       invalidateAuditEvents(queryClient);
       invalidateSpacesList(queryClient);
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
-      if (action === "restore" && item.kind !== "space") {
+      if (action === "restore") {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.space(item.space_id) });
         await invalidateFileSyncFallback(queryClient, item.space_id);
       }
       await queryClient.resetQueries({ queryKey: queryKeys.trash });
@@ -46,7 +54,7 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
       {mutation.error ? <p role="alert" className="mb-3 text-danger">{mutation.error instanceof Error ? mutation.error.message : "Request failed"}</p> : null}
       {confirmation ? (
         <div className="space-y-4">
-          <p>Permanently delete “{confirmation.name}”{confirmation.kind === "folder" || confirmation.kind === "space" ? " and everything inside it" : ""}? Recovery becomes unavailable immediately. Storage cleanup runs in the background.</p>
+          <p>Permanently delete “{confirmation.name}”{confirmation.kind === "folder" || confirmation.kind === "space" ? " and everything inside it, including items deleted separately" : ""}? Recovery becomes unavailable immediately. Storage cleanup runs in the background.</p>
           <div className="flex justify-end gap-2">
             <Button secondary disabled={mutation.isPending} onClick={() => { mutation.reset(); setConfirmation(null); }}>Cancel</Button>
             <Button variant="danger" disabled={mutation.isPending} onClick={() => mutation.mutate({ item: confirmation, action: "purge" })}>

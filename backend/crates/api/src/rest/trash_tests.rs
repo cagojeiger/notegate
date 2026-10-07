@@ -43,10 +43,11 @@ async fn dashboard_trash_lists_restores_and_returns_accepted_for_permanent_delet
     let deletion =
         uuid::Uuid::parse_str(list["items"][0]["deletion_operation_id"].as_str().unwrap())?;
     let path = format!("/v1/me/trash/spaces/{space}/nodes/{}", item.id);
+    let first_version = version_query(&list["items"][0]);
     let (status, _) = empty_request(
         rest_app(state.clone(), caller.clone()),
         "POST",
-        format!("{path}/restore"),
+        format!("{path}/restore?{first_version}"),
     )
     .await?;
     assert_eq!(status, StatusCode::NO_CONTENT);
@@ -68,10 +69,33 @@ async fn dashboard_trash_lists_restores_and_returns_accepted_for_permanent_delet
     assert_eq!(events["events"][1]["operation_id"], deletion.to_string());
     repo.soft_delete_node(space, item.id, caller.account_id(), true)
         .await?;
-    let (status, result) = empty_request(
+    for (method, route) in [
+        ("POST", format!("{path}/restore?{first_version}")),
+        ("DELETE", format!("{path}?{first_version}")),
+    ] {
+        let (status, _) =
+            empty_request(rest_app(state.clone(), caller.clone()), method, route).await?;
+        assert_eq!(status, StatusCode::CONFLICT);
+    }
+    let (status, _) = empty_request(
         rest_app(state.clone(), caller.clone()),
         "DELETE",
         path.clone(),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (_, current) = get_json(
+        rest_app(state.clone(), caller.clone()),
+        "/v1/me/trash".to_owned(),
+    )
+    .await?;
+    assert_eq!(current["items"][0]["recoverable"], true);
+    assert_eq!(current["items"][0]["deletion_pending"], false);
+    let current_version = version_query(&current["items"][0]);
+    let (status, result) = empty_request(
+        rest_app(state.clone(), caller.clone()),
+        "DELETE",
+        format!("{path}?{current_version}"),
     )
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED);
@@ -79,7 +103,7 @@ async fn dashboard_trash_lists_restores_and_returns_accepted_for_permanent_delet
     let (status, _) = empty_request(
         rest_app(state.clone(), caller.clone()),
         "POST",
-        format!("{path}/restore"),
+        format!("{path}/restore?{current_version}"),
     )
     .await?;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -143,7 +167,12 @@ async fn trash_cursor_is_owner_scoped_and_external_channels_are_rejected()
     assert!(
         state
             .files
-            .restore_trash(&external, space, Some(page.items[0].id))
+            .restore_trash(
+                &external,
+                space,
+                Some(page.items[0].id),
+                (&page.items[0]).into()
+            )
             .await
             .is_err()
     );
@@ -165,4 +194,12 @@ async fn trash_cursor_is_owner_scoped_and_external_channels_are_rejected()
     );
     db.cleanup().await;
     Ok(())
+}
+
+fn version_query(item: &serde_json::Value) -> String {
+    let mut query = format!("deleted_at={}", item["deleted_at"].as_str().unwrap());
+    if let Some(operation) = item["deletion_operation_id"].as_str() {
+        query.push_str(&format!("&deletion_operation_id={operation}"));
+    }
+    query
 }

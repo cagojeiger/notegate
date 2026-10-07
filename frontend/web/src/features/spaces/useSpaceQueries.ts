@@ -126,6 +126,8 @@ export function useDeleteSpaceMutation(onDeleted: (spaceId: string) => void) {
     onSuccess: async (_data, spaceId) => {
       await removeDeletedSpaceQueries(queryClient, spaceId);
       onDeleted(spaceId);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.trash });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       invalidateSpacesList(queryClient);
       invalidateAuditEvents(queryClient);
     }

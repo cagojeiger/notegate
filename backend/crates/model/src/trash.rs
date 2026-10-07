@@ -18,6 +18,22 @@ pub struct TrashItem {
     pub deletion_pending: bool,
 }
 
+/// The deletion instance selected by the user, including legacy rows without an operation ID.
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct TrashEntryVersion {
+    pub deleted_at: DateTime<Utc>,
+    pub deletion_operation_id: Option<Uuid>,
+}
+
+impl From<&TrashItem> for TrashEntryVersion {
+    fn from(item: &TrashItem) -> Self {
+        Self {
+            deleted_at: item.deleted_at,
+            deletion_operation_id: item.deletion_operation_id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrashCursor {
     pub owner_user_id: Uuid,

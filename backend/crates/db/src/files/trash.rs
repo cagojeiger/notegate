@@ -2,7 +2,7 @@
 use chrono::{DateTime, Utc};
 use notegate_core::tier::effective_file_tree_limits;
 use notegate_core::{Error, Result};
-use notegate_model::trash::{TrashCursor, TrashItem};
+use notegate_model::trash::{TrashCursor, TrashEntryVersion, TrashItem};
 use sqlx::{FromRow, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -46,6 +46,7 @@ impl From<TrashRow> for TrashItem {
 
 #[derive(FromRow)]
 struct DeletedNode {
+    deleted_at: DateTime<Utc>,
     name: String,
     kind: String,
     parent_id: Uuid,
@@ -122,6 +123,7 @@ impl FilesRepo {
         owner: Uuid,
         space_id: Uuid,
         node_id: Uuid,
+        expected: TrashEntryVersion,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let gate = space_usage::acquire_mutation_gate(&mut tx, space_id).await?;
@@ -130,6 +132,7 @@ impl FilesRepo {
         lock_owned_space(&mut tx, owner, space_id, false).await?;
         let now = trash_now(&mut tx, self.trash_time).await?;
         let node = deleted_node(&mut tx, space_id, node_id).await?;
+        require_entry_version(node.deleted_at, node.deletion_operation_id, expected)?;
         if node.deletion_root_id != Some(node_id)
             || node.purge_requested_at.is_some()
             || node.purge_after <= now
@@ -193,22 +196,29 @@ impl FilesRepo {
         tx.commit().await.map_err(map_sqlx_error)
     }
 
-    pub async fn restore_trashed_space(&self, owner: Uuid, space_id: Uuid) -> Result<()> {
+    pub async fn restore_trashed_space(
+        &self,
+        owner: Uuid,
+        space_id: Uuid,
+        expected: TrashEntryVersion,
+    ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let _gate = space_usage::acquire_mutation_gate(&mut tx, space_id).await?;
         let tier =
             tier_lookup::lock_active_user_tier(&mut tx, owner, "trash item not found").await?;
         lock_owned_space(&mut tx, owner, space_id, true).await?;
         let now = trash_now(&mut tx, self.trash_time).await?;
-        let (recoverable, deletion_operation_id): (bool, Option<Uuid>) = sqlx::query_as(
-            "SELECT trash_recoverable AND purge_requested_at IS NULL AND purge_after > $2, \
-                deletion_operation_id FROM spaces WHERE id = $1",
-        )
-        .bind(space_id)
-        .bind(now)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
+        let (recoverable, deleted_at, deletion_operation_id): (bool, DateTime<Utc>, Option<Uuid>) =
+            sqlx::query_as(
+                "SELECT trash_recoverable AND purge_requested_at IS NULL AND purge_after > $2, \
+                deleted_at, deletion_operation_id FROM spaces WHERE id = $1",
+            )
+            .bind(space_id)
+            .bind(now)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        require_entry_version(deleted_at, deletion_operation_id, expected)?;
         if !recoverable {
             return Err(Error::conflict("space is no longer recoverable"));
         }
@@ -261,6 +271,7 @@ impl FilesRepo {
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+        crate::link_graph_work_repo::schedule_space_rebuild_in(&mut tx, space_id).await?;
         audit_events::space_restored(
             &mut tx,
             AuditContext::rest(owner).with_operation_id(Uuid::new_v4()),
@@ -277,6 +288,7 @@ impl FilesRepo {
         owner: Uuid,
         space_id: Uuid,
         node_id: Option<Uuid>,
+        expected: TrashEntryVersion,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let _gate = space_usage::acquire_mutation_gate(&mut tx, space_id).await?;
@@ -285,6 +297,7 @@ impl FilesRepo {
         let now = trash_now(&mut tx, self.trash_time).await?;
         let deletion_operation_id = if let Some(node_id) = node_id {
             let node = deleted_node(&mut tx, space_id, node_id).await?;
+            require_entry_version(node.deleted_at, node.deletion_operation_id, expected)?;
             if node.deletion_root_id.is_some_and(|root| root != node_id) {
                 return Err(Error::conflict(
                     "permanent deletion must target the trash entry",
@@ -298,6 +311,14 @@ impl FilesRepo {
             ).bind(space_id).bind(node_id).bind(now).execute(&mut *tx).await.map_err(map_sqlx_error)?;
             node.deletion_operation_id
         } else {
+            let (deleted_at, operation_id): (DateTime<Utc>, Option<Uuid>) = sqlx::query_as(
+                "SELECT deleted_at, deletion_operation_id FROM spaces WHERE id = $1",
+            )
+            .bind(space_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+            require_entry_version(deleted_at, operation_id, expected)?;
             sqlx::query_scalar("UPDATE spaces SET purge_after = LEAST(purge_after, $2), purge_requested_at = COALESCE(purge_requested_at, $2) WHERE id = $1 RETURNING deletion_operation_id")
                 .bind(space_id)
                 .bind(now)
@@ -316,6 +337,19 @@ impl FilesRepo {
         .await?;
         tx.commit().await.map_err(map_sqlx_error)
     }
+}
+
+fn require_entry_version(
+    deleted_at: DateTime<Utc>,
+    operation_id: Option<Uuid>,
+    expected: TrashEntryVersion,
+) -> Result<()> {
+    if deleted_at != expected.deleted_at || operation_id != expected.deletion_operation_id {
+        return Err(Error::conflict(
+            "trash entry has changed; refresh before trying again",
+        ));
+    }
+    Ok(())
 }
 
 async fn trash_now(
@@ -355,7 +389,7 @@ async fn deleted_node(
     node: Uuid,
 ) -> Result<DeletedNode> {
     sqlx::query_as(
-        "SELECT name, kind, parent_id, purge_after, deletion_root_id, deletion_operation_id, purge_requested_at FROM nodes \
+        "SELECT deleted_at, name, kind, parent_id, purge_after, deletion_root_id, deletion_operation_id, purge_requested_at FROM nodes \
          WHERE space_id = $1 AND id = $2 AND parent_id IS NOT NULL AND deleted_at IS NOT NULL FOR UPDATE",
     ).bind(space).bind(node).fetch_optional(&mut **tx).await.map_err(map_sqlx_error)?
         .ok_or_else(|| Error::not_found("trash item not found"))
