@@ -819,6 +819,12 @@ async fn space_restore_preserves_nodes_but_does_not_restore_previously_deleted_c
             .await,
         Err(Error::Conflict(_))
     ));
+    // A rejected restore queues rollback when its transaction is dropped. Wait
+    // for the Space lock to clear before asserting an uncontended purge pass.
+    sqlx::query("SELECT id FROM spaces WHERE id = $1 FOR UPDATE")
+        .bind(space)
+        .execute(&db.pool)
+        .await?;
     assert_eq!(
         PurgeRepo::new(db.pool.clone())
             .run_once()
