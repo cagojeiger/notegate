@@ -261,6 +261,7 @@ pub async fn request_expiry(
 }
 
 pub struct AttachUploadArgs<'a> {
+    pub capture: file_change_events::ChangeCapture<'a>,
     pub pool: &'a PgPool,
     pub external_only: bool,
     pub id: Uuid,
@@ -273,6 +274,7 @@ pub struct AttachUploadArgs<'a> {
 
 pub async fn attach(args: AttachUploadArgs<'_>) -> Result<(Node, FileObject)> {
     let AttachUploadArgs {
+        capture,
         pool,
         external_only,
         id,
@@ -386,7 +388,7 @@ pub async fn attach(args: AttachUploadArgs<'_>) -> Result<(Node, FileObject)> {
 
     file_change_events::file_created(
         &mut tx,
-        file_change_events::context(requested_by, space_id),
+        file_change_events::context(requested_by, space_id, capture),
         node.id,
         &node.name,
         parent_id,

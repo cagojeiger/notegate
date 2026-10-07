@@ -19,6 +19,7 @@ const FILE_CHANGE_ACTIONS: Record<string, string> = {
   "item.move": "Moved",
   "item.copy": "Copied",
   "item.delete": "Deleted",
+  "item.restore": "Restored",
   "metadata.replace": "Updated metadata",
   "metadata.patch": "Updated metadata"
 };
@@ -153,6 +154,20 @@ export function formatFileChangeTarget(event: FileChangeEvent): string {
 export function formatFileChangeDetails(event: FileChangeEvent): FileChangeDetail[] {
   const metadata = event.metadata;
   const details: FileChangeDetail[] = [];
+  if (typeof metadata.source === "string") details.push({ label: "Source", value: metadata.source });
+  if (typeof metadata.purpose === "string") details.push({ label: "Purpose", value: metadata.purpose });
+  addIdDetail(details, "Operation", event.operation_id);
+  for (const side of ["before", "after"] as const) {
+    const revision = metadata[`${side}_revision_id`];
+    const status = metadata[`${side}_revision_status`];
+    if (typeof revision === "string") {
+      const availability = status === "current" ? "Current body" : status === "retained" ? "Body retained" : "Body unavailable";
+      details.push({ label: side === "before" ? "Before version" : "After version", value: `${shortId(revision)} · ${availability}` });
+    }
+    const cleanup = metadata[`${side}_revision_cleanup_at`];
+    if (typeof cleanup === "string") details.push({ label: `${side === "before" ? "Before" : "After"} cleanup from`, value: formatEventTime(cleanup) });
+  }
+
 
   if (event.op_type === "folder.create" || event.op_type === "text.create" || event.op_type === "file.create") {
     addIdDetail(details, "Parent", metadata.parent_node_id);

@@ -520,3 +520,7 @@ DB trigger는 content row가 올바른 node kind에만 붙도록 보장한다. F
 ## Text revision history
 
 `text_objects.revision_*` tracks body attribution and the current editing group independently of metadata updates. `text_revisions` stores immutable encrypted past bodies and precomputed cleanup eligibility. `text_revision_usage` tracks a separate Space history-body budget; deletion releases it transactionally. All three are detailed in [Text revisions](text-revisions.md).
+
+### Change snapshot persistence
+
+`file_change_events.owner_user_id`는 소유 이력 조회를 위한 변경 당시 소유자 ID이며 resource FK를 두지 않는다. `private_metadata`에는 행/Space에 묶인 암호화 envelope를 저장한다. `metadata`에는 식별자와 구조 플래그만 남긴다. 소유자·시각 인덱스는 삭제된 Space의 이력 조회에 사용한다. 버전 존재 조회는 `text_objects.revision_id` unique index와 `text_revisions` PK를 사용하고 본문은 읽지 않는다.

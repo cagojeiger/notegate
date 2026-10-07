@@ -20,6 +20,7 @@ use crate::file_change_events;
 
 pub async fn update_node(
     pool: &PgPool,
+    capture: file_change_events::ChangeCapture<'_>,
     external_only: bool,
     space_id: Uuid,
     command: &UpdateNode,
@@ -91,7 +92,7 @@ pub async fn update_node(
 
     file_change_events::node_updated(
         &mut tx,
-        file_change_events::context(updated_by, space_id),
+        file_change_events::context(updated_by, space_id, capture),
         command.node_id,
         file_change_events::NodeUpdated {
             item_kind: &node_kind,
@@ -113,6 +114,7 @@ pub async fn update_node(
 
 pub async fn update_node_external_access_policy(
     pool: &PgPool,
+    capture: file_change_events::ChangeCapture<'_>,
     space_id: Uuid,
     command: &UpdateNodeExternalAccessPolicy,
     updated_by: Uuid,
@@ -149,7 +151,7 @@ pub async fn update_node_external_access_policy(
 
     file_change_events::node_updated(
         &mut tx,
-        file_change_events::context(updated_by, space_id),
+        file_change_events::context(updated_by, space_id, capture),
         command.node_id,
         file_change_events::NodeUpdated {
             item_kind: &row.kind,
@@ -171,6 +173,7 @@ pub async fn update_node_external_access_policy(
 
 pub async fn update_text_encryption(
     pool: &PgPool,
+    capture: file_change_events::ChangeCapture<'_>,
     crypto: &PiiCrypto,
     space_id: Uuid,
     command: &UpdateTextEncryption,
@@ -241,7 +244,7 @@ pub async fn update_text_encryption(
 
     file_change_events::node_updated(
         &mut tx,
-        file_change_events::context(updated_by, space_id),
+        file_change_events::context(updated_by, space_id, capture),
         command.node_id,
         file_change_events::NodeUpdated {
             item_kind: &row.kind,

@@ -21,6 +21,7 @@ use crate::files_repo::TextMutationKind;
 use crate::space_usage::{self, UsageDelta};
 
 pub struct SaveTextContentArgs<'a> {
+    pub capture: file_change_events::ChangeCapture<'a>,
     pub pool: &'a PgPool,
     pub external_only: bool,
     pub crypto: &'a PiiCrypto,
@@ -41,6 +42,7 @@ pub struct SaveTextContentArgs<'a> {
 /// `updated_by` on both the text and its node.
 pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, TextObject)> {
     let SaveTextContentArgs {
+        capture,
         pool,
         external_only,
         crypto,
@@ -214,7 +216,8 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
 
     file_change_events::text_saved(
         &mut tx,
-        file_change_events::context(updated_by, space_id),
+        file_change_events::context(updated_by, space_id, capture)
+            .with_before_revision(revision.previous_id),
         node_id,
         &node_row.name,
         node_row.parent_id,

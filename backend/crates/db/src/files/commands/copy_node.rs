@@ -22,6 +22,7 @@ use crate::file_change_events;
 use crate::space_usage::{self, UsageDelta};
 
 pub struct CopyNodeArgs<'a> {
+    pub capture: file_change_events::ChangeCapture<'a>,
     pub pool: &'a PgPool,
     pub external_only: bool,
     pub crypto: &'a PiiCrypto,
@@ -36,6 +37,7 @@ pub struct CopyNodeArgs<'a> {
 
 pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
     let CopyNodeArgs {
+        capture,
         pool,
         external_only,
         crypto,
@@ -149,7 +151,7 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
 
     file_change_events::node_copied(
         &mut tx,
-        file_change_events::context(created_by, space_id),
+        file_change_events::context(created_by, space_id, capture),
         copied_root.id,
         &source_kind,
         &copied_root.name,

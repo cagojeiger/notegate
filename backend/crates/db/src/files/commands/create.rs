@@ -21,8 +21,10 @@ use crate::file_change_events;
 use crate::space_usage::{self, UsageDelta};
 
 /// Insert a folder under `parent_id`, attributing it to `created_by`.
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_folder(
     pool: &PgPool,
+    capture: file_change_events::ChangeCapture<'_>,
     external_only: bool,
     space_id: Uuid,
     parent_id: Uuid,
@@ -58,7 +60,7 @@ pub async fn insert_folder(
 
     file_change_events::folder_created(
         &mut tx,
-        file_change_events::context(created_by, space_id),
+        file_change_events::context(created_by, space_id, capture),
         row.id,
         &row.name,
         parent_id,
@@ -72,6 +74,7 @@ pub async fn insert_folder(
 /// Insert a text node + its `text_objects` row, attributing both to
 /// `created_by`. `content` carries the pre-computed metrics from the service.
 pub struct InsertTextArgs<'a> {
+    pub capture: file_change_events::ChangeCapture<'a>,
     pub pool: &'a PgPool,
     pub external_only: bool,
     pub crypto: &'a PiiCrypto,
@@ -88,6 +91,7 @@ pub struct InsertTextArgs<'a> {
 
 pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)> {
     let InsertTextArgs {
+        capture,
         pool,
         external_only,
         crypto,
@@ -172,7 +176,7 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
 
     file_change_events::text_created(
         &mut tx,
-        file_change_events::context(created_by, space_id),
+        file_change_events::context(created_by, space_id, capture),
         node_row.id,
         &node_row.name,
         parent_id,

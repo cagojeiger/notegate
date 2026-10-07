@@ -23,6 +23,7 @@ const VISIBLE: &str = "r.space_id = $1 AND r.node_id = $2 AND EXISTS (SELECT 1 F
 
 /// Revision attribution to commit together with the replacement body.
 pub(crate) struct NextRevision {
+    pub previous_id: Uuid,
     pub id: Uuid,
     pub written_at: DateTime<Utc>,
     pub group_id: Uuid,
@@ -115,6 +116,7 @@ pub(crate) async fn capture(
             .execute(&mut *tx).await.map_err(map_sqlx_error)?;
     }
     Ok(NextRevision {
+        previous_id: id,
         id: Uuid::new_v4(),
         written_at: saved_at,
         group_id: if same_group {

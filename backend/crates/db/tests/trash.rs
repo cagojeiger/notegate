@@ -89,6 +89,8 @@ async fn trash_migrations_preserve_legacy_targets_and_nullable_event_links() -> 
     .await?;
     db.apply_migration(45).await?;
     db.apply_migration(46).await?;
+    db.apply_migration(47).await?;
+    db.apply_migration(48).await?;
     let after: Vec<(Uuid, Uuid, DateTime<Utc>, DateTime<Utc>)> = sqlx::query_as(
         "SELECT id, deletion_target_node_id, deleted_at, purge_after FROM nodes \
          WHERE space_id = $1 AND deleted_at IS NOT NULL ORDER BY id",

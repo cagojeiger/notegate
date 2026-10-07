@@ -188,7 +188,8 @@ impl FilesRepo {
         .map_err(map_sqlx_error)?;
         file_change_events::node_restored(
             &mut tx,
-            file_change_events::context(owner, space_id).with_operation_id(Uuid::new_v4()),
+            file_change_events::context(owner, space_id, self.change_capture())
+                .with_operation_id(Uuid::new_v4()),
             node_id,
             &node.kind,
             node.parent_id,

@@ -45,10 +45,10 @@ Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-event
 - 새 node/subtree 또는 Space 삭제마다 UUID `operation_id`를 생성한다. 같은 transaction에서 domain의 `deletion_operation_id`와 삭제 event의 `operation_id`를 기록한다.
 - 복원과 영구 삭제 요청은 각각 새 `operation_id`를 갖고, `metadata.related_deletion_operation_id`로 원래 삭제를 참조한다. 복원은 domain의 삭제 ID를 해제하지만 event 참조는 유지한다. 재삭제는 새 ID를 사용한다.
 - `deletion_target_node_id`는 삭제 요청이 직접 대상으로 삼은 노드 ID이며 함께 복원할 범위를 구분한다. `parent_id`와 파일 트리 root는 별개다. `deletion_operation_id`는 삭제 작업 식별자다. 먼저 삭제된 자식의 ID는 상위 폴더 삭제 때 변경하지 않는다.
-- 기존 행과 이 계약 범위 밖의 event는 `operation_id=NULL`이다. 기존 삭제와 event를 시각 또는 리소스 ID로 추측해서 연결하지 않는다. 연결 ID가 없는 복원/영구 삭제 요청은 `related_deletion_operation_id=null`이다.
+- 기존 행과 이 계약 범위 밖의 Audit event는 `operation_id=NULL`이다. 새 Changes는 모든 변경에 `operation_id`를 기록한다. 기존 삭제와 event를 시각 또는 리소스 ID로 추측해서 연결하지 않는다. 연결 ID가 없는 복원/영구 삭제 요청은 `related_deletion_operation_id=null`이다.
 - ID는 correlation 용도이며 authorization, request idempotency, event cursor 또는 문서 snapshot을 대체하지 않는다. Event retention은 유지하고, 로그가 없어도 domain state에 따라 복원한다.
 - 비동기 purge는 semantic row 제거 전에 원래 삭제 ID를 object 원장에 보존한다. 이는 S3 물리 삭제 완료 event/receipt가 아니며 원장도 기존 retention을 따른다.
-- MCP/CLI invocation 및 Text revision과의 직접 연결은 이 계약에 포함하지 않는다. `read op=changes`는 저장된 event의 `operation_id`를 반환한다.
+- MCP/CLI invocation과의 직접 연결은 별도이며, Changes의 Text revision 연결은 아래 snapshot 계약을 따른다. `read op=changes`는 저장된 event의 `operation_id`를 반환한다.
 
 ## Capture guarantee
 
@@ -303,3 +303,13 @@ command_invocations: 90 days
 ```
 
 각 event table은 retention 조회/삭제를 위한 `created_at` index를 둔다. Purge worker는 `audit_events` 180일, `file_change_events`와 `command_invocations` 90일을 초과한 행을 테이블별 bounded batch로 삭제한다.
+
+## Changes snapshots
+
+- 새 Changes의 문서 이름·수정 이유·크기 등 내용 메타데이터는 전용 HKDF subkey와 AES-GCM으로 암호화한다. AAD는 Space ID와 event ID에 묶인다. 식별자·시각·고정된 구조 변경 플래그는 조회와 링크 그래프 갱신을 위해 평문으로 둔다.
+- 성공한 변경과 snapshot은 같은 트랜잭션에 저장한다. snapshot 기록 실패는 문서 변경도 롤백하며, 내용이 같은 저장은 새 event/version을 만들지 않는다.
+- `metadata.source`는 기록 경로, `actor_kind`는 인증된 계정 종류다. 계정이 Agent라는 사실만으로 AI 실행이라고 단정하지 않는다.
+- 지원되는 문서 변경에는 `before_revision_id`/`after_revision_id`를 남긴다. 기존 기록의 연결은 추정해서 채우지 않는다. 폴더 단위 변경은 하위 문서 전체의 버전을 나열하지 않는다.
+- 목록의 `before_revision_status`/`after_revision_status`는 본문 존재 상태(`current`, `retained`, `unavailable`)다. `*_revision_cleanup_at`은 보관 본문의 정리 시작 가능 시각이며 즉시 삭제를 보장하지 않는다. 이 정보는 본문 접근 권한을 부여하지 않는다.
+- `GET /api/v1/me/file-change-events`는 현재 User의 소유 이력을 Space 삭제 뒤에도 90일 보존 기간 내 조회한다. 선택적 `space_id`, `limit`, `cursor`를 받는다. 외부 Agent 접근과 기존 Space별 권한은 바뀌지 않는다.
+- 기존 plaintext Changes는 `history.encryption` Reconciler가 최대 100행씩 암호화한다. 이관 중에는 이전 형식도 읽는다. 이미 삭제된 Space의 소유자를 입증할 수 없는 과거 행은 소유 이력에 노출하지 않는다.

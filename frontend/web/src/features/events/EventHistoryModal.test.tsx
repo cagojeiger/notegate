@@ -24,6 +24,21 @@ function jsonResponse(body: unknown) {
 }
 
 describe("EventHistoryModal", () => {
+  it("shows retained changes when all owned spaces have been removed", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({
+      events: [{ id: 40, operation_id: "operation-40", created_at: "2026-07-10T00:00:00Z", space_id: "removed-space", node_id: "removed-note", actor_account_id: null, actor: null, op_type: "text.write",
+        metadata: { item_kind: "text", item_name: "old.md", purpose: "Correct a date", source: "mcp", before_revision_id: "old-revision", before_revision_status: "unavailable" } }],
+      page: { ...page, returned: 1 }
+    }));
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    expect(await screen.findByText("Document · old.md")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain("/api/v1/me/file-change-events?limit=50");
+    await user.click(screen.getByRole("button", { name: "Show change details for Document · old.md" }));
+    expect(screen.getByText("Correct a date")).toBeInTheDocument();
+    expect(screen.getByText("old-revision · Body unavailable")).toBeInTheDocument();
+  });
+
   it("does not call the user-only audit endpoint when audit is unavailable", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({ events: [], page }));
 

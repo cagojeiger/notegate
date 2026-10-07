@@ -4,6 +4,9 @@
 //! reads ENC/LOOKUP root secrets, derives purpose-specific subkeys with HKDF,
 //! and never uses a raw root secret directly as an encryption/HMAC/signing key.
 
+mod history;
+pub use history::EncryptedHistoryValue;
+
 use std::fmt::Write as _;
 
 use aes_gcm::aead::{Aead, Generate as _, KeyInit, Payload};
@@ -24,6 +27,7 @@ const CRYPTO_VERSION: i32 = 1;
 const ENC_EPOCH_VERIFY_LABEL: &[u8] = b"notegate/enc/epoch-verify/v1";
 const PII_FIELD_LABEL: &[u8] = b"notegate/enc/pii-field/v1";
 const BROWSER_REFRESH_TOKEN_FIELD_LABEL: &[u8] = b"notegate/enc/browser-refresh-token-field/v1";
+const HISTORY_FIELD_LABEL: &[u8] = b"notegate/enc/history-field/v1";
 const TEXT_CONTENT_FIELD_LABEL: &[u8] = b"notegate/enc/text-content-field/v1";
 const LOOKUP_EPOCH_VERIFY_LABEL: &[u8] = b"notegate/lookup/epoch-verify/v1";
 const PROVIDER_SUB_HMAC_LABEL: &[u8] = b"notegate/lookup/provider-sub-hmac/v1";
@@ -148,6 +152,7 @@ pub struct PiiCrypto {
     pii_field_key: [u8; KEY_LEN],
     browser_refresh_token_field_key: [u8; KEY_LEN],
     text_content_field_key: [u8; KEY_LEN],
+    history_field_key: [u8; KEY_LEN],
     provider_sub_hmac_key: [u8; KEY_LEN],
     email_hmac_key: [u8; KEY_LEN],
     api_key_hmac_key: [u8; KEY_LEN],
@@ -181,6 +186,7 @@ impl PiiCrypto {
             pii_field_key: hkdf_key(enc_root, PII_FIELD_LABEL)?,
             browser_refresh_token_field_key: hkdf_key(enc_root, BROWSER_REFRESH_TOKEN_FIELD_LABEL)?,
             text_content_field_key: hkdf_key(enc_root, TEXT_CONTENT_FIELD_LABEL)?,
+            history_field_key: hkdf_key(enc_root, HISTORY_FIELD_LABEL)?,
             provider_sub_hmac_key: hkdf_key(lookup_root, PROVIDER_SUB_HMAC_LABEL)?,
             email_hmac_key: hkdf_key(lookup_root, EMAIL_HMAC_LABEL)?,
             api_key_hmac_key: hkdf_key(lookup_root, API_KEY_HMAC_LABEL)?,

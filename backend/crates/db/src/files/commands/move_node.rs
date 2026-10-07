@@ -19,6 +19,7 @@ use super::checks;
 use crate::file_change_events;
 
 pub struct MoveNodeArgs<'a> {
+    pub capture: file_change_events::ChangeCapture<'a>,
     pub pool: &'a PgPool,
     pub external_only: bool,
     pub space_id: Uuid,
@@ -34,6 +35,7 @@ pub struct MoveNodeArgs<'a> {
 /// the update to `updated_by`. Updates only the moved node's row.
 pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
     let MoveNodeArgs {
+        capture,
         pool,
         external_only,
         space_id,
@@ -135,7 +137,7 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
 
     file_change_events::node_moved(
         &mut tx,
-        file_change_events::context(updated_by, space_id),
+        file_change_events::context(updated_by, space_id, capture),
         node_id,
         file_change_events::NodeMoved {
             item_kind: &moved_kind,

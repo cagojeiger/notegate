@@ -189,6 +189,7 @@ impl AppState {
             AuditEventRepo::new(db.clone()),
             command_invocations.clone(),
             BackgroundJobRepo::new(db.clone()),
+            notegate_db::ChangeHistoryRepo::new(db.clone(), pii_crypto.clone()),
         );
         let connections = ConnectionService::new(ConnectionRepo::new(db.clone()));
         let agent_repo = AgentRepo::new(db.clone());

@@ -5,28 +5,48 @@
 
 use crate::file_change_event_repo::{NewFileChangeEvent, insert_file_change_event};
 use crate::files_repo::TextMutationKind;
-use notegate_core::Result;
+use notegate_core::{Result, security::PiiCrypto};
 use notegate_model::files::CopyCounts;
 use serde_json::{Value, json};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct FileChangeContext {
+pub struct ChangeCapture<'a> {
+    pub crypto: &'a PiiCrypto,
+    pub source: &'static str,
+    pub purpose: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FileChangeContext<'a> {
+    capture: ChangeCapture<'a>,
+    before_revision_id: Option<Uuid>,
     actor_account_id: Uuid,
     space_id: Uuid,
     operation_id: Option<Uuid>,
 }
 
-impl FileChangeContext {
+impl FileChangeContext<'_> {
+    pub(crate) fn with_before_revision(mut self, id: Uuid) -> Self {
+        self.before_revision_id = Some(id);
+        self
+    }
+
     pub(crate) fn with_operation_id(mut self, operation_id: Uuid) -> Self {
         self.operation_id = Some(operation_id);
         self
     }
 }
 
-pub(crate) fn context(actor_account_id: Uuid, space_id: Uuid) -> FileChangeContext {
+pub(crate) fn context(
+    actor_account_id: Uuid,
+    space_id: Uuid,
+    capture: ChangeCapture<'_>,
+) -> FileChangeContext<'_> {
     FileChangeContext {
+        capture,
+        before_revision_id: None,
         actor_account_id,
         space_id,
         operation_id: None,
@@ -35,15 +55,23 @@ pub(crate) fn context(actor_account_id: Uuid, space_id: Uuid) -> FileChangeConte
 
 async fn event(
     tx: &mut PgConnection,
-    ctx: FileChangeContext,
+    ctx: FileChangeContext<'_>,
     node_id: Option<Uuid>,
     op_type: &'static str,
-    metadata: Value,
+    mut metadata: Value,
 ) -> Result<()> {
+    metadata["source"] = json!(ctx.capture.source);
+    if let Some(purpose) = ctx.capture.purpose {
+        metadata["purpose"] = json!(purpose);
+    }
+    if let Some(id) = ctx.before_revision_id {
+        metadata["before_revision_id"] = json!(id);
+    }
     insert_file_change_event(
         tx,
+        ctx.capture.crypto,
         NewFileChangeEvent {
-            operation_id: ctx.operation_id,
+            operation_id: Some(ctx.operation_id.unwrap_or_else(Uuid::new_v4)),
             space_id: ctx.space_id,
             node_id,
             actor_account_id: Some(ctx.actor_account_id),
@@ -67,7 +95,7 @@ fn folder_created_payload(item_name: &str, parent_node_id: Uuid) -> (&'static st
 
 pub(crate) async fn folder_created(
     tx: &mut PgConnection,
-    ctx: FileChangeContext,
+    ctx: FileChangeContext<'_>,
     node_id: Uuid,
     item_name: &str,
     parent_node_id: Uuid,
@@ -96,7 +124,7 @@ fn text_created_payload(
 
 pub(crate) async fn text_created(
     tx: &mut PgConnection,
-    ctx: FileChangeContext,
+    ctx: FileChangeContext<'_>,
     node_id: Uuid,
     item_name: &str,
     parent_node_id: Uuid,
@@ -126,7 +154,7 @@ fn file_created_payload(
 
 pub(crate) async fn file_created(
     tx: &mut PgConnection,
-    ctx: FileChangeContext,
+    ctx: FileChangeContext<'_>,
     node_id: Uuid,
     item_name: &str,
     parent_node_id: Uuid,
@@ -162,7 +190,7 @@ fn text_saved_payload(
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn text_saved(
     tx: &mut PgConnection,
-    ctx: FileChangeContext,
+    ctx: FileChangeContext<'_>,
     node_id: Uuid,
     item_name: &str,
     parent_node_id: Option<Uuid>,
@@ -215,7 +243,7 @@ fn node_updated_payload(updated: &NodeUpdated<'_>) -> (&'static str, Value) {
 
 pub(crate) async fn node_updated(
     tx: &mut PgConnection,
-    ctx: FileChangeContext,
+    ctx: FileChangeContext<'_>,
     node_id: Uuid,
     updated: NodeUpdated<'_>,
 ) -> Result<()> {
@@ -247,7 +275,7 @@ fn node_write_lock_updated_payload(
 
 pub(crate) async fn node_write_lock_updated(
     tx: &mut PgConnection,
-    ctx: FileChangeContext,
+    ctx: FileChangeContext<'_>,
     node_id: Uuid,
     item_kind: &str,
     item_name: &str,
@@ -288,7 +316,7 @@ pub(crate) struct NodeMoved<'a> {
 
 pub(crate) async fn node_moved(
     tx: &mut PgConnection,
-    ctx: FileChangeContext,
+    ctx: FileChangeContext<'_>,
     node_id: Uuid,
     moved: NodeMoved<'_>,
 ) -> Result<()> {
@@ -328,7 +356,7 @@ fn node_copied_payload(
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn node_copied(
     tx: &mut PgConnection,
-    ctx: FileChangeContext,
+    ctx: FileChangeContext<'_>,
     new_node_id: Uuid,
     item_kind: &str,
     item_name: &str,
@@ -377,7 +405,7 @@ pub(crate) struct NodeDeleted<'a> {
 
 pub(crate) async fn node_deleted(
     tx: &mut PgConnection,
-    ctx: FileChangeContext,
+    ctx: FileChangeContext<'_>,
     node_id: Uuid,
     deleted: NodeDeleted<'_>,
 ) -> Result<()> {
@@ -393,7 +421,7 @@ pub(crate) async fn node_deleted(
 
 pub(crate) async fn node_restored(
     tx: &mut PgConnection,
-    ctx: FileChangeContext,
+    ctx: FileChangeContext<'_>,
     node_id: Uuid,
     kind: &str,
     parent_id: Uuid,
