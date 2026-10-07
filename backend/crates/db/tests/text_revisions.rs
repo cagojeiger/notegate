@@ -423,12 +423,12 @@ async fn legacy_revision_reasons_migrate_and_survive_old_writer_archival() -> Te
         .await?;
     save(&repo, space, node.id, actor, "b").await?;
     sqlx::query(
-        "UPDATE text_objects SET revision_purpose='current legacy reason' WHERE node_id=$1",
+        "UPDATE text_objects SET revision_purpose='current legacy reason', revision_private_purpose=NULL WHERE node_id=$1",
     )
     .bind(node.id)
     .execute(&db.pool)
     .await?;
-    sqlx::query("UPDATE text_revisions SET purpose='past legacy reason' WHERE node_id=$1")
+    sqlx::query("UPDATE text_revisions SET purpose='past legacy reason', private_purpose=NULL WHERE node_id=$1")
         .bind(node.id)
         .execute(&db.pool)
         .await?;

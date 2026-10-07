@@ -40,5 +40,7 @@ BEGIN
 END;
 $$;
 CREATE TRIGGER text_objects_clear_replaced_private_purpose BEFORE UPDATE ON text_objects
-  FOR EACH ROW WHEN (OLD.revision_private_purpose IS NOT NULL)
+  FOR EACH ROW WHEN (OLD.revision_private_purpose IS NOT NULL
+    AND NEW.revision_id IS DISTINCT FROM OLD.revision_id
+    AND NEW.revision_private_purpose IS NOT DISTINCT FROM OLD.revision_private_purpose)
   EXECUTE FUNCTION clear_replaced_private_purpose();

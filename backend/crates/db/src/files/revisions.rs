@@ -105,7 +105,7 @@ pub(crate) async fn capture(
             .try_get::<Option<Value>, _>("revision_private_purpose")
             .map_err(map_sqlx_error)?
         {
-            Some(encrypted) => Some(encrypted),
+            Some(encrypted) => encrypted,
             None => protect_purpose(
                 crypto,
                 current.space_id,
@@ -154,19 +154,19 @@ pub(crate) fn protect_purpose(
     node: Uuid,
     revision: Uuid,
     purpose: Option<&str>,
-) -> Result<Option<Value>> {
-    purpose
-        .map(|purpose| {
-            if purpose.chars().count() > 200 {
-                return Err(Error::validation("revision purpose exceeds 200 characters"));
-            }
-            serde_json::to_value(crypto.encrypt_history(
-                &format!("revision-purpose/{space}/{node}/{revision}"),
-                purpose,
-            )?)
-            .map_err(|_| Error::internal("revision purpose encoding failed"))
-        })
-        .transpose()
+) -> Result<Value> {
+    if purpose.is_some_and(|value| value.chars().count() > 200) {
+        return Err(Error::validation("revision purpose exceeds 200 characters"));
+    }
+    // An authenticated null is also a complete new-format snapshot. This keeps
+    // ordinary writes out of the legacy archival trigger, without an extra flag.
+    let payload = serde_json::to_string(&purpose)
+        .map_err(|_| Error::internal("revision purpose encoding failed"))?;
+    serde_json::to_value(crypto.encrypt_history(
+        &format!("revision-purpose/{space}/{node}/{revision}"),
+        &payload,
+    )?)
+    .map_err(|_| Error::internal("revision purpose encoding failed"))
 }
 
 fn open_purpose(
@@ -182,12 +182,12 @@ fn open_purpose(
         Some(value) => {
             let encrypted = serde_json::from_value(value)
                 .map_err(|_| Error::internal("invalid encrypted revision purpose"))?;
-            crypto
-                .decrypt_history(
-                    &format!("revision-purpose/{space}/{node}/{revision}"),
-                    &encrypted,
-                )
-                .map(Some)
+            let payload = crypto.decrypt_history(
+                &format!("revision-purpose/{space}/{node}/{revision}"),
+                &encrypted,
+            )?;
+            serde_json::from_str(&payload)
+                .map_err(|_| Error::internal("invalid revision purpose payload"))
         }
     }
 }
