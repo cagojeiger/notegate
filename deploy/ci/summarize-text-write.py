@@ -33,7 +33,8 @@ print("Same Linux CI runner and PostgreSQL 17; release profile; four DB connecti
       "20 changed saves per writer after two warmups and an untimed CHECKPOINT per case; "
       "three paired trials in alternating order. Durability remains enabled. "
       "Service-call latency includes DB/pool/row-lock waiting and crypto; it excludes HTTP/auth middleware. "
-      "Payloads are synthetic repeated characters. Values below are medians of trial p95/throughput, "
+      "Payloads are synthetic repeated characters alternating between N and N-1 bytes to exercise quota deltas. "
+      "Values below are medians of trial p95/throughput, "
       "not fleet percentiles or production capacity. Timing has no pass/fail threshold.\n")
 print("| KiB | Encryption | Shape | Base p95 ms | New p95 ms | p95 change | Base writes/s | New writes/s |")
 print("|---:|---|---|---:|---:|---:|---:|---:|")
