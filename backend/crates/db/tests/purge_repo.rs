@@ -1065,3 +1065,72 @@ async fn failed_space_batch_preserves_its_intent_but_not_other_spaces_committed_
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn space_waits_for_bounded_ledger_and_connection_cleanup_without_resetting_retries()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "purge-space-anchors").await?;
+    let operation = Uuid::new_v4();
+    sqlx::query(
+        "UPDATE spaces SET deleted_at = now(), deleted_by_user_id = $2, purge_after = now(), \
+             purge_requested_at = now(), deletion_operation_id = $3 WHERE id = $1",
+    )
+    .bind(space)
+    .bind(owner)
+    .bind(operation)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO object_storage_objects(id, object_key, space_id, parent_node_id, name, declared_byte_len, \
+             media_type, state, retry_count, retry_after, last_error_code) \
+         SELECT id, id::text, $1, $2, 'pending.bin', 1, 'application/octet-stream', 'delete_pending', 7, \
+             now() + interval '1 hour', 'fixture' FROM (SELECT gen_random_uuid() AS id FROM generate_series(1, 201)) seed",
+    ).bind(space).bind(root).execute(&db.pool).await?;
+    sqlx::query("INSERT INTO accounts(kind) SELECT 'agent' FROM generate_series(1, 201)")
+        .execute(&db.pool)
+        .await?;
+    sqlx::query("INSERT INTO agents(id, owner_user_id, name) SELECT id, $1, id::text FROM accounts WHERE kind = 'agent'")
+        .bind(owner).execute(&db.pool).await?;
+    sqlx::query(
+        "INSERT INTO space_agent_connections(space_id, agent_id, permission, connected_by_user_id) \
+         SELECT $1, id, 'read', $2 FROM agents WHERE owner_user_id = $2",
+    )
+    .bind(space)
+    .bind(owner)
+    .execute(&db.pool)
+    .await?;
+    for remaining in [101, 1, 0] {
+        let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
+        assert_eq!(run.spaces_deleted, u64::from(remaining == 0));
+        assert_eq!(
+            run.nodes_deleted, 0,
+            "empty Space root is counted with its Space"
+        );
+        assert_eq!(
+            run.object_deletions_queued, 0,
+            "existing cleanup intent is not requeued"
+        );
+        let anchors: (i64, i64, bool) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM object_storage_objects WHERE space_id = $1), \
+             (SELECT count(*) FROM space_agent_connections WHERE space_id = $1), \
+             EXISTS(SELECT 1 FROM spaces WHERE id = $1)",
+        )
+        .bind(space)
+        .fetch_one(&db.pool)
+        .await?;
+        assert_eq!(anchors, (remaining, remaining, remaining > 0));
+        assert_eq!(run.resources_pending, remaining > 0);
+    }
+    let preserved: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM object_storage_objects WHERE state = 'delete_pending' AND node_id IS NULL \
+         AND parent_node_id IS NULL AND space_id IS NULL AND deletion_operation_id = $1 \
+         AND retry_count = 7 AND retry_after > now() AND last_error_code = 'fixture'",
+    ).bind(operation).fetch_one(&db.pool).await?;
+    assert_eq!(preserved, 201);
+    db.cleanup().await;
+    Ok(())
+}
