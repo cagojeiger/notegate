@@ -1054,6 +1054,14 @@ async fn permanent_folder_deletion_includes_independent_trash_but_keeps_its_oper
         assert_eq!(operation, expected.deletion_operation_id);
     }
     assert!(repo.find_node(space, current.id).await?.is_none());
+    // The now-empty parent is reclaimed in the next batch, not by cascading
+    // the whole folder during the first pass.
+    let remaining = repo.list_trash(owner, 100, None).await?;
+    assert_eq!(remaining.len(), 1);
+    assert!(!remaining[0].recoverable);
+    let next = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(next.nodes_deleted, 1);
+    assert_eq!(next.object_deletions_queued, 0);
     assert!(repo.list_trash(owner, 100, None).await?.is_empty());
     db.cleanup().await;
     Ok(())

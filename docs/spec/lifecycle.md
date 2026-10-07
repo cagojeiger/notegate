@@ -99,7 +99,7 @@ spaces.purge_after=now()+retention
 - 연결 row는 즉시 disconnect하지 않는다. 삭제된 space는 live 조회와 권한 확인에서 제외되어 agent 접근이 차단된다.
 - `space_usage`는 purge까지 유지하지만 Usage 조회와 reconciliation 대상에서는 제외한다.
 - Live 조회는 deleted space를 제외한다.
-- `purge_after` 이후 background purge가 cascade hard delete할 수 있다.
+- `purge_after` 이후 background purge가 하위 자원을 batch로 정리하고 빈 Space를 제거한다.
 
 ## Agent connection
 

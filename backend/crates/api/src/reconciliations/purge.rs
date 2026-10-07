@@ -6,8 +6,8 @@ use notegate_reconciliation::{
     ReconciliationFailure, ReconciliationFuture, ReconciliationSchedule,
 };
 
-const PURGE_INTERVAL: Duration = Duration::from_secs(60 * 60);
-const PURGE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+const PURGE_INTERVAL: Duration = Duration::from_secs(60);
+const PURGE_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub(super) struct PurgeReconciler {
     repo: PurgeRepo,
@@ -39,6 +39,7 @@ impl Reconciler for PurgeReconciler {
                 event = "purge.completed",
                 spaces_deleted = run.spaces_deleted,
                 nodes_deleted = run.nodes_deleted,
+                text_revisions_deleted = run.text_revisions_deleted,
                 accounts_anonymized = run.accounts_anonymized,
                 api_keys_deleted = run.api_keys_deleted,
                 browser_sessions_deleted = run.browser_sessions_deleted,
@@ -48,8 +49,13 @@ impl Reconciler for PurgeReconciler {
                 command_invocations_deleted = run.command_invocations_deleted,
                 link_graph_projections_deleted = run.link_graph_projections_deleted,
                 object_deletions_queued = run.object_deletions_queued,
+                resources_pending = run.resources_pending,
             );
-            Ok(ReconciliationDirective::Complete)
+            Ok(if run.resources_pending {
+                ReconciliationDirective::ContinueAfter(Duration::from_secs(1))
+            } else {
+                ReconciliationDirective::Complete
+            })
         })
     }
 }

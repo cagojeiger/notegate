@@ -299,9 +299,12 @@ spaces
   trash_recoverable bool not null default false
   deletion_operation_id uuid null
   purge_requested_at timestamptz null
+  purge_last_attempt_at timestamptz null
 ```
 
 Live space name은 `(owner_user_id, name)` 기준 unique다. Space name은 1~63자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, `:`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다. Space 목록 기본 정렬은 `(sort_order, name, id)`다. 서비스 생성 경로는 새 space를 `max(owner live sort_order)+1000`으로 만들어 기본적으로 목록 끝에 추가한다. `navigation_pinned_at`은 탐색 영역 고정 상태이고 `user_mcp_enabled_at`은 User MCP 권한 상태이며 서로 독립적이다. `deleted_at`, `deleted_by_user_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.
+
+`purge_last_attempt_at`은 background purge의 Space 순회용 시각이며 삭제 완료/요청 시각이 아니다. Physical child, due node, object 원장의 parent/Space 조회는 별도 index를 사용한다.
 
 `trash_recoverable`은 해당 Space 삭제가 휴지통 복원 보존 정책을 지원하는지 표시한다. 현재 복원이 가능한지는 만료 시각, 영구 삭제 요청, 파일 원장 상태와 현재 제한을 별도로 검증한다.
 

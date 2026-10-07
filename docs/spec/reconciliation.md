@@ -55,19 +55,25 @@ Object storage cleanup은 전역 singleton reconciliation으로 실행하지만,
 `system.purge`는 하나의 kind, 일정, advisory lock을 유지하며 다음 세 묶음을 순차 실행한다. 별도 worker나 병렬 reconciliation으로 분리하지 않는다.
 
 ```text
-system.purge (1시간 주기, 전체 실행 timeout 1시간)
-  ├─ resources  → 객체 삭제 요청 기록 + 리소스 DB 삭제 + orphan projection 정리 → COMMIT
+system.purge (1분 주기, 전체 실행 timeout 2분)
+  ├─ resources
+  │    ├─ Space별: 버전/참조 정리 + 객체 삭제 요청 + leaf node 삭제 → COMMIT
+  │    └─ 이미 제거된 owner의 orphan projection 정리 → 별도 COMMIT
   ├─ identities → 계정 익명화 + 만료된 API key/browser session 정리 → COMMIT
   └─ history    → terminal object 원장 + 보존 기간 만료 event/invocation 정리 → COMMIT
 ```
 
-각 묶음은 자체 트랜잭션을 사용한다. 특히 객체 삭제 요청 기록과 리소스 DB 삭제는 함께 커밋하거나 함께 롤백한다. 일반적인 DB 오류가 발생하면 해당 묶음만 롤백하고 뒤의 묶음도 실행한다. 앞서 커밋한 묶음은 유지하며, 모든 묶음을 시도한 뒤 하나라도 실패했으면 첫 오류를 반환해 runtime이 실행 실패로 기록한다. 다음 고정 주기에 원본 상태를 다시 읽어 재시도한다.
+리소스 정리는 마지막 시도 시각이 오래된 Space부터 최대 10개를 순회하며, Space마다 짧은 트랜잭션을 사용한다. `purge_last_attempt_at`은 선택 시 별도로 커밋하는 순회 metadata다. 잠긴 Space나 실패한 Space도 다음 순회에서 다른 Space보다 우선하지 않으며, 완료 증거로 사용하지 않는다. 변경 경로와 같은 Space gate를 사용하고 잠긴 Space는 건너뛴다.
 
-트랜잭션 분리는 실행 시간이나 프로세스 장애의 격리를 뜻하지 않는다. 앞의 묶음이 느리면 뒤의 묶음도 기다린다. 전체 timeout, 종료 또는 panic으로 실행이 중단되면 뒤의 묶음은 실행되지 않을 수 있고, 이미 커밋한 결과는 유지된다. 커밋 응답 중 연결이 끊기면 결과가 불확실할 수 있으므로 재실행은 현재 DB 상태를 기준으로 수렴한다.
+삭제 대상은 물리적인 자식이 없는 leaf부터 선택한다. 만료/영구 삭제된 조상의 subtree에는 독립적으로 삭제했던 자식도 포함된다. 본문 버전, 양방향 링크 참조, upload의 부모 참조를 batch로 먼저 정리하며, 남은 참조가 있으면 node 삭제를 미룬다. Space는 모든 non-root node와 객체 원장의 Space 참조, Agent connection을 정리한 뒤 빈 root와 함께 제거한다. 큰 subtree나 문서 버전을 한꺼번에 cascade하지 않는다.
 
-보존 기간과 묶음별 SQL batch 상한은 `performance-limits.md`를 따른다. 실행에서 남은 backlog는 다음 고정 주기에 처리하며, `system.purge`는 짧은 후속 실행을 요청하지 않는다. 논리 삭제는 화면에서 자원을 제외하고, S3 물리 삭제는 `object_storage.cleanup`이 처리한다.
+객체 삭제 요청과 해당 semantic row 제거는 같은 Space batch에서 함께 커밋하거나 롤백한다. 실패한 batch는 재시도하며, 이미 커밋한 다른 Space의 진척은 유지한다. 일반적인 오류 이후에도 뒤의 Space와 identities/history 묶음을 시도하고, 하나라도 실패하면 첫 오류를 반환한다. 정상 실행에서 resource backlog가 남으면 runtime lock을 해제하고 1초 후 이어서 실행한다. 실패는 다음 1분 주기에 재시도한다. 보존 기간은 변경하지 않는다.
 
-각 묶음의 커밋 후 `purge.group_completed`에 `group`과 처리 건수를 기록하고, 오류는 `purge.group_failed`에 해당 `group`과 함께 기록한다. 모든 묶음이 성공한 경우에만 기존 `purge.completed`가 기록된다. 부분 성공을 전체 성공으로 보고하지 않는다.
+리소스 순회는 30초 이후 새 Space batch를 시작하지 않으며, 한 batch의 timeout은 15초다. 개별 SQL statement는 10초, lock 대기는 2초로 제한한다. 이후 orphan projection과 backlog 조회를 수행한다. 전체 실행 timeout, 종료, panic으로 중단되면 뒤의 묶음은 실행되지 않을 수 있지만 이전 커밋은 유지된다. 커밋 응답이 유실되어도 다음 실행은 남은 DB 상태를 읽어 수렴한다.
+
+처리 상한은 `performance-limits.md`를 따른다. 상한은 row 변경량을 제한하며 조회 비용, WAL, vacuum이나 실제 디스크 공간 반환 시간을 보장하지 않는다. S3 물리 삭제는 기존 `object_storage.cleanup`이 별도로 재시도한다.
+
+커밋한 Space batch는 `purge.space_completed`, 오류는 `purge.space_failed`로 기록한다. resource 묶음 성공 시 `purge.group_completed`에 처리량, 경과 시간, 남은 삭제 후보 수와 가장 오래된 eligible 시각을 기록한다. 후보 수는 due Space/node의 수이며 subtree 전체 row 수나 S3 삭제 완료 수가 아니다. 다른 묶음의 오류는 `purge.group_failed`로 기록하고, 모든 묶음이 성공해야 `purge.completed`를 기록한다.
 
 ## 관측
 

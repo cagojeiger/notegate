@@ -58,9 +58,9 @@ Revision bodies use the configured encryption key without key rotation or an old
 
 The `text_revisions.retention` kind runs in the shared reconciliation runtime with its schedule, advisory lock and metrics.
 
-Every ten minutes, process at most 100 eligible rows from one live Space in one transaction, using the existing Space mutation lock order. Indexes support due-time selection and per-Space cleanup. If rows were deleted, release the runtime lock and request a follow-up after one second. Lock acquisition is bounded to two seconds; failure/timeout retries on the next normal schedule. Space purge owns cascades for deleted Spaces.
+Every ten minutes, process at most 100 eligible rows from one live Space in one transaction, using the existing Space mutation lock order. Indexes support due-time selection and per-Space cleanup. If rows were deleted, release the runtime lock and request a follow-up after one second. Lock acquisition is bounded to two seconds; failure/timeout retries on the next normal schedule. Irreversible resource purge removes retained revisions in batches before deleting their document or Space.
 
-A cleanup failure retains extra history rather than losing a checkpoint. It can delay capacity recovery; existing reconciliation outcome/duration/last-success metrics and `text_revisions.cleaned` counts provide operational evidence. Deletion triggers release history usage, including ordinary resource cascades.
+A cleanup failure retains extra history rather than losing a checkpoint. It can delay capacity recovery; existing reconciliation outcome/duration/last-success metrics and `text_revisions.cleaned` counts provide operational evidence. Deletion triggers release history usage, including revision batches drained by resource purge.
 
 ## Validation
 

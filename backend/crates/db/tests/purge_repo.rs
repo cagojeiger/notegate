@@ -647,3 +647,402 @@ async fn assert_purge_failure_isolation(
     db.cleanup().await;
     Ok(())
 }
+
+// Raw fixtures keep large-tree tests fast while representing retained physical
+// rows rather than using the live-subtree delete API's 1,000-node request cap.
+async fn retained_node(
+    pool: &sqlx::PgPool,
+    space: Uuid,
+    parent: Uuid,
+    owner: Uuid,
+    kind: &str,
+    due: bool,
+) -> Result<Uuid, sqlx::Error> {
+    sqlx::query_scalar(
+        "INSERT INTO nodes (id, space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id, \
+             deleted_by_account_id, deleted_at, purge_after, deletion_target_node_id, deletion_operation_id) \
+         SELECT id, $1, $2, id::text, $4, $3, $3, $3, now() - interval '1 day', \
+             CASE WHEN $5 THEN now() - interval '1 second' ELSE now() + interval '29 days' END, id, gen_random_uuid() \
+         FROM (SELECT gen_random_uuid() AS id) seed RETURNING id",
+    ).bind(space).bind(parent).bind(owner).bind(kind).bind(due).fetch_one(pool).await
+}
+
+async fn retained_children(
+    pool: &sqlx::PgPool,
+    space: Uuid,
+    parent: Uuid,
+    owner: Uuid,
+    count: i32,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO nodes (id, space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id, \
+             deleted_by_account_id, deleted_at, purge_after, deletion_target_node_id, deletion_operation_id) \
+         SELECT id, $1, $2, 'retained-' || value, 'folder', $3, $3, $3, now() - interval '1 day', \
+             now() + interval '29 days', id, gen_random_uuid() \
+         FROM (SELECT gen_random_uuid() AS id, value FROM generate_series(1, $4) value) seed",
+    ).bind(space).bind(parent).bind(owner).bind(count).execute(pool).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn large_physical_subtree_drains_children_before_parent_and_survives_restart()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "purge-tree-batches").await?;
+    let parent = retained_node(&db.pool, space, root, owner, "folder", true).await?;
+    // These children's own deadlines are in the future. The irreversible
+    // ancestor still owns their physical deletion, without restoring them.
+    retained_children(&db.pool, space, parent, owner, 205).await?;
+    let (other_owner, other_space, other_root) =
+        space_with_root(&db.pool, "purge-small-peer").await?;
+    retained_node(
+        &db.pool,
+        other_space,
+        other_root,
+        other_owner,
+        "folder",
+        true,
+    )
+    .await?;
+
+    for (expected, remaining) in [(101, 105), (100, 5), (5, 0), (1, 0)] {
+        // A fresh instance on every pass cannot rely on an in-memory cursor.
+        let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
+        assert_eq!(run.nodes_deleted, expected);
+        let children: i64 = sqlx::query_scalar("SELECT count(*) FROM nodes WHERE parent_id = $1")
+            .bind(parent)
+            .fetch_one(&db.pool)
+            .await?;
+        assert_eq!(children, remaining);
+        let parent_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = $1)")
+                .bind(parent)
+                .fetch_one(&db.pool)
+                .await?;
+        assert_eq!(parent_exists, expected != 1);
+        assert_eq!(run.resources_pending, expected != 1);
+    }
+    let live_usage: i64 =
+        sqlx::query_scalar("SELECT live_node_count FROM space_usage WHERE space_id = $1")
+            .bind(space)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(
+        live_usage, 1,
+        "hard deletion does not release live quota twice"
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn hard_purge_drains_revisions_without_cascading_or_losing_usage_accounting()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "purge-revision-batches").await?;
+    let node = retained_node(&db.pool, space, root, owner, "text", true).await?;
+    sqlx::query(
+        "INSERT INTO text_objects (node_id, space_id, content_text, content_sha256, byte_len, line_count, created_by_account_id, updated_by_account_id) \
+         VALUES ($1, $2, 'current', $3, 7, 1, $4, $4)",
+    ).bind(node).bind(space).bind("a".repeat(64)).bind(owner).execute(&db.pool).await?;
+    sqlx::query(
+        "INSERT INTO text_revisions (id, node_id, space_id, content_sha256, byte_len, line_count, written_at, \
+             author_id, group_id, source, checkpoint, superseded_at, cleanup_at, ciphertext, nonce, enc_key_id, enc_version) \
+         SELECT gen_random_uuid(), $1, $2, $3, 1, 1, now(), $4, gen_random_uuid(), 'browser', true, now(), \
+             now() + interval '30 days', decode('aa', 'hex'), decode('bb', 'hex'), 'fixture', 1 \
+         FROM generate_series(1, 201)",
+    ).bind(node).bind(space).bind("b".repeat(64)).bind(owner).execute(&db.pool).await?;
+    sqlx::query("INSERT INTO text_revision_usage(space_id, stored_bytes) VALUES ($1, 402)")
+        .bind(space)
+        .execute(&db.pool)
+        .await?;
+    let version: (chrono::DateTime<chrono::Utc>, Option<Uuid>) =
+        sqlx::query_as("SELECT deleted_at, deletion_operation_id FROM nodes WHERE id = $1")
+            .bind(node)
+            .fetch_one(&db.pool)
+            .await?;
+
+    for (deleted, remaining, node_exists) in [(100, 101, true), (100, 1, true), (1, 0, false)] {
+        let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
+        assert_eq!(run.text_revisions_deleted, deleted);
+        assert_eq!(run.nodes_deleted, u64::from(!node_exists));
+        let stored: (i64, i64, bool) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM text_revisions WHERE node_id = $1), \
+             (SELECT stored_bytes FROM text_revision_usage WHERE space_id = $2), \
+             EXISTS(SELECT 1 FROM text_objects WHERE node_id = $1 AND content_text = 'current')",
+        )
+        .bind(node)
+        .bind(space)
+        .fetch_one(&db.pool)
+        .await?;
+        assert_eq!(stored, (remaining, remaining * 2, node_exists));
+        assert_eq!(run.resources_pending, node_exists);
+        if node_exists {
+            let error = notegate_db::FilesRepo::new(db.pool.clone())
+                .restore_trashed_node(
+                    owner,
+                    space,
+                    node,
+                    notegate_model::trash::TrashEntryVersion {
+                        deleted_at: version.0,
+                        deletion_operation_id: version.1,
+                    },
+                )
+                .await
+                .expect_err("partially purged expired content cannot be restored");
+            assert!(matches!(error, notegate_core::Error::Conflict(_)));
+        }
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn persisted_rotation_reaches_spaces_beyond_the_candidate_window()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(&db.pool, "purge-rotation", "rotation@example.test").await?;
+    let mut spaces = Vec::new();
+    for index in 0..11 {
+        let space: Uuid = sqlx::query_scalar(
+            "INSERT INTO spaces(owner_user_id, name) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(owner)
+        .bind(format!("rotate-{index}"))
+        .fetch_one(&db.pool)
+        .await?;
+        let root: Uuid =
+            sqlx::query_scalar("SELECT id FROM nodes WHERE space_id = $1 AND parent_id IS NULL")
+                .bind(space)
+                .fetch_one(&db.pool)
+                .await?;
+        retained_children(&db.pool, space, root, owner, 101).await?;
+        sqlx::query("UPDATE spaces SET deleted_at = now(), deleted_by_user_id = $2, purge_after = now() - interval '1 second' WHERE id = $1")
+            .bind(space).bind(owner).execute(&db.pool).await?;
+        spaces.push(space);
+    }
+    spaces.sort_unstable();
+    let last = spaces[10];
+    let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(first.nodes_deleted, 1_000);
+    let first_last: (i64, bool) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM nodes WHERE space_id = $1 AND parent_id IS NOT NULL), \
+         purge_last_attempt_at IS NULL FROM spaces WHERE id = $1",
+    )
+    .bind(last)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(first_last, (101, true));
+    let second = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(second.nodes_deleted, 109);
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM nodes WHERE space_id = $1 AND parent_id IS NOT NULL",
+    )
+    .bind(last)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        remaining, 1,
+        "the untouched Space precedes previously attempted Spaces"
+    );
+    assert!(second.resources_pending);
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn busy_space_does_not_block_other_spaces_and_resumes_after_unlock()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, busy, root) = space_with_root(&db.pool, "purge-busy").await?;
+    let node = retained_node(&db.pool, busy, root, owner, "folder", true).await?;
+    let (other_owner, other, other_root) = space_with_root(&db.pool, "purge-free").await?;
+    retained_node(&db.pool, other, other_root, other_owner, "folder", true).await?;
+    let mut lock = db.pool.begin().await?;
+    // Production shared mutation gate, scoped to this test schema.
+    let value = busy.as_u128();
+    let folded = (value as u64) ^ ((value >> 64) as u64) ^ 0x4e47_5350_4143_4501;
+    sqlx::query("SELECT pg_advisory_xact_lock_shared(hashtextextended(current_schema(), $1))")
+        .bind(i64::from_ne_bytes(folded.to_ne_bytes()))
+        .execute(&mut *lock)
+        .await?;
+    let first = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        PurgeRepo::new(db.pool.clone()).run_once(),
+    )
+    .await??;
+    assert_eq!(first.nodes_deleted, 1);
+    assert!(first.resources_pending);
+    let retained: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = $1)")
+        .bind(node)
+        .fetch_one(&db.pool)
+        .await?;
+    assert!(retained);
+    lock.commit().await?;
+    assert_eq!(
+        PurgeRepo::new(db.pool.clone())
+            .run_once()
+            .await?
+            .nodes_deleted,
+        1
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn pending_uploads_are_expired_in_batches_before_their_folder_is_removed()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "purge-upload-batches").await?;
+    let parent = retained_node(&db.pool, space, root, owner, "folder", true).await?;
+    sqlx::query(
+        "INSERT INTO object_storage_objects(id, object_key, space_id, parent_node_id, requested_by_account_id, name, declared_byte_len, media_type, state) \
+         SELECT id, id::text, $1, $2, $3, 'pending.bin', 1, 'application/octet-stream', 'uploading' \
+         FROM (SELECT gen_random_uuid() AS id FROM generate_series(1, 201)) seed",
+    ).bind(space).bind(parent).bind(owner).execute(&db.pool).await?;
+    for (queued, remaining) in [(100, 101), (100, 1), (1, 0)] {
+        let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
+        assert_eq!(run.object_deletions_queued, queued);
+        assert_eq!(run.nodes_deleted, u64::from(remaining == 0));
+        let anchors: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM object_storage_objects WHERE parent_node_id = $1",
+        )
+        .bind(parent)
+        .fetch_one(&db.pool)
+        .await?;
+        assert_eq!(anchors, remaining);
+        let expired: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM object_storage_objects f WHERE f.space_id = $1 AND f.state = 'expire_pending' \
+             AND f.parent_node_id IS NULL AND f.deletion_operation_id IS NOT NULL",
+        ).bind(space).fetch_one(&db.pool).await?;
+        assert_eq!(expired, 201 - remaining);
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn link_references_drain_in_batches_without_losing_incoming_paths()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "purge-link-batches").await?;
+    let target = retained_node(&db.pool, space, root, owner, "text", true).await?;
+    let source: Uuid = sqlx::query_scalar(
+        "INSERT INTO nodes(space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
+         VALUES ($1, $2, 'live.md', 'text', $3, $3) RETURNING id",
+    ).bind(space).bind(root).bind(owner).fetch_one(&db.pool).await?;
+    sqlx::query(
+        "INSERT INTO node_link_refs(space_id, source_node_id, target_node_id, target_path, reference_kind, occurrence_count) \
+         SELECT $1, $2, $3, '/incoming-' || value, 'link', 1 FROM generate_series(1, 1001) value \
+         UNION ALL SELECT $1, $3, NULL::uuid, '/outgoing-' || value, 'link', 1 FROM generate_series(1, 1001) value",
+    ).bind(space).bind(source).bind(target).execute(&db.pool).await?;
+    let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(first.nodes_deleted, 0);
+    let refs: (i64, i64) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE source_node_id = $1), count(*) FILTER (WHERE target_node_id = $1) FROM node_link_refs",
+    ).bind(target).fetch_one(&db.pool).await?;
+    assert_eq!(refs, (1, 1));
+    assert_eq!(
+        PurgeRepo::new(db.pool.clone())
+            .run_once()
+            .await?
+            .nodes_deleted,
+        1
+    );
+    let paths: (i64, i64) = sqlx::query_as(
+        "SELECT count(*), count(*) FILTER (WHERE target_node_id IS NOT NULL) FROM node_link_refs WHERE source_node_id = $1",
+    ).bind(source).fetch_one(&db.pool).await?;
+    assert_eq!(paths, (1001, 0));
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn failed_space_batch_preserves_its_intent_but_not_other_spaces_committed_progress()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, bad, bad_root) = space_with_root(&db.pool, "purge-failed-space").await?;
+    let (good_owner, good, good_root) = space_with_root(&db.pool, "purge-successful-space").await?;
+    let files = notegate_db::FilesRepo::new(db.pool.clone());
+    let (bad_node, bad_file) = attach_file(&files, bad, bad_root, "bad.bin", 1, owner).await?;
+    let (good_node, good_file) =
+        attach_file(&files, good, good_root, "good.bin", 1, good_owner).await?;
+    for (space, node, actor) in [(bad, bad_node.id, owner), (good, good_node.id, good_owner)] {
+        files.soft_delete_node(space, node, actor, false).await?;
+        sqlx::query(
+            "UPDATE nodes SET purge_requested_at = now(), purge_after = now() WHERE id = $1",
+        )
+        .bind(node)
+        .execute(&db.pool)
+        .await?;
+    }
+    sqlx::query(
+        "INSERT INTO audit_events(created_at, owner_user_id, actor_account_id, source, op_type, resource_type) \
+         VALUES (now() - interval '366 days', $1, $1, 'system', 'test.expired', 'test')",
+    ).bind(owner).execute(&db.pool).await?;
+    sqlx::query("CREATE TABLE fail_node_purge(id uuid PRIMARY KEY)")
+        .execute(&db.pool)
+        .await?;
+    sqlx::query("INSERT INTO fail_node_purge(id) VALUES ($1)")
+        .bind(bad_node.id)
+        .execute(&db.pool)
+        .await?;
+    sqlx::raw_sql(
+        "CREATE FUNCTION fail_selected_node_purge() RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN IF EXISTS(SELECT 1 FROM fail_node_purge WHERE id = OLD.id) THEN \
+             RAISE EXCEPTION 'injected node purge failure'; END IF; RETURN OLD; END; $$; \
+         CREATE TRIGGER fail_selected_node BEFORE DELETE ON nodes FOR EACH ROW EXECUTE FUNCTION fail_selected_node_purge();",
+    ).execute(&db.pool).await?;
+    assert!(PurgeRepo::new(db.pool.clone()).run_once().await.is_err());
+    for (key, state, node) in [
+        (&bad_file.object_key, "attached", Some(bad_node.id)),
+        (&good_file.object_key, "delete_pending", None),
+    ] {
+        let ledger: (String, Option<Uuid>) = sqlx::query_as(
+            "SELECT state, node_id FROM object_storage_objects WHERE object_key = $1",
+        )
+        .bind(key)
+        .fetch_one(&db.pool)
+        .await?;
+        assert_eq!(ledger, (state.to_owned(), node));
+    }
+    let history: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE op_type = 'test.expired'")
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(history, 0);
+    sqlx::query("DELETE FROM fail_node_purge")
+        .execute(&db.pool)
+        .await?;
+    let retry = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(retry.nodes_deleted, 1);
+    assert_eq!(
+        retry.object_deletions_queued, 1,
+        "committed peer intent is not queued again"
+    );
+    assert_eq!(retry.audit_events_deleted, 0);
+    db.cleanup().await;
+    Ok(())
+}
