@@ -1444,22 +1444,25 @@ mod tests {
         })
         .await?;
 
-        let row = sqlx::query_as::<
-            _,
-            (
-                String,
-                String,
-                Option<String>,
-                serde_json::Value,
-                serde_json::Value,
-            ),
-        >(
-            "SELECT tool, op, space_name, input, response FROM command_invocations \
-             WHERE actor_account_id = $1 ORDER BY id DESC LIMIT 1",
-        )
-        .bind(caller.account_id())
-        .fetch_one(&state.db)
-        .await?;
+        let item = state
+            .command_invocations
+            .list_by_owner(
+                caller.account_id(),
+                notegate_model::CommandInvocationSurface::Mcp,
+                100,
+                None,
+            )
+            .await?
+            .into_iter()
+            .next()
+            .expect("recorded invocation");
+        let row = (
+            item.tool,
+            item.op.expect("operation"),
+            item.space_name,
+            item.input,
+            item.response.expect("captured response"),
+        );
         assert_eq!(row.0, "read");
         assert_eq!(row.1, "changes");
         assert_eq!(row.2.as_deref(), Some("rest-test"));
@@ -1483,13 +1486,19 @@ mod tests {
         .await
         .expect_err("changes rejects a non-root target");
 
-        let failed = sqlx::query_as::<_, (Option<String>, String, Option<String>)>(
-            "SELECT space_name, outcome, error_code FROM command_invocations \
-             WHERE actor_account_id = $1 ORDER BY id DESC LIMIT 1",
-        )
-        .bind(caller.account_id())
-        .fetch_one(&state.db)
-        .await?;
+        let item = state
+            .command_invocations
+            .list_by_owner(
+                caller.account_id(),
+                notegate_model::CommandInvocationSurface::Mcp,
+                100,
+                None,
+            )
+            .await?
+            .into_iter()
+            .next()
+            .expect("recorded invocation");
+        let failed = (item.space_name, item.outcome, item.error_code);
         assert_eq!(failed.0.as_deref(), Some("rest-test"));
         assert_eq!(failed.1, "error");
         assert_eq!(failed.2.as_deref(), Some("changes_scope_invalid"));
@@ -1508,22 +1517,25 @@ mod tests {
             CallToolResponse::Complete(ref result) if result.is_error == Some(true)
         ));
 
-        let malformed_row = sqlx::query_as::<
-            _,
-            (
-                Option<String>,
-                serde_json::Value,
-                serde_json::Value,
-                String,
-                String,
-            ),
-        >(
-            "SELECT purpose, input, response, outcome, error_code FROM command_invocations \
-             WHERE actor_account_id = $1 ORDER BY id DESC LIMIT 1",
-        )
-        .bind(caller.account_id())
-        .fetch_one(&state.db)
-        .await?;
+        let item = state
+            .command_invocations
+            .list_by_owner(
+                caller.account_id(),
+                notegate_model::CommandInvocationSurface::Mcp,
+                100,
+                None,
+            )
+            .await?
+            .into_iter()
+            .next()
+            .expect("recorded invocation");
+        let malformed_row = (
+            item.purpose,
+            item.input,
+            item.response.expect("captured response"),
+            item.outcome,
+            item.error_code.expect("error code"),
+        );
         assert_eq!(malformed_row.0, None);
         assert_eq!(malformed_row.1, missing_purpose);
         assert_eq!(malformed_row.2["kind"], "complete");
@@ -1575,23 +1587,28 @@ mod tests {
             .await;
         assert!(unknown_error.is_err());
 
-        let rows = sqlx::query_as::<
-            _,
-            (
-                String,
-                Option<String>,
-                serde_json::Value,
-                serde_json::Value,
-                String,
-                String,
-            ),
-        >(
-            "SELECT tool, purpose, input, response, outcome, error_code FROM command_invocations \
-             WHERE actor_account_id = $1 ORDER BY id",
-        )
-        .bind(caller.account_id())
-        .fetch_all(&state.db)
-        .await?;
+        let mut rows: Vec<_> = state
+            .command_invocations
+            .list_by_owner(
+                caller.account_id(),
+                notegate_model::CommandInvocationSurface::Mcp,
+                100,
+                None,
+            )
+            .await?
+            .into_iter()
+            .map(|item| {
+                (
+                    item.tool,
+                    item.purpose,
+                    item.input,
+                    item.response.expect("captured response"),
+                    item.outcome,
+                    item.error_code.expect("error code"),
+                )
+            })
+            .collect();
+        rows.reverse();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].0, "read");
         assert_eq!(rows[0].1, None);

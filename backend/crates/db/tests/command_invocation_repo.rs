@@ -8,6 +8,66 @@ use notegate_db::{CommandInvocationRepo, NewCommandInvocation};
 use notegate_model::{CommandInvocationCursor, CommandInvocationSurface};
 
 #[tokio::test]
+async fn legacy_payload_encryption_is_bounded_restartable_and_row_bound()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup_before(49).await? else {
+        return Ok(());
+    };
+    let owner =
+        insert_user_account(&db.pool, "legacy-history", "legacy-history@example.test").await?;
+    sqlx::query(
+        "INSERT INTO command_invocations \
+         (owner_user_id, actor_account_id, caller_kind, surface, tool, op, purpose, input, response, outcome, duration_ms) \
+         SELECT $1, $1, 'user', 'mcp', 'read', 'spaces', 'legacy purpose', \
+                jsonb_build_object('target', 'private-' || n), '{\"ok\":true}'::jsonb, 'success', 1 \
+         FROM generate_series(1,101) n",
+    ).bind(owner).execute(&db.pool).await?;
+    db.apply_migration(49).await?;
+    let repo = CommandInvocationRepo::new(db.pool.clone());
+    let before = repo
+        .list_by_owner(owner, CommandInvocationSurface::Mcp, 101, None)
+        .await?;
+    assert_eq!(repo.encrypt_legacy_payloads().await?, 100);
+    // The old binary's compatibility view remains writable during rollout.
+    sqlx::query(
+        "INSERT INTO mcp_invocations \
+         (owner_user_id, actor_account_id, caller_kind, tool, op, purpose, input, outcome, duration_ms) \
+         VALUES ($1, $1, 'user', 'read', 'spaces', 'rolling purpose', '{}'::jsonb, 'success', 1)",
+    ).bind(owner).execute(&db.pool).await?;
+    assert_eq!(repo.encrypt_legacy_payloads().await?, 2);
+    assert_eq!(repo.encrypt_legacy_payloads().await?, 0);
+    let after = repo
+        .list_by_owner(owner, CommandInvocationSurface::Mcp, 102, None)
+        .await?;
+    assert_eq!(after.len(), 102);
+    for prior in before {
+        let migrated = after
+            .iter()
+            .find(|item| item.id == prior.id)
+            .expect("same history identity");
+        assert_eq!(migrated.purpose, prior.purpose);
+        assert_eq!(migrated.input, prior.input);
+        assert_eq!(migrated.response, prior.response);
+    }
+    let plaintext_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM command_invocations WHERE purpose IS NOT NULL OR space_name IS NOT NULL \
+         OR input != '{}'::jsonb OR response IS NOT NULL OR private_payload IS NULL",
+    ).fetch_one(&db.pool).await?;
+    assert_eq!(plaintext_count, 0);
+    let source = after.first().expect("first row").id;
+    let target = after.last().expect("last row").id;
+    sqlx::query("UPDATE command_invocations SET private_payload=(SELECT private_payload FROM command_invocations WHERE id=$1) WHERE id=$2")
+        .bind(source).bind(target).execute(&db.pool).await?;
+    assert!(
+        repo.list_by_owner(owner, CommandInvocationSurface::Mcp, 102, None)
+            .await
+            .is_err()
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn migration_preserves_mcp_rows_and_legacy_writes_during_rolling_deployments()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup_before(40).await? else {
@@ -137,10 +197,10 @@ async fn insert_records_invocation_summary_and_payloads() -> Result<(), Box<dyn 
     assert_eq!(row.3, "cli");
     assert_eq!(row.4, "read");
     assert_eq!(row.5.as_deref(), Some("changes"));
-    assert_eq!(row.6.as_deref(), Some("review recent changes"));
-    assert_eq!(row.7.as_deref(), Some("Research"));
-    assert_eq!(row.8, input);
-    assert_eq!(row.9.as_ref(), Some(&response));
+    assert_eq!(row.6, None);
+    assert_eq!(row.7, None);
+    assert_eq!(row.8, serde_json::json!({}));
+    assert_eq!(row.9, None);
     assert_eq!(row.10, "error");
     assert_eq!(row.11.as_deref(), Some("not_found"));
     assert_eq!(row.12, 17);
@@ -154,6 +214,41 @@ async fn insert_records_invocation_summary_and_payloads() -> Result<(), Box<dyn 
     assert_eq!(
         listed.first().map(|item| item.surface.as_str()),
         Some("cli")
+    );
+
+    let item = listed.first().expect("recorded invocation");
+    assert_eq!(item.input, input);
+    assert_eq!(item.purpose.as_deref(), Some("review recent changes"));
+    assert_eq!(item.space_name.as_deref(), Some("Research"));
+    let encrypted: serde_json::Value =
+        sqlx::query_scalar("SELECT private_payload FROM command_invocations WHERE id=$1")
+            .bind(item.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert!(!encrypted.to_string().contains("Research"));
+    assert!(!encrypted.to_string().contains("review recent changes"));
+    assert!(
+        repo.list_by_owner(
+            uuid::Uuid::new_v4(),
+            CommandInvocationSurface::Cli,
+            10,
+            None
+        )
+        .await?
+        .is_empty()
+    );
+    // Changing the owner must not make another owner's encrypted payload readable.
+    let other_owner =
+        insert_user_account(&db.pool, "history-other", "history-other@example.test").await?;
+    sqlx::query("UPDATE command_invocations SET owner_user_id=$2 WHERE id=$1")
+        .bind(item.id)
+        .bind(other_owner)
+        .execute(&db.pool)
+        .await?;
+    assert!(
+        repo.list_by_owner(other_owner, CommandInvocationSurface::Cli, 10, None)
+            .await
+            .is_err()
     );
 
     db.cleanup().await;

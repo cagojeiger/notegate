@@ -1,5 +1,6 @@
 //! Bounded encryption of retained rows written before history encryption existed.
-use notegate_db::ChangeHistoryRepo;
+use notegate_core::security::PiiCrypto;
+use notegate_db::{ChangeHistoryRepo, CommandInvocationRepo, PgPool};
 use notegate_reconciliation::{
     Reconciler, ReconciliationContext, ReconciliationDirective, ReconciliationError,
     ReconciliationFailure, ReconciliationFuture, ReconciliationSchedule,
@@ -7,11 +8,15 @@ use notegate_reconciliation::{
 use std::time::Duration;
 
 pub(super) struct HistoryPrivacyReconciler {
-    files: ChangeHistoryRepo,
+    changes: ChangeHistoryRepo,
+    invocations: CommandInvocationRepo,
 }
 impl HistoryPrivacyReconciler {
-    pub(super) fn new(files: ChangeHistoryRepo) -> Self {
-        Self { files }
+    pub(super) fn new(pool: PgPool, crypto: PiiCrypto) -> Self {
+        Self {
+            changes: ChangeHistoryRepo::new(pool.clone(), crypto.clone()),
+            invocations: CommandInvocationRepo::with_crypto(pool, crypto),
+        }
     }
     pub(super) fn schedule() -> Result<ReconciliationSchedule, ReconciliationError> {
         ReconciliationSchedule::new(Duration::from_secs(60), Duration::from_secs(60))
@@ -22,14 +27,19 @@ impl Reconciler for HistoryPrivacyReconciler {
     fn reconcile<'a>(&'a self, _context: &'a ReconciliationContext) -> ReconciliationFuture<'a> {
         Box::pin(async move {
             let count = self
-                .files
+                .changes
                 .encrypt_legacy_metadata()
                 .await
                 .map_err(|error| Box::new(error) as ReconciliationFailure)?;
-            if count > 0 {
-                tracing::info!(event = "history.encrypted", count);
+            let invocations = self
+                .invocations
+                .encrypt_legacy_payloads()
+                .await
+                .map_err(|error| Box::new(error) as ReconciliationFailure)?;
+            if count + invocations > 0 {
+                tracing::info!(event = "history.encrypted", count, invocations);
             }
-            Ok(if count == 100 {
+            Ok(if count == 100 || invocations == 100 {
                 ReconciliationDirective::ContinueAfter(Duration::from_secs(1))
             } else {
                 ReconciliationDirective::Complete

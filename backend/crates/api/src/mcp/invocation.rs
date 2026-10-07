@@ -341,24 +341,29 @@ mod tests {
             false
         );
 
-        let rows = sqlx::query_as::<
-            _,
-            (
-                String,
-                Option<String>,
-                Option<String>,
-                serde_json::Value,
-                serde_json::Value,
-                String,
-                Option<String>,
-            ),
-        >(
-            "SELECT tool, op, purpose, input, response, outcome, error_code \
-             FROM command_invocations WHERE actor_account_id = $1 ORDER BY id",
-        )
-        .bind(caller.account_id())
-        .fetch_all(&state.db)
-        .await?;
+        let mut rows: Vec<_> = state
+            .command_invocations
+            .list_by_owner(
+                caller.account_id(),
+                notegate_model::CommandInvocationSurface::Mcp,
+                100,
+                None,
+            )
+            .await?
+            .into_iter()
+            .map(|item| {
+                (
+                    item.tool,
+                    item.op,
+                    item.purpose,
+                    item.input,
+                    item.response.expect("captured response"),
+                    item.outcome,
+                    item.error_code,
+                )
+            })
+            .collect();
+        rows.reverse();
         assert_eq!(rows.len(), 4);
         assert_eq!(rows[0].0, "search");
         assert_eq!(rows[0].1.as_deref(), Some("find"));
@@ -554,23 +559,28 @@ mod tests {
         )
         .await?;
 
-        let rows = sqlx::query_as::<
-            _,
-            (
-                String,
-                Option<String>,
-                serde_json::Value,
-                serde_json::Value,
-                String,
-                Option<String>,
-            ),
-        >(
-            "SELECT tool, op, input, response, outcome, error_code \
-             FROM command_invocations WHERE actor_account_id = $1 ORDER BY id",
-        )
-        .bind(caller.account_id())
-        .fetch_all(&state.db)
-        .await?;
+        let mut rows: Vec<_> = state
+            .command_invocations
+            .list_by_owner(
+                caller.account_id(),
+                notegate_model::CommandInvocationSurface::Mcp,
+                100,
+                None,
+            )
+            .await?
+            .into_iter()
+            .map(|item| {
+                (
+                    item.tool,
+                    item.op,
+                    item.input,
+                    item.response.expect("captured response"),
+                    item.outcome,
+                    item.error_code,
+                )
+            })
+            .collect();
+        rows.reverse();
         assert_eq!(rows.len(), 4);
 
         let persisted = serde_json::to_string(&rows)?;
@@ -688,9 +698,9 @@ mod tests {
 
         let row = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, String, String)>(
             "SELECT owner_user_id, actor_account_id, caller_kind, surface \
-             FROM command_invocations WHERE purpose = $1",
+             FROM command_invocations WHERE actor_account_id = $1",
         )
-        .bind("search the owner's notes")
+        .bind(agent_account_id)
         .fetch_one(&state.db)
         .await?;
         assert_eq!(row.0, owner_user_id);

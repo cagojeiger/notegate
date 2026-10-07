@@ -73,6 +73,8 @@ file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 
 `input`과 `response`는 실제 실행/응답 객체와 분리된 저장 전용 복사본이다. Tool/op별 allowlist는 purpose, target/path, 구조적 flag/count/hash처럼 분석에 필요한 값만 유지한다. Text `content`, patch/edit 문자열과 `diff`, grep 일치 줄, 검색어, 모든 cursor, 원본 파일명과 암호화 metadata, multipart ETag, presigned URL/header, PII와 자유 형식 오류 문구는 `{"_redacted":true,"category":"..."}` marker로 대체한다. 알려지지 않은 field의 이름과 값은 저장하지 않고 `_omitted_field_count`만 남긴다. 각 snapshot은 redaction 후 256 KiB를 넘으면 전체를 크기 marker로 대체한다.
 
+저장할 때 `purpose`, `space_name`, redacted `input`/`response`는 한 암호화 envelope로 묶는다. 소유자 ID와 snapshot UUID를 AEAD에 바인딩하며, 조회 시 소유권으로 먼저 필터링한 뒤 복호화한다. 식별자, 시간, 호출 경로, tool/op, 결과 및 오류 코드는 조회를 위해 평문으로 유지한다. 기존 평문 행은 `history.encryption` Reconciler가 최대 100행씩 이관하며, 이관 중에는 기존 형식도 읽는다. 암호화 오류를 평문 fallback으로 숨기지 않는다.
+
 MCP `response`는 protocol `ErrorData` 또는 `structured_content`에서 만들며 RMCP가 같은 JSON을 복제하는 wire `content[].text`와 `_meta`는 저장하지 않는다. CLI response와 구조화 오류는 같은 저장 전용 JSON 정책으로 정규화한다. Sequence tool은 한 invocation row만 만들고 commands/results에 재귀 redaction을 적용하며 내부 command별 행은 만들지 않는다. Response snapshot이 없는 행은 `response=NULL`이고 모든 행은 90일 retention을 따른다. 호출 이력 조회용 MCP/CLI command는 없으며 user browser의 History > MCP 또는 History > CLI에서 자기 소유 범위만 조회한다.
 
 ## Audit event sources

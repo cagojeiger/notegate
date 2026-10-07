@@ -25,14 +25,14 @@ pub(crate) use object_storage::run_once as run_object_storage_cleanup_once;
 pub(crate) fn spawn(
     pool: &PgPool,
     object_storage: ObjectStorage,
-    files: notegate_db::ChangeHistoryRepo,
+    crypto: notegate_core::security::PiiCrypto,
     registered_job_kinds: &[String],
     shutdown: CancellationToken,
 ) -> Result<JoinHandle<()>, ReconciliationError> {
     let queue = JobQueue::new(pool.clone());
     let registry = ReconciliationRegistry::new()
         .register(
-            history_privacy::HistoryPrivacyReconciler::new(files),
+            history_privacy::HistoryPrivacyReconciler::new(pool.clone(), crypto),
             history_privacy::HistoryPrivacyReconciler::schedule()?,
         )?
         .register(

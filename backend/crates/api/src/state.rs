@@ -183,7 +183,8 @@ impl AppState {
             pii_crypto.clone(),
             config.default_user_tier,
         );
-        let command_invocations = CommandInvocationRepo::new(db.clone());
+        let command_invocations =
+            CommandInvocationRepo::with_crypto(db.clone(), pii_crypto.clone());
         let account_lifecycle = AccountService::new(account_repo.clone());
         let history = HistoryService::new(
             AuditEventRepo::new(db.clone()),

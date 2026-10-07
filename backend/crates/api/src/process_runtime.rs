@@ -65,13 +65,13 @@ impl ProcessRuntime {
         &mut self,
         pool: &PgPool,
         object_storage: ObjectStorage,
-        files: notegate_db::ChangeHistoryRepo,
+        crypto: notegate_core::security::PiiCrypto,
     ) -> anyhow::Result<()> {
         let job_kinds = background_jobs::registered_job_kinds();
         let task = reconciliations::spawn(
             pool,
             object_storage,
-            files,
+            crypto,
             &job_kinds,
             self.shutdown.clone(),
         )?;
