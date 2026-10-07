@@ -31,19 +31,16 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedResources> {
     let started = Instant::now();
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
     set_timeouts(&mut tx).await?;
-    // Persist rotation before doing work, including skipped/failed Spaces. No
-    // in-memory cursor is needed after restart and one large Space cannot fill
-    // the candidate window. This does not change deletion eligibility.
+    // Select distinct Spaces, not individual nodes from a large subtree. The
+    // attempt timestamp is updated only when a batch starts, so a pass timeout
+    // cannot keep postponing the unvisited end of this candidate window.
     let candidates: Vec<Uuid> = sqlx::query_scalar(
-        "WITH candidates AS ( \
-             SELECT s.id FROM spaces s WHERE \
+        "SELECT s.id FROM spaces s WHERE \
                  (s.deleted_at IS NOT NULL AND (s.purge_requested_at IS NOT NULL OR s.purge_after <= now())) \
                  OR EXISTS (SELECT 1 FROM nodes n WHERE n.space_id = s.id AND n.deleted_at IS NOT NULL \
                      AND (n.purge_requested_at IS NOT NULL OR n.purge_after <= now())) \
              ORDER BY s.purge_last_attempt_at NULLS FIRST, s.id \
-             LIMIT $1 FOR UPDATE OF s SKIP LOCKED \
-         ) UPDATE spaces s SET purge_last_attempt_at = clock_timestamp() \
-         FROM candidates c WHERE s.id = c.id RETURNING s.id",
+             LIMIT $1 FOR UPDATE OF s SKIP LOCKED",
     )
     .bind(SPACE_PURGE_BATCH)
     .fetch_all(&mut *tx)
@@ -133,6 +130,23 @@ async fn set_timeouts(connection: &mut PgConnection) -> Result<()> {
 
 async fn purge_space(pool: &PgPool, space_id: Uuid) -> Result<PurgedResources> {
     let started = Instant::now();
+    let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
+    set_timeouts(&mut tx).await?;
+    // Scheduling metadata commits even if the subsequent resource batch is
+    // busy, fails or times out. It is not a deletion/completion receipt.
+    let attempted: Option<Uuid> = sqlx::query_scalar(
+        "WITH candidate AS (SELECT id FROM spaces WHERE id = $1 FOR UPDATE SKIP LOCKED) \
+         UPDATE spaces s SET purge_last_attempt_at = clock_timestamp() \
+         FROM candidate c WHERE s.id = c.id RETURNING s.id",
+    )
+    .bind(space_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    tx.commit().await.map_err(map_sqlx_error)?;
+    if attempted.is_none() {
+        return Ok(PurgedResources::default());
+    }
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
     set_timeouts(&mut tx).await?;
     if !crate::space_usage::try_acquire_reconciliation_gate(&mut tx, space_id).await? {

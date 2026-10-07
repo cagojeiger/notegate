@@ -63,7 +63,7 @@ system.purge (1분 주기, 전체 실행 timeout 2분)
   └─ history    → terminal object 원장 + 보존 기간 만료 event/invocation 정리 → COMMIT
 ```
 
-리소스 정리는 마지막 시도 시각이 오래된 Space부터 최대 10개를 순회하며, Space마다 짧은 트랜잭션을 사용한다. `purge_last_attempt_at`은 선택 시 별도로 커밋하는 순회 metadata다. 잠긴 Space나 실패한 Space도 다음 순회에서 다른 Space보다 우선하지 않으며, 완료 증거로 사용하지 않는다. 변경 경로와 같은 Space gate를 사용하고 잠긴 Space는 건너뛴다.
+리소스 정리는 마지막 시도 시각이 오래된 Space부터 최대 10개를 순회하며, Space마다 짧은 트랜잭션을 사용한다. `purge_last_attempt_at`은 실제 batch를 시작할 때 별도로 커밋하는 순회 metadata다. 아직 시도하지 않은 Space는 실행 시간 예산이 소진되어도 뒤로 밀리지 않는다. Space gate가 잠겼거나 batch가 실패한 경우에도 시도 시각은 유지하며, 완료 증거로 사용하지 않는다. 변경 경로와 같은 Space gate를 사용하고 잠긴 Space는 건너뛴다.
 
 삭제 대상은 물리적인 자식이 없는 leaf부터 선택한다. 만료/영구 삭제된 조상의 subtree에는 독립적으로 삭제했던 자식도 포함된다. 본문 버전, 양방향 링크 참조, upload의 부모 참조를 batch로 먼저 정리하며, 남은 참조가 있으면 node 삭제를 미룬다. Space는 모든 non-root node와 객체 원장의 Space 참조, Agent connection을 정리한 뒤 빈 root와 함께 제거한다. 큰 subtree나 문서 버전을 한꺼번에 cascade하지 않는다.
 
