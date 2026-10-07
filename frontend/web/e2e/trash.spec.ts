@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 
 import { makeSpace } from "../src/test/fixtures";
 import type { TrashItem } from "../src/api/trash";
@@ -13,45 +14,51 @@ const item: TrashItem = {
 };
 
 for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "mobile", width: 390, height: 844 }]) {
-  test(`compact trash selects one item on ${viewport.name}`, async ({ page }, testInfo) => {
-    await page.setViewportSize(viewport);
-    const items: TrashItem[] = [
-      item,
-      { ...item, id: "reports", kind: "folder", name: "reports", path: "/work/reports" },
-      { ...item, id: "archive", name: "archive.md", path: "/archive/archive.md", recoverable: false },
-      { ...item, id: "old-image", kind: "file", name: "old.png", path: "/images/old.png", recoverable: false, deletion_pending: true }
-    ];
-    const meta = { limit: 50, returned: 0, has_more: false, next_cursor: null };
-    await routeJsonApi(page, (url) => {
-      if (url.pathname === "/api/v1/me") return { account: { id: "user-1", kind: "user", display_name: "User" }, user: { email: "user@example.com" }, capabilities: { can_create_space: true, can_manage_agents: true } };
-      if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
-      if (url.pathname === "/api/v1/spaces") return { spaces: [space], page: meta };
-      if (url.pathname === "/api/v1/me/trash") return { items, page: { ...meta, returned: items.length } };
-      if (url.pathname.endsWith("/children")) return { parent: { id: space.root_node_id, path: "/" }, children: [], page: meta };
-      if (url.pathname.endsWith("/nodes")) return { nodes: [], page: meta };
-      if (url.pathname.endsWith("/file-change-sync")) return { changes: [], next_after_id: 0, has_more: false, resync_required: false };
-      throw new Error(`Unhandled request: ${url.pathname}`);
+  for (const theme of ["light", "dark"] as const) {
+    test(`compact trash selects one item on ${viewport.name} in ${theme} mode`, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport);
+      await page.addInitScript((value) => window.localStorage.setItem("notegate.theme", value), theme);
+      const items: TrashItem[] = [
+        item,
+        { ...item, id: "reports", kind: "folder", name: "reports", path: "/work/reports" },
+        { ...item, id: "archive", name: "archive.md", path: "/archive/archive.md", recoverable: false },
+        { ...item, id: "old-image", kind: "file", name: "old.png", path: "/images/old.png", recoverable: false, deletion_pending: true }
+      ];
+      const meta = { limit: 50, returned: 0, has_more: false, next_cursor: null };
+      await routeJsonApi(page, (url) => {
+        if (url.pathname === "/api/v1/me") return { account: { id: "user-1", kind: "user", display_name: "User" }, user: { email: "user@example.com" }, capabilities: { can_create_space: true, can_manage_agents: true } };
+        if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
+        if (url.pathname === "/api/v1/spaces") return { spaces: [space], page: meta };
+        if (url.pathname === "/api/v1/me/trash") return { items, page: { ...meta, returned: items.length } };
+        if (url.pathname.endsWith("/children")) return { parent: { id: space.root_node_id, path: "/" }, children: [], page: meta };
+        if (url.pathname.endsWith("/nodes")) return { nodes: [], page: meta };
+        if (url.pathname.endsWith("/file-change-sync")) return { changes: [], next_after_id: 0, has_more: false, resync_required: false };
+        throw new Error(`Unhandled request: ${url.pathname}`);
+      });
+      await page.goto("/");
+      await page.getByRole("button", { name: "Trash", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Trash" });
+      await expect(dialog.getByRole("button", { name: "Select meeting.md" })).toHaveAttribute("aria-pressed", "true");
+      await expect(dialog.getByRole("button", { name: "Restore reports" })).toHaveCount(0);
+      await dialog.getByRole("button", { name: "Select reports" }).click();
+      await expect(dialog.getByRole("region", { name: "Details for reports" })).toContainText("Items deleted separately stay in Trash.");
+      await expect(dialog.getByRole("button", { name: "Restore reports" })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Restore meeting.md" })).toHaveCount(0);
+      const listBounds = await dialog.getByRole("list", { name: "Deleted items" }).boundingBox();
+      const detailBounds = await dialog.getByRole("region", { name: "Details for reports" }).boundingBox();
+      if (!listBounds || !detailBounds) throw new Error("Trash panes missing");
+      if (viewport.name === "desktop") expect(detailBounds.x).toBeGreaterThan(listBounds.x + listBounds.width);
+      else expect(detailBounds.y).toBeGreaterThan(listBounds.y + listBounds.height);
+      expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      const accessibility = await new AxeBuilder({ page }).include('[role="dialog"]').withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+      expect(accessibility.violations, JSON.stringify(accessibility.violations, null, 2)).toEqual([]);
+      await testInfo.attach(`trash-${viewport.name}-${theme}`, { body: await page.screenshot({ path: `test-results/trash-${viewport.name}-${theme}.png` }), contentType: "image/png" });
+      await dialog.getByRole("button", { name: "Select old.png" }).click();
+      await expect(dialog.getByRole("button", { name: "Restore old.png" })).toBeDisabled();
+      await expect(dialog.getByRole("button", { name: "Permanently delete old.png" })).toBeDisabled();
     });
-    await page.goto("/");
-    await page.getByRole("button", { name: "Trash", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Trash" });
-    await expect(dialog.getByRole("button", { name: "Select meeting.md" })).toHaveAttribute("aria-pressed", "true");
-    await expect(dialog.getByRole("button", { name: "Restore reports" })).toHaveCount(0);
-    await dialog.getByRole("button", { name: "Select reports" }).click();
-    await expect(dialog.getByRole("region", { name: "Details for reports" })).toContainText("Items deleted separately stay in Trash.");
-    await expect(dialog.getByRole("button", { name: "Restore reports" })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "Restore meeting.md" })).toHaveCount(0);
-    const listBounds = await dialog.getByRole("list", { name: "Deleted items" }).boundingBox();
-    const detailBounds = await dialog.getByRole("region", { name: "Details for reports" }).boundingBox();
-    if (!listBounds || !detailBounds) throw new Error("Trash panes missing");
-    if (viewport.name === "desktop") expect(detailBounds.x).toBeGreaterThan(listBounds.x + listBounds.width);
-    else expect(detailBounds.y).toBeGreaterThan(listBounds.y + listBounds.height);
-    expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-    await testInfo.attach(`trash-${viewport.name}-compact`, { body: await page.screenshot({ path: `test-results/trash-${viewport.name}-compact.png` }), contentType: "image/png" });
-    await dialog.getByRole("button", { name: "Select old.png" }).click();
-    await expect(dialog.getByRole("button", { name: "Restore old.png" })).toBeDisabled();
-    await expect(dialog.getByRole("button", { name: "Permanently delete old.png" })).toBeDisabled();
-  });
+  }
 
   test(`trash confirms deletion and restores content on ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);

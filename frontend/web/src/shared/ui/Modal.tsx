@@ -22,7 +22,7 @@ export function Modal({
   width = "max-w-md",
   placement = "center"
 }: {
-  title: string;
+  title: ReactNode;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
