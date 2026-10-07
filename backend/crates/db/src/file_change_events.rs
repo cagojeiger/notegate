@@ -422,11 +422,13 @@ pub(crate) async fn node_deleted(
     event(tx, ctx, Some(node_id), op_type, metadata).await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn node_restored(
     tx: &mut PgConnection,
     ctx: FileChangeContext<'_>,
     node_id: Uuid,
     kind: &str,
+    name: &str,
     parent_id: Uuid,
     restored_nodes: i64,
     deletion_operation_id: Option<Uuid>,
@@ -437,7 +439,7 @@ pub(crate) async fn node_restored(
         Some(node_id),
         "item.restore",
         json!({
-            "item_kind": kind, "parent_node_id": parent_id,
+            "item_kind": kind, "item_name": name, "parent_node_id": parent_id,
             "restored_nodes": restored_nodes, "recursive": kind == "folder",
             "related_deletion_operation_id": deletion_operation_id,
         }),

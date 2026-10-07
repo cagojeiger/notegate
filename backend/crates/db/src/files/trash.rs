@@ -192,6 +192,7 @@ impl FilesRepo {
                 .with_operation_id(Uuid::new_v4()),
             node_id,
             &node.kind,
+            &node.name,
             node.parent_id,
             count,
             node.deletion_operation_id,

@@ -53,49 +53,31 @@ pub(crate) struct NewFileChangeEvent {
 pub(crate) async fn insert_file_change_event(
     tx: &mut sqlx::PgConnection,
     crypto: &PiiCrypto,
-    mut event: NewFileChangeEvent,
+    event: NewFileChangeEvent,
 ) -> Result<()> {
-    // Reserve the row identity for AEAD binding while holding the mutation lock.
-    // Sequence gaps on rollback are intentional; events remain transaction-atomic.
-    let (id, owner, actor_kind, revision): (i64, Uuid, Option<String>, Option<Uuid>) =
-        sqlx::query_as(
-            "SELECT nextval(pg_get_serial_sequence('file_change_events', 'id')), s.owner_user_id, \
-         (SELECT kind::text FROM accounts WHERE id = $2), \
-         (SELECT revision_id FROM text_objects WHERE space_id = s.id AND node_id = $3) \
-         FROM spaces s WHERE s.id = $1",
-        )
-        .bind(event.space_id)
-        .bind(event.actor_account_id)
-        .bind(event.node_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-    let values = event
-        .metadata
-        .as_object_mut()
-        .ok_or_else(|| Error::internal("change metadata must be an object"))?;
-    values.insert("actor_kind".into(), serde_json::json!(actor_kind));
-    if let Some(revision) = revision {
-        let key = if event.op_type == "item.delete" {
-            "before_revision_id"
-        } else {
-            "after_revision_id"
-        };
-        values.insert(key.into(), serde_json::json!(revision));
-    }
-    let (metadata, private) = protect_metadata(crypto, event.space_id, id, event.metadata)?;
-    sqlx::query(
+    // A dedicated snapshot UUID binds AEAD before INSERT, without another DB
+    // round trip. The sequence ID still defines the Space's mutation order.
+    let snapshot_id = Uuid::new_v4();
+    let (metadata, private) =
+        protect_metadata(crypto, event.space_id, snapshot_id, event.metadata)?;
+    sqlx::query_scalar::<_, i64>(
         "INSERT INTO file_change_events \
-         (id, space_id, node_id, actor_account_id, op_type, metadata, operation_id, owner_user_id, private_metadata) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+         (space_id, node_id, actor_account_id, op_type, metadata, operation_id, owner_user_id, private_metadata, snapshot_id) \
+         SELECT s.id, $2, $3, $4, \
+           $5::jsonb || jsonb_build_object('actor_kind', (SELECT kind::text FROM accounts WHERE id=$3)) \
+           || CASE WHEN t.revision_id IS NULL THEN '{}'::jsonb \
+                   ELSE jsonb_build_object(CASE WHEN $4='item.delete' THEN 'before_revision_id' ELSE 'after_revision_id' END, t.revision_id) END, \
+           $6, s.owner_user_id, $7, $8 \
+         FROM spaces s LEFT JOIN text_objects t ON t.space_id=s.id AND t.node_id=$2 \
+         WHERE s.id=$1 RETURNING id",
     )
-    .bind(id).bind(event.space_id).bind(event.node_id).bind(event.actor_account_id)
-    .bind(event.op_type).bind(metadata).bind(event.operation_id).bind(owner).bind(private)
-    .execute(&mut *tx).await.map_err(map_sqlx_error)?;
+    .bind(event.space_id).bind(event.node_id).bind(event.actor_account_id)
+    .bind(event.op_type).bind(metadata).bind(event.operation_id).bind(private).bind(snapshot_id)
+    .fetch_one(&mut *tx).await.map_err(map_sqlx_error)?;
     Ok(())
 }
 
-fn binding(space: Uuid, id: i64) -> String {
+fn binding(space: Uuid, id: Uuid) -> String {
     format!("changes/{space}/{id}")
 }
 
@@ -104,7 +86,7 @@ fn binding(space: Uuid, id: i64) -> String {
 fn protect_metadata(
     crypto: &PiiCrypto,
     space: Uuid,
-    id: i64,
+    id: Uuid,
     metadata: Value,
 ) -> Result<(Value, Value)> {
     let mut public = serde_json::Map::new();
@@ -152,11 +134,12 @@ fn protect_metadata(
 fn open_metadata(
     crypto: &PiiCrypto,
     space: Uuid,
-    id: i64,
+    id: Option<Uuid>,
     mut metadata: Value,
     private: Option<Value>,
 ) -> Result<Value> {
     if let Some(private) = private {
+        let id = id.ok_or_else(|| Error::internal("encrypted history has no snapshot identity"))?;
         let encrypted: EncryptedHistoryValue = serde_json::from_value(private)
             .map_err(|_| Error::internal("invalid encrypted change metadata"))?;
         let plaintext = crypto.decrypt_history(&binding(space, id), &encrypted)?;
@@ -182,11 +165,13 @@ pub(crate) async fn encrypt_legacy(pool: &PgPool, crypto: &PiiCrypto) -> Result<
     .map_err(map_sqlx_error)?;
     let count = rows.len() as u64;
     for (id, space, metadata) in rows {
-        let (metadata, private) = protect_metadata(crypto, space, id, metadata)?;
-        sqlx::query("UPDATE file_change_events e SET metadata=$2, private_metadata=$3, owner_user_id=COALESCE(owner_user_id, (SELECT s.owner_user_id FROM spaces s WHERE s.id=e.space_id)) WHERE id=$1")
+        let snapshot_id = Uuid::new_v4();
+        let (metadata, private) = protect_metadata(crypto, space, snapshot_id, metadata)?;
+        sqlx::query("UPDATE file_change_events e SET metadata=$2, private_metadata=$3, snapshot_id=$4, owner_user_id=COALESCE(owner_user_id, (SELECT s.owner_user_id FROM spaces s WHERE s.id=e.space_id)) WHERE id=$1")
             .bind(id)
             .bind(metadata)
             .bind(private)
+            .bind(snapshot_id)
             .execute(&mut *tx)
             .await
             .map_err(map_sqlx_error)?;
@@ -335,6 +320,7 @@ struct FileChangeEventRow {
     op_type: String,
     metadata: Value,
     private_metadata: Option<Value>,
+    snapshot_id: Option<Uuid>,
 }
 
 fn decode_rows(
@@ -354,7 +340,7 @@ fn decode_rows(
                 metadata: open_metadata(
                     crypto,
                     row.space_id,
-                    row.id,
+                    row.snapshot_id,
                     row.metadata,
                     row.private_metadata,
                 )?,
@@ -456,4 +442,4 @@ pub(crate) async fn list_by_owner(
     with_revision_availability(pool, decode_rows(crypto, rows)?).await
 }
 
-const FILE_CHANGE_EVENT_COLUMNS: &str = "id, operation_id, created_at, space_id, node_id, actor_account_id, op_type, metadata, private_metadata";
+const FILE_CHANGE_EVENT_COLUMNS: &str = "id, operation_id, created_at, space_id, node_id, actor_account_id, op_type, metadata, private_metadata, snapshot_id";

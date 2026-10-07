@@ -213,16 +213,19 @@ file_change_events
   id bigserial pk
   operation_id uuid null
   created_at timestamptz not null default now()
+  owner_user_id uuid null
   space_id uuid not null
   node_id uuid null
   actor_account_id uuid null
   op_type text not null
   metadata jsonb not null default '{}'
+  private_metadata jsonb null
+  snapshot_id uuid null
 ```
 
 `file_change_events`는 space 안의 파일/폴더/문서 변경을 기록하며 space 전체 조회와 node별 조회를 위한 index를 둔다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
-`operation_id`는 휴지통 lifecycle 작업마다 생성하는 UUID이며 event의 순서/cursor인 `id`와 별개다. `nodes`/`spaces.deletion_operation_id`는 현재 삭제 작업을 식별한다. `nodes.deletion_target_node_id`는 해당 노드를 포함한 삭제 요청이 직접 대상으로 삼은 노드 ID다. 대상 노드는 자기 ID를, 함께 삭제한 자손은 같은 대상 ID를 저장한다. 직접 부모나 파일 트리의 root를 뜻하지 않으며, 먼저 개별 삭제했던 자손의 값은 변경하지 않는다. 이 식별자에는 FK를 두지 않으며 기존 행은 NULL로 유지한다.
+`operation_id`는 새 Changes 및 휴지통 lifecycle 작업마다 생성하는 UUID이며 event의 순서/cursor인 `id`와 별개다. `nodes`/`spaces.deletion_operation_id`는 현재 삭제 작업을 식별한다. `nodes.deletion_target_node_id`는 해당 노드를 포함한 삭제 요청이 직접 대상으로 삼은 노드 ID다. 대상 노드는 자기 ID를, 함께 삭제한 자손은 같은 대상 ID를 저장한다. 직접 부모나 파일 트리의 root를 뜻하지 않으며, 먼저 개별 삭제했던 자손의 값은 변경하지 않는다. 이 식별자에는 FK를 두지 않으며 기존 행은 NULL로 유지한다.
 
 `command_invocations`는 domain event와 분리된 MCP·CLI 실행 이력이다. 저장 대상과 redaction, 크기 제한, retention 계약은 `docs/spec/event-logging.md`가 소유한다.
 
@@ -273,6 +276,8 @@ file_change_events_space_id_idx(space_id, id)
 file_change_events_actor_time_idx(actor_account_id, created_at desc, id desc)
 file_change_events_retention_idx(created_at)
 file_change_events_operation_idx(space_id, operation_id) where operation_id is not null
+file_change_events_owner_time_idx(owner_user_id, created_at desc, id desc) where owner_user_id is not null
+file_change_events_unencrypted_idx(id) where private_metadata is null
 
 command_invocations_owner_surface_time_idx(owner_user_id, surface, created_at desc, id desc)
 command_invocations_actor_time_idx(actor_account_id, created_at desc, id desc)

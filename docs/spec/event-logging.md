@@ -277,17 +277,21 @@ audit_events
   resource_id
 ```
 
-`file_change_events`는 space/node 기준 조회 축만 column으로 둔다.
+`file_change_events`는 owner/space/node 조회 축을 column으로 두고 내용 메타데이터는 암호화한다.
 
 ```text
 file_change_events
   id
+  operation_id
+  owner_user_id
   created_at
   space_id
   node_id
   actor_account_id
   op_type
   metadata
+  private_metadata
+  snapshot_id
 ```
 
 권장 index와 column type은 `docs/spec/db.md`의 Event history tables가 정본이다.
@@ -306,7 +310,7 @@ command_invocations: 90 days
 
 ## Changes snapshots
 
-- 새 Changes의 문서 이름·수정 이유·크기 등 내용 메타데이터는 전용 HKDF subkey와 AES-GCM으로 암호화한다. AAD는 Space ID와 event ID에 묶인다. 식별자·시각·고정된 구조 변경 플래그는 조회와 링크 그래프 갱신을 위해 평문으로 둔다.
+- 새 Changes의 문서 이름·수정 이유·크기 등 내용 메타데이터는 전용 HKDF subkey와 AES-GCM으로 암호화한다. AAD는 Space ID와 행별 `snapshot_id` UUID에 묶인다. 순서/cursor용 event ID와 암호화 snapshot 식별자는 별개다. 식별자·시각·고정된 구조 변경 플래그는 조회와 링크 그래프 갱신을 위해 평문으로 둔다.
 - 성공한 변경과 snapshot은 같은 트랜잭션에 저장한다. snapshot 기록 실패는 문서 변경도 롤백하며, 내용이 같은 저장은 새 event/version을 만들지 않는다.
 - `metadata.source`는 기록 경로, `actor_kind`는 인증된 계정 종류다. 계정이 Agent라는 사실만으로 AI 실행이라고 단정하지 않는다.
 - 지원되는 문서 변경에는 `before_revision_id`/`after_revision_id`를 남긴다. 기존 기록의 연결은 추정해서 채우지 않는다. 폴더 단위 변경은 하위 문서 전체의 버전을 나열하지 않는다.

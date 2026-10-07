@@ -2,6 +2,8 @@
 -- only from an existing Space, never guessed from actor or timestamps.
 ALTER TABLE file_change_events ADD COLUMN owner_user_id UUID;
 ALTER TABLE file_change_events ADD COLUMN private_metadata JSONB;
+ALTER TABLE file_change_events ADD COLUMN snapshot_id UUID;
+ALTER TABLE file_change_events ADD CHECK ((snapshot_id IS NULL) = (private_metadata IS NULL));
 CREATE FUNCTION initialize_change_history_owner() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     IF NEW.owner_user_id IS NULL THEN
