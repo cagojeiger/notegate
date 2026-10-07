@@ -35,16 +35,16 @@ Agent caller:
 GET /api/v1/me/usage
 ```
 
-User caller만 가능하다. 현재 tier와 소유 Space별 저장 Text/File 용량 및 live item 수를 반환한다. `items`는 내부 Space root를 제외한다. `deleted`는 삭제된 Space이며 항목 수는 0, reconciliation은 `unsupported`다. `retained_text_bytes`/`retained_file_bytes`는 전체 used 중 휴지통·삭제 대기분이다. DB에서 제거된 Space는 보관량이 있는 동안 ID와 `Deleted space`로 남는다. 응답은 owner counter만 조회하며 원본 본문을 스캔하지 않는다.
+User caller만 가능하다. 현재 tier와 소유 Space별 저장 Text/File 용량 및 live item 수를 반환한다. `items`는 내부 Space root를 제외한다. `retained_text_bytes`/`retained_file_bytes`는 Space의 전체 used 중 휴지통·삭제 대기분이다. `spaces`는 최대 20개의 활성 Space만 반환하고, `deleted_spaces`는 삭제된 Space 중 보관량이 남은 것들의 count/Text/File bytes 합계다. 삭제된 Space별 목록을 반환하지 않으므로 응답 크기가 증가하지 않는다. 원본 본문 대신 owner counter를 집계한다.
 
 ```json
 {
   "tier": "tier0",
+  "deleted_spaces": {"count": 0, "text_bytes": 0, "file_bytes": 0},
   "spaces": [
     {
       "id": "space-id",
       "name": "Personal",
-      "deleted": false,
       "retained_text_bytes": 0,
       "retained_file_bytes": 0,
       "items": {"used": 319, "limit": 1999},

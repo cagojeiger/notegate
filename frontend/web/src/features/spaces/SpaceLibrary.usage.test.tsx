@@ -86,15 +86,12 @@ describe("SpaceLibrary usage", () => {
   it("explains retained content and keeps deleted spaces out of active navigation", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({
       ...usage,
-      spaces: [
-        { ...usage.spaces[0], retained_text_bytes: 1024, retained_file_bytes: 2048 },
-        { ...usage.spaces[0], id: "removed-space", name: "Deleted space", deleted: true,
-          text_bytes: { used: 0, limit: 134217728 }, file_bytes: { used: 4096, limit: 134217728 } }
-      ]
+      spaces: [{ ...usage.spaces[0], retained_text_bytes: 1024, retained_file_bytes: 2048 }],
+      deleted_spaces: { count: 200, text_bytes: 0, file_bytes: 4096 }
     }));
     renderLibrary();
     expect(await screen.findByText(/Includes retained content: 1 KB text and 2 KB files/)).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Retained storage" })).toHaveTextContent("Deleted space");
+    expect(screen.getByRole("region", { name: "Retained storage" })).toHaveTextContent("200 deleted spaces");
     expect(screen.getByRole("region", { name: "Retained storage" })).toHaveTextContent("Files 4 KB");
     expect(screen.queryByRole("button", { name: /Recalculate Deleted space/ })).not.toBeInTheDocument();
   });

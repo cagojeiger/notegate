@@ -210,9 +210,18 @@ async fn deleted_space_keeps_owner_accounting_until_s3_completion() -> TestResul
     assert_eq!(stored(&db, space).await?, (5, 9));
     let usage = UsageRepo::new(db.pool.clone());
     let snapshot = usage.current_user_usage(owner).await?.unwrap();
-    assert!(snapshot.spaces[0].deleted);
-    assert_eq!(snapshot.spaces[0].live_text_bytes, 0);
-    assert_eq!(snapshot.spaces[0].stored_text_bytes, 5);
+    assert!(snapshot.spaces.is_empty());
+    assert_eq!(snapshot.deleted_space_count, 1);
+    assert_eq!(snapshot.deleted_text_bytes, 5);
+    assert_eq!(snapshot.deleted_file_bytes, 9);
+    assert_eq!(
+        usage
+            .current_user_usage(other)
+            .await?
+            .unwrap()
+            .deleted_space_count,
+        0
+    );
     assert!(
         usage
             .current_user_usage(other)
@@ -236,8 +245,9 @@ async fn deleted_space_keeps_owner_accounting_until_s3_completion() -> TestResul
             .await?;
     assert_eq!(links, (None, space));
     let snapshot = usage.current_user_usage(owner).await?.unwrap();
-    assert_eq!(snapshot.spaces[0].name, "Deleted space");
-    assert_eq!(snapshot.spaces[0].stored_file_bytes, 9);
+    assert!(snapshot.spaces.is_empty());
+    assert_eq!(snapshot.deleted_text_bytes, 0);
+    assert_eq!(snapshot.deleted_file_bytes, 9);
     assert_eq!(
         snapshot,
         usage.current_user_usage(owner).await?.unwrap(),
@@ -255,6 +265,14 @@ async fn deleted_space_keeps_owner_accounting_until_s3_completion() -> TestResul
             .unwrap()
             .spaces
             .is_empty()
+    );
+    assert_eq!(
+        usage
+            .current_user_usage(owner)
+            .await?
+            .unwrap()
+            .deleted_space_count,
+        0
     );
     purge.run_once().await?;
     let scopes: i64 =

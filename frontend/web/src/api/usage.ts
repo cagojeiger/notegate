@@ -9,7 +9,6 @@ export type QuotaUsage = {
 export type SpaceUsage = {
   id: string;
   name: string;
-  deleted?: boolean;
   items: QuotaUsage;
   text_bytes: QuotaUsage;
   file_bytes: QuotaUsage;
@@ -24,6 +23,7 @@ export type SpaceUsage = {
 export type CurrentUserUsage = {
   tier: string;
   spaces: SpaceUsage[];
+  deleted_spaces?: { count: number; text_bytes: number; file_bytes: number };
 };
 
 export function getCurrentUserUsage(client: ApiClient): Promise<CurrentUserUsage> {

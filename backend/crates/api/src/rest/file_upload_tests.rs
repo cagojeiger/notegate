@@ -1751,7 +1751,8 @@ async fn attached_file_quota_survives_s3_failure_and_crash_before_completion_com
     state
         .object_storage
         .delete(&format!("objects/{}", upload.id))
-        .await?;
+        .await
+        .expect("S3 acknowledged deletion");
     assert_eq!(
         object_get_status(&state, upload.id).await,
         StatusCode::NOT_FOUND

@@ -81,7 +81,6 @@ pub struct QuotaUsage {
 pub struct SpaceUsage {
     pub id: Uuid,
     pub name: String,
-    pub deleted: bool,
     pub items: QuotaUsage,
     pub text_bytes: QuotaUsage,
     pub file_bytes: QuotaUsage,
@@ -92,9 +91,17 @@ pub struct SpaceUsage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletedSpaceUsage {
+    pub count: usize,
+    pub text_bytes: usize,
+    pub file_bytes: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CurrentUserUsage {
     pub tier: UserTier,
     pub spaces: Vec<SpaceUsage>,
+    pub deleted_spaces: DeletedSpaceUsage,
 }
 
 fn build_usage(snapshot: UserUsageSnapshot, runtime_limits: Limits) -> CurrentUserUsage {
@@ -105,13 +112,8 @@ fn build_usage(snapshot: UserUsageSnapshot, runtime_limits: Limits) -> CurrentUs
         .map(|space| SpaceUsage {
             id: space.id,
             name: space.name,
-            deleted: space.deleted,
             items: QuotaUsage {
-                used: if space.deleted {
-                    0
-                } else {
-                    space.live_nodes.saturating_sub(1)
-                },
+                used: space.live_nodes.saturating_sub(1),
                 limit: limits.space_max_nodes.saturating_sub(1),
             },
             text_bytes: QuotaUsage {
@@ -135,6 +137,11 @@ fn build_usage(snapshot: UserUsageSnapshot, runtime_limits: Limits) -> CurrentUs
 
     CurrentUserUsage {
         tier: snapshot.tier,
+        deleted_spaces: DeletedSpaceUsage {
+            count: snapshot.deleted_space_count,
+            text_bytes: snapshot.deleted_text_bytes,
+            file_bytes: snapshot.deleted_file_bytes,
+        },
         spaces,
     }
 }
@@ -161,11 +168,13 @@ mod tests {
         let space_id = Uuid::new_v4();
         let usage = build_usage(
             UserUsageSnapshot {
+                deleted_space_count: 0,
+                deleted_text_bytes: 0,
+                deleted_file_bytes: 0,
                 tier: UserTier::Tier0,
                 spaces: vec![SpaceUsageSnapshot {
                     id: space_id,
                     name: "Personal".to_owned(),
-                    deleted: false,
                     live_nodes: 7,
                     live_text_bytes: 512,
                     live_file_bytes: 128,
@@ -215,11 +224,13 @@ mod tests {
     fn usage_excludes_the_space_root_from_items() {
         let usage = build_usage(
             UserUsageSnapshot {
+                deleted_space_count: 0,
+                deleted_text_bytes: 0,
+                deleted_file_bytes: 0,
                 tier: UserTier::Tier0,
                 spaces: vec![SpaceUsageSnapshot {
                     id: Uuid::new_v4(),
                     name: "Empty".to_owned(),
-                    deleted: false,
                     live_nodes: 1,
                     live_text_bytes: 0,
                     live_file_bytes: 0,

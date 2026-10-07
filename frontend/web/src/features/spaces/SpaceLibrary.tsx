@@ -47,7 +47,7 @@ export function SpaceLibrary({
     [usageQuery.data?.spaces]
   );
   const selectedUsage = selectedSpace ? usageBySpaceId.get(selectedSpace.id) : undefined;
-  const retainedSpaces = (usageQuery.data?.spaces ?? []).filter((usage) => usage.deleted && (usage.text_bytes.used > 0 || usage.file_bytes.used > 0));
+  const deletedStorage = usageQuery.data?.deleted_spaces;
   const currentUsageState = usageState(usageQuery);
   const updatePending = updateSpace.isPending || updateInspectorSpace.isPending;
   const selectedCheckError = checkUsage.isError && checkUsage.variables === selectedSpace?.id
@@ -132,19 +132,12 @@ export function SpaceLibrary({
                 />
               </section>
             )}
-            {retainedSpaces.length > 0 ? (
+            {deletedStorage && deletedStorage.count > 0 ? (
               <section aria-label="Retained storage" className="mt-6 space-y-3">
                 <h2 className="text-sm font-medium">Retained storage</h2>
-                <p className="text-xs text-muted">Deleted spaces still use storage while in trash or awaiting file deletion.</p>
-                <Card>
-                  <ul className="divide-y divide-seam">
-                    {retainedSpaces.map((usage) => (
-                      <li key={usage.id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-xs">
-                        <span className="min-w-0 truncate text-text" title={usage.id}>{usage.name} · {usage.id.slice(0, 8)}</span>
-                        <span className="text-muted">Text {formatBytes(usage.text_bytes.used)} · Files {formatBytes(usage.file_bytes.used)}</span>
-                      </li>
-                    ))}
-                  </ul>
+                <Card className="space-y-2 p-4 text-xs">
+                  <p>{deletedStorage.count} deleted {deletedStorage.count === 1 ? "space" : "spaces"} still use storage while in trash or awaiting file deletion.</p>
+                  <p className="text-muted">Text {formatBytes(deletedStorage.text_bytes)} · Files {formatBytes(deletedStorage.file_bytes)}</p>
                 </Card>
               </section>
             ) : null}

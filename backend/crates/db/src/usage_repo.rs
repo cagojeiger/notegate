@@ -28,9 +28,16 @@ impl UsageRepo {
     pub async fn current_user_usage(&self, user_id: Uuid) -> Result<Option<UserUsageSnapshot>> {
         let active_user = active_account_predicate("acc.");
         let user = sqlx::query_as::<_, UserUsageRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT u.tier \
-             FROM users u \
-             JOIN accounts acc ON acc.id = u.id \
+            "SELECT u.tier, retained.space_count AS deleted_space_count, \
+                    retained.text_bytes AS deleted_text_bytes, retained.file_bytes AS deleted_file_bytes \
+             FROM users u JOIN accounts acc ON acc.id = u.id \
+             CROSS JOIN LATERAL ( \
+                 SELECT count(*) AS space_count, COALESCE(sum(stored.text_bytes), 0)::bigint AS text_bytes, \
+                     COALESCE(sum(stored.file_bytes), 0)::bigint AS file_bytes \
+                 FROM space_storage_usage stored WHERE stored.owner_user_id = u.id \
+                     AND (stored.text_bytes > 0 OR stored.file_bytes > 0) \
+                     AND NOT EXISTS (SELECT 1 FROM spaces s WHERE s.id = stored.space_id AND s.deleted_at IS NULL) \
+             ) retained \
              WHERE u.id = $1 AND acc.kind = 'user' AND {active_user}"
         )))
         .bind(user_id)
@@ -42,27 +49,16 @@ impl UsageRepo {
         };
 
         let rows = sqlx::query_as::<_, SpaceUsageRow>(
-            "WITH owned AS ( \
-                 SELECT id, name, sort_order, deleted_at IS NOT NULL AS deleted, false AS removed \
-                 FROM spaces WHERE owner_user_id = $1 \
-                 UNION ALL \
-                 SELECT u.space_id, 'Deleted space', 0, true, true FROM space_storage_usage u \
-                 WHERE u.owner_user_id = $1 AND (u.text_bytes > 0 OR u.file_bytes > 0) \
-                   AND NOT EXISTS (SELECT 1 FROM spaces s WHERE s.id = u.space_id) \
-             ) SELECT s.id, s.name, s.deleted, \
-                    CASE WHEN s.removed THEN 1 ELSE su.live_node_count END AS live_node_count, \
-                    CASE WHEN s.deleted THEN 0 ELSE su.live_text_bytes END AS live_text_bytes, \
-                    CASE WHEN s.deleted THEN 0 ELSE su.live_file_bytes END AS live_file_bytes, \
+            "SELECT s.id, s.name, su.live_node_count, su.live_text_bytes, su.live_file_bytes, \
                     stored.text_bytes AS stored_text_bytes, stored.file_bytes AS stored_file_bytes, \
-                    COALESCE(su.reconciled_at, 'epoch'::timestamptz) AS reconciled_at, \
-                    NOT s.deleted AND EXISTS ( \
-                        SELECT 1 FROM background_jobs job \
+                    su.reconciled_at, \
+                    EXISTS (SELECT 1 FROM background_jobs job \
                         WHERE job.job_kind = 'space_usage_reconcile' \
                           AND job.status IN ('queued', 'running') \
-                          AND job.payload ->> 'space_id' = s.id::text \
-                    ) AS reconciliation_pending \
-             FROM owned s LEFT JOIN space_storage_usage stored ON stored.space_id = s.id \
+                          AND job.payload ->> 'space_id' = s.id::text) AS reconciliation_pending \
+             FROM spaces s LEFT JOIN space_storage_usage stored ON stored.space_id = s.id \
              LEFT JOIN space_usage su ON su.space_id = s.id \
+             WHERE s.owner_user_id = $1 AND s.deleted_at IS NULL \
              ORDER BY s.sort_order, s.name, s.id",
         )
         .bind(user_id)
@@ -76,6 +72,9 @@ impl UsageRepo {
             .collect::<Result<Vec<_>>>()?;
         Ok(Some(UserUsageSnapshot {
             tier: UserTier::parse_db(&user.tier)?,
+            deleted_space_count: to_usize(user.deleted_space_count, "deleted space")?,
+            deleted_text_bytes: to_usize(user.deleted_text_bytes, "deleted text byte")?,
+            deleted_file_bytes: to_usize(user.deleted_file_bytes, "deleted file byte")?,
             spaces,
         }))
     }
@@ -170,6 +169,9 @@ pub enum UsageReconciliationOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserUsageSnapshot {
     pub tier: UserTier,
+    pub deleted_space_count: usize,
+    pub deleted_text_bytes: usize,
+    pub deleted_file_bytes: usize,
     pub spaces: Vec<SpaceUsageSnapshot>,
 }
 
@@ -177,7 +179,6 @@ pub struct UserUsageSnapshot {
 pub struct SpaceUsageSnapshot {
     pub id: Uuid,
     pub name: String,
-    pub deleted: bool,
     pub live_nodes: usize,
     pub live_text_bytes: usize,
     pub live_file_bytes: usize,
@@ -201,7 +202,6 @@ impl TryFrom<SpaceUsageRow> for SpaceUsageSnapshot {
         Ok(Self {
             id: row.id,
             name: row.name,
-            deleted: row.deleted,
             live_nodes: to_usize(live_node_count, "node")?,
             live_text_bytes: to_usize(live_text_bytes, "text byte")?,
             live_file_bytes: to_usize(live_file_bytes, "file byte")?,
@@ -217,13 +217,15 @@ impl TryFrom<SpaceUsageRow> for SpaceUsageSnapshot {
 #[derive(Debug, FromRow)]
 struct UserUsageRow {
     tier: String,
+    deleted_space_count: i64,
+    deleted_text_bytes: i64,
+    deleted_file_bytes: i64,
 }
 
 #[derive(Debug, FromRow)]
 struct SpaceUsageRow {
     id: Uuid,
     name: String,
-    deleted: bool,
     live_node_count: Option<i64>,
     live_text_bytes: Option<i64>,
     live_file_bytes: Option<i64>,

@@ -35,7 +35,7 @@ Items는 live 상태, Text/File quota는 아직 보관 중인 bytes를 기준으
 - Soft delete와 영구 삭제 요청만으로 bytes를 반환하지 않는다. 복원은 이미 계산된 bytes를 다시 더하지 않는다.
 - 미완료 upload는 별도 예약량으로 업로드 시작 시 합산하며 attach 시 저장 용량으로 전환한다. 실패한 upload 예약은 expiry cleanup 완료까지 유지한다.
 - 문서 과거 본문은 별도 `text_revision_usage` 예산을 사용하고 revision DELETE와 함께 반환한다. Node metadata, event history, DB/S3 내부 overhead는 Text/File quota에 포함하지 않는다.
-- 삭제된 Space도 보관 bytes를 조회할 수 있다. DB에서 Space가 제거된 뒤에는 이름 대신 `Deleted space`와 ID를 반환한다. 소유자만 볼 수 있다.
+- 삭제된 Space의 보관량은 `deleted_spaces` 합계(count/Text/File bytes)로 반환한다. 목록이 무제한으로 커지지 않으며 소유자만 볼 수 있다. 원장은 개별 Space ID로 유지한다.
 - 사용자 전체 content quota는 없다. Text/File quota는 Space별로 독립 적용한다.
 
 S3 acknowledgement는 NoteGate의 quota 반환 경계다. 저장소 내부 GC나 디스크 공간 반환을 확인하지 않는다. Versioning bucket의 DeleteObject는 delete marker만 만들 수 있으므로 provider의 과거 object version 정리는 별도 운영 책임이다. [S3 DeleteObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html)
