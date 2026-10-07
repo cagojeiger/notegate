@@ -48,6 +48,11 @@ impl FilesService {
         self
     }
 
+    pub fn with_history_source(mut self, source: &'static str) -> Self {
+        self.store = self.store.with_history_source(source);
+        self
+    }
+
     pub fn with_revision_purpose(mut self, purpose: Option<String>) -> Self {
         self.store = self.store.with_revision_purpose(purpose);
         self

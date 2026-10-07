@@ -401,6 +401,8 @@ pub async fn manage(
     input: ManageInput,
 ) -> Result<Value, CommandError> {
     validate_manage_operation(&input)?;
+    let scoped = context.clone().with_write_purpose(input.purpose.clone());
+    let context = &scoped;
     match input.op.as_str() {
         MANAGE_OP_MKDIR => {
             files::mkdir(

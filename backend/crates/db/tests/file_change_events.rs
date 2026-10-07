@@ -459,9 +459,13 @@ async fn legacy_snapshot_migration_preserves_only_provable_ownership_and_encrypt
     let (owner, space, _) = space_with_root(&db.pool, "legacy-change-snapshots").await?;
     sqlx::query("INSERT INTO file_change_events(space_id, op_type, metadata) SELECT $1, 'text.write', '{\"item_name\":\"legacy private.md\",\"name_changed\":false}'::jsonb FROM generate_series(1,101)")
         .bind(space).execute(&db.pool).await?;
-    let missing_space = Uuid::new_v4();
+    let (_, missing_space, _) = space_with_root(&db.pool, "removed-legacy-space").await?;
     sqlx::query("INSERT INTO file_change_events(space_id, op_type, metadata) VALUES($1,'item.delete','{\"item_name\":\"orphan.md\"}')")
         .bind(missing_space).execute(&db.pool).await?;
+    sqlx::query("DELETE FROM spaces WHERE id=$1")
+        .bind(missing_space)
+        .execute(&db.pool)
+        .await?;
     db.apply_migration(48).await?;
     let history = ChangeHistoryRepo::new(db.pool.clone(), PiiCrypto::test());
     assert_eq!(history.encrypt_legacy_metadata().await?, 100);

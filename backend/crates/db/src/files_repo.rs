@@ -41,6 +41,7 @@ pub struct FilesRepo {
     external_only: bool,
     revision_session: Option<Uuid>,
     revision_source: &'static str,
+    change_source: &'static str,
     revision_purpose: Option<String>,
     revision_time: Option<DateTime<Utc>>,
     trash_time: Option<DateTime<Utc>>,
@@ -107,6 +108,7 @@ impl FilesRepo {
             external_only: false,
             revision_session: None,
             revision_source: "unknown",
+            change_source: "unknown",
             revision_purpose: None,
             revision_time: None,
             trash_time: None,
@@ -120,6 +122,9 @@ impl FilesRepo {
 
     pub fn with_revision_context(mut self, source: &'static str, session: Option<Uuid>) -> Self {
         self.revision_source = source;
+        if source != "restore" {
+            self.change_source = source;
+        }
         self.revision_session = session;
         self.revision_purpose = None;
         self
@@ -132,6 +137,12 @@ impl FilesRepo {
         self
     }
 
+    pub fn with_history_source(mut self, source: &'static str) -> Self {
+        self.change_source = source;
+        self.revision_source = source;
+        self
+    }
+
     pub fn with_revision_purpose(mut self, purpose: Option<String>) -> Self {
         self.revision_purpose = purpose;
         self
@@ -140,7 +151,7 @@ impl FilesRepo {
     pub(crate) fn change_capture(&self) -> crate::file_change_events::ChangeCapture<'_> {
         crate::file_change_events::ChangeCapture {
             crypto: &self.crypto,
-            source: self.revision_source,
+            source: self.change_source,
             purpose: self.revision_purpose.as_deref(),
         }
     }

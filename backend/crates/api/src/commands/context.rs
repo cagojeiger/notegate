@@ -11,6 +11,7 @@ use crate::internal_search::RequestContext;
 #[derive(Debug, Clone)]
 pub struct CommandContext {
     caller: Caller,
+    source: &'static str,
     edit_session_id: Option<uuid::Uuid>,
     write_purpose: Option<String>,
     internal_search: Option<RequestContext>,
@@ -18,12 +19,34 @@ pub struct CommandContext {
 
 impl CommandContext {
     pub fn new(caller: Caller, internal_search: Option<RequestContext>) -> Self {
+        let source = match caller.channel {
+            notegate_model::Channel::Browser => "browser",
+            notegate_model::Channel::Api => "api",
+            notegate_model::Channel::Mcp => "mcp",
+        };
         Self {
+            source,
             caller,
             edit_session_id: None,
             write_purpose: None,
             internal_search,
         }
+    }
+
+    pub fn with_source(mut self, source: &'static str) -> Self {
+        self.source = source;
+        self
+    }
+
+    pub fn files(
+        &self,
+        files: &notegate_service::files::FilesService,
+    ) -> notegate_service::files::FilesService {
+        files
+            .for_channel(self.caller.channel)
+            .with_revision_session(self.edit_session_id)
+            .with_revision_purpose(self.write_purpose.clone())
+            .with_history_source(self.source)
     }
 
     pub fn with_edit_session(mut self, session: Option<uuid::Uuid>) -> Self {
@@ -34,14 +57,6 @@ impl CommandContext {
     pub fn with_write_purpose(mut self, purpose: String) -> Self {
         self.write_purpose = Some(purpose);
         self
-    }
-
-    pub fn write_purpose(&self) -> Option<String> {
-        self.write_purpose.clone()
-    }
-
-    pub fn edit_session_id(&self) -> Option<uuid::Uuid> {
-        self.edit_session_id
     }
 
     pub fn caller(&self) -> &Caller {

@@ -20,7 +20,11 @@ async fn dashboard_trash_lists_restores_and_returns_accepted_for_permanent_delet
     };
     let state = state(&db);
     let (caller, space, root) = caller_and_space(&state).await?;
-    let repo = FilesRepo::new(db.pool.clone());
+    let repo = FilesRepo::with_limits_and_crypto(
+        db.pool.clone(),
+        state.config.limits,
+        state.security.clone(),
+    );
     let item = repo
         .insert_folder(
             space,
@@ -142,7 +146,11 @@ async fn trash_cursor_is_owner_scoped_and_external_channels_are_rejected()
     };
     let state = state(&db);
     let (caller, space, root) = caller_and_space(&state).await?;
-    let repo = FilesRepo::new(db.pool.clone());
+    let repo = FilesRepo::with_limits_and_crypto(
+        db.pool.clone(),
+        state.config.limits,
+        state.security.clone(),
+    );
     for name in ["first", "second"] {
         let item = repo
             .insert_folder(

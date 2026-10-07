@@ -183,7 +183,7 @@ pub(crate) async fn encrypt_legacy(pool: &PgPool, crypto: &PiiCrypto) -> Result<
     let count = rows.len() as u64;
     for (id, space, metadata) in rows {
         let (metadata, private) = protect_metadata(crypto, space, id, metadata)?;
-        sqlx::query("UPDATE file_change_events SET metadata=$2, private_metadata=$3 WHERE id=$1")
+        sqlx::query("UPDATE file_change_events e SET metadata=$2, private_metadata=$3, owner_user_id=COALESCE(owner_user_id, (SELECT s.owner_user_id FROM spaces s WHERE s.id=e.space_id)) WHERE id=$1")
             .bind(id)
             .bind(metadata)
             .bind(private)
