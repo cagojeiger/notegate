@@ -39,6 +39,7 @@ describe("TrashModal", () => {
     });
     show();
     expect(await screen.findByRole("button", { name: "Select note.md" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Select note.md" })).toHaveAccessibleDescription(/Daily · \/notes\/note.md.*Recoverable/);
     expect(screen.queryByRole("button", { name: "Restore second.md" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Select second.md" }));
     expect(screen.getByRole("button", { name: "Select second.md" })).toHaveAttribute("aria-pressed", "true");
@@ -46,7 +47,10 @@ describe("TrashModal", () => {
     expect(screen.getByRole("region", { name: "Details for second.md" })).toHaveTextContent("/notes/second.md");
     await user.click(screen.getByRole("button", { name: "Restore second.md" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Select second.md" })).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Restore note.md" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Restore note.md" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select note.md" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("status")).toHaveTextContent("Restored “second.md”");
+    expect(screen.getByRole("status")).toHaveFocus();
     const requests = fetchMock.mock.calls.filter(([, options]) => options?.method === "POST");
     expect(requests).toHaveLength(1);
     const url = new URL(String(requests[0]?.[0]), "http://localhost");
@@ -65,10 +69,13 @@ describe("TrashModal", () => {
       return response([{ ...item, recoverable: !queued, deletion_pending: queued }]);
     });
     show();
-    await screen.findByText("note.md");
+    await screen.findByRole("button", { name: "Select note.md" });
     await user.click(screen.getByRole("button", { name: "Permanently delete note.md" }));
     expect(fetchMock.mock.calls.some(([, options]) => options?.method === "DELETE")).toBe(false);
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(screen.getByRole("region", { name: "Confirm permanent deletion" })).toHaveTextContent("Daily · /notes/note.md");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Permanently delete note.md" })).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "Permanently delete note.md" }));
     await user.click(screen.getByRole("button", { name: /^Permanently delete$/ }));
     await screen.findByText("Deletion queued · recovery unavailable");
@@ -104,7 +111,7 @@ describe("TrashModal", () => {
     show();
     await user.click(await screen.findByRole("button", { name: "Restore note.md" }));
     await screen.findByRole("alert");
-    expect(screen.getByText("note.md")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select note.md" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Restore note.md" })).toBeEnabled());
   });
 
@@ -120,6 +127,27 @@ describe("TrashModal", () => {
     await screen.findByText("second.md");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("cursor=next-page"))).toBe(true);
   });
+
+  it("keeps loaded pages after restoring an item from a later page", async () => {
+    const user = userEvent.setup();
+    const second = { ...item, id: "node-2", name: "second.md" };
+    const third = { ...item, id: "node-3", name: "third.md" };
+    let restored = false;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (options?.method === "POST") { restored = true; return new Response(null, { status: 204 }); }
+      if (String(url).includes("cursor=next-page")) return response(restored ? [third] : [second, third]);
+      return new Response(JSON.stringify({ items: [item], page: { ...page, has_more: true, next_cursor: "next-page" } }), { status: 200 });
+    });
+    show();
+    await user.click(await screen.findByRole("button", { name: "Load more" }));
+    await user.click(await screen.findByRole("button", { name: "Select second.md" }));
+    await user.click(screen.getByRole("button", { name: "Restore second.md" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Select second.md" })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Select third.md" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select third.md" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("cursor=next-page"))).toHaveLength(2);
+  });
   it("refreshes the Space resources and agent connections after restoration", async () => {
     const user = userEvent.setup();
     let restored = false;
@@ -129,7 +157,7 @@ describe("TrashModal", () => {
     });
     let cache: QueryClient | undefined;
     show((client) => { cache = client; });
-    await screen.findByText("note.md");
+    await screen.findByRole("button", { name: "Select note.md" });
     if (!cache) throw new Error("query client missing");
     cache.setQueryData(queryKeys.connections(item.space_id), { connections: ["old-agent"] });
     cache.setQueryData(queryKeys.node(item.space_id, "child"), { id: "child" });
@@ -154,7 +182,7 @@ describe("TrashModal", () => {
     show();
     await user.click(await screen.findByRole("button", { name: "Permanently delete note.md" }));
     await user.click(screen.getByRole("button", { name: /^Permanently delete$/ }));
-    await screen.findByText("new-note.md");
+    await screen.findByRole("button", { name: "Select new-note.md" });
     expect(screen.getByRole("alert")).toHaveTextContent("Trash entry has changed");
     expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "DELETE")).toHaveLength(1);
   });

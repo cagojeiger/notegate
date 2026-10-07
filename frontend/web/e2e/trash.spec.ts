@@ -41,6 +41,11 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     await expect(dialog.getByRole("region", { name: "Details for reports" })).toContainText("Items deleted separately stay in Trash.");
     await expect(dialog.getByRole("button", { name: "Restore reports" })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Restore meeting.md" })).toHaveCount(0);
+    const listBounds = await dialog.getByRole("list", { name: "Deleted items" }).boundingBox();
+    const detailBounds = await dialog.getByRole("region", { name: "Details for reports" }).boundingBox();
+    if (!listBounds || !detailBounds) throw new Error("Trash panes missing");
+    if (viewport.name === "desktop") expect(detailBounds.x).toBeGreaterThan(listBounds.x + listBounds.width);
+    else expect(detailBounds.y).toBeGreaterThan(listBounds.y + listBounds.height);
     expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     await testInfo.attach(`trash-${viewport.name}-compact`, { body: await page.screenshot({ path: `test-results/trash-${viewport.name}-compact.png` }), contentType: "image/png" });
     await dialog.getByRole("button", { name: "Select old.png" }).click();
@@ -74,7 +79,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     await page.screenshot({ path: `test-results/trash-${viewport.name}-sidebar.png` });
     await page.getByRole("button", { name: "Trash", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Trash" });
-    await expect(dialog.getByText("meeting.md", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Select meeting.md" })).toBeVisible();
     await expect(dialog.getByRole("region", { name: "Details for meeting.md" })).toContainText("/notes/meeting.md");
     await testInfo.attach(`trash-${viewport.name}`, { body: await page.screenshot({ path: `test-results/trash-${viewport.name}.png` }), contentType: "image/png" });
     const restorePath = "**/api/v1/me/trash/spaces/*/nodes/deleted-node/restore?**";
@@ -86,7 +91,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     }));
     await dialog.getByRole("button", { name: "Restore meeting.md" }).click();
     await expect(dialog.getByRole("alert")).toHaveText(conflictMessage);
-    await expect(dialog.getByText("meeting.md", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Select meeting.md" })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Restore meeting.md" })).toBeEnabled();
     await page.screenshot({ path: `test-results/trash-${viewport.name}-restore-conflict.png` });
     await page.unroute(restorePath);
@@ -94,14 +99,59 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     await expect(dialog.getByText("Trash is empty.")).toBeVisible();
     current = item;
     await dialog.getByRole("button", { name: "Refresh" }).click();
+    await dialog.getByRole("button", { name: "Select meeting.md" }).click();
     await dialog.getByRole("button", { name: "Permanently delete meeting.md" }).click();
     expect(deletionRequests).toBe(0);
+    await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+    await expect(dialog.getByRole("region", { name: "Confirm permanent deletion" })).toContainText("/notes/meeting.md");
     await page.screenshot({ path: `test-results/trash-${viewport.name}-confirm-delete.png` });
     await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog.getByRole("button", { name: "Permanently delete meeting.md" })).toBeFocused();
     await dialog.getByRole("button", { name: "Permanently delete meeting.md" }).click();
     await dialog.getByRole("button", { name: "Permanently delete", exact: true }).click();
     await expect(dialog.getByText("Deletion queued · recovery unavailable")).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Restore meeting.md" })).toBeDisabled();
     expect(deletionRequests).toBe(1);
+  });
+
+  test(`trash preserves loaded pages and scroll after restoration on ${viewport.name}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    let items = Array.from({ length: 60 }, (_, index) => ({ ...item, id: `node-${index}`, name: `note-${index}.md`, path: `/notes/note-${index}.md` }));
+    let nextPageRequests = 0;
+    const meta = { limit: 50, returned: 0, has_more: false, next_cursor: null };
+    await routeJsonApi(page, (url) => {
+      if (url.pathname === "/api/v1/me") return { account: { id: "user-1", kind: "user", display_name: "User" }, user: { email: "user@example.com" }, capabilities: { can_create_space: true, can_manage_agents: true } };
+      if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
+      if (url.pathname === "/api/v1/spaces") return { spaces: [space], page: meta };
+      if (url.pathname === "/api/v1/me/trash") {
+        const later = url.searchParams.get("cursor") === "next-page";
+        if (later) nextPageRequests += 1;
+        const entries = later ? items.slice(50) : items.slice(0, 50);
+        return { items: entries, page: { ...meta, returned: entries.length, has_more: !later, next_cursor: later ? null : "next-page" } };
+      }
+      if (url.pathname.endsWith("/nodes/node-55/restore")) { items = items.filter((entry) => entry.id !== "node-55"); return {}; }
+      if (url.pathname.endsWith("/children")) return { parent: { id: space.root_node_id, path: "/" }, children: [], page: meta };
+      if (url.pathname.endsWith("/nodes")) return { nodes: [], page: meta };
+      if (url.pathname.endsWith("/file-change-sync")) return { changes: [], next_after_id: 0, has_more: false, resync_required: false };
+      throw new Error(`Unhandled request: ${url.pathname}`);
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Trash", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Trash" });
+    const list = dialog.getByRole("list", { name: "Deleted items" });
+    await dialog.getByRole("button", { name: "Load more" }).click();
+    await dialog.getByRole("button", { name: "Select note-55.md" }).click();
+    const scrollTop = await list.evaluate((element) => element.scrollTop);
+    expect(scrollTop).toBeGreaterThan(0);
+    await dialog.getByRole("button", { name: "Permanently delete note-55.md" }).click();
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    expect(await list.evaluate((element) => element.scrollTop)).toBe(scrollTop);
+    await dialog.getByRole("button", { name: "Restore note-55.md" }).click();
+    await expect(list.getByRole("button", { name: "Select note-55.md" })).toHaveCount(0);
+    await expect(list.getByRole("button", { name: "Select note-59.md" })).toHaveCount(1);
+    await expect(dialog.getByRole("status")).toContainText("Restored “note-55.md”");
+    await expect(dialog.getByRole("button", { name: "Restore note-0.md" })).toHaveCount(0);
+    expect(await list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    expect(nextPageRequests).toBe(2);
   });
 }
