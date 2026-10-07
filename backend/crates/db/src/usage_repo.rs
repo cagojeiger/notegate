@@ -42,17 +42,27 @@ impl UsageRepo {
         };
 
         let rows = sqlx::query_as::<_, SpaceUsageRow>(
-            "SELECT s.id, s.name, su.live_node_count, su.live_text_bytes, su.live_file_bytes, \
-                    su.reconciled_at, \
-                    EXISTS ( \
+            "WITH owned AS ( \
+                 SELECT id, name, sort_order, deleted_at IS NOT NULL AS deleted, false AS removed \
+                 FROM spaces WHERE owner_user_id = $1 \
+                 UNION ALL \
+                 SELECT u.space_id, 'Deleted space', 0, true, true FROM space_storage_usage u \
+                 WHERE u.owner_user_id = $1 AND (u.text_bytes > 0 OR u.file_bytes > 0) \
+                   AND NOT EXISTS (SELECT 1 FROM spaces s WHERE s.id = u.space_id) \
+             ) SELECT s.id, s.name, s.deleted, \
+                    CASE WHEN s.removed THEN 1 ELSE su.live_node_count END AS live_node_count, \
+                    CASE WHEN s.deleted THEN 0 ELSE su.live_text_bytes END AS live_text_bytes, \
+                    CASE WHEN s.deleted THEN 0 ELSE su.live_file_bytes END AS live_file_bytes, \
+                    stored.text_bytes AS stored_text_bytes, stored.file_bytes AS stored_file_bytes, \
+                    COALESCE(su.reconciled_at, 'epoch'::timestamptz) AS reconciled_at, \
+                    NOT s.deleted AND EXISTS ( \
                         SELECT 1 FROM background_jobs job \
                         WHERE job.job_kind = 'space_usage_reconcile' \
                           AND job.status IN ('queued', 'running') \
                           AND job.payload ->> 'space_id' = s.id::text \
                     ) AS reconciliation_pending \
-             FROM spaces s \
+             FROM owned s LEFT JOIN space_storage_usage stored ON stored.space_id = s.id \
              LEFT JOIN space_usage su ON su.space_id = s.id \
-             WHERE s.owner_user_id = $1 AND s.deleted_at IS NULL \
              ORDER BY s.sort_order, s.name, s.id",
         )
         .bind(user_id)
@@ -167,9 +177,12 @@ pub struct UserUsageSnapshot {
 pub struct SpaceUsageSnapshot {
     pub id: Uuid,
     pub name: String,
+    pub deleted: bool,
     pub live_nodes: usize,
     pub live_text_bytes: usize,
     pub live_file_bytes: usize,
+    pub stored_text_bytes: usize,
+    pub stored_file_bytes: usize,
     pub reconciliation_pending: bool,
     pub reconciliation_available_at: DateTime<Utc>,
 }
@@ -182,13 +195,18 @@ impl TryFrom<SpaceUsageRow> for SpaceUsageSnapshot {
         let live_node_count = row.live_node_count.ok_or_else(missing_counter)?;
         let live_text_bytes = row.live_text_bytes.ok_or_else(missing_counter)?;
         let live_file_bytes = row.live_file_bytes.ok_or_else(missing_counter)?;
+        let stored_text_bytes = row.stored_text_bytes.ok_or_else(missing_counter)?;
+        let stored_file_bytes = row.stored_file_bytes.ok_or_else(missing_counter)?;
         let reconciled_at = row.reconciled_at.ok_or_else(missing_counter)?;
         Ok(Self {
             id: row.id,
             name: row.name,
+            deleted: row.deleted,
             live_nodes: to_usize(live_node_count, "node")?,
             live_text_bytes: to_usize(live_text_bytes, "text byte")?,
             live_file_bytes: to_usize(live_file_bytes, "file byte")?,
+            stored_text_bytes: to_usize(stored_text_bytes, "stored text byte")?,
+            stored_file_bytes: to_usize(stored_file_bytes, "stored file byte")?,
             reconciliation_pending: row.reconciliation_pending,
             reconciliation_available_at: reconciled_at
                 + Duration::seconds(MANUAL_RECONCILE_COOLDOWN_SECONDS),
@@ -205,9 +223,12 @@ struct UserUsageRow {
 struct SpaceUsageRow {
     id: Uuid,
     name: String,
+    deleted: bool,
     live_node_count: Option<i64>,
     live_text_bytes: Option<i64>,
     live_file_bytes: Option<i64>,
+    stored_text_bytes: Option<i64>,
+    stored_file_bytes: Option<i64>,
     reconciled_at: Option<DateTime<Utc>>,
     reconciliation_pending: bool,
 }

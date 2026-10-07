@@ -108,6 +108,17 @@ pub(super) async fn purge(pool: &PgPool, now: Option<DateTime<Utc>>) -> Result<P
     .map_err(map_sqlx_error)?
     .get("deleted_count");
 
+    // Accounting scopes outlive deleted Spaces while any object still needs
+    // cleanup. Empty orphan counters carry no retention obligation themselves.
+    let storage_scopes_deleted = sqlx::query(
+        "WITH due AS (SELECT u.space_id FROM space_storage_usage u \
+             WHERE u.text_bytes = 0 AND u.file_bytes = 0 \
+               AND NOT EXISTS (SELECT 1 FROM spaces s WHERE s.id = u.space_id) \
+               AND NOT EXISTS (SELECT 1 FROM object_storage_objects o WHERE o.usage_space_id = u.space_id \
+                   AND o.state NOT IN ('expired', 'deleted')) \
+             ORDER BY u.space_id LIMIT 1000 FOR UPDATE OF u SKIP LOCKED) \
+         DELETE FROM space_storage_usage u USING due WHERE u.space_id = due.space_id",
+    ).execute(&mut *tx).await.map_err(map_sqlx_error)?.rows_affected();
     tx.commit().await.map_err(map_sqlx_error)?;
     tracing::info!(
         event = "purge.group_completed",
@@ -116,6 +127,7 @@ pub(super) async fn purge(pool: &PgPool, now: Option<DateTime<Utc>>) -> Result<P
         audit_events_deleted,
         file_change_events_deleted,
         command_invocations_deleted,
+        storage_scopes_deleted,
     );
 
     Ok(PurgedHistory {

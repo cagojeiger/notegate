@@ -49,9 +49,12 @@ impl From<QuotaUsage> for QuotaUsageOut {
 pub(crate) struct SpaceUsageOut {
     id: Uuid,
     name: String,
+    deleted: bool,
     items: QuotaUsageOut,
     text_bytes: QuotaUsageOut,
     file_bytes: QuotaUsageOut,
+    retained_text_bytes: usize,
+    retained_file_bytes: usize,
     reconciliation: UsageReconciliationStatusOut,
 }
 
@@ -83,7 +86,9 @@ impl From<CurrentUserUsage> for CurrentUserUsageOut {
                 .spaces
                 .into_iter()
                 .map(|space| {
-                    let availability = if space.reconciliation_pending {
+                    let availability = if space.deleted {
+                        CommandAvailability::unsupported()
+                    } else if space.reconciliation_pending {
                         CommandAvailability::pending()
                     } else if space.reconciliation_available_at > now {
                         CommandAvailability::cooldown(space.reconciliation_available_at)
@@ -93,9 +98,12 @@ impl From<CurrentUserUsage> for CurrentUserUsageOut {
                     SpaceUsageOut {
                         id: space.id,
                         name: space.name,
+                        deleted: space.deleted,
                         items: space.items.into(),
                         text_bytes: space.text_bytes.into(),
                         file_bytes: space.file_bytes.into(),
+                        retained_text_bytes: space.retained_text_bytes,
+                        retained_file_bytes: space.retained_file_bytes,
                         reconciliation: UsageReconciliationStatusOut {
                             status: if space.reconciliation_pending {
                                 UsageReconciliationStatus::Pending

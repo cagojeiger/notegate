@@ -70,7 +70,15 @@ impl SpaceUsageRepo {
                         SELECT 1 FROM information_schema.columns \
                         WHERE table_schema = current_schema() AND table_name = 'space_usage' \
                           AND column_name = 'live_file_bytes' \
-                    )",
+                    ) \
+                    AND to_regclass(current_schema() || '.space_storage_usage') IS NOT NULL \
+                    AND (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid \
+                        JOIN pg_namespace n ON n.oid = c.relnamespace \
+                        WHERE n.nspname = current_schema() AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A') \
+                          AND (c.relname, t.tgname) IN (('spaces', 'spaces_create_storage_usage'), \
+                            ('text_objects', 'text_objects_storage_usage'), \
+                            ('object_storage_objects', 'object_storage_usage_scope'), \
+                            ('object_storage_objects', 'object_storage_retained_usage'))) = 4",
         )
         .fetch_one(&self.pool)
         .await
@@ -89,9 +97,8 @@ impl SpaceUsageRepo {
             "SELECT EXISTS ( \
                  SELECT 1 FROM spaces s \
                  WHERE s.deleted_at IS NULL \
-                   AND NOT EXISTS ( \
-                       SELECT 1 FROM space_usage su WHERE su.space_id = s.id \
-                   ) \
+                   AND (NOT EXISTS (SELECT 1 FROM space_usage su WHERE su.space_id = s.id) \
+                       OR NOT EXISTS (SELECT 1 FROM space_storage_usage su WHERE su.space_id = s.id)) \
              )",
         )
         .fetch_one(&self.pool)

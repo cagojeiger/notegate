@@ -27,6 +27,7 @@ file_change_events
 command_invocations
 spaces
 space_usage
+space_storage_usage
 background_jobs
 background_job_attempts
 space_agent_connections
@@ -206,7 +207,7 @@ audit_events
   metadata jsonb not null default '{}'
 ```
 
-`audit_events`는 account, browser session, credential, agent, space, connection 관리 변경과 node/Space DB 정리 완료를 기록한다. 완료 기록은 원본 삭제와 같은 transaction에 저장하며 리소스 삭제 뒤에도 identifier snapshot으로 180일 보존한다. S3 삭제 완료를 뜻하지 않는다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
+`audit_events`는 account, browser session, credential, agent, space, connection 관리 변경과 node/Space DB 정리 완료를 기록한다. 완료 기록은 원본 삭제와 같은 transaction에 저장하며 리소스 삭제 뒤에도 identifier snapshot으로 180일 보존한다. `object.delete`는 별도로 S3 삭제 acknowledgement를 기록한다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
 ```text
 file_change_events
@@ -329,7 +330,18 @@ space_usage
   reconciled_at timestamptz not null
 ```
 
-`space_usage`는 일반 쿼터 검사와 Usage 조회를 위한 authoritative counter를 보관한다. Root node는 `live_node_count`에 포함한다. Space 생성은 root node와 usage row를 같은 transaction에서 만든다. File-tree 변경은 예상 delta를 검증하고 source row와 counter를 같은 transaction에서 갱신한다. 정확한 계산과 복구 기준은 `usage-and-quotas.md`를 따른다.
+`space_usage`는 활성 항목 수와 활성 본문 bytes를 보관한다. Byte quota는 `space_storage_usage`의 보관량을 사용한다. Root node는 `live_node_count`에 포함한다. Space 생성은 root node와 usage row를 같은 transaction에서 만든다. File-tree 변경은 예상 delta를 검증하고 source row와 counter를 같은 transaction에서 갱신한다. 정확한 계산과 복구 기준은 `usage-and-quotas.md`를 따른다.
+
+```text
+space_storage_usage
+  space_id uuid pk -- no FK
+  owner_user_id uuid not null -- immutable ownership, no FK
+  text_bytes bigint not null check >= 0
+  file_bytes bigint not null check >= 0
+```
+
+이름/본문 없이 소유자와 용량만 저장한다. Text source 및 object 상태 trigger가 갱신하며 Space 제거 뒤 S3 삭제가 끝날 때까지 유지한다. Byte가 0이고 Space와 nonterminal object 참조가 없으면 bounded history cleanup에서 제거한다.
+
 
 ```text
 background_jobs
@@ -457,13 +469,14 @@ file_objects
 
 `File` metadata는 `file_objects`에 저장하고 실제 bytes는 S3 호환 저장소에 저장한다. NoteGate는 외부에 노출하지 않는 `object_key`만 저장한다. `media_type`은 client 선언값이고 `detected_media_type`은 object bytes에서 감지한 값이다. `NULL`은 아직 감지하지 못한 상태다.
 
-Space content quota는 `space_usage.live_text_bytes`와 `space_usage.live_file_bytes`로 독립 검사한다. Text는 `text_objects.byte_len`, File은 `file_objects.byte_len`을 사용한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다.
+Space content quota는 `space_storage_usage.text_bytes`와 `file_bytes`로 독립 검사한다. 휴지통 Text와 attached/delete_pending object bytes를 포함하며 DB/S3 완료 transaction이 용량을 반환한다. 과거 revision 본문은 별도 예산이다.
 
 ```text
 object_storage_objects
   id uuid pk
   object_key text unique not null
   space_id/parent_node_id/node_id/requested_by_account_id uuid null
+  usage_space_id uuid null -- immutable accounting scope, no FK
   name/declared_byte_len/media_type/encryption metadata
   upload_mode text check ('single','multipart')
   multipart_upload_id text null
@@ -475,6 +488,8 @@ object_storage_objects
 ```
 
 `object_storage_objects`는 업로드 연결과 물리 삭제 재시도를 위한 운영 원장이다. Node/Space soft delete는 현재 본문과 연결된 object를 30일 보존한다. 보관 기간 만료 또는 사용자 영구 삭제 요청 이후 hard purge가 object를 `delete_pending`으로 전환한 뒤 semantic rows를 제거한다. Purge는 객체 원장의 `deletion_operation_id`에 원래 node 삭제 ID(없으면 Space 삭제 ID)를 복사한다. 원장은 Node/Space purge 뒤에도 남도록 참조 FK가 `ON DELETE SET NULL`이며, `expired`/`deleted` 이력은 cluster-singleton purge가 180일 뒤 bounded batch로 삭제한다. Retention 조회는 terminal state와 `COALESCE(deleted_at, last_activity_at)` 순서의 partial index를 사용한다. `expire_pending`과 `delete_pending`은 S3 삭제 실패를 재시도하는 중간 상태다.
+
+`usage_space_id`는 최초 Space ID를 보존하고 FK가 NULL이 되어도 유지한다. 이미 소속이 끊긴 legacy object는 NULL이다. S3 삭제 성공 후 `deleted` 전환, 저장 용량 감소, `object.delete` receipt를 하나의 transaction으로 처리한다. Provider 내부 disk GC는 이 완료 기준에 포함하지 않는다.
 
 Content FK invariant:
 

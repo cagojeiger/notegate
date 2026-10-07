@@ -68,6 +68,29 @@ pub(crate) async fn space_purged(
     .await
 }
 
+pub(crate) async fn object_deleted(
+    tx: &mut PgConnection,
+    owner_user_id: Option<Uuid>,
+    space_id: Option<Uuid>,
+    object_id: Uuid,
+    operation_id: Option<Uuid>,
+) -> Result<()> {
+    insert_audit_event(
+        tx,
+        NewAuditEvent {
+            operation_id,
+            owner_user_id,
+            actor_account_id: None,
+            source: "system",
+            op_type: "object.delete",
+            resource_type: "storage_object",
+            resource_id: Some(object_id),
+            metadata: json!({ "completion_scope": "s3", "space_id": space_id }),
+        },
+    )
+    .await
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AuditContext {
     actor_account_id: Uuid,

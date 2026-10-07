@@ -85,17 +85,27 @@ impl ObjectStorageRepo {
     }
 
     pub async fn mark_deleted(&self, id: Uuid) -> Result<bool> {
-        let result = sqlx::query(
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        // The state transition releases retained bytes via the storage counter
+        // trigger. Its receipt must commit with that release, exactly once.
+        let completed: Option<(Option<Uuid>, Option<Uuid>, Option<Uuid>)> = sqlx::query_as(
             "UPDATE object_storage_objects \
              SET state = 'deleted', deleted_at = COALESCE(deleted_at, now()), \
                  retry_after = NULL, last_error_code = NULL \
-             WHERE id = $1 AND state IN ('delete_pending','deleted')",
+             WHERE id = $1 AND state = 'delete_pending' \
+             RETURNING usage_space_id, deletion_operation_id, \
+                 (SELECT owner_user_id FROM space_storage_usage WHERE space_id = usage_space_id)",
         )
         .bind(id)
-        .execute(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(result.rows_affected() == 1)
+        if let Some((space_id, operation_id, owner_user_id)) = completed {
+            crate::audit_events::object_deleted(&mut tx, owner_user_id, space_id, id, operation_id)
+                .await?;
+        }
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(completed.is_some())
     }
 
     pub async fn mark_cleanup_failed(

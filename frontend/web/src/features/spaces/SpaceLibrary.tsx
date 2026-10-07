@@ -5,6 +5,7 @@ import type { UpdateSpaceInput } from "../../api/spaces";
 import type { Space } from "../../api/types";
 import type { CurrentUserUsage } from "../../api/usage";
 import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
+import { formatBytes } from "../../shared/lib/formatBytes";
 import { Button, Card, Modal } from "../../shared/ui";
 import { SortableSpaceGrid } from "./SortableSpaceGrid";
 import { SpaceInspector, type SpaceInspectorProps } from "./SpaceInspector";
@@ -46,6 +47,7 @@ export function SpaceLibrary({
     [usageQuery.data?.spaces]
   );
   const selectedUsage = selectedSpace ? usageBySpaceId.get(selectedSpace.id) : undefined;
+  const retainedSpaces = (usageQuery.data?.spaces ?? []).filter((usage) => usage.deleted && (usage.text_bytes.used > 0 || usage.file_bytes.used > 0));
   const currentUsageState = usageState(usageQuery);
   const updatePending = updateSpace.isPending || updateInspectorSpace.isPending;
   const selectedCheckError = checkUsage.isError && checkUsage.variables === selectedSpace?.id
@@ -130,6 +132,22 @@ export function SpaceLibrary({
                 />
               </section>
             )}
+            {retainedSpaces.length > 0 ? (
+              <section aria-label="Retained storage" className="mt-6 space-y-3">
+                <h2 className="text-sm font-medium">Retained storage</h2>
+                <p className="text-xs text-muted">Deleted spaces still use storage while in trash or awaiting file deletion.</p>
+                <Card>
+                  <ul className="divide-y divide-seam">
+                    {retainedSpaces.map((usage) => (
+                      <li key={usage.id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-xs">
+                        <span className="min-w-0 truncate text-text" title={usage.id}>{usage.name} · {usage.id.slice(0, 8)}</span>
+                        <span className="text-muted">Text {formatBytes(usage.text_bytes.used)} · Files {formatBytes(usage.file_bytes.used)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              </section>
+            ) : null}
           </div>
         </div>
       </section>

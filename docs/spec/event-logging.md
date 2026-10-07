@@ -52,7 +52,8 @@ Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-event
 - 비동기 purge는 semantic row 제거 전에 원래 삭제 ID를 object 원장에 보존한다. 이는 S3 물리 삭제 완료 event/receipt가 아니며 원장도 기존 retention을 따른다.
 - DB purge는 실제로 삭제한 node마다 `node.purge`, 마지막 Space 행을 삭제할 때 `space.purge`를 Audit에 같은 transaction으로 기록한다. 내부 root node는 Space 완료에 포함하며 별도 node 기록을 만들지 않는다. 기록 실패는 해당 삭제 batch를 rollback하고, 재시도는 남아 있는 리소스만 처리하므로 완료 기록이 중복되지 않는다.
 - 완료 기록의 `operation_id`는 원래 node 삭제 ID이며, 없으면 Space 삭제 ID를 사용한다. 먼저 개별 삭제된 자식의 ID는 유지한다. 둘 다 없으면 NULL로 두며 과거 삭제에 대한 기록을 추측해서 만들지 않는다.
-- 이 기록은 `source=system`, `actor_account_id=NULL`, `completion_scope=database`다. 이름·경로·본문·object key 없이 owner/resource/Space/삭제 대상 ID와 node 종류만 저장한다. 삭제된 리소스에 FK로 연결하지 않으며 소유자의 Audit에서 180일 보관한다. S3 삭제 성공이나 저장소 내부 물리 정리 완료, 용량 반환을 의미하지 않는다.
+- 이 기록은 `source=system`, `actor_account_id=NULL`, `completion_scope=database`다. 이름·경로·본문·object key 없이 owner/resource/Space/삭제 대상 ID와 node 종류만 저장한다. 삭제된 리소스에 FK로 연결하지 않으며 소유자의 Audit에서 180일 보관한다. File의 S3 삭제 성공이나 저장소 내부 물리 정리 완료를 의미하지 않는다. Text 용량은 해당 DB 삭제와 함께 반환된다.
+- S3 DeleteObject 성공 후 `object.delete`를 `source=system`, `actor_account_id=NULL`, `completion_scope=s3`로 기록한다. Resource는 object UUID이고 metadata는 `space_id`만 포함한다. 원래 삭제 ID를 유지하며 object 상태·용량 반환·receipt가 함께 commit된다. 재시도는 이미 완료된 object에 중복 receipt를 만들지 않는다. Owner는 보관 용량 원장에서 가져오고 과거 orphan은 NULL로 둔다. Receipt는 180일 유지되며 provider 내부 GC 완료 증명은 아니다.
 - MCP/CLI invocation과의 직접 연결은 별도이며, Changes의 Text revision 연결은 아래 snapshot 계약을 따른다. `read op=changes`는 저장된 event의 `operation_id`를 반환한다.
 
 ## Capture guarantee
@@ -114,6 +115,7 @@ space.delete
 space.restore
 space.purge
 node.purge
+object.delete
 trash.purge.request
 
 agent.create
@@ -157,6 +159,10 @@ node.purge
 
 space.purge
   completion_scope: "database"
+
+object.delete
+  completion_scope: "s3"
+  space_id: uuid | null
 ```
 
 Audit event target mapping:
@@ -181,6 +187,10 @@ space.*
 node.purge
   resource_type: "node"
   resource_id: node_id
+
+object.delete
+  resource_type: "storage_object"
+  resource_id: object_id
 
 agent.*
   resource_type: "agent"

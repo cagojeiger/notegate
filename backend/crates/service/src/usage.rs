@@ -81,9 +81,12 @@ pub struct QuotaUsage {
 pub struct SpaceUsage {
     pub id: Uuid,
     pub name: String,
+    pub deleted: bool,
     pub items: QuotaUsage,
     pub text_bytes: QuotaUsage,
     pub file_bytes: QuotaUsage,
+    pub retained_text_bytes: usize,
+    pub retained_file_bytes: usize,
     pub reconciliation_pending: bool,
     pub reconciliation_available_at: DateTime<Utc>,
 }
@@ -102,18 +105,29 @@ fn build_usage(snapshot: UserUsageSnapshot, runtime_limits: Limits) -> CurrentUs
         .map(|space| SpaceUsage {
             id: space.id,
             name: space.name,
+            deleted: space.deleted,
             items: QuotaUsage {
-                used: space.live_nodes.saturating_sub(1),
+                used: if space.deleted {
+                    0
+                } else {
+                    space.live_nodes.saturating_sub(1)
+                },
                 limit: limits.space_max_nodes.saturating_sub(1),
             },
             text_bytes: QuotaUsage {
-                used: space.live_text_bytes,
+                used: space.stored_text_bytes,
                 limit: limits.space_max_text_bytes,
             },
             file_bytes: QuotaUsage {
-                used: space.live_file_bytes,
+                used: space.stored_file_bytes,
                 limit: limits.space_max_file_bytes,
             },
+            retained_text_bytes: space
+                .stored_text_bytes
+                .saturating_sub(space.live_text_bytes),
+            retained_file_bytes: space
+                .stored_file_bytes
+                .saturating_sub(space.live_file_bytes),
             reconciliation_pending: space.reconciliation_pending,
             reconciliation_available_at: space.reconciliation_available_at,
         })
@@ -151,9 +165,12 @@ mod tests {
                 spaces: vec![SpaceUsageSnapshot {
                     id: space_id,
                     name: "Personal".to_owned(),
+                    deleted: false,
                     live_nodes: 7,
                     live_text_bytes: 512,
                     live_file_bytes: 128,
+                    stored_text_bytes: 512,
+                    stored_file_bytes: 128,
                     reconciliation_pending: true,
                     reconciliation_available_at: Utc::now(),
                 }],
@@ -202,9 +219,12 @@ mod tests {
                 spaces: vec![SpaceUsageSnapshot {
                     id: Uuid::new_v4(),
                     name: "Empty".to_owned(),
+                    deleted: false,
                     live_nodes: 1,
                     live_text_bytes: 0,
                     live_file_bytes: 0,
+                    stored_text_bytes: 0,
+                    stored_file_bytes: 0,
                     reconciliation_pending: false,
                     reconciliation_available_at: Utc::now(),
                 }],

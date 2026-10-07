@@ -35,7 +35,7 @@ Agent caller:
 GET /api/v1/me/usage
 ```
 
-User caller만 가능하다. 현재 tier와 소유 Space별 live Text/File/item usage를 반환한다. `items`는 내부 Space root를 제외한다. User당 live Space가 최대 20개이므로 pagination하지 않는다.
+User caller만 가능하다. 현재 tier와 소유 Space별 저장 Text/File 용량 및 live item 수를 반환한다. `items`는 내부 Space root를 제외한다. `deleted`는 삭제된 Space이며 항목 수는 0, reconciliation은 `unsupported`다. `retained_text_bytes`/`retained_file_bytes`는 전체 used 중 휴지통·삭제 대기분이다. DB에서 제거된 Space는 보관량이 있는 동안 ID와 `Deleted space`로 남는다. 응답은 owner counter만 조회하며 원본 본문을 스캔하지 않는다.
 
 ```json
 {
@@ -44,6 +44,9 @@ User caller만 가능하다. 현재 tier와 소유 Space별 live Text/File/item 
     {
       "id": "space-id",
       "name": "Personal",
+      "deleted": false,
+      "retained_text_bytes": 0,
+      "retained_file_bytes": 0,
       "items": {"used": 319, "limit": 1999},
       "text_bytes": {"used": 48120320, "limit": 134217728},
       "file_bytes": {"used": 80000000, "limit": 134217728},

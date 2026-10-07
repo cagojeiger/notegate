@@ -48,6 +48,9 @@ export function AuditEventsPanel() {
                   {event.metadata.completion_scope === "database" ? (
                     <p className="mt-1 text-xs text-muted">Database cleanup only. File storage cleanup is tracked separately.</p>
                   ) : null}
+                  {event.metadata.completion_scope === "s3" ? (
+                    <p className="mt-1 text-xs text-muted">Storage confirmed deletion and released the file quota. Internal disk cleanup is managed by the storage provider.</p>
+                  ) : null}
                   {event.operation_id ? (
                     <p className="mt-1 font-mono text-xs text-muted" title={event.operation_id}>Operation {shortId(event.operation_id)}</p>
                   ) : null}

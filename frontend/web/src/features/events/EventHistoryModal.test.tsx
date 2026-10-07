@@ -47,6 +47,23 @@ describe("EventHistoryModal", () => {
     expect(screen.getByText("System")).toBeInTheDocument();
   });
 
+  it("distinguishes S3 deletion acknowledgement from provider disk cleanup", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => jsonResponse({
+      events: String(input).includes("/audit-events") ? [{
+        ...auditEvent(42, "object.delete"), operation_id: "delete-42", actor_account_id: null,
+        source: "system", resource_type: "storage_object", resource_id: "object-42",
+        metadata: { completion_scope: "s3", space_id: "removed-space" }
+      }] : [], page
+    }));
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    await user.click(screen.getByRole("tab", { name: "Audit" }));
+    expect(await screen.findByText("File deletion confirmed by storage")).toBeInTheDocument();
+    expect(screen.getByText("Stored file object-42")).toBeInTheDocument();
+    expect(screen.getByText(/Storage confirmed deletion and released the file quota/)).toHaveTextContent("Internal disk cleanup is managed by the storage provider.");
+    expect(screen.getByText("Operation delete-42")).toBeInTheDocument();
+  });
+
   it("shows retained changes when all owned spaces have been removed", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({

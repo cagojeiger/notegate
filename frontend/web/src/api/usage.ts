@@ -9,9 +9,12 @@ export type QuotaUsage = {
 export type SpaceUsage = {
   id: string;
   name: string;
+  deleted?: boolean;
   items: QuotaUsage;
   text_bytes: QuotaUsage;
   file_bytes: QuotaUsage;
+  retained_text_bytes?: number;
+  retained_file_bytes?: number;
   reconciliation: {
     status: "idle" | "pending";
     availability: CommandAvailability;

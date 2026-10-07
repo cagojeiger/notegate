@@ -168,7 +168,7 @@ impl FilesRepo {
         )?)?;
         require_restore_fanout(&mut tx, space_id, Some(node_id), caps.folder_max_children).await?;
         require_attached_objects(&mut tx, space_id, Some(node_id)).await?;
-        space_usage::apply_quota_delta(
+        space_usage::restore_usage(
             &mut tx,
             &gate,
             UsageDelta::subtree(count, text_bytes, file_bytes),
@@ -250,13 +250,15 @@ impl FilesRepo {
             return Err(Error::conflict("a space with this name already exists"));
         }
         let caps = effective_file_tree_limits(tier, self.limits);
-        let (nodes, text, files): (i64, i64, i64) = sqlx::query_as(
-            "SELECT live_node_count, live_text_bytes, live_file_bytes FROM space_usage WHERE space_id = $1 FOR UPDATE",
-        ).bind(space_id).fetch_one(&mut *tx).await.map_err(map_sqlx_error)?;
-        if crate::to_usize(nodes, "node")? > caps.space_max_nodes
-            || crate::to_usize(text, "text bytes")? > caps.space_max_text_bytes
-            || crate::to_usize(files, "file bytes")? > caps.space_max_file_bytes
-        {
+        let nodes: i64 = sqlx::query_scalar(
+            "SELECT live_node_count FROM space_usage WHERE space_id = $1 FOR UPDATE",
+        )
+        .bind(space_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        // Retained bytes are already charged while the Space is in trash.
+        if crate::to_usize(nodes, "node")? > caps.space_max_nodes {
             return Err(Error::conflict(
                 "restored space would exceed its current tier limits",
             ));

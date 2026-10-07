@@ -908,6 +908,7 @@ async fn migration_backfills_existing_documents_without_inventing_history() -> T
     db.apply_migration(48).await?;
     db.apply_migration(49).await?;
     db.apply_migration(50).await?;
+    db.apply_migration(51).await?;
     assert!(
         repo.list_text_revisions(space, node_id, 10, None)
             .await?

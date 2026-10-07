@@ -14,8 +14,8 @@ Account  live_api_keys             live count         hard limit
 Space    active_connections        live count         tier
 Agent    connected_spaces          live count         tier
 Space    live_nodes                stored counter     tier + runtime cap
-Space    live_text_bytes           stored counter     tier + runtime cap
-Space    live_file_bytes           stored counter     tier + runtime cap
+Space    stored_text_bytes           stored counter     tier + runtime cap
+Space    stored_file_bytes           stored counter     tier + runtime cap
 Folder   live_children             live count         tier + runtime cap
 Text     object_bytes/lines        request/object     hard limit
 File     object_bytes              request/object     hard limit
@@ -27,19 +27,22 @@ File     object_bytes              request/object     hard limit
 
 ## Usage semantics
 
-Usage는 역대 누적량이 아니라 현재 live 상태다. 생성은 사용량을 늘리고, soft delete는 사용량을 줄인다.
+Items는 live 상태, Text/File quota는 아직 보관 중인 bytes를 기준으로 한다.
 
-- Live node 수에는 Space root node를 포함한다.
-- Storage 화면은 사용자가 볼 수 있는 Folder, Text, File 수를 `Items`로 표시하며 Space root node는 제외한다.
-- Text bytes는 live Text node에 연결된 `text_objects.byte_len`의 합이다.
-- File bytes는 live File node에 연결된 `file_objects.byte_len`의 합이다.
-- Node metadata와 event history는 Text/File bytes에 포함하지 않는다.
-- Soft-deleted node와 deleted space는 Usage 응답에서 제외한다.
+- Live node 수에는 Space root를 포함하지만 화면의 `items.used`에서는 제외한다.
+- Text bytes는 휴지통을 포함한 `text_objects.byte_len` 합이다. 실제 DB row 삭제가 commit될 때 반환한다.
+- File bytes는 object 원장의 `attached` + `delete_pending` 선언 크기 합이다. S3 DeleteObject 성공 후 완료 transaction이 commit될 때 반환한다.
+- Soft delete와 영구 삭제 요청만으로 bytes를 반환하지 않는다. 복원은 이미 계산된 bytes를 다시 더하지 않는다.
+- 미완료 upload는 별도 예약량으로 업로드 시작 시 합산하며 attach 시 저장 용량으로 전환한다. 실패한 upload 예약은 expiry cleanup 완료까지 유지한다.
+- 문서 과거 본문은 별도 `text_revision_usage` 예산을 사용하고 revision DELETE와 함께 반환한다. Node metadata, event history, DB/S3 내부 overhead는 Text/File quota에 포함하지 않는다.
+- 삭제된 Space도 보관 bytes를 조회할 수 있다. DB에서 Space가 제거된 뒤에는 이름 대신 `Deleted space`와 ID를 반환한다. 소유자만 볼 수 있다.
 - 사용자 전체 content quota는 없다. Text/File quota는 Space별로 독립 적용한다.
+
+S3 acknowledgement는 NoteGate의 quota 반환 경계다. 저장소 내부 GC나 디스크 공간 반환을 확인하지 않는다. Versioning bucket의 DeleteObject는 delete marker만 만들 수 있으므로 provider의 과거 object version 정리는 별도 운영 책임이다. [S3 DeleteObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html)
 
 ## Space usage counter
 
-비용이 큰 Space usage는 `space_usage`에 저장한다. Reconciliation 요청과 실행 이력은 범용 background job queue에 둔다.
+활성 항목은 `space_usage`, 보관 용량은 `space_storage_usage`에 저장한다. Reconciliation 요청과 실행 이력은 범용 background job queue에 둔다.
 
 ```text
 space_usage
@@ -49,12 +52,18 @@ space_usage
   live_file_bytes
   reconciled_at
 
+space_storage_usage
+  space_id (no FK)
+  owner_user_id (no FK)
+  text_bytes
+  file_bytes
+
 background_jobs
   job_kind = 'space_usage_reconcile'
   payload = {"space_id": ...}
 ```
 
-Space 생성은 root node와 `space_usage(nodes=1, text_bytes=0, file_bytes=0)`를 같은 transaction에서 만든다. 이후 counter도 원본 변경과 같은 transaction에서 갱신한다. 원본 테이블은 reconciliation 기준이고 counter는 일반 쿼터 검사와 Usage 조회에 사용한다. Event log는 Usage 계산에 사용하지 않는다.
+Space 생성은 root node와 두 counter row를 같은 transaction에서 만든다. `space_storage_usage`는 Space 삭제 뒤에도 유지하며 비어 있고 nonterminal object 참조가 없을 때 bounded cleanup으로 제거한다. 이후 counter도 원본 변경과 같은 transaction에서 갱신한다. 원본 테이블은 reconciliation 기준이고 counter는 일반 쿼터 검사와 Usage 조회에 사용한다. Event log는 Usage 계산에 사용하지 않는다.
 
 API startup은 migration 이후 usage 테이블과 Space 생성 trigger를 검증한다. Live Space에 counter row가 누락되어 있으면 자동 복구하지 않고 startup을 실패시킨다. 스키마 누락은 readiness도 실패한다. Operator는 전체 재계산 명령으로 복구한 뒤 API를 다시 시작한다.
 
@@ -76,6 +85,10 @@ No-op 변경               0               0                0
 
 복사 대상과 형식은 [`files-commands.md`](./files-commands.md#copy-semantics)의 공통 command 계약을 따른다.
 
+저장 용량은 source-table trigger가 같은 transaction에서 갱신한다. Text는 INSERT/byte_len UPDATE/DELETE, File은 `attached` 또는 `delete_pending`에 진입하거나 나올 때의 delta를 반영한다. 위 표는 기존 live counter 기준이며 soft delete는 저장 용량을 변경하지 않는다. S3 완료는 object 상태 전환, 저장 용량 반환, `object.delete` Audit receipt를 함께 commit한다. 실패/timeout은 용량을 유지하며 반복 완료는 no-op이다.
+
+Migration은 기존 휴지통과 pending object를 포함해 backfill한다. 이미 Space FK가 끊긴 과거 object는 owner/Space를 추측하지 않아 이 집계에 포함할 수 없다. 구버전 프로세스도 trigger로 counter를 유지하지만, 새 quota 정책은 모든 writer가 업그레이드된 뒤 적용된다.
+
 ## Quota enforcement
 
 File-tree mutation은 Space를 잠근 transaction 안에서 변경 후 예상 counter를 계산한다. 예상 값이 effective tier quota를 넘으면 원본과 counter를 변경하지 않고 `409 conflict`로 거부한다.
@@ -84,10 +97,10 @@ File-tree mutation은 Space를 잠근 transaction 안에서 변경 후 예상 co
 acquire shared Space reconciliation gate
   -> resolve and lock the owner tier quota
   -> lock Space
-  -> lock space_usage
-  -> validate current counters + deltas
-  -> reserve the delta in space_usage
-  -> mutate source rows
+  -> lock space_usage and space_storage_usage
+  -> validate live nodes and stored byte deltas
+  -> update live counters
+  -> mutate source rows (triggers update stored counters)
   -> commit
 ```
 
@@ -102,8 +115,8 @@ worker claim
   -> select ready job with FOR UPDATE SKIP LOCKED
   -> try exclusive Space reconciliation gate
   -> retry after 5 seconds when the gate is busy
-  -> lock the Space and space_usage
-  -> COUNT/SUM live Text/File source rows
+  -> lock Space, live counters and stored counters
+  -> COUNT/SUM live nodes/content and all retained Text/File source rows
   -> upsert counters (a missing counter row is recreated)
   -> set reconciled_at = now()
   -> commit
@@ -111,7 +124,8 @@ worker claim
 ```
 
 - Queue는 중복 job을 허용하지만 정확한 재계산은 멱등이다. 수동 요청 경로는 동일 Space의 활성 job을 검사해 사용자 중복 요청을 차단한다.
-- Deleted Space의 job은 성공으로 종료한다.
+- Deleted Space는 수동 reconciliation을 제공하지 않으며 기존 job은 성공으로 종료한다. 저장 용량 trigger는 삭제 완료까지 계속 동작한다.
+- 저장 counter row lock은 S3 완료와 재계산을 직렬화하여 동시 완료의 delta가 유실되지 않게 한다.
 - File-tree mutation은 shared gate, reconciler는 exclusive gate를 사용한다. Shared gate 획득에 실패한 mutation은 DB connection을 점유하며 기다리지 않고 임시 오류를 반환한다.
 - 재계산 중 해당 Space의 read는 허용하고 mutation만 일시적으로 거부한다. 다른 Space는 영향받지 않는다.
 - Space gate가 busy이거나 실행이 실패하면 queue attempt를 닫고 재시도한다. 최대 attempt를 소진하면 `dead`가 된다.

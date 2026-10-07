@@ -109,18 +109,18 @@ pub async fn insert(
         effective_limits,
     )
     .await?;
-    let (live_file_bytes, pending_file_bytes): (i64, i64) = sqlx::query_as(
-        "SELECT su.live_file_bytes, COALESCE(( \
+    let (stored_file_bytes, pending_file_bytes): (i64, i64) = sqlx::query_as(
+        "SELECT su.file_bytes, COALESCE(( \
              SELECT sum(o.declared_byte_len) FROM object_storage_objects o \
-             WHERE o.space_id = $1 AND o.state IN ('uploading','expire_pending') \
+             WHERE o.usage_space_id = $1 AND o.state IN ('uploading','expire_pending') \
          ), 0)::bigint \
-         FROM space_usage su WHERE su.space_id = $1",
+         FROM space_storage_usage su WHERE su.space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    let projected = live_file_bytes
+    let projected = stored_file_bytes
         .checked_add(pending_file_bytes)
         .and_then(|value| value.checked_add(input.byte_len))
         .ok_or_else(|| Error::internal("pending file byte total overflow"))?;

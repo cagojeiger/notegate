@@ -36,6 +36,7 @@ const AUDIT_TARGET_LABELS: Record<string, string> = {
   api_key: "API key",
   browser_session: "Browser session",
   node: "Item",
+  storage_object: "Stored file",
   space: "Space"
 };
 
@@ -50,6 +51,7 @@ const AUDIT_ACTIONS: Record<string, string> = {
   "space.delete": "Deleted a space",
   "space.purge": "Removed space from database",
   "node.purge": "Removed item from database",
+  "object.delete": "File deletion confirmed by storage",
   "agent.create": "Created an agent",
   "agent.delete": "Deleted an agent",
   "user_key.create": "Created a user API key",
