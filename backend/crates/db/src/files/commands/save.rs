@@ -166,6 +166,13 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     )
     .await?;
 
+    let private_purpose = super::super::revisions::protect_purpose(
+        crypto,
+        space_id,
+        node_id,
+        revision.id,
+        revision_purpose,
+    )?;
     let doc_row = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE text_objects \
          SET storage_format = $3, content_text = $4, encrypted_payload = $5, \
@@ -175,7 +182,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
              updated_by_account_id = $14, updated_at = now(), \
              revision_id = $15, revision_written_at = $16, revision_author_id = $14, \
              revision_group_id = $17, revision_group_started_at = $18, \
-             revision_session_id = $19, revision_source = $20, revision_purpose = $21 \
+             revision_session_id = $19, revision_source = $20, revision_purpose = NULL, revision_private_purpose = $21 \
          WHERE space_id = $1 AND node_id = $2 RETURNING {TEXT_COLUMNS}"
     )))
     .bind(space_id)
@@ -198,7 +205,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     .bind(revision.group_started_at)
     .bind(revision_session)
     .bind(revision_source)
-    .bind(revision_purpose)
+    .bind(private_purpose)
     .fetch_one(&mut *tx)
     .await
     .map_err(map_constraint_error)?;

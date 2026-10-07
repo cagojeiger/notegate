@@ -1661,6 +1661,22 @@ mod tests {
         assert_eq!(rows[1].3["kind"], "error");
         assert_eq!(rows[1].4, "error");
 
+        state
+            .spaces
+            .update(
+                caller.account.kind,
+                caller.account_id(),
+                notegate_service::spaces::UpdateSpace {
+                    space_id: _space_id,
+                    name: None,
+                    sort_order: None,
+                    navigation_pinned: None,
+                    user_mcp_enabled: Some(true),
+                    default_external_access_enabled: Some(true),
+                    default_text_encryption_enabled: None,
+                },
+            )
+            .await?;
         let written =
             client
                 .call_tool(CallToolRequestParams::new("write").with_arguments(

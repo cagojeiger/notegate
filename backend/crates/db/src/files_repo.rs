@@ -917,6 +917,7 @@ impl FilesRepo {
     ) -> Result<notegate_model::text_revision::TextRevisionPage> {
         crate::files::revisions::list(
             &self.pool,
+            &self.crypto,
             space_id,
             node_id,
             limit,

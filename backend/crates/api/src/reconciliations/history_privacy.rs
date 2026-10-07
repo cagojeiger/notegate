@@ -8,6 +8,8 @@ use notegate_reconciliation::{
 use std::time::Duration;
 
 pub(super) struct HistoryPrivacyReconciler {
+    pool: PgPool,
+    crypto: PiiCrypto,
     changes: ChangeHistoryRepo,
     invocations: CommandInvocationRepo,
 }
@@ -15,7 +17,9 @@ impl HistoryPrivacyReconciler {
     pub(super) fn new(pool: PgPool, crypto: PiiCrypto) -> Self {
         Self {
             changes: ChangeHistoryRepo::new(pool.clone(), crypto.clone()),
-            invocations: CommandInvocationRepo::with_crypto(pool, crypto),
+            invocations: CommandInvocationRepo::with_crypto(pool.clone(), crypto.clone()),
+            pool,
+            crypto,
         }
     }
     pub(super) fn schedule() -> Result<ReconciliationSchedule, ReconciliationError> {
@@ -36,10 +40,14 @@ impl Reconciler for HistoryPrivacyReconciler {
                 .encrypt_legacy_payloads()
                 .await
                 .map_err(|error| Box::new(error) as ReconciliationFailure)?;
-            if count + invocations > 0 {
-                tracing::info!(event = "history.encrypted", count, invocations);
+            let revisions =
+                notegate_db::files::revisions::encrypt_legacy_purposes(&self.pool, &self.crypto)
+                    .await
+                    .map_err(|error| Box::new(error) as ReconciliationFailure)?;
+            if count + invocations + revisions > 0 {
+                tracing::info!(event = "history.encrypted", count, invocations, revisions);
             }
-            Ok(if count == 100 || invocations == 100 {
+            Ok(if count == 100 || invocations == 100 || revisions >= 100 {
                 ReconciliationDirective::ContinueAfter(Duration::from_secs(1))
             } else {
                 ReconciliationDirective::Complete
