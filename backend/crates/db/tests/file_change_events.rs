@@ -364,7 +364,8 @@ async fn encrypted_change_snapshots_keep_version_references_after_body_and_space
         2
     );
     assert_eq!(
-        notegate_db::files::revisions::cleanup_at(&db.pool, clock + Duration::days(2)).await?,
+        // The initial revision is a checkpoint retained for 30 days.
+        notegate_db::files::revisions::cleanup_at(&db.pool, clock + Duration::days(31)).await?,
         1
     );
     let events = repo
