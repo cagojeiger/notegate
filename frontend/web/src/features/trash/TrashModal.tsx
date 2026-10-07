@@ -25,7 +25,7 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
       else await purgeTrash(client, item);
     },
     onError: (error) => {
-      if (error instanceof ApiError && error.status === 409) {
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
         setConfirmation(null);
         void queryClient.resetQueries({ queryKey: queryKeys.trash });
       }
@@ -51,7 +51,7 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
         name conflicts must be resolved first. Restore a deleted parent before its children.
         Restored spaces require reconnecting agents.
       </p>
-      {mutation.error ? <p role="alert" className="mb-3 text-danger">{mutation.error instanceof Error ? mutation.error.message : "Request failed"}</p> : null}
+      {mutation.error ? <p role="alert" className="mb-3 text-danger">{mutation.error instanceof ApiError && mutation.error.status === 404 ? "This item is no longer available in this trash view." : mutation.error instanceof Error ? mutation.error.message : "Request failed"}</p> : null}
       {confirmation ? (
         <div className="space-y-4">
           <p>Permanently delete “{confirmation.name}”{confirmation.kind === "folder" || confirmation.kind === "space" ? " and everything inside it, including items deleted separately" : ""}? Recovery becomes unavailable immediately. Storage cleanup runs in the background.</p>

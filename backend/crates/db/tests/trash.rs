@@ -1041,6 +1041,15 @@ async fn permanent_folder_deletion_includes_independent_trash_but_keeps_its_oper
     );
     repo.request_trash_purge(owner, space, Some(parent.id), parent_version)
         .await?;
+    let pending = repo.list_trash(owner, 100, None).await?;
+    let independent = pending.iter().find(|item| item.id == old.id).unwrap();
+    assert!(independent.deletion_pending);
+    assert!(!independent.recoverable);
+    assert_eq!(independent.path, "/notes/old.bin");
+    assert_eq!(
+        independent.deletion_operation_id,
+        old_version.deletion_operation_id
+    );
     let purged = PurgeRepo::new(db.pool.clone()).run_once().await?;
     assert_eq!(purged.object_deletions_queued, 2);
     for (object, expected) in [
@@ -1063,6 +1072,105 @@ async fn permanent_folder_deletion_includes_independent_trash_but_keeps_its_oper
     assert_eq!(next.nodes_deleted, 1);
     assert_eq!(next.object_deletions_queued, 0);
     assert!(repo.list_trash(owner, 100, None).await?.is_empty());
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn permanent_folder_request_only_updates_its_target_with_many_retained_children() -> TestResult
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "trash-target-only").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let parent = folder(&repo, owner, space, root, "notes").await?;
+    // Retained children are outside the live subtree limit and can accumulate
+    // over many independent deletions before the parent itself is deleted.
+    sqlx::query(
+        "INSERT INTO nodes (id, space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id, \
+             deleted_by_account_id, deleted_at, purge_after, deletion_target_node_id, deletion_operation_id) \
+         SELECT id, $1, $2, 'retained-' || value, 'folder', $3, $3, $3, now() - interval '1 day', \
+             now() + interval '29 days', id, gen_random_uuid() \
+         FROM (SELECT gen_random_uuid() AS id, value FROM generate_series(1, 1101) value) seed",
+    ).bind(space).bind(parent.id).bind(owner).execute(&db.pool).await?;
+    repo.soft_delete_node(space, parent.id, owner, true).await?;
+    let parent_version = entry_version(&db.pool, space, Some(parent.id)).await?;
+    let child: Uuid = sqlx::query_scalar("SELECT id FROM nodes WHERE parent_id = $1 LIMIT 1")
+        .bind(parent.id)
+        .fetch_one(&db.pool)
+        .await?;
+    let child_version = entry_version(&db.pool, space, Some(child)).await?;
+    let child_deadline: DateTime<Utc> =
+        sqlx::query_scalar("SELECT purge_after FROM nodes WHERE id = $1")
+            .bind(child)
+            .fetch_one(&db.pool)
+            .await?;
+    sqlx::query(
+        "CREATE FUNCTION reject_retained_child_update() RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN IF OLD.parent_id = TG_ARGV[0]::uuid THEN RAISE EXCEPTION 'descendant updated synchronously'; \
+         END IF; RETURN NEW; END; $$",
+    ).execute(&db.pool).await?;
+    sqlx::query(&format!(
+        "CREATE TRIGGER reject_retained_child_update BEFORE UPDATE ON nodes \
+         FOR EACH ROW EXECUTE FUNCTION reject_retained_child_update('{}')",
+        parent.id,
+    ))
+    .execute(&db.pool)
+    .await?;
+    repo.request_trash_purge(owner, space, Some(parent.id), parent_version)
+        .await?;
+    sqlx::query("DROP TRIGGER reject_retained_child_update ON nodes")
+        .execute(&db.pool)
+        .await?;
+    let requested: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM nodes WHERE space_id = $1 AND purge_requested_at IS NOT NULL",
+    )
+    .bind(space)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        requested, 1,
+        "only the deletion target is updated in the request"
+    );
+    let unchanged: (DateTime<Utc>, bool, Option<Uuid>) = sqlx::query_as(
+        "SELECT purge_after, purge_requested_at IS NULL, deletion_operation_id FROM nodes WHERE id = $1",
+    ).bind(child).fetch_one(&db.pool).await?;
+    assert_eq!(
+        unchanged,
+        (child_deadline, true, child_version.deletion_operation_id)
+    );
+    let listed = repo.list_trash(owner, 100, None).await?;
+    assert_eq!(listed.len(), 100);
+    assert!(
+        listed
+            .iter()
+            .all(|item| item.deletion_pending && !item.recoverable)
+    );
+    assert!(
+        repo.restore_trashed_node(owner, space, parent.id, parent_version)
+            .await
+            .is_err()
+    );
+    assert!(
+        repo.restore_trashed_node(owner, space, child, child_version)
+            .await
+            .is_err()
+    );
+    let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(first.nodes_deleted, 100);
+    assert!(first.resources_pending);
+    let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM nodes WHERE parent_id = $1")
+        .bind(parent.id)
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(remaining, 1001);
+    assert!(
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = $1)")
+            .bind(parent.id)
+            .fetch_one(&db.pool)
+            .await?
+    );
     db.cleanup().await;
     Ok(())
 }

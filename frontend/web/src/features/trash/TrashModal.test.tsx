@@ -131,4 +131,29 @@ describe("TrashModal", () => {
     expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "DELETE")).toHaveLength(1);
   });
 
+  it.each(["restore", "purge"] as const)("refreshes a missing item after %s without retrying the action", async (action) => {
+    const user = userEvent.setup();
+    const method = action === "restore" ? "POST" : "DELETE";
+    let missing = false;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+      if (options?.method === method) {
+        missing = true;
+        return new Response(JSON.stringify({ message: "Trash item not found", kind: "not_found" }), { status: 404 });
+      }
+      return response(missing ? [] : [item]);
+    });
+    show();
+    if (action === "restore") {
+      await user.click(await screen.findByRole("button", { name: "Restore note.md" }));
+    } else {
+      await user.click(await screen.findByRole("button", { name: "Permanently delete note.md" }));
+      await user.click(screen.getByRole("button", { name: /^Permanently delete$/ }));
+    }
+    await screen.findByText("Trash is empty.");
+    expect(screen.getByRole("alert")).toHaveTextContent("This item is no longer available in this trash view.");
+    expect(screen.queryByRole("button", { name: /^Permanently delete$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+    expect(fetchMock.mock.calls.filter(([, options]) => options?.method === method)).toHaveLength(1);
+  });
+
 });

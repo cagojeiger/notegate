@@ -96,18 +96,21 @@ impl FilesRepo {
                     page.deleted_at, page.purge_after, page.deletion_operation_id, \
                     COALESCE(page.recoverable, false) \
                         AND page.purge_after > COALESCE($5, now()) AS recoverable, \
-                    (page.purge_requested_at IS NOT NULL OR page.purge_after <= COALESCE($5, now())) AS deletion_pending, \
-                    CASE WHEN page.kind = 'space' THEN '/' ELSE ( \
-                        WITH RECURSIVE chain AS ( \
-                            SELECT id, parent_id, '/' || name AS path FROM nodes WHERE id = page.id \
-                            UNION ALL SELECT p.id, p.parent_id, \
-                                CASE WHEN p.parent_id IS NULL THEN c.path \
-                                     ELSE '/' || p.name || c.path END \
-                            FROM nodes p JOIN chain c ON p.id = c.parent_id \
-                            WHERE p.space_id = page.space_id \
-                        ) SELECT path FROM chain WHERE parent_id IS NULL \
-                    ) END AS path \
-             FROM page ORDER BY page.deleted_at DESC, page.id DESC",
+                    (page.purge_requested_at IS NOT NULL OR page.purge_after <= COALESCE($5, now()) \
+                        OR COALESCE(ancestry.deletion_pending, false)) AS deletion_pending, \
+                    CASE WHEN page.kind = 'space' THEN '/' ELSE ancestry.path END AS path \
+             FROM page LEFT JOIN LATERAL ( \
+                WITH RECURSIVE chain AS ( \
+                    SELECT id, parent_id, '/' || name AS path, deleted_at, purge_after, purge_requested_at \
+                    FROM nodes WHERE space_id = page.space_id AND id = page.id AND page.kind <> 'space' \
+                    UNION ALL SELECT p.id, p.parent_id, \
+                        CASE WHEN p.parent_id IS NULL THEN c.path ELSE '/' || p.name || c.path END, \
+                        p.deleted_at, p.purge_after, p.purge_requested_at \
+                    FROM nodes p JOIN chain c ON p.id = c.parent_id WHERE p.space_id = page.space_id \
+                ) SELECT max(path) FILTER (WHERE parent_id IS NULL) AS path, \
+                    bool_or(deleted_at IS NOT NULL AND (purge_requested_at IS NOT NULL \
+                        OR purge_after <= COALESCE($5, now()))) AS deletion_pending FROM chain \
+             ) ancestry ON true ORDER BY page.deleted_at DESC, page.id DESC",
         )
         .bind(owner)
         .bind(cursor.as_ref().map(|c| c.deleted_at))
@@ -306,11 +309,11 @@ impl FilesRepo {
                     "permanent deletion must target the trash entry",
                 ));
             }
+            // The Reconciler follows due ancestors. Record only the target's
+            // irreversible intent; retained descendants are not bounded by live quotas.
             sqlx::query(
-                "WITH RECURSIVE subtree AS (SELECT id FROM nodes WHERE id = $2 AND space_id = $1 \
-                    UNION ALL SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id WHERE n.space_id = $1) \
-                 UPDATE nodes SET purge_after = LEAST(purge_after, $3), purge_requested_at = COALESCE(purge_requested_at, $3) \
-                 WHERE space_id = $1 AND deleted_at IS NOT NULL AND id IN (SELECT id FROM subtree)",
+                "UPDATE nodes SET purge_after = LEAST(purge_after, $3), purge_requested_at = COALESCE(purge_requested_at, $3) \
+                 WHERE space_id = $1 AND id = $2",
             ).bind(space_id).bind(node_id).bind(now).execute(&mut *tx).await.map_err(map_sqlx_error)?;
             node.deletion_operation_id
         } else {
