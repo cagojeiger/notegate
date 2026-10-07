@@ -103,6 +103,23 @@ describe("TrashModal", () => {
     expect(fetchMock.mock.calls.some(([url]) => new URL(String(url), "http://localhost").pathname.endsWith("/nodes/node-1/restore"))).toBe(true);
   });
 
+  it("does not select another item when background deletion already removed the target", async () => {
+    const user = userEvent.setup();
+    const other = { ...item, id: "node-2", name: "other.md" };
+    let deleted = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+      if (options?.method === "DELETE") { deleted = true; return new Response(JSON.stringify({ status: "deletion_requested" }), { status: 202 }); }
+      return response(deleted ? [other] : [item, other]);
+    });
+    show();
+    await user.click(await screen.findByRole("button", { name: "Permanently delete note.md" }));
+    await user.click(screen.getByRole("button", { name: /^Permanently delete$/ }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Select note.md" })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Select other.md" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("button", { name: "Permanently delete other.md" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Permanent deletion requested");
+  });
+
   it("keeps recoverable content visible when a restore conflicts", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => options?.method === "POST"

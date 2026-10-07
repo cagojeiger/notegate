@@ -41,7 +41,7 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
     onSuccess: async (_, { item, action }) => {
       setConfirmation(null);
       setNotice(action === "restore" ? `Restored “${item.name}” to ${item.space_name} · ${item.path}.` : `Permanent deletion requested for “${item.name}”. Recovery is unavailable; cleanup runs in the background.`);
-      if (action === "restore") setSelectedKey(null);
+      setSelectedKey(action === "restore" ? null : `${item.kind}:${item.id}`);
       invalidateAuditEvents(queryClient);
       invalidateSpacesList(queryClient);
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
