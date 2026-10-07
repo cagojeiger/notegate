@@ -7,7 +7,7 @@
 )]
 mod common;
 use chrono::{DateTime, Duration, Utc};
-use common::{TestDb, space_with_root};
+use common::{TestDb, legacy_space_with_root, space_with_root};
 use notegate_core::{Error, security::PiiCrypto};
 use notegate_db::{FilesRepo, TextMutationKind, files::revisions};
 use notegate_model::files::{StoredContent, WriteTextBody};
@@ -780,7 +780,7 @@ async fn migration_backfills_existing_documents_without_inventing_history() -> T
     let Some(db) = TestDb::setup_before(42).await? else {
         return Ok(());
     };
-    let (actor, space, root) = space_with_root(&db.pool, "revision-migration").await?;
+    let (actor, space, root) = legacy_space_with_root(&db.pool, "revision-migration").await?;
     let repo = FilesRepo::new(db.pool.clone());
     // Model the old binary's schema directly; the current writer requires the latest migration.
     let node_id: Uuid = sqlx::query_scalar("INSERT INTO nodes (space_id,parent_id,name,kind,created_by_account_id,updated_by_account_id) VALUES ($1,$2,'legacy.md','text',$3,$3) RETURNING id")
@@ -795,6 +795,9 @@ async fn migration_backfills_existing_documents_without_inventing_history() -> T
     let backfilled: bool=sqlx::query_scalar("SELECT revision_author_id=updated_by_account_id AND revision_written_at=updated_at FROM text_objects WHERE node_id=$1").bind(node_id).fetch_one(&db.pool).await?;
     assert!(backfilled);
     db.apply_migration(43).await?;
+    db.apply_migration(44).await?;
+    db.apply_migration(45).await?;
+    db.apply_migration(46).await?;
     assert!(
         repo.list_text_revisions(space, node_id, 10, None)
             .await?
@@ -897,6 +900,74 @@ async fn changed_save_updates_body_and_revision_attribution_once() -> TestResult
         .await?;
     assert_eq!(count, 1);
     assert_eq!(revision_head(&db.pool, node.id).await?, head);
+    assert_history_usage(&db.pool, space).await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn trash_restore_keeps_the_current_revision_but_does_not_freeze_revision_retention()
+-> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (actor, space, root) = space_with_root(&db.pool, "revision-trash").await?;
+    let start = Utc::now() - Duration::seconds(3);
+    let repo = FilesRepo::new(db.pool.clone()).with_revision_time(start);
+    let (node, _) = repo
+        .insert_text(space, root, "note.md", &body("old"), actor)
+        .await?;
+    let editing = repo
+        .clone()
+        .with_revision_context("browser", Some(Uuid::new_v4()));
+    save(
+        &editing
+            .clone()
+            .with_revision_time(start + Duration::seconds(1)),
+        space,
+        node.id,
+        actor,
+        "intermediate",
+    )
+    .await?;
+    save(
+        &editing.with_revision_time(start + Duration::seconds(2)),
+        space,
+        node.id,
+        actor,
+        "current",
+    )
+    .await?;
+    let head = revision_head(&db.pool, node.id).await?;
+    repo.soft_delete_node(space, node.id, actor, false).await?;
+    let selected = repo
+        .list_trash(actor, 100, None)
+        .await?
+        .into_iter()
+        .find(|item| item.id == node.id)
+        .unwrap();
+    let cleanup_at: DateTime<Utc> =
+        sqlx::query_scalar("SELECT min(cleanup_at) FROM text_revisions WHERE node_id = $1")
+            .bind(node.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert!(cleanup_at > selected.deleted_at && cleanup_at < selected.purge_after);
+    assert_eq!(revisions::cleanup_at(&db.pool, cleanup_at).await?, 1);
+    repo.with_trash_time(cleanup_at)
+        .restore_trashed_node(actor, space, node.id, (&selected).into())
+        .await?;
+    assert_eq!(revision_head(&db.pool, node.id).await?, head);
+    let history: i64 = sqlx::query_scalar("SELECT count(*) FROM text_revisions WHERE node_id = $1")
+        .bind(node.id)
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(history, 1);
+    let current: String =
+        sqlx::query_scalar("SELECT content_text FROM text_objects WHERE node_id = $1")
+            .bind(node.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(current, "current");
     assert_history_usage(&db.pool, space).await?;
     db.cleanup().await;
     Ok(())

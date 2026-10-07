@@ -9,10 +9,11 @@ import { makeSpace } from "../../test/fixtures";
 import { createTestQueryClient } from "../../test/queryClient";
 import {
   createSpaceMutationOptions,
-  useReorderSpacesMutation
+  useReorderSpacesMutation,
+  useDeleteSpaceMutation
 } from "./useSpaceQueries";
 
-const apiClient = vi.hoisted(() => ({ post: vi.fn() }));
+const apiClient = vi.hoisted(() => ({ post: vi.fn(), delete: vi.fn() }));
 
 vi.mock("../../api/ApiProvider", () => ({
   useApiClient: () => apiClient
@@ -99,5 +100,24 @@ describe("useReorderSpacesMutation", () => {
       queryKey: queryKeys.spaces,
       exact: true
     });
+  });
+});
+
+describe("useDeleteSpaceMutation", () => {
+  it("refreshes trash and usage and removes cached resources after deletion", async () => {
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(queryKeys.node("space-1", "note-1"), { id: "note-1" });
+    queryClient.setQueryData(queryKeys.usage, { total: 100 });
+    queryClient.setQueryData(queryKeys.trash, { pages: [] });
+    const onDeleted = vi.fn();
+    apiClient.delete.mockResolvedValue(undefined);
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+    const { result } = renderHook(() => useDeleteSpaceMutation(onDeleted), { wrapper });
+    await act(async () => { await result.current.mutateAsync("space-1"); });
+    expect(queryClient.getQueryData(queryKeys.node("space-1", "note-1"))).toBeUndefined();
+    expect(queryClient.getQueryState(queryKeys.usage)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(queryKeys.trash)?.isInvalidated).toBe(true);
+    expect(onDeleted).toHaveBeenCalledWith("space-1");
   });
 });

@@ -720,7 +720,7 @@ impl FilesService {
     /// Delete a node (`rm`). Requires write permission.
     ///
     /// The node is hidden immediately by soft-deleting the live subtree. Public
-    /// recovery is intentionally not part of the product contract; the returned
+    /// recovery is available to the owner through dashboard trash; the returned
     /// `purge_after` is when an internal purge job may hard-delete the rows.
     pub async fn delete_node(
         &self,

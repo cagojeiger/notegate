@@ -27,11 +27,12 @@ type ActivityRailProps = {
   onDeleteSpace: (space: Space) => void;
   onOpenLibrary?: () => void;
   libraryActive?: boolean;
+  onOpenTrash?: () => void;
   onOpenHistory: () => void;
   onOpenSettings: () => void;
 };
 
-export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpaces, navigationLocked = false, onSelectSpace, onReorderSpaces, onCreateSpace, onRenameSpace, onDeleteSpace, onOpenLibrary, libraryActive = false, onOpenHistory, onOpenSettings }: ActivityRailProps) {
+export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpaces, navigationLocked = false, onSelectSpace, onReorderSpaces, onCreateSpace, onRenameSpace, onDeleteSpace, onOpenLibrary, libraryActive = false, onOpenTrash, onOpenHistory, onOpenSettings }: ActivityRailProps) {
   const [draggedSpaceId, setDraggedSpaceId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; space: Space } | null>(null);
@@ -123,6 +124,7 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
         ) : null}
       </div>
       <div className="space-y-0.5 border-t border-seam p-2">
+        {onOpenTrash ? <button disabled={navigationLocked} onClick={onOpenTrash} className="grid size-workbench-control place-items-center rounded-workbench-surface text-muted transition hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-not-allowed disabled:opacity-45" aria-label="Trash" title="Trash"><Trash2 size={16} /></button> : null}
         <button disabled={navigationLocked} onClick={onOpenHistory} className="grid size-workbench-control place-items-center rounded-workbench-surface text-muted transition hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-not-allowed disabled:opacity-45" aria-label="History" title="History">
           <History size={16} />
         </button>

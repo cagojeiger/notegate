@@ -3,7 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::unwrap_in_result)]
 mod common;
 
-use common::{TestDb, insert_user_account};
+use common::{TestDb, insert_legacy_user_account, insert_user_account};
 use notegate_db::{CommandInvocationRepo, NewCommandInvocation};
 use notegate_model::{CommandInvocationCursor, CommandInvocationSurface};
 
@@ -13,12 +13,7 @@ async fn migration_preserves_mcp_rows_and_legacy_writes_during_rolling_deploymen
     let Some(db) = TestDb::setup_before(40).await? else {
         return Ok(());
     };
-    let owner = insert_user_account(
-        &db.pool,
-        "invocation-migration",
-        "invocation-migration@example.test",
-    )
-    .await?;
+    let owner = insert_legacy_user_account(&db.pool).await?;
     let original_id: i64 = sqlx::query_scalar(
         "INSERT INTO mcp_invocations \
          (owner_user_id, actor_account_id, caller_kind, tool, op, purpose, input, outcome, duration_ms) \

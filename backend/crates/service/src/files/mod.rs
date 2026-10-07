@@ -16,6 +16,7 @@ mod preview;
 mod read;
 mod revisions;
 pub use revisions::RevisionHistoryPage;
+mod trash;
 mod tree;
 mod view;
 

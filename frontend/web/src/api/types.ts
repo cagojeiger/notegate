@@ -249,6 +249,7 @@ export type MetadataResponse = {
 
 export type AuditEvent = {
   id: number;
+  operation_id?: string | null;
   created_at: string;
   actor_account_id: string | null;
   actor?: AccountRef | null;
@@ -338,6 +339,7 @@ export type BackgroundJobDetailResponse = {
 
 export type FileChangeEvent = {
   id: number;
+  operation_id?: string | null;
   created_at: string;
   space_id: string;
   node_id: string | null;

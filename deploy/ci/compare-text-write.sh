@@ -7,9 +7,10 @@ baseline_dir="${1:?Baseline checkout is required}"
 candidate_dir="$PWD"
 results_dir="$candidate_dir/text-write-results"
 mkdir -p "$results_dir"
-export CARGO_TARGET_DIR="$candidate_dir/target"
 cp backend/crates/service/tests/text_write_performance.rs "$baseline_dir/backend/crates/service/tests/text_write_performance.rs"
 for label in baseline candidate; do
+  # Equal package versions across checkouts must not reuse workspace artifacts.
+  export CARGO_TARGET_DIR="$candidate_dir/target/$label"
   checkout_dir="$candidate_dir"
   if [[ "$label" == baseline ]]; then checkout_dir="$baseline_dir"; fi
   git -C "$checkout_dir" rev-parse HEAD > "$results_dir/$label.sha"

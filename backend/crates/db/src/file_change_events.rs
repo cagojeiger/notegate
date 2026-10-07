@@ -15,12 +15,21 @@ use uuid::Uuid;
 pub(crate) struct FileChangeContext {
     actor_account_id: Uuid,
     space_id: Uuid,
+    operation_id: Option<Uuid>,
+}
+
+impl FileChangeContext {
+    pub(crate) fn with_operation_id(mut self, operation_id: Uuid) -> Self {
+        self.operation_id = Some(operation_id);
+        self
+    }
 }
 
 pub(crate) fn context(actor_account_id: Uuid, space_id: Uuid) -> FileChangeContext {
     FileChangeContext {
         actor_account_id,
         space_id,
+        operation_id: None,
     }
 }
 
@@ -34,6 +43,7 @@ async fn event(
     insert_file_change_event(
         tx,
         NewFileChangeEvent {
+            operation_id: ctx.operation_id,
             space_id: ctx.space_id,
             node_id,
             actor_account_id: Some(ctx.actor_account_id),
@@ -379,6 +389,29 @@ pub(crate) async fn node_deleted(
         deleted.recursive,
     );
     event(tx, ctx, Some(node_id), op_type, metadata).await
+}
+
+pub(crate) async fn node_restored(
+    tx: &mut PgConnection,
+    ctx: FileChangeContext,
+    node_id: Uuid,
+    kind: &str,
+    parent_id: Uuid,
+    restored_nodes: i64,
+    deletion_operation_id: Option<Uuid>,
+) -> Result<()> {
+    event(
+        tx,
+        ctx,
+        Some(node_id),
+        "item.restore",
+        json!({
+            "item_kind": kind, "parent_node_id": parent_id,
+            "restored_nodes": restored_nodes, "recursive": kind == "folder",
+            "related_deletion_operation_id": deletion_operation_id,
+        }),
+    )
+    .await
 }
 
 #[cfg(test)]

@@ -40,6 +40,16 @@ Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-event
 - `metadata`는 operation별 allowlist를 따르며, identifier, enum, count 같은 작은 structural fact만 담는다.
 - `metadata` 변경은 additive만 허용한다. Reader는 모르는 key를 무시하고, 기존 key의 의미를 바꾸는 변경은 새 `op_type`으로 기록한다.
 
+## Trash operation correlation
+
+- 새 node/subtree 또는 Space 삭제마다 UUID `operation_id`를 생성한다. 같은 transaction에서 domain의 `deletion_operation_id`와 삭제 event의 `operation_id`를 기록한다.
+- 복원과 영구 삭제 요청은 각각 새 `operation_id`를 갖고, `metadata.related_deletion_operation_id`로 원래 삭제를 참조한다. 복원은 domain의 삭제 ID를 해제하지만 event 참조는 유지한다. 재삭제는 새 ID를 사용한다.
+- `deletion_target_node_id`는 삭제 요청이 직접 대상으로 삼은 노드 ID이며 함께 복원할 범위를 구분한다. `parent_id`와 파일 트리 root는 별개다. `deletion_operation_id`는 삭제 작업 식별자다. 먼저 삭제된 자식의 ID는 상위 폴더 삭제 때 변경하지 않는다.
+- 기존 행과 이 계약 범위 밖의 event는 `operation_id=NULL`이다. 기존 삭제와 event를 시각 또는 리소스 ID로 추측해서 연결하지 않는다. 연결 ID가 없는 복원/영구 삭제 요청은 `related_deletion_operation_id=null`이다.
+- ID는 correlation 용도이며 authorization, request idempotency, event cursor 또는 문서 snapshot을 대체하지 않는다. Event retention은 유지하고, 로그가 없어도 domain state에 따라 복원한다.
+- 비동기 purge는 semantic row 제거 전에 원래 삭제 ID를 object 원장에 보존한다. 이는 S3 물리 삭제 완료 event/receipt가 아니며 원장도 기존 retention을 따른다.
+- MCP/CLI invocation 및 Text revision과의 직접 연결은 이 계약에 포함하지 않는다. `read op=changes`는 저장된 event의 `operation_id`를 반환한다.
+
 ## Capture guarantee
 
 Event capture는 domain mutation의 일부다.
@@ -94,6 +104,8 @@ session.revoke
 space.create
 space.update
 space.delete
+space.restore
+trash.purge.request
 
 agent.create
 agent.delete
@@ -187,6 +199,7 @@ item.move
 item.update
 item.copy
 item.delete
+item.restore
 ```
 
 File change event metadata는 제한된 structural fact와 metric만 담는다. 허용 가능한 예:
@@ -195,6 +208,7 @@ File change event metadata는 제한된 structural fact와 metric만 담는다. 
 item_kind: "folder" | "text" | "file"
 item_name: string
 parent_node_id: uuid
+restored_nodes: integer
 copied_from_node_id: uuid
 parent_node_id_before: uuid
 parent_node_id_after: uuid

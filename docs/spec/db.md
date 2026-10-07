@@ -195,6 +195,7 @@ Event history table은 현재 상태의 source of truth가 아니다. 성공한 
 ```text
 audit_events
   id bigserial pk
+  operation_id uuid null
   created_at timestamptz not null default now()
   owner_user_id uuid null
   actor_account_id uuid null
@@ -210,6 +211,7 @@ audit_events
 ```text
 file_change_events
   id bigserial pk
+  operation_id uuid null
   created_at timestamptz not null default now()
   space_id uuid not null
   node_id uuid null
@@ -219,6 +221,8 @@ file_change_events
 ```
 
 `file_change_events`는 space 안의 파일/폴더/문서 변경을 기록하며 space 전체 조회와 node별 조회를 위한 index를 둔다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
+
+`operation_id`는 휴지통 lifecycle 작업마다 생성하는 UUID이며 event의 순서/cursor인 `id`와 별개다. `nodes`/`spaces.deletion_operation_id`는 현재 삭제 작업을 식별한다. `nodes.deletion_target_node_id`는 해당 노드를 포함한 삭제 요청이 직접 대상으로 삼은 노드 ID다. 대상 노드는 자기 ID를, 함께 삭제한 자손은 같은 대상 ID를 저장한다. 직접 부모나 파일 트리의 root를 뜻하지 않으며, 먼저 개별 삭제했던 자손의 값은 변경하지 않는다. 이 식별자에는 FK를 두지 않으며 기존 행은 NULL로 유지한다.
 
 `command_invocations`는 domain event와 분리된 MCP·CLI 실행 이력이다. 저장 대상과 redaction, 크기 제한, retention 계약은 `docs/spec/event-logging.md`가 소유한다.
 
@@ -261,12 +265,14 @@ audit_events_owner_time_idx(owner_user_id, created_at desc, id desc)
 audit_events_actor_time_idx(actor_account_id, created_at desc, id desc)
 audit_events_resource_time_idx(resource_type, resource_id, created_at desc, id desc)
 audit_events_retention_idx(created_at)
+audit_events_operation_idx(owner_user_id, operation_id) where operation_id is not null
 
 file_change_events_space_time_idx(space_id, created_at desc, id desc)
 file_change_events_node_time_idx(space_id, node_id, created_at desc, id desc)
 file_change_events_space_id_idx(space_id, id)
 file_change_events_actor_time_idx(actor_account_id, created_at desc, id desc)
 file_change_events_retention_idx(created_at)
+file_change_events_operation_idx(space_id, operation_id) where operation_id is not null
 
 command_invocations_owner_surface_time_idx(owner_user_id, surface, created_at desc, id desc)
 command_invocations_actor_time_idx(actor_account_id, created_at desc, id desc)
@@ -290,9 +296,17 @@ spaces
   deleted_at timestamptz null
   deleted_by_user_id uuid null references users(id)
   purge_after timestamptz null
+  trash_recoverable bool not null default false
+  deletion_operation_id uuid null
+  purge_requested_at timestamptz null
+  purge_last_attempt_at timestamptz null
 ```
 
 Live space name은 `(owner_user_id, name)` 기준 unique다. Space name은 1~63자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, `:`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다. Space 목록 기본 정렬은 `(sort_order, name, id)`다. 서비스 생성 경로는 새 space를 `max(owner live sort_order)+1000`으로 만들어 기본적으로 목록 끝에 추가한다. `navigation_pinned_at`은 탐색 영역 고정 상태이고 `user_mcp_enabled_at`은 User MCP 권한 상태이며 서로 독립적이다. `deleted_at`, `deleted_by_user_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.
+
+`purge_last_attempt_at`은 background purge의 Space 순회용 시각이며 삭제 완료/요청 시각이 아니다. Physical child, due node, object 원장의 parent/Space 조회는 별도 index를 사용한다.
+
+`trash_recoverable`은 해당 Space 삭제가 휴지통 복원 보존 정책을 지원하는지 표시한다. 현재 복원이 가능한지는 만료 시각, 영구 삭제 요청, 파일 원장 상태와 현재 제한을 별도로 검증한다.
 
 ```text
 space_usage
@@ -376,6 +390,9 @@ nodes
   updated_at timestamptz
   deleted_at timestamptz null
   purge_after timestamptz null
+  deletion_target_node_id uuid null
+  deletion_operation_id uuid null
+  purge_requested_at timestamptz null
 ```
 
 - `(parent_id, space_id)`는 `nodes(id, space_id)`를 참조하는 composite FK다(`UNIQUE (id, space_id)`로 보장). parent는 항상 같은 space 안에 있다.
@@ -442,9 +459,10 @@ object_storage_objects
   state text check ('uploading','attached','expire_pending','expired','delete_pending','deleted')
   last_activity_at/retry_count/retry_after/last_error_code
   created_at/attached_at/delete_requested_at/deleted_at
+  deletion_operation_id uuid null
 ```
 
-`object_storage_objects`는 업로드 연결과 물리 삭제 재시도를 위한 운영 원장이다. Node/Space soft delete transaction은 연결된 object를 즉시 `delete_pending`으로 전환한다. Hard purge의 같은 전환은 이전에 누락된 요청을 보정하는 안전장치다. 원장은 Node/Space purge 뒤에도 남도록 참조 FK가 `ON DELETE SET NULL`이며, `expired`/`deleted` 이력은 cluster-singleton purge가 90일 뒤 bounded batch로 삭제한다. Retention 조회는 terminal state와 `COALESCE(deleted_at, last_activity_at)` 순서의 partial index를 사용한다. `expire_pending`과 `delete_pending`은 S3 삭제 실패를 재시도하는 중간 상태다.
+`object_storage_objects`는 업로드 연결과 물리 삭제 재시도를 위한 운영 원장이다. Node/Space soft delete는 현재 본문과 연결된 object를 30일 보존한다. 보관 기간 만료 또는 사용자 영구 삭제 요청 이후 hard purge가 object를 `delete_pending`으로 전환한 뒤 semantic rows를 제거한다. Purge는 객체 원장의 `deletion_operation_id`에 원래 node 삭제 ID(없으면 Space 삭제 ID)를 복사한다. 원장은 Node/Space purge 뒤에도 남도록 참조 FK가 `ON DELETE SET NULL`이며, `expired`/`deleted` 이력은 cluster-singleton purge가 90일 뒤 bounded batch로 삭제한다. Retention 조회는 terminal state와 `COALESCE(deleted_at, last_activity_at)` 순서의 partial index를 사용한다. `expire_pending`과 `delete_pending`은 S3 삭제 실패를 재시도하는 중간 상태다.
 
 Content FK invariant:
 

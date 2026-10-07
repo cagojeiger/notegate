@@ -285,7 +285,9 @@ describe("workbench node mutations", () => {
       refetchType: "none"
     });
     expect(resetQueries).toHaveBeenCalledTimes(3);
-    expect(invalidateQueries).toHaveBeenCalledTimes(2);
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.trash });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.usage });
+    expect(invalidateQueries).toHaveBeenCalledTimes(4);
   });
 
   it("invalidates only the old and new parent when moving a node", async () => {

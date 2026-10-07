@@ -60,6 +60,42 @@ pub async fn space_with_root(
     Ok((account, space, root))
 }
 
+/// Seed old-schema migration tests without invoking the latest event writer.
+#[allow(dead_code)]
+pub async fn insert_legacy_user_account(pool: &PgPool) -> Result<Uuid, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let account: Uuid =
+        sqlx::query_scalar("INSERT INTO accounts (kind) VALUES ('user') RETURNING id")
+            .fetch_one(&mut *tx)
+            .await?;
+    sqlx::query("INSERT INTO users (id) VALUES ($1)")
+        .bind(account)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(account)
+}
+
+#[allow(dead_code)]
+pub async fn legacy_space_with_root(
+    pool: &PgPool,
+    sub: &str,
+) -> Result<(Uuid, Uuid, Uuid), sqlx::Error> {
+    let account = insert_legacy_user_account(pool).await?;
+    let space: Uuid =
+        sqlx::query_scalar("INSERT INTO spaces (owner_user_id, name) VALUES ($1, $2) RETURNING id")
+            .bind(account)
+            .bind(format!("ws-{sub}"))
+            .fetch_one(pool)
+            .await?;
+    let root: Uuid =
+        sqlx::query_scalar("SELECT id FROM nodes WHERE space_id = $1 AND parent_id IS NULL")
+            .bind(space)
+            .fetch_one(pool)
+            .await?;
+    Ok((account, space, root))
+}
+
 /// Record and attach an object-backed file without contacting object storage.
 #[allow(dead_code)]
 pub async fn attach_file(

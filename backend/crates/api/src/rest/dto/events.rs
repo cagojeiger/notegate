@@ -18,6 +18,7 @@ use crate::file_change::FileChangeImpact;
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct AuditEventOut {
     pub id: i64,
+    pub operation_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub actor_account_id: Option<Uuid>,
     pub actor: Option<AccountRef>,
@@ -32,6 +33,7 @@ impl AuditEventOut {
     pub(crate) fn from_event(event: &AuditEvent, refs: &HashMap<Uuid, ModelAccountRef>) -> Self {
         Self {
             id: event.id,
+            operation_id: event.operation_id,
             created_at: event.created_at,
             actor_account_id: event.actor_account_id,
             actor: event
@@ -188,6 +190,7 @@ impl From<&BackgroundJobDetail> for BackgroundJobDetailResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct FileChangeEventOut {
     pub id: i64,
+    pub operation_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub space_id: Uuid,
     pub node_id: Option<Uuid>,
@@ -204,6 +207,7 @@ impl FileChangeEventOut {
     ) -> Self {
         Self {
             id: event.id,
+            operation_id: event.operation_id,
             created_at: event.created_at,
             space_id: event.space_id,
             node_id: event.node_id,
@@ -351,6 +355,7 @@ mod tests {
     fn event(op_type: &str, metadata: Value) -> FileChangeEvent {
         FileChangeEvent {
             id: 1,
+            operation_id: None,
             created_at: Utc::now(),
             space_id: Uuid::new_v4(),
             node_id: Some(Uuid::new_v4()),

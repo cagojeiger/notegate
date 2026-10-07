@@ -154,3 +154,13 @@ impl LinkGraphWorkRepo {
         tx.commit().await.map_err(map_sqlx_error)
     }
 }
+
+/// Restore publishes rebuild intent in the same transaction as making the Space live.
+pub(crate) async fn schedule_space_rebuild_in(
+    connection: &mut sqlx::PgConnection,
+    space_id: Uuid,
+) -> Result<()> {
+    lock_space_state_in(connection, space_id).await?;
+    start_full_scan_state(connection, space_id).await?;
+    Ok(())
+}

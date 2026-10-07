@@ -15,6 +15,7 @@ use uuid::Uuid;
 /// Write-side row for capture; the read shape is `notegate_model::FileChangeEvent`.
 #[derive(Debug)]
 pub(crate) struct NewFileChangeEvent {
+    pub operation_id: Option<Uuid>,
     pub space_id: Uuid,
     pub node_id: Option<Uuid>,
     pub actor_account_id: Option<Uuid>,
@@ -29,14 +30,15 @@ pub(crate) async fn insert_file_change_event(
 ) -> Result<()> {
     sqlx::query(
         "INSERT INTO file_change_events \
-         (space_id, node_id, actor_account_id, op_type, metadata) \
-         VALUES ($1, $2, $3, $4, $5)",
+         (space_id, node_id, actor_account_id, op_type, metadata, operation_id) \
+         VALUES ($1, $2, $3, $4, $5, $6)",
     )
     .bind(event.space_id)
     .bind(event.node_id)
     .bind(event.actor_account_id)
     .bind(event.op_type)
     .bind(event.metadata)
+    .bind(event.operation_id)
     .execute(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
@@ -181,6 +183,7 @@ pub(crate) async fn sync_file_change_events(
 #[derive(Debug, FromRow)]
 struct FileChangeEventRow {
     id: i64,
+    operation_id: Option<Uuid>,
     created_at: DateTime<Utc>,
     space_id: Uuid,
     node_id: Option<Uuid>,
@@ -193,6 +196,7 @@ impl From<FileChangeEventRow> for notegate_model::FileChangeEvent {
     fn from(row: FileChangeEventRow) -> Self {
         Self {
             id: row.id,
+            operation_id: row.operation_id,
             created_at: row.created_at,
             space_id: row.space_id,
             node_id: row.node_id,
@@ -204,4 +208,4 @@ impl From<FileChangeEventRow> for notegate_model::FileChangeEvent {
 }
 
 const FILE_CHANGE_EVENT_COLUMNS: &str =
-    "id, created_at, space_id, node_id, actor_account_id, op_type, metadata";
+    "id, operation_id, created_at, space_id, node_id, actor_account_id, op_type, metadata";

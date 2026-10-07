@@ -14,7 +14,6 @@ use uuid::Uuid;
 use super::super::error::map_sqlx_error;
 use super::checks;
 use crate::file_change_events;
-use crate::object_storage_repo;
 use crate::space_usage::{self, UsageDelta};
 
 #[derive(Debug, FromRow)]
@@ -112,13 +111,8 @@ pub async fn soft_delete_node(
             .await
             .map_err(map_sqlx_error)?;
 
-    // Queue physical S3 deletion at soft-delete time (not at `purge_after`):
-    // object bytes are removed immediately and are unlike inline Text/File rows,
-    // which survive the retention window. Object recovery is not a product
-    // contract — see `docs/spec/lifecycle.md` (Node 삭제).
-    object_storage_repo::queue_subtree_object_deletions(&mut tx, space_id, node_id).await?;
-
     // Soft-delete the whole live subtree in one statement.
+    let operation_id = Uuid::new_v4();
     sqlx::query(
         "WITH RECURSIVE subtree AS ( \
             SELECT id FROM nodes \
@@ -127,20 +121,22 @@ pub async fn soft_delete_node(
             SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id \
             WHERE n.space_id = $1 AND n.deleted_at IS NULL \
          ) \
-         UPDATE nodes SET deleted_at = now(), deleted_by_account_id = $3, purge_after = $4 \
+         UPDATE nodes SET deleted_at = now(), deleted_by_account_id = $3, purge_after = $4, \
+             deletion_target_node_id = $2, deletion_operation_id = $5 \
          WHERE space_id = $1 AND id IN (SELECT id FROM subtree)",
     )
     .bind(space_id)
     .bind(node_id)
     .bind(deleted_by)
     .bind(purge_after)
+    .bind(operation_id)
     .execute(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
 
     file_change_events::node_deleted(
         &mut tx,
-        file_change_events::context(deleted_by, space_id),
+        file_change_events::context(deleted_by, space_id).with_operation_id(operation_id),
         node_id,
         file_change_events::NodeDeleted {
             item_kind: &node.kind,

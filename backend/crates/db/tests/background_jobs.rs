@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use common::{TestDb, space_with_root};
+use common::{TestDb, legacy_space_with_root};
 use notegate_jobs::{
     AttemptOutcome, ClaimedJob, DeferTransition, FailureTransition, JobDisposition, JobFailure,
     JobHandler, JobQueue, JobRegistry, JobSpec, NewJob, Worker, WorkerConfig,
@@ -257,7 +257,7 @@ async fn legacy_background_runtime_migration_preserves_queued_work()
     let Some(db) = TestDb::setup_before(32).await? else {
         return Ok(());
     };
-    let (_, space_id, _) = space_with_root(&db.pool, "legacy-runtime-removal").await?;
+    let (_, space_id, _) = legacy_space_with_root(&db.pool, "legacy-runtime-removal").await?;
     sqlx::query("INSERT INTO space_usage_reconcile_jobs (space_id, retry_count) VALUES ($1, 3)")
         .bind(space_id)
         .execute(&db.pool)
@@ -303,7 +303,7 @@ async fn job_history_migration_backfills_active_jobs() -> Result<(), Box<dyn std
         return Ok(());
     };
     let (owner_account_id, backfilled_space_id, _) =
-        space_with_root(&db.pool, "jobs-history-backfill").await?;
+        legacy_space_with_root(&db.pool, "jobs-history-backfill").await?;
     sqlx::query(
         "INSERT INTO background_jobs (job_kind, payload) \
          VALUES ('space_usage_reconcile', jsonb_build_object('space_id', $1))",
@@ -311,7 +311,8 @@ async fn job_history_migration_backfills_active_jobs() -> Result<(), Box<dyn std
     .bind(backfilled_space_id)
     .execute(&db.pool)
     .await?;
-    let (_, terminal_space_id, _) = space_with_root(&db.pool, "jobs-history-terminal").await?;
+    let (_, terminal_space_id, _) =
+        legacy_space_with_root(&db.pool, "jobs-history-terminal").await?;
     sqlx::query(
         "INSERT INTO background_jobs (job_kind, payload, status, completed_at) \
          VALUES ('space_usage_reconcile', jsonb_build_object('space_id', $1), \
@@ -382,7 +383,7 @@ async fn link_job_history_migration_backfills_existing_jobs()
         return Ok(());
     };
     let (owner_account_id, space_id, _) =
-        space_with_root(&db.pool, "link-jobs-history-backfill").await?;
+        legacy_space_with_root(&db.pool, "link-jobs-history-backfill").await?;
     let job_id: uuid::Uuid = sqlx::query_scalar(
         "INSERT INTO background_jobs (job_kind, payload, status, completed_at) \
          VALUES ('link_graph_project_nodes', jsonb_build_object('space_id', $1), \

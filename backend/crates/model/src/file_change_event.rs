@@ -10,6 +10,7 @@ use crate::EventCursor;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FileChangeEvent {
     pub id: i64,
+    pub operation_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub space_id: Uuid,
     pub node_id: Option<Uuid>,

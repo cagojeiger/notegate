@@ -50,7 +50,7 @@ describe("app dialog builders", () => {
     const dialog = deleteSpaceDialog(space, onDelete);
 
     if (dialog.kind !== "confirm") throw new Error("expected confirm dialog");
-    expect(dialog.message).toContain("cannot be recovered in the app");
+    expect(dialog.message).toContain("Trash for 30 days");
     dialog.onConfirm();
 
     expect(onDelete).toHaveBeenCalledWith(space.id);
@@ -88,7 +88,7 @@ describe("app dialog builders", () => {
 
     if (dialog.kind !== "confirm") throw new Error("expected confirm dialog");
     expect(dialog.message).toContain("everything inside it");
-    expect(dialog.message).toContain("cannot be recovered in the app");
+    expect(dialog.message).toContain("Trash for 30 days");
     dialog.onConfirm();
 
     expect(onDelete).toHaveBeenCalledWith(folder, true);

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::audit_events::{self, AuditContext};
-use crate::{map_sqlx_error, object_storage_repo, space_permission, tier_lookup};
+use crate::{map_sqlx_error, space_permission, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::tier::{TierFeatures, UserTier};
 use notegate_core::{Error, Result, limits};
@@ -607,16 +607,21 @@ impl SpaceRepo {
         deleted_by_user_id: Uuid,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let _gate = crate::space_usage::acquire_mutation_gate(&mut tx, space_id).await?;
+        tier_lookup::lock_active_user_tier(&mut tx, owner_user_id, "space not found").await?;
+        let operation_id = Uuid::new_v4();
         let result = sqlx::query(
             "UPDATE spaces \
-             SET deleted_at = now(), deleted_by_user_id = $3, \
-                 purge_after = now() + make_interval(days => $4::int), updated_at = now() \
+             SET trash_recoverable = true, deleted_at = now(), deleted_by_user_id = $3, \
+                 purge_after = now() + make_interval(days => $4::int), updated_at = now(), \
+                 deletion_operation_id = $5 \
              WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL",
         )
         .bind(space_id)
         .bind(owner_user_id)
         .bind(deleted_by_user_id)
         .bind(i32::try_from(limits::DELETED_SPACE_RETENTION_DAYS).unwrap_or(i32::MAX))
+        .bind(operation_id)
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -624,9 +629,7 @@ impl SpaceRepo {
             return Err(Error::not_found("space not found"));
         }
 
-        object_storage_repo::queue_space_object_deletions(&mut tx, space_id).await?;
-
-        let audit_ctx = AuditContext::rest(deleted_by_user_id);
+        let audit_ctx = AuditContext::rest(deleted_by_user_id).with_operation_id(operation_id);
         audit_events::space_deleted(&mut tx, audit_ctx, owner_user_id, space_id).await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;

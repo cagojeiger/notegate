@@ -285,7 +285,12 @@ tier0_logical_content_10000_users = 2.5 TiB
 ## Purge limits
 
 ```text
-purge_interval_minutes = 60
+purge_interval_minutes = 1
+purge_timeout_seconds = 120
+purge_resource_pass_budget_seconds = 30
+purge_space_batch_timeout_seconds = 15
+purge_statement_timeout_seconds = 10
+purge_lock_timeout_seconds = 2
 deleted_space_retention_days = 30
 deleted_node_retention_days = 30
 account_deletion_retention_days = 15
@@ -295,8 +300,14 @@ object_storage_history_retention_days = 90
 audit_event_retention_days = 365
 file_change_event_retention_days = 90
 command_invocation_retention_days = 90
-purge_batch_spaces = 100
-purge_batch_nodes = 1000
+purge_batch_spaces = 10
+purge_batch_nodes_per_space = 100
+purge_batch_text_revisions_per_space = 100
+purge_batch_object_node_links_per_space = 100
+purge_batch_object_space_links_per_space = 100
+purge_batch_link_refs_per_direction_per_space = 1000
+purge_batch_connections_per_space = 100
+purge_batch_orphan_link_projections = 1000
 purge_batch_accounts = 100
 purge_batch_api_keys = 1000
 purge_batch_object_storage_history = 1000

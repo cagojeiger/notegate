@@ -210,6 +210,7 @@ fn redact_subtree_counts(event: &mut notegate_model::FileChangeEvent) {
             "copied_texts",
             "copied_files",
             "deleted_nodes",
+            "restored_nodes",
         ] {
             metadata.remove(key);
         }
@@ -246,6 +247,7 @@ mod tests {
     fn event(id: i64) -> FileChangeEvent {
         FileChangeEvent {
             id,
+            operation_id: None,
             created_at: Utc::now(),
             space_id: Uuid::nil(),
             node_id: None,
@@ -266,7 +268,7 @@ mod tests {
     #[test]
     fn external_history_omits_subtree_counts_without_losing_navigation() {
         let parent = Uuid::new_v4();
-        for op in ["item.copy", "item.delete"] {
+        for op in ["item.copy", "item.delete", "item.restore"] {
             let mut row = event(42);
             row.op_type = op.to_owned();
             row.metadata = serde_json::json!({
@@ -277,6 +279,7 @@ mod tests {
                 "copied_texts": 3,
                 "copied_files": 1,
                 "deleted_nodes": 5,
+                "restored_nodes": 5,
                 "recursive": true,
             });
             let browser_metadata = row.metadata.clone();
@@ -286,6 +289,7 @@ mod tests {
                 "copied_texts",
                 "copied_files",
                 "deleted_nodes",
+                "restored_nodes",
             ] {
                 assert!(row.metadata.get(key).is_none());
                 assert!(browser_metadata.get(key).is_some());

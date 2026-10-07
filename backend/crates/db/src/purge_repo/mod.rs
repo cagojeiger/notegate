@@ -1,7 +1,7 @@
 //! Hard purge for soft-deleted spaces and nodes.
 //!
 //! Cross-process scheduling is owned by the reconciliation runtime. This repo
-//! runs bounded resource, identity, and history transactions sequentially.
+//! runs bounded resource batches, then identity and history transactions.
 
 mod history;
 mod identities;
@@ -20,7 +20,7 @@ impl PurgeRepo {
         Self { pool }
     }
 
-    /// Run each cleanup group in its own transaction, in order.
+    /// Run cleanup groups in order, committing each resource batch separately.
     ///
     /// A group error does not skip subsequent groups or undo committed work.
     /// Every failed group is logged; after all groups finish, return the first
@@ -43,8 +43,9 @@ impl PurgeRepo {
         let history = history?;
 
         Ok(PurgeRun {
-            spaces_deleted: resources.spaces_deleted.max(0) as u64,
-            nodes_deleted: resources.nodes_deleted.max(0) as u64,
+            spaces_deleted: resources.spaces_deleted,
+            nodes_deleted: resources.nodes_deleted,
+            text_revisions_deleted: resources.text_revisions_deleted,
             accounts_anonymized: identities.accounts_anonymized.max(0) as u64,
             api_keys_deleted: identities.api_keys_deleted.max(0) as u64,
             browser_sessions_deleted: identities.browser_sessions_deleted.max(0) as u64,
@@ -52,8 +53,9 @@ impl PurgeRepo {
             audit_events_deleted: history.audit_events_deleted.max(0) as u64,
             file_change_events_deleted: history.file_change_events_deleted.max(0) as u64,
             command_invocations_deleted: history.command_invocations_deleted.max(0) as u64,
-            link_graph_projections_deleted: resources.link_graph_projections_deleted.max(0) as u64,
+            link_graph_projections_deleted: resources.link_graph_projections_deleted,
             object_deletions_queued: resources.object_deletions_queued,
+            resources_pending: resources.has_more,
         })
     }
 }
@@ -62,6 +64,7 @@ impl PurgeRepo {
 pub struct PurgeRun {
     pub spaces_deleted: u64,
     pub nodes_deleted: u64,
+    pub text_revisions_deleted: u64,
     pub accounts_anonymized: u64,
     pub api_keys_deleted: u64,
     pub browser_sessions_deleted: u64,
@@ -71,4 +74,5 @@ pub struct PurgeRun {
     pub command_invocations_deleted: u64,
     pub link_graph_projections_deleted: u64,
     pub object_deletions_queued: u64,
+    pub resources_pending: bool,
 }
