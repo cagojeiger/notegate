@@ -21,6 +21,180 @@ use uuid::Uuid;
 static PURGE_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test]
+async fn purge_receipts_keep_original_groups_after_space_removal_and_expire_after_180_days()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "purge-receipts").await?;
+    let other_owner = insert_user_account(&db.pool, "other-receipts", "other@example.test").await?;
+    let parent = retained_node(&db.pool, space, root, owner, "folder", false).await?;
+    let child = retained_node(&db.pool, space, parent, owner, "text", false).await?;
+    let files = notegate_db::FilesRepo::new(db.pool.clone());
+    let (file, _) = attach_file(&files, space, root, "private-name.bin", 10, owner).await?;
+    files.soft_delete_node(space, file.id, owner, false).await?;
+    let original: Vec<(Uuid, String, Uuid, Uuid)> = sqlx::query_as(
+        "SELECT id, kind, deletion_operation_id, deletion_target_node_id FROM nodes \
+         WHERE id = ANY($1) ORDER BY id",
+    )
+    .bind(vec![parent, child, file.id])
+    .fetch_all(&db.pool)
+    .await?;
+    let space_operation = Uuid::new_v4();
+    sqlx::query(
+        "UPDATE spaces SET deleted_at = now(), deleted_by_user_id = $2, \
+         purge_after = now() - interval '1 second', deletion_operation_id = $3 WHERE id = $1",
+    )
+    .bind(space)
+    .bind(owner)
+    .bind(space_operation)
+    .execute(&db.pool)
+    .await?;
+
+    let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!((first.nodes_deleted, first.spaces_deleted), (2, 0));
+    let second = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!((second.nodes_deleted, second.spaces_deleted), (1, 1));
+    let repeated = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!((repeated.nodes_deleted, repeated.spaces_deleted), (0, 0));
+
+    let history = notegate_db::AuditEventRepo::new(db.pool.clone());
+    let events = history.list_by_owner(owner, 100, None).await?;
+    let receipts: Vec<_> = events
+        .iter()
+        .filter(|event| event.op_type.ends_with(".purge"))
+        .collect();
+    assert_eq!(
+        receipts.len(),
+        4,
+        "one receipt per removed resource, none for the internal root"
+    );
+    for (id, kind, operation, target) in original {
+        let receipt = receipts
+            .iter()
+            .find(|event| event.resource_id == Some(id))
+            .unwrap();
+        assert_eq!(receipt.op_type, "node.purge");
+        assert_eq!(receipt.source, "system");
+        assert_eq!(receipt.actor_account_id, None);
+        assert_eq!(receipt.operation_id, Some(operation));
+        assert_eq!(
+            receipt.metadata,
+            serde_json::json!({
+                "space_id": space,
+                "item_kind": kind,
+                "deletion_target_node_id": target,
+                "completion_scope": "database"
+            })
+        );
+    }
+    let space_receipt = receipts
+        .iter()
+        .find(|event| event.resource_id == Some(space))
+        .unwrap();
+    assert_eq!(space_receipt.op_type, "space.purge");
+    assert_eq!(space_receipt.operation_id, Some(space_operation));
+    assert_eq!(
+        space_receipt.metadata,
+        serde_json::json!({ "completion_scope": "database" })
+    );
+    assert!(
+        history
+            .list_by_owner(other_owner, 100, None)
+            .await?
+            .iter()
+            .all(|event| !event.op_type.ends_with(".purge"))
+    );
+    let state: String = sqlx::query_scalar(
+        "SELECT state FROM object_storage_objects WHERE deletion_operation_id = \
+         (SELECT operation_id FROM audit_events WHERE resource_id = $1 AND op_type = 'node.purge')",
+    )
+    .bind(file.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        state, "delete_pending",
+        "DB receipt is not an S3 completion claim"
+    );
+
+    let expires = space_receipt.created_at + chrono::Duration::days(180);
+    for (now, expected) in [
+        (expires - chrono::Duration::microseconds(1), true),
+        (expires, false),
+    ] {
+        PurgeRepo::new(db.pool.clone())
+            .with_history_time(now)
+            .run_once()
+            .await?;
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM audit_events WHERE id = $1)")
+                .bind(space_receipt.id)
+                .fetch_one(&db.pool)
+                .await?;
+        assert_eq!(exists, expected);
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn receipt_failure_rolls_back_database_deletion_and_storage_intent()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    for op_type in ["node.purge", "space.purge"] {
+        let Some(db) = TestDb::setup().await? else {
+            return Ok(());
+        };
+        let (owner, space, root) = space_with_root(&db.pool, "receipt-failure").await?;
+        let files = notegate_db::FilesRepo::new(db.pool.clone());
+        let (file, _) = attach_file(&files, space, root, "retained.bin", 10, owner).await?;
+        sqlx::query(
+            "UPDATE spaces SET deleted_at = now(), deleted_by_user_id = $2, \
+             purge_after = now() - interval '1 second' WHERE id = $1",
+        )
+        .bind(space)
+        .bind(owner)
+        .execute(&db.pool)
+        .await?;
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+            "CREATE FUNCTION fail_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN RAISE EXCEPTION 'injected receipt failure'; END; $$; \
+             CREATE TRIGGER fail_receipt BEFORE INSERT ON audit_events FOR EACH ROW \
+             WHEN (NEW.op_type = '{op_type}') EXECUTE FUNCTION fail_receipt()"
+        )))
+        .execute(&db.pool)
+        .await?;
+
+        assert!(PurgeRepo::new(db.pool.clone()).run_once().await.is_err());
+        let state: (String, bool, bool, i64) = sqlx::query_as(
+            "SELECT o.state, EXISTS(SELECT 1 FROM nodes WHERE id = $1), \
+                 EXISTS(SELECT 1 FROM spaces WHERE id = $2), \
+                 (SELECT count(*) FROM audit_events WHERE op_type IN ('node.purge', 'space.purge')) \
+             FROM object_storage_objects o WHERE o.node_id = $1",
+        ).bind(file.id).bind(space).fetch_one(&db.pool).await?;
+        assert_eq!(state, ("attached".to_owned(), true, true, 0));
+
+        sqlx::query("DROP TRIGGER fail_receipt ON audit_events")
+            .execute(&db.pool)
+            .await?;
+        let retry = PurgeRepo::new(db.pool.clone()).run_once().await?;
+        assert_eq!((retry.nodes_deleted, retry.spaces_deleted), (1, 1));
+        PurgeRepo::new(db.pool.clone()).run_once().await?;
+        let receipts: (i64, i64) = sqlx::query_as(
+            "SELECT count(*), count(operation_id) FROM audit_events WHERE op_type IN ('node.purge', 'space.purge')",
+        ).fetch_one(&db.pool).await?;
+        assert_eq!(
+            receipts,
+            (2, 0),
+            "legacy deletion IDs stay unknown; retries do not duplicate receipts"
+        );
+        db.cleanup().await;
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::Error>> {
     let _guard = PURGE_TEST_MUTEX.lock().await;
     let Some(db) = TestDb::setup().await? else {
@@ -820,10 +994,16 @@ async fn large_physical_subtree_drains_children_before_parent_and_survives_resta
     )
     .await?;
 
+    let mut total_deleted = 0_i64;
     for (expected, remaining) in [(101, 105), (100, 5), (5, 0), (1, 0)] {
         // A fresh instance on every pass cannot rely on an in-memory cursor.
         let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
         assert_eq!(run.nodes_deleted, expected);
+        total_deleted += expected as i64;
+        let receipts: (i64, i64) = sqlx::query_as(
+            "SELECT count(*), count(DISTINCT resource_id) FROM audit_events WHERE op_type = 'node.purge'",
+        ).fetch_one(&db.pool).await?;
+        assert_eq!(receipts, (total_deleted, total_deleted));
         let children: i64 = sqlx::query_scalar("SELECT count(*) FROM nodes WHERE parent_id = $1")
             .bind(parent)
             .fetch_one(&db.pool)

@@ -10,7 +10,7 @@ NoteGate는 관리 변경과 파일트리 변경을 별도 stream으로 기록�
 
 ```text
 audit_events
-  account, session, credential, agent, space, connection 관리 이력
+  account, session, credential, agent, space, connection 관리 이력과 DB 리소스 정리 완료
 
 file_change_events
   file-tree/file content change 이력
@@ -50,6 +50,9 @@ Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-event
 - 기존 행과 이 계약 범위 밖의 Audit event는 `operation_id=NULL`이다. 새 Changes는 모든 변경에 `operation_id`를 기록한다. 기존 삭제와 event를 시각 또는 리소스 ID로 추측해서 연결하지 않는다. 연결 ID가 없는 복원/영구 삭제 요청은 `related_deletion_operation_id=null`이다.
 - ID는 correlation 용도이며 authorization, request idempotency, event cursor 또는 문서 snapshot을 대체하지 않는다. Event retention은 유지하고, 로그가 없어도 domain state에 따라 복원한다.
 - 비동기 purge는 semantic row 제거 전에 원래 삭제 ID를 object 원장에 보존한다. 이는 S3 물리 삭제 완료 event/receipt가 아니며 원장도 기존 retention을 따른다.
+- DB purge는 실제로 삭제한 node마다 `node.purge`, 마지막 Space 행을 삭제할 때 `space.purge`를 Audit에 같은 transaction으로 기록한다. 내부 root node는 Space 완료에 포함하며 별도 node 기록을 만들지 않는다. 기록 실패는 해당 삭제 batch를 rollback하고, 재시도는 남아 있는 리소스만 처리하므로 완료 기록이 중복되지 않는다.
+- 완료 기록의 `operation_id`는 원래 node 삭제 ID이며, 없으면 Space 삭제 ID를 사용한다. 먼저 개별 삭제된 자식의 ID는 유지한다. 둘 다 없으면 NULL로 두며 과거 삭제에 대한 기록을 추측해서 만들지 않는다.
+- 이 기록은 `source=system`, `actor_account_id=NULL`, `completion_scope=database`다. 이름·경로·본문·object key 없이 owner/resource/Space/삭제 대상 ID와 node 종류만 저장한다. 삭제된 리소스에 FK로 연결하지 않으며 소유자의 Audit에서 180일 보관한다. S3 삭제 성공이나 저장소 내부 물리 정리 완료, 용량 반환을 의미하지 않는다.
 - MCP/CLI invocation과의 직접 연결은 별도이며, Changes의 Text revision 연결은 아래 snapshot 계약을 따른다. `read op=changes`는 저장된 event의 `operation_id`를 반환한다.
 
 ## Capture guarantee
@@ -93,7 +96,7 @@ system
 
 ## Audit events
 
-Audit event는 account, session, credential, agent, space, connection 관리 변경을 기록한다.
+Audit event는 account, session, credential, agent, space, connection 관리 변경과 비동기 DB 리소스 정리 완료를 기록한다.
 
 Audit event type:
 
@@ -109,6 +112,8 @@ space.create
 space.update
 space.delete
 space.restore
+space.purge
+node.purge
 trash.purge.request
 
 agent.create
@@ -143,6 +148,15 @@ connection.upsert
 
 session.revoke
   reason: "refresh_failed"
+
+node.purge
+  completion_scope: "database"
+  space_id: uuid
+  item_kind: "folder" | "text" | "file"
+  deletion_target_node_id: uuid (known only)
+
+space.purge
+  completion_scope: "database"
 ```
 
 Audit event target mapping:
@@ -163,6 +177,10 @@ session.*
 space.*
   resource_type: "space"
   resource_id: space_id
+
+node.purge
+  resource_type: "node"
+  resource_id: node_id
 
 agent.*
   resource_type: "agent"

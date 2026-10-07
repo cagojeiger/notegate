@@ -206,7 +206,7 @@ audit_events
   metadata jsonb not null default '{}'
 ```
 
-`audit_events`는 account, browser session, credential, agent, space, connection 관리 변경을 기록한다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
+`audit_events`는 account, browser session, credential, agent, space, connection 관리 변경과 node/Space DB 정리 완료를 기록한다. 완료 기록은 원본 삭제와 같은 transaction에 저장하며 리소스 삭제 뒤에도 identifier snapshot으로 180일 보존한다. S3 삭제 완료를 뜻하지 않는다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
 ```text
 file_change_events

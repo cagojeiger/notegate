@@ -24,6 +24,29 @@ function jsonResponse(body: unknown) {
 }
 
 describe("EventHistoryModal", () => {
+  it("shows database purge receipts without claiming file storage deletion is complete", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => jsonResponse({
+      events: String(input).includes("/audit-events") ? [{
+        ...auditEvent(41, "node.purge"),
+        operation_id: "delete-41",
+        actor_account_id: null,
+        source: "system",
+        resource_type: "node",
+        resource_id: "removed-file",
+        metadata: { item_kind: "file", completion_scope: "database" }
+      }] : [],
+      page
+    }));
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    await user.click(screen.getByRole("tab", { name: "Audit" }));
+    expect(await screen.findByText("Removed item from database")).toBeInTheDocument();
+    expect(screen.getByText("File removed-file")).toBeInTheDocument();
+    expect(screen.getByText("Database cleanup only. File storage cleanup is tracked separately.")).toBeInTheDocument();
+    expect(screen.getByText("Operation delete-41")).toBeInTheDocument();
+    expect(screen.getByText("System")).toBeInTheDocument();
+  });
+
   it("shows retained changes when all owned spaces have been removed", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({

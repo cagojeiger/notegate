@@ -10,6 +10,64 @@ use serde_json::{Value, json};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+/// Identifier-only snapshots returned by the actual DELETE, not candidates.
+#[derive(Debug, sqlx::FromRow, serde::Serialize)]
+pub(crate) struct PurgedNode {
+    pub id: Uuid,
+    pub kind: String,
+    pub operation_id: Option<Uuid>,
+    pub deletion_target_node_id: Option<Uuid>,
+}
+
+pub(crate) async fn nodes_purged(
+    tx: &mut PgConnection,
+    owner_user_id: Uuid,
+    space_id: Uuid,
+    nodes: &[PurgedNode],
+) -> Result<()> {
+    if nodes.is_empty() {
+        return Ok(());
+    }
+    // One bounded insert per purge batch, in the resource deletion transaction.
+    sqlx::query(
+        "INSERT INTO audit_events \
+         (owner_user_id, source, op_type, resource_type, resource_id, operation_id, metadata) \
+         SELECT $1, 'system', 'node.purge', 'node', n.id, n.operation_id, \
+             jsonb_strip_nulls(jsonb_build_object('space_id', $2::uuid, 'item_kind', n.kind, \
+                 'deletion_target_node_id', n.deletion_target_node_id, 'completion_scope', 'database')) \
+         FROM jsonb_to_recordset($3) AS n(id uuid, kind text, operation_id uuid, deletion_target_node_id uuid)",
+    )
+    .bind(owner_user_id)
+    .bind(space_id)
+    .bind(sqlx::types::Json(nodes))
+    .execute(tx)
+    .await
+    .map_err(crate::map_sqlx_error)?;
+    Ok(())
+}
+
+pub(crate) async fn space_purged(
+    tx: &mut PgConnection,
+    owner_user_id: Uuid,
+    space_id: Uuid,
+    operation_id: Option<Uuid>,
+) -> Result<()> {
+    insert_audit_event(
+        tx,
+        NewAuditEvent {
+            operation_id,
+            owner_user_id: Some(owner_user_id),
+            actor_account_id: None,
+            source: "system",
+            op_type: "space.purge",
+            resource_type: "space",
+            resource_id: Some(space_id),
+            metadata: json!({ "completion_scope": "database" }),
+        },
+    )
+    .await
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AuditContext {
     actor_account_id: Uuid,

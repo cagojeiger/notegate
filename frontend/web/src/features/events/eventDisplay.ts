@@ -35,6 +35,7 @@ const AUDIT_TARGET_LABELS: Record<string, string> = {
   agent: "Agent",
   api_key: "API key",
   browser_session: "Browser session",
+  node: "Item",
   space: "Space"
 };
 
@@ -47,6 +48,8 @@ const AUDIT_ACTIONS: Record<string, string> = {
   "space.create": "Created a space",
   "space.update": "Updated a space",
   "space.delete": "Deleted a space",
+  "space.purge": "Removed space from database",
+  "node.purge": "Removed item from database",
   "agent.create": "Created an agent",
   "agent.delete": "Deleted an agent",
   "user_key.create": "Created a user API key",
@@ -133,7 +136,9 @@ export function formatAuditAction(event: AuditEvent): string {
 }
 
 export function formatAuditTarget(event: AuditEvent): string {
-  const label = AUDIT_TARGET_LABELS[event.resource_type] ?? event.resource_type.replace(/_/g, " ");
+  const itemKind = typeof event.metadata.item_kind === "string" ? event.metadata.item_kind : "";
+  const label = (event.resource_type === "node" ? ITEM_KIND_LABELS[itemKind] : undefined)
+    ?? AUDIT_TARGET_LABELS[event.resource_type] ?? event.resource_type.replace(/_/g, " ");
   if (event.resource_type === "browser_session") return label;
   return event.resource_id ? `${label} ${shortId(event.resource_id)}` : label;
 }
