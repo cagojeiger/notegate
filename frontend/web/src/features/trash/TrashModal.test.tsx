@@ -26,6 +26,34 @@ function show(onReady?: (client: QueryClient) => void) {
 }
 
 describe("TrashModal", () => {
+  it("shows actions only for the selected item and restores that item's deletion", async () => {
+    const user = userEvent.setup();
+    const second = { ...item, id: "node-2", name: "second.md", path: "/notes/second.md", deletion_operation_id: "operation-2" };
+    let restored = false;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+      if (options?.method === "POST") {
+        restored = true;
+        return new Response(null, { status: 204 });
+      }
+      return response(restored ? [item] : [item, second]);
+    });
+    show();
+    expect(await screen.findByRole("button", { name: "Select note.md" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Restore second.md" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Select second.md" }));
+    expect(screen.getByRole("button", { name: "Select second.md" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Restore note.md" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Details for second.md" })).toHaveTextContent("/notes/second.md");
+    await user.click(screen.getByRole("button", { name: "Restore second.md" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Select second.md" })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Restore note.md" })).toBeEnabled();
+    const requests = fetchMock.mock.calls.filter(([, options]) => options?.method === "POST");
+    expect(requests).toHaveLength(1);
+    const url = new URL(String(requests[0]?.[0]), "http://localhost");
+    expect(url.pathname).toContain("/nodes/node-2/restore");
+    expect(url.searchParams.get("deletion_operation_id")).toBe(second.deletion_operation_id);
+  });
+
   it("requires explicit confirmation and displays queued deletion without claiming completion", async () => {
     const user = userEvent.setup();
     let queued = false;
