@@ -945,7 +945,17 @@ async fn link_references_drain_in_batches_without_losing_incoming_paths()
         return Ok(());
     };
     let (owner, space, root) = space_with_root(&db.pool, "purge-link-batches").await?;
-    let target = retained_node(&db.pool, space, root, owner, "text", true).await?;
+    let files = notegate_db::FilesRepo::new(db.pool.clone());
+    let (file_node, file) = attach_file(&files, space, root, "target.bin", 1, owner).await?;
+    files
+        .soft_delete_node(space, file_node.id, owner, false)
+        .await?;
+    sqlx::query("UPDATE nodes SET purge_after = now(), purge_requested_at = now() WHERE id = $1")
+        .bind(file_node.id)
+        .execute(&db.pool)
+        .await?;
+    let target = file_node.id;
+    let outgoing = retained_node(&db.pool, space, root, owner, "text", true).await?;
     let source: Uuid = sqlx::query_scalar(
         "INSERT INTO nodes(space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
          VALUES ($1, $2, 'live.md', 'text', $3, $3) RETURNING id",
@@ -953,21 +963,30 @@ async fn link_references_drain_in_batches_without_losing_incoming_paths()
     sqlx::query(
         "INSERT INTO node_link_refs(space_id, source_node_id, target_node_id, target_path, reference_kind, occurrence_count) \
          SELECT $1, $2, $3, '/incoming-' || value, 'link', 1 FROM generate_series(1, 1001) value \
-         UNION ALL SELECT $1, $3, NULL::uuid, '/outgoing-' || value, 'link', 1 FROM generate_series(1, 1001) value",
-    ).bind(space).bind(source).bind(target).execute(&db.pool).await?;
+         UNION ALL SELECT $1, $4, NULL::uuid, '/outgoing-' || value, 'link', 1 FROM generate_series(1, 1001) value",
+    ).bind(space).bind(source).bind(target).bind(outgoing).execute(&db.pool).await?;
     let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
     assert_eq!(first.nodes_deleted, 0);
+    assert_eq!(first.object_deletions_queued, 0);
     let refs: (i64, i64) = sqlx::query_as(
-        "SELECT count(*) FILTER (WHERE source_node_id = $1), count(*) FILTER (WHERE target_node_id = $1) FROM node_link_refs",
-    ).bind(target).fetch_one(&db.pool).await?;
+        "SELECT count(*) FILTER (WHERE source_node_id = $1), count(*) FILTER (WHERE target_node_id = $2) FROM node_link_refs",
+    ).bind(outgoing).bind(target).fetch_one(&db.pool).await?;
     assert_eq!(refs, (1, 1));
-    assert_eq!(
-        PurgeRepo::new(db.pool.clone())
-            .run_once()
-            .await?
-            .nodes_deleted,
-        1
-    );
+    let retained: (String, Option<Uuid>) =
+        sqlx::query_as("SELECT state, node_id FROM object_storage_objects WHERE object_key = $1")
+            .bind(&file.object_key)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(retained, ("attached".to_owned(), Some(target)));
+    let second = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(second.nodes_deleted, 2);
+    assert_eq!(second.object_deletions_queued, 1);
+    let removed: (String, Option<Uuid>) =
+        sqlx::query_as("SELECT state, node_id FROM object_storage_objects WHERE object_key = $1")
+            .bind(&file.object_key)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(removed, ("delete_pending".to_owned(), None));
     let paths: (i64, i64) = sqlx::query_as(
         "SELECT count(*), count(*) FILTER (WHERE target_node_id IS NOT NULL) FROM node_link_refs WHERE source_node_id = $1",
     ).bind(source).fetch_one(&db.pool).await?;

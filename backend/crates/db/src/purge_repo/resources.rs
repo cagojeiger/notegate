@@ -204,7 +204,10 @@ async fn purge_space(pool: &PgPool, space_id: Uuid) -> Result<PurgedResources> {
         "WITH due AS (SELECT f.id, f.state, COALESCE(f.deletion_operation_id, n.deletion_operation_id, p.deletion_operation_id, s.deletion_operation_id) AS operation_id \
              FROM object_storage_objects f JOIN spaces s ON s.id = $1 \
              LEFT JOIN nodes n ON n.id = f.node_id LEFT JOIN nodes p ON p.id = f.parent_node_id \
-             WHERE f.node_id = ANY($2) OR f.parent_node_id = ANY($2) \
+             WHERE f.parent_node_id = ANY($2) OR (f.node_id = ANY($2) \
+                 AND NOT EXISTS (SELECT 1 FROM text_revisions r WHERE r.space_id = $1 AND r.node_id = f.node_id) \
+                 AND NOT EXISTS (SELECT 1 FROM node_link_refs r WHERE r.space_id = $1 AND (r.source_node_id = f.node_id OR r.target_node_id = f.node_id)) \
+                 AND NOT EXISTS (SELECT 1 FROM object_storage_objects anchor WHERE anchor.parent_node_id = f.node_id)) \
              ORDER BY f.id LIMIT $3 FOR UPDATE OF f SKIP LOCKED), changed AS ( \
              UPDATE object_storage_objects f SET \
                  state = CASE f.state WHEN 'attached' THEN 'delete_pending' WHEN 'uploading' THEN 'expire_pending' ELSE f.state END, \
