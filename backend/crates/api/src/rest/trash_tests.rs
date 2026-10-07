@@ -8,6 +8,7 @@
 use axum::http::StatusCode;
 use notegate_db::{FilesRepo, test_support::TestDb};
 use notegate_model::{Channel, files::CreateFolder};
+use tower::ServiceExt as _;
 
 use super::test_support::{caller_and_space, empty_request, get_json, rest_app, state};
 
@@ -77,13 +78,16 @@ async fn dashboard_trash_lists_restores_and_returns_accepted_for_permanent_delet
             empty_request(rest_app(state.clone(), caller.clone()), method, route).await?;
         assert_eq!(status, StatusCode::CONFLICT);
     }
-    let (status, _) = empty_request(
-        rest_app(state.clone(), caller.clone()),
-        "DELETE",
-        path.clone(),
-    )
-    .await?;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // Extractor rejection is plain text, unlike the domain error JSON envelope.
+    let rejected = rest_app(state.clone(), caller.clone())
+        .oneshot(
+            axum::http::Request::builder()
+                .method("DELETE")
+                .uri(&path)
+                .body(axum::body::Body::empty())?,
+        )
+        .await?;
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
     let (_, current) = get_json(
         rest_app(state.clone(), caller.clone()),
         "/v1/me/trash".to_owned(),
