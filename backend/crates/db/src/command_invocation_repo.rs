@@ -21,6 +21,7 @@ pub struct CommandInvocationRepo {
 
 #[derive(Debug)]
 pub struct NewCommandInvocation<'a> {
+    pub invocation_id: Option<Uuid>,
     pub owner_user_id: Uuid,
     pub actor_account_id: Uuid,
     pub caller_kind: &'static str,
@@ -58,8 +59,8 @@ impl CommandInvocationRepo {
         let encrypted = self.protect(invocation.owner_user_id, snapshot_id, &private)?;
         sqlx::query(
             "INSERT INTO command_invocations \
-             (owner_user_id, actor_account_id, caller_kind, surface, tool, op, input, outcome, error_code, duration_ms, snapshot_id, private_payload) \
-             VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb, $7, $8, $9, $10, $11)",
+             (owner_user_id, actor_account_id, caller_kind, surface, tool, op, input, outcome, error_code, duration_ms, snapshot_id, private_payload, invocation_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb, $7, $8, $9, $10, $11, $12)",
         )
         .bind(invocation.owner_user_id)
         .bind(invocation.actor_account_id)
@@ -72,6 +73,7 @@ impl CommandInvocationRepo {
         .bind(invocation.duration_ms)
         .bind(snapshot_id)
         .bind(encrypted)
+        .bind(invocation.invocation_id)
         .execute(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
@@ -93,7 +95,7 @@ impl CommandInvocationRepo {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let rows = sqlx::query_as::<_, CommandInvocationRow>(
             "SELECT id, created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, op, purpose, \
-                    space_name, input, response, outcome, error_code, duration_ms, snapshot_id, private_payload \
+                    space_name, input, response, outcome, error_code, duration_ms, snapshot_id, private_payload, invocation_id \
              FROM command_invocations WHERE private_payload IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED",
         ).fetch_all(&mut *tx).await.map_err(map_sqlx_error)?;
         let count = rows.len() as u64;
@@ -125,7 +127,7 @@ impl CommandInvocationRepo {
         let cursor_id = cursor.map(|cursor| cursor.id);
         let rows = sqlx::query_as::<_, CommandInvocationRow>(
             "SELECT id, created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, op, purpose, \
-                    space_name, input, response, outcome, error_code, duration_ms, snapshot_id, private_payload \
+                    space_name, input, response, outcome, error_code, duration_ms, snapshot_id, private_payload, invocation_id \
              FROM command_invocations \
              WHERE owner_user_id = $1 \
                AND surface = $2 \
@@ -203,6 +205,7 @@ fn validate_private_fields(invocation: &NewCommandInvocation<'_>) -> Result<()> 
 
 #[derive(Debug, FromRow)]
 struct CommandInvocationRow {
+    invocation_id: Option<Uuid>,
     id: i64,
     owner_user_id: Uuid,
     created_at: DateTime<Utc>,
@@ -226,6 +229,7 @@ impl From<CommandInvocationRow> for CommandInvocation {
     fn from(row: CommandInvocationRow) -> Self {
         Self {
             id: row.id,
+            invocation_id: row.invocation_id,
             created_at: row.created_at,
             actor_account_id: row.actor_account_id,
             caller_kind: row.caller_kind,

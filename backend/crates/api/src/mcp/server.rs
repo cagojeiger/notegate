@@ -262,8 +262,14 @@ impl ServerHandler for McpServer {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        context: RequestContext<RoleServer>,
+        mut context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
+        let invocation_id = uuid::Uuid::new_v4();
+        if let Some(parts) = context.extensions.get_mut::<Parts>() {
+            parts
+                .extensions
+                .insert(crate::invocations::InvocationId(invocation_id));
+        }
         let tool = request.name.to_string();
         let input = Value::Object(request.arguments.clone().unwrap_or_default());
         let caller = context
@@ -287,7 +293,15 @@ impl ServerHandler for McpServer {
             }
         };
 
-        invocation::execute_call(&self.state, caller.as_ref(), &tool, &input, call).await
+        invocation::execute_call(
+            invocation_id,
+            &self.state,
+            caller.as_ref(),
+            &tool,
+            &input,
+            call,
+        )
+        .await
     }
 
     async fn list_tools(
@@ -1436,12 +1450,19 @@ mod tests {
 
         let server = McpServer::new(state.clone());
         let typed_input = serde_json::from_value(input.clone())?;
-        invocation::execute_call(&state, Some(&caller), "read", &input, async {
-            server
-                .read_tool(Extension(parts), Parameters(typed_input))
-                .await
-                .map(|value| CallToolResult::structured(value.0).into())
-        })
+        invocation::execute_call(
+            uuid::Uuid::new_v4(),
+            &state,
+            Some(&caller),
+            "read",
+            &input,
+            async {
+                server
+                    .read_tool(Extension(parts), Parameters(typed_input))
+                    .await
+                    .map(|value| CallToolResult::structured(value.0).into())
+            },
+        )
         .await?;
 
         let item = state
@@ -1477,12 +1498,19 @@ mod tests {
         let mut invalid_parts = axum::http::Request::new(()).into_parts().0;
         invalid_parts.extensions.insert(caller.clone());
         let typed_invalid_input = serde_json::from_value(invalid_input.clone())?;
-        invocation::execute_call(&state, Some(&caller), "read", &invalid_input, async {
-            server
-                .read_tool(Extension(invalid_parts), Parameters(typed_invalid_input))
-                .await
-                .map(|value| CallToolResult::structured(value.0).into())
-        })
+        invocation::execute_call(
+            uuid::Uuid::new_v4(),
+            &state,
+            Some(&caller),
+            "read",
+            &invalid_input,
+            async {
+                server
+                    .read_tool(Extension(invalid_parts), Parameters(typed_invalid_input))
+                    .await
+                    .map(|value| CallToolResult::structured(value.0).into())
+            },
+        )
         .await
         .expect_err("changes rejects a non-root target");
 
@@ -1504,14 +1532,20 @@ mod tests {
         assert_eq!(failed.2.as_deref(), Some("changes_scope_invalid"));
 
         let missing_purpose = serde_json::json!({"op": "spaces"});
-        let malformed =
-            invocation::execute_call(&state, Some(&caller), "read", &missing_purpose, async {
+        let malformed = invocation::execute_call(
+            uuid::Uuid::new_v4(),
+            &state,
+            Some(&caller),
+            "read",
+            &missing_purpose,
+            async {
                 Ok(CallToolResult::error(vec![ContentBlock::text(
                     "failed to deserialize parameters: missing field `purpose`",
                 )])
                 .into())
-            })
-            .await?;
+            },
+        )
+        .await?;
         assert!(matches!(
             malformed,
             CallToolResponse::Complete(ref result) if result.is_error == Some(true)
@@ -1626,6 +1660,46 @@ mod tests {
         assert!(!rows[1].2.to_string().contains("SECRET_UNKNOWN_ARGUMENT"));
         assert_eq!(rows[1].3["kind"], "error");
         assert_eq!(rows[1].4, "error");
+
+        let written =
+            client
+                .call_tool(CallToolRequestParams::new("write").with_arguments(
+                    serde_json::from_value(serde_json::json!({
+                        "op":"write", "target":"rest-test:/linked.md", "create":true,
+                        "content":"linked history", "purpose":"Record linked change"
+                    }))?,
+                ))
+                .await?;
+        assert_ne!(written.is_error, Some(true));
+        let invocation = state
+            .command_invocations
+            .list_by_owner(
+                caller.account_id(),
+                notegate_model::CommandInvocationSurface::Mcp,
+                1,
+                None,
+            )
+            .await?
+            .into_iter()
+            .next()
+            .expect("write invocation");
+        assert!(invocation.invocation_id.is_some());
+        let changes = state
+            .history
+            .list_file_changes(
+                caller.account.kind,
+                caller.account_id(),
+                Some(_space_id),
+                Some(1),
+                None,
+            )
+            .await?;
+        assert_eq!(changes.items.len(), 1);
+        assert_eq!(
+            changes.items[0].metadata["invocation_id"],
+            serde_json::json!(invocation.invocation_id)
+        );
+        assert_eq!(changes.items[0].metadata["source"], "mcp");
 
         stop_tool_refresh_test_server(client, shutdown, server_task).await;
         db.cleanup().await;

@@ -16,10 +16,12 @@ pub(super) fn context(parts: &Parts) -> Result<CommandContext, ErrorData> {
             "authenticated caller extension missing",
         ))
     })?;
-    Ok(CommandContext::new(
-        caller,
-        RequestContext::from_parts(parts),
-    ))
+    let mut context =
+        CommandContext::new(caller, RequestContext::from_parts(parts)).with_source("mcp");
+    if let Some(id) = parts.extensions.get::<crate::invocations::InvocationId>() {
+        context = context.with_invocation(id.0);
+    }
+    Ok(context)
 }
 
 pub(super) fn result(result: Result<Value, CommandError>) -> Result<Json<Value>, ErrorData> {

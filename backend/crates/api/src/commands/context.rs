@@ -12,6 +12,7 @@ use crate::internal_search::RequestContext;
 pub struct CommandContext {
     caller: Caller,
     source: &'static str,
+    invocation_id: Option<uuid::Uuid>,
     edit_session_id: Option<uuid::Uuid>,
     write_purpose: Option<String>,
     internal_search: Option<RequestContext>,
@@ -26,6 +27,7 @@ impl CommandContext {
         };
         Self {
             source,
+            invocation_id: None,
             caller,
             edit_session_id: None,
             write_purpose: None,
@@ -38,6 +40,15 @@ impl CommandContext {
         self
     }
 
+    pub fn with_invocation(mut self, id: uuid::Uuid) -> Self {
+        self.invocation_id = Some(id);
+        self
+    }
+
+    pub fn invocation_id(&self) -> Option<uuid::Uuid> {
+        self.invocation_id
+    }
+
     pub fn files(
         &self,
         files: &notegate_service::files::FilesService,
@@ -47,6 +58,7 @@ impl CommandContext {
             .with_revision_session(self.edit_session_id)
             .with_revision_purpose(self.write_purpose.clone())
             .with_history_source(self.source)
+            .with_invocation_id(self.invocation_id)
     }
 
     pub fn with_edit_session(mut self, session: Option<uuid::Uuid>) -> Self {

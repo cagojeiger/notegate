@@ -41,6 +41,7 @@ async fn command_invocations_require_one_surface_and_keep_pagination_independent
         state
             .command_invocations
             .insert(NewCommandInvocation {
+                invocation_id: None,
                 owner_user_id: owner,
                 actor_account_id: owner,
                 caller_kind: "user",

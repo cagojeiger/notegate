@@ -42,6 +42,7 @@ pub struct FilesRepo {
     revision_session: Option<Uuid>,
     revision_source: &'static str,
     change_source: &'static str,
+    invocation_id: Option<Uuid>,
     revision_purpose: Option<String>,
     revision_time: Option<DateTime<Utc>>,
     trash_time: Option<DateTime<Utc>>,
@@ -109,6 +110,7 @@ impl FilesRepo {
             revision_session: None,
             revision_source: "unknown",
             change_source: "unknown",
+            invocation_id: None,
             revision_purpose: None,
             revision_time: None,
             trash_time: None,
@@ -137,6 +139,11 @@ impl FilesRepo {
         self
     }
 
+    pub fn with_invocation_id(mut self, id: Option<Uuid>) -> Self {
+        self.invocation_id = id;
+        self
+    }
+
     pub fn with_history_source(mut self, source: &'static str) -> Self {
         self.change_source = source;
         self.revision_source = source;
@@ -150,6 +157,7 @@ impl FilesRepo {
 
     pub(crate) fn change_capture(&self) -> crate::file_change_events::ChangeCapture<'_> {
         crate::file_change_events::ChangeCapture {
+            invocation_id: self.invocation_id,
             crypto: &self.crypto,
             source: self.change_source,
             purpose: self.revision_purpose.as_deref(),

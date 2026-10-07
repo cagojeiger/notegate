@@ -169,6 +169,7 @@ async fn insert_records_invocation_summary_and_payloads() -> Result<(), Box<dyn 
     });
 
     repo.insert(NewCommandInvocation {
+        invocation_id: None,
         owner_user_id: owner,
         actor_account_id: owner,
         caller_kind: "user",
@@ -266,6 +267,7 @@ async fn failed_calls_may_be_recorded_without_a_valid_purpose()
     let empty_input = serde_json::json!({});
 
     repo.insert(NewCommandInvocation {
+        invocation_id: None,
         owner_user_id: owner,
         actor_account_id: owner,
         caller_kind: "user",
@@ -283,6 +285,7 @@ async fn failed_calls_may_be_recorded_without_a_valid_purpose()
     .await?;
 
     repo.insert(NewCommandInvocation {
+        invocation_id: None,
         owner_user_id: owner,
         actor_account_id: owner,
         caller_kind: "user",
@@ -302,6 +305,7 @@ async fn failed_calls_may_be_recorded_without_a_valid_purpose()
     for padded_purpose in ["\tsearch notes", "search notes\n"] {
         let padded_search_purpose = repo
             .insert(NewCommandInvocation {
+                invocation_id: None,
                 owner_user_id: owner,
                 actor_account_id: owner,
                 caller_kind: "user",
@@ -322,6 +326,7 @@ async fn failed_calls_may_be_recorded_without_a_valid_purpose()
 
     let space_on_non_changes_call = repo
         .insert(NewCommandInvocation {
+            invocation_id: None,
             owner_user_id: owner,
             actor_account_id: owner,
             caller_kind: "user",
@@ -342,6 +347,7 @@ async fn failed_calls_may_be_recorded_without_a_valid_purpose()
     let non_object_response = serde_json::json!(["not", "an", "object"]);
     let invalid_response = repo
         .insert(NewCommandInvocation {
+            invocation_id: None,
             owner_user_id: owner,
             actor_account_id: owner,
             caller_kind: "user",
@@ -361,6 +367,7 @@ async fn failed_calls_may_be_recorded_without_a_valid_purpose()
 
     let invalid_surface = repo
         .insert(NewCommandInvocation {
+            invocation_id: None,
             owner_user_id: owner,
             actor_account_id: owner,
             caller_kind: "user",
@@ -396,6 +403,7 @@ async fn list_by_owner_is_newest_first_scoped_and_cursor_paginated()
 
     for purpose in ["first", "second", "third"] {
         repo.insert(NewCommandInvocation {
+            invocation_id: None,
             owner_user_id: owner,
             actor_account_id: owner,
             caller_kind: "user",
@@ -414,6 +422,7 @@ async fn list_by_owner_is_newest_first_scoped_and_cursor_paginated()
     }
     for purpose in ["cli first", "cli second"] {
         repo.insert(NewCommandInvocation {
+            invocation_id: None,
             owner_user_id: owner,
             actor_account_id: owner,
             caller_kind: "user",
@@ -431,6 +440,7 @@ async fn list_by_owner_is_newest_first_scoped_and_cursor_paginated()
         .await?;
     }
     repo.insert(NewCommandInvocation {
+        invocation_id: None,
         owner_user_id: other,
         actor_account_id: other,
         caller_kind: "user",

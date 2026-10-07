@@ -157,6 +157,7 @@ export function formatFileChangeDetails(event: FileChangeEvent): FileChangeDetai
   if (typeof metadata.source === "string") details.push({ label: "Source", value: metadata.source });
   if (typeof metadata.purpose === "string") details.push({ label: "Purpose", value: metadata.purpose });
   addIdDetail(details, "Operation", event.operation_id);
+  addIdDetail(details, "Call", metadata.invocation_id);
   for (const side of ["before", "after"] as const) {
     const revision = metadata[`${side}_revision_id`];
     const status = metadata[`${side}_revision_status`];

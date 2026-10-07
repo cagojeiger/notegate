@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ChangeCapture<'a> {
+    pub invocation_id: Option<Uuid>,
     pub crypto: &'a PiiCrypto,
     pub source: &'static str,
     pub purpose: Option<&'a str>,
@@ -64,6 +65,9 @@ async fn event(
         .as_object_mut()
         .ok_or_else(|| notegate_core::Error::internal("change metadata must be an object"))?;
     values.insert("source".into(), json!(ctx.capture.source));
+    if let Some(id) = ctx.capture.invocation_id {
+        values.insert("invocation_id".into(), json!(id));
+    }
     if let Some(purpose) = ctx.capture.purpose {
         values.insert("purpose".into(), json!(purpose));
     }

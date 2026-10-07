@@ -97,7 +97,8 @@ fn protect_metadata(
     for (key, value) in entries {
         let structural = matches!(
             key.as_str(),
-            "item_kind"
+            "invocation_id"
+                | "item_kind"
                 | "source"
                 | "actor_kind"
                 | "executor_kind"

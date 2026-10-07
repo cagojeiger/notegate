@@ -48,6 +48,11 @@ impl FilesService {
         self
     }
 
+    pub fn with_invocation_id(mut self, id: Option<Uuid>) -> Self {
+        self.store = self.store.with_invocation_id(id);
+        self
+    }
+
     pub fn with_history_source(mut self, source: &'static str) -> Self {
         self.store = self.store.with_history_source(source);
         self

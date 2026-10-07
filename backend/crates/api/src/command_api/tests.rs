@@ -372,7 +372,7 @@ async fn cli_mutations_record_transport_and_purpose_in_changes()
         "tool": "manage", "input": {"op": "mkdir", "target": "rest-test:/notes", "purpose": "Organize meeting notes"}
     })).await?;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let (status, body) = cli_request(app, cli_headers(), json!({
+    let (status, body) = cli_request(app.clone(), cli_headers(), json!({
         "tool": "write", "input": {"op": "write", "target": "rest-test:/notes/draft.md", "content": "draft", "create": true, "purpose": "Capture the meeting result"}
     })).await?;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -401,6 +401,70 @@ async fn cli_mutations_record_transport_and_purpose_in_changes()
         events.items[1].metadata["purpose"],
         "Organize meeting notes"
     );
+    let invocations = state
+        .command_invocations
+        .list_by_owner(
+            caller.account_id(),
+            notegate_model::CommandInvocationSurface::Cli,
+            10,
+            None,
+        )
+        .await?;
+    assert_eq!(invocations.len(), 2);
+    for (event, invocation) in events.items.iter().zip(&invocations) {
+        assert!(invocation.invocation_id.is_some());
+        assert_eq!(
+            event.metadata["invocation_id"],
+            json!(invocation.invocation_id)
+        );
+    }
+    assert_ne!(invocations[0].invocation_id, invocations[1].invocation_id);
+    // One call, two deletion operations: restoring the parent must not restore
+    // a child that was deleted in an earlier step of the same command sequence.
+    let (status, body) = cli_request(
+        app,
+        cli_headers(),
+        json!({
+            "tool": "run_write_sequence", "input": {
+                "purpose": "Remove obsolete draft and folder",
+                "commands": [
+                    {"tool":"manage", "op":"rm", "target":"rest-test:/notes/draft.md"},
+                    {"tool":"manage", "op":"rm", "target":"rest-test:/notes", "recursive":true}
+                ]
+            }
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["completed"], 2, "{body}");
+    let changes = state
+        .history
+        .list_file_changes(
+            caller.account.kind,
+            caller.account_id(),
+            Some(space_id),
+            Some(2),
+            None,
+        )
+        .await?;
+    let invocations = state
+        .command_invocations
+        .list_by_owner(
+            caller.account_id(),
+            notegate_model::CommandInvocationSurface::Cli,
+            1,
+            None,
+        )
+        .await?;
+    assert_eq!(changes.items.len(), 2);
+    for event in &changes.items {
+        assert_eq!(
+            event.metadata["invocation_id"],
+            json!(invocations[0].invocation_id)
+        );
+        assert_eq!(event.op_type, "item.delete");
+    }
+    assert_ne!(changes.items[0].operation_id, changes.items[1].operation_id);
     db.cleanup().await;
     Ok(())
 }

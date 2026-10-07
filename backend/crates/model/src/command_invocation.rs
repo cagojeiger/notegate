@@ -23,6 +23,7 @@ impl CommandInvocationSurface {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommandInvocation {
+    pub invocation_id: Option<Uuid>,
     pub id: i64,
     pub created_at: DateTime<Utc>,
     pub actor_account_id: Uuid,

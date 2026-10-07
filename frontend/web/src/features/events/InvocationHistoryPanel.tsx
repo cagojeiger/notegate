@@ -80,6 +80,7 @@ function CommandInvocationRow({ invocation }: { invocation: CommandInvocation })
           <span aria-hidden="true">·</span>
           <span className={invocation.outcome === "success" ? "text-success" : "text-danger"}>{status}</span>
         </div>
+        {invocation.invocation_id ? <p className="mt-2 break-all font-mono text-xs text-muted">Call {invocation.invocation_id}</p> : null}
         <InvocationDetails label="Input" value={invocation.input} />
         <InvocationDetails label="Response" value={invocation.response} />
       </div>

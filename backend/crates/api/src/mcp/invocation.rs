@@ -23,6 +23,7 @@ use crate::observability::CommandInvocationMetrics;
 use crate::state::AppState;
 
 pub(crate) async fn execute_call(
+    invocation_id: uuid::Uuid,
     state: &AppState,
     caller: Option<&Caller>,
     tool: &str,
@@ -74,6 +75,7 @@ pub(crate) async fn execute_call(
             state,
             caller,
             InvocationRecord {
+                id: Some(invocation_id),
                 surface: InvocationSurface::Mcp,
                 tool: canonical_tool(tool),
                 op,
@@ -271,25 +273,38 @@ mod tests {
             "target": "Research:/",
             "q": "SECRET_SEARCH_QUERY"
         });
-        execute_call(&state, Some(&caller), "search", &search_input, async {
-            Ok(CallToolResult::structured(serde_json::json!({"items": []})).into())
-        })
+        execute_call(
+            uuid::Uuid::new_v4(),
+            &state,
+            Some(&caller),
+            "search",
+            &search_input,
+            async { Ok(CallToolResult::structured(serde_json::json!({"items": []})).into()) },
+        )
         .await?;
         let missing_input = serde_json::json!({
             "purpose": "read a missing design note",
             "op": "read",
             "target": "Research:/missing.md"
         });
-        let recorded_error = execute_call(&state, Some(&caller), "read", &missing_input, async {
-            Err::<CallToolResponse, _>(invalid_input_error(
-                "the requested design note does not exist",
-            ))
-        })
+        let recorded_error = execute_call(
+            uuid::Uuid::new_v4(),
+            &state,
+            Some(&caller),
+            "read",
+            &missing_input,
+            async {
+                Err::<CallToolResponse, _>(invalid_input_error(
+                    "the requested design note does not exist",
+                ))
+            },
+        )
         .await
         .expect_err("tool error is returned");
         assert_eq!(recorded_error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
         let invalid_purpose_input = serde_json::json!({"purpose": " ", "op": "spaces"});
         let error = execute_call(
+            uuid::Uuid::new_v4(),
             &state,
             Some(&caller),
             "read",
@@ -304,6 +319,7 @@ mod tests {
             "commands": [{"tool": "read", "op": "read", "target": "Research:/missing.md"}]
         });
         let sequence = execute_call(
+            uuid::Uuid::new_v4(),
             &state,
             Some(&caller),
             "run_read_sequence",
@@ -414,43 +430,57 @@ mod tests {
             "original_filename": "SECRET_ORIGINAL_FILENAME.pdf",
             "encryption_metadata": {"wrapped_key": "SECRET_ENCRYPTION_METADATA"}
         });
-        execute_call(&state, Some(&caller), "file_upload", &upload_input, async {
-            Ok(CallToolResult::structured(serde_json::json!({
-                "upload_id": "upload-1",
-                "target": "Research:/report.pdf",
-                "transfer": {
-                    "method": "PUT",
-                    "url": "SECRET_UPLOAD_URL",
-                    "headers": {"authorization": "SECRET_UPLOAD_HEADER"},
-                    "expires_in_seconds": 300
-                },
-                "next_action": {
-                    "kind": "http_upload",
-                    "instruction": "SECRET_UPLOAD_INSTRUCTION",
-                    "transfer_field": "transfer"
-                }
-            }))
-            .into())
-        })
+        execute_call(
+            uuid::Uuid::new_v4(),
+            &state,
+            Some(&caller),
+            "file_upload",
+            &upload_input,
+            async {
+                Ok(CallToolResult::structured(serde_json::json!({
+                    "upload_id": "upload-1",
+                    "target": "Research:/report.pdf",
+                    "transfer": {
+                        "method": "PUT",
+                        "url": "SECRET_UPLOAD_URL",
+                        "headers": {"authorization": "SECRET_UPLOAD_HEADER"},
+                        "expires_in_seconds": 300
+                    },
+                    "next_action": {
+                        "kind": "http_upload",
+                        "instruction": "SECRET_UPLOAD_INSTRUCTION",
+                        "transfer_field": "transfer"
+                    }
+                }))
+                .into())
+            },
+        )
         .await?;
 
         let me_input = serde_json::json!({
             "purpose": "SECRET_ME_PURPOSE",
             "unexpected": "SECRET_ME_ARGUMENT"
         });
-        execute_call(&state, Some(&caller), "me", &me_input, async {
-            Ok(CallToolResult::structured(serde_json::json!({
-                "account": {
-                    "id": "account-1",
-                    "kind": "user",
-                    "display_name": "SECRET_DISPLAY_NAME"
-                },
-                "user": {"email": "SECRET_EMAIL"},
-                "capabilities": {"can_create_space": true, "can_manage_agents": true},
-                "server_version": "0.1.50"
-            }))
-            .into())
-        })
+        execute_call(
+            uuid::Uuid::new_v4(),
+            &state,
+            Some(&caller),
+            "me",
+            &me_input,
+            async {
+                Ok(CallToolResult::structured(serde_json::json!({
+                    "account": {
+                        "id": "account-1",
+                        "kind": "user",
+                        "display_name": "SECRET_DISPLAY_NAME"
+                    },
+                    "user": {"email": "SECRET_EMAIL"},
+                    "capabilities": {"can_create_space": true, "can_manage_agents": true},
+                    "server_version": "0.1.50"
+                }))
+                .into())
+            },
+        )
         .await?;
 
         let read_sequence_input = serde_json::json!({
@@ -461,6 +491,7 @@ mod tests {
             ]
         });
         execute_call(
+            uuid::Uuid::new_v4(),
             &state,
             Some(&caller),
             "run_read_sequence",
@@ -516,6 +547,7 @@ mod tests {
             ]
         });
         execute_call(
+            uuid::Uuid::new_v4(),
             &state,
             Some(&caller),
             "run_write_sequence",
@@ -691,9 +723,14 @@ mod tests {
             "target": "Research:/",
             "q": "cache"
         });
-        execute_call(&state, Some(&agent_caller), "search", &input, async {
-            Ok(CallToolResult::structured(serde_json::json!({"items": []})).into())
-        })
+        execute_call(
+            uuid::Uuid::new_v4(),
+            &state,
+            Some(&agent_caller),
+            "search",
+            &input,
+            async { Ok(CallToolResult::structured(serde_json::json!({"items": []})).into()) },
+        )
         .await?;
 
         let row = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, String, String)>(

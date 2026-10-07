@@ -21,6 +21,8 @@ command_invocations
 
 외부 command 호출 자체는 domain mutation stream과 다른 `command_invocations`에 기록한다. 이 표는 MCP와 Command API의 read와 실패 호출도 포함하는 실행 이력이며 현재 state나 mutation history의 source of truth가 아니다.
 
+`invocation_id`는 서버가 MCP/CLI 호출 경계에서 생성하는 UUID다. 호출 이력과 그 호출로 성공한 Changes에 함께 남기며, 한 sequence의 여러 변경은 같은 호출 ID를 갖는다. 삭제·복원의 작업 범위를 결정하는 `operation_id`는 별개다. Invocation 저장은 best-effort이므로 연결된 호출 행이 없을 수도 있고, legacy 행에는 연결 ID를 추측해 넣지 않는다.
+
 두 mutation stream(`audit_events`, `file_change_events`)은 성공적으로 commit된 domain mutation의 이력이다. 현재 state의 source of truth는 normalized domain table이다. `command_invocations`는 실행 관찰 이력이며 이 mutation 보장에 포함되지 않는다.
 
 Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-events`, command 실행 이력은 `GET /api/v1/me/command-invocations`로 조회하고, file change history는 `GET /api/v1/spaces/{space_id}/file-change-events`, UI forward sync는 `GET /api/v1/spaces/{space_id}/file-change-sync`로 조회한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.

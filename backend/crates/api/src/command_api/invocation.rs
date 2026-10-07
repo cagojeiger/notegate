@@ -9,7 +9,6 @@ use notegate_command::{
     COMMAND_PROTOCOL_VERSION, CommandError, CommandTool, FileDownloadInput, FileUploadInput,
     RecoveryAction, RunReadSequenceInput, RunWriteSequenceInput, validate_purpose,
 };
-use notegate_model::Caller;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
@@ -47,7 +46,6 @@ pub(super) async fn execute(
 ) -> Result<Json<Value>, CommandHttpError> {
     let started = Instant::now();
     let command_context = context.into_command();
-    let caller = command_context.caller().clone();
 
     let raw_envelope = match input {
         Ok(Json(input)) => input,
@@ -57,7 +55,7 @@ pub(super) async fn execute(
             let result = Err(CommandHttpError::invalid_json(rejection));
             return finish(
                 &state,
-                &caller,
+                &command_context,
                 "unknown",
                 &Value::Null,
                 result,
@@ -79,7 +77,7 @@ pub(super) async fn execute(
     if let Err(error) = validate_command_protocol(headers) {
         return finish(
             &state,
-            &caller,
+            &command_context,
             tool,
             &raw_input,
             Err(error),
@@ -93,7 +91,16 @@ pub(super) async fn execute(
         Ok(envelope) => envelope,
         Err(error) => {
             let result = Err(CommandHttpError::invalid_schema(error));
-            return finish(&state, &caller, tool, &raw_input, result, started, metrics).await;
+            return finish(
+                &state,
+                &command_context,
+                tool,
+                &raw_input,
+                result,
+                started,
+                metrics,
+            )
+            .await;
         }
     };
 
@@ -103,7 +110,7 @@ pub(super) async fn execute(
             let result = Err(CommandHttpError::from(unknown_tool_error(&envelope.tool)));
             return finish(
                 &state,
-                &caller,
+                &command_context,
                 "unknown",
                 &envelope.input,
                 result,
@@ -114,12 +121,17 @@ pub(super) async fn execute(
         }
     };
     let tool = known_tool.as_str();
-    let result = dispatch(&state, command_context, known_tool, envelope.input.clone())
-        .await
-        .map_err(Into::into);
+    let result = dispatch(
+        &state,
+        command_context.clone(),
+        known_tool,
+        envelope.input.clone(),
+    )
+    .await
+    .map_err(Into::into);
     finish(
         &state,
-        &caller,
+        &command_context,
         tool,
         &envelope.input,
         result,
@@ -238,7 +250,7 @@ fn validate_command_protocol(headers: &HeaderMap) -> Result<(), CommandHttpError
 
 async fn finish(
     state: &AppState,
-    caller: &Caller,
+    context: &CommandContext,
     tool: &str,
     input: &Value,
     result: Result<Value, CommandHttpError>,
@@ -263,8 +275,9 @@ async fn finish(
     let response = redact_response(tool, &metadata.response_context, &result);
     record(
         state,
-        caller,
+        context.caller(),
         InvocationRecord {
+            id: context.invocation_id(),
             surface: InvocationSurface::Cli,
             tool,
             op: metadata.op.as_deref(),
