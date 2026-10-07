@@ -349,3 +349,4 @@ command_invocations: 90 days
 - 목록의 `before_revision_status`/`after_revision_status`는 본문 존재 상태(`current`, `retained`, `unavailable`)다. `*_revision_cleanup_at`은 보관 본문의 정리 시작 가능 시각이며 즉시 삭제를 보장하지 않는다. 이 정보는 본문 접근 권한을 부여하지 않는다.
 - `GET /api/v1/me/file-change-events`는 현재 User의 소유 이력을 Space 삭제 뒤에도 90일 보존 기간 내 조회한다. 선택적 `space_id`, `limit`, `cursor`를 받는다. 외부 Agent 접근과 기존 Space별 권한은 바뀌지 않는다.
 - 기존 plaintext Changes는 `history.encryption` Reconciler가 최대 100행씩 암호화한다. 이관 중에는 이전 형식도 읽는다. 이미 삭제된 Space의 소유자를 입증할 수 없는 과거 행은 소유 이력에 노출하지 않는다.
+- Space 영구 삭제는 암호화와 별개로 기존 Changes의 소유자 ID를 최대 100행씩 보존한다. 소유자 미확정 행이 남거나 다른 트랜잭션에서 잠긴 경우 Space 삭제를 다음 회차로 넘긴다. 이후 암호화는 보존된 소유자 ID를 유지한다.

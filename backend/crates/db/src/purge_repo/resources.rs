@@ -13,6 +13,7 @@ const REVISION_PURGE_BATCH: i64 = 100;
 const OBJECT_PURGE_BATCH: i64 = 100;
 const LINK_REF_PURGE_BATCH: i64 = 1_000;
 const CONNECTION_PURGE_BATCH: i64 = 100;
+const CHANGE_HISTORY_OWNER_BATCH: i64 = 100;
 const LINK_GRAPH_PROJECTION_PURGE_BATCH: i64 = 1_000;
 const RESOURCE_PASS_BUDGET: Duration = Duration::from_secs(30);
 const SPACE_BATCH_TIMEOUT: Duration = Duration::from_secs(15);
@@ -291,11 +292,27 @@ async fn purge_space(pool: &PgPool, space_id: Uuid) -> Result<PurgedResources> {
                  ORDER BY agent_id LIMIT $2 FOR UPDATE SKIP LOCKED) \
              DELETE FROM space_agent_connections c USING due WHERE c.space_id = $1 AND c.agent_id = due.agent_id",
         ).bind(space_id).bind(CONNECTION_PURGE_BATCH).execute(&mut *tx).await.map_err(map_sqlx_error)?;
+        // Preserve legacy ownership independently of background encryption.
+        // Locked or remaining rows keep the Space alive for the next batch.
+        sqlx::query(
+            "WITH pending AS (SELECT id FROM file_change_events \
+                 WHERE space_id = $1 AND owner_user_id IS NULL \
+                 ORDER BY id LIMIT $3 FOR UPDATE SKIP LOCKED) \
+             UPDATE file_change_events e SET owner_user_id = $2 FROM pending \
+             WHERE e.id = pending.id",
+        )
+        .bind(space_id)
+        .bind(owner_user_id)
+        .bind(CHANGE_HISTORY_OWNER_BATCH)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
         let purged_space: Option<Option<Uuid>> = sqlx::query_scalar(
             "DELETE FROM spaces s WHERE s.id = $1 \
              AND NOT EXISTS (SELECT 1 FROM object_storage_objects WHERE space_id = $1) \
              AND NOT EXISTS (SELECT 1 FROM space_agent_connections WHERE space_id = $1) \
              AND NOT EXISTS (SELECT 1 FROM node_link_refs WHERE space_id = $1) \
+             AND NOT EXISTS (SELECT 1 FROM file_change_events WHERE space_id = $1 AND owner_user_id IS NULL) \
              RETURNING s.deletion_operation_id",
         )
         .bind(space_id)

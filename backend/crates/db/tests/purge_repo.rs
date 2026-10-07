@@ -21,6 +21,120 @@ use uuid::Uuid;
 static PURGE_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test]
+async fn space_purge_preserves_legacy_change_owners_before_background_encryption()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup_before(48).await? else {
+        return Ok(());
+    };
+    let (owner, space, _) =
+        common::legacy_space_with_root(&db.pool, "purge-legacy-changes").await?;
+    sqlx::query(
+        "INSERT INTO file_change_events(space_id, op_type, metadata) \
+         SELECT $1, 'text.write', '{\"item_name\":\"legacy private.md\"}'::jsonb \
+         FROM generate_series(1, 201)",
+    )
+    .bind(space)
+    .execute(&db.pool)
+    .await?;
+    for version in 48..=51 {
+        db.apply_migration(version).await?;
+    }
+    sqlx::query(
+        "UPDATE spaces SET deleted_at = now(), deleted_by_user_id = $2, \
+         purge_after = now(), purge_requested_at = now() WHERE id = $1",
+    )
+    .bind(space)
+    .bind(owner)
+    .execute(&db.pool)
+    .await?;
+
+    // Hold the same row lock that background encryption takes. Purge must
+    // preserve other owners in bounded batches without deleting this Space.
+    let mut encryption = db.pool.begin().await?;
+    let locked_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM file_change_events WHERE space_id = $1 \
+         ORDER BY id LIMIT 1 FOR UPDATE",
+    )
+    .bind(space)
+    .fetch_one(&mut *encryption)
+    .await?;
+    let purge = PurgeRepo::new(db.pool.clone());
+    for remaining in [101_i64, 1, 1] {
+        let run = purge.run_once().await?;
+        assert_eq!(run.spaces_deleted, 0);
+        assert!(run.resources_pending);
+        let state: (i64, bool) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM file_change_events \
+                 WHERE space_id = $1 AND owner_user_id IS NULL), \
+             EXISTS(SELECT 1 FROM spaces WHERE id = $1)",
+        )
+        .bind(space)
+        .fetch_one(&db.pool)
+        .await?;
+        assert_eq!(state, (remaining, true));
+    }
+    let locked_owner: Option<Uuid> =
+        sqlx::query_scalar("SELECT owner_user_id FROM file_change_events WHERE id = $1")
+            .bind(locked_id)
+            .fetch_one(&mut *encryption)
+            .await?;
+    assert_eq!(locked_owner, None);
+    encryption.rollback().await?;
+
+    let run = purge.run_once().await?;
+    assert_eq!(run.spaces_deleted, 1);
+    assert!(!run.resources_pending);
+    let preserved: (i64, i64, bool) = sqlx::query_as(
+        "SELECT count(*), count(*) FILTER (WHERE owner_user_id = $2 AND private_metadata IS NULL), \
+         EXISTS(SELECT 1 FROM spaces WHERE id = $1) \
+         FROM file_change_events WHERE space_id = $1",
+    )
+    .bind(space)
+    .bind(owner)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(preserved, (201, 201, false));
+    assert_eq!(purge.run_once().await?.spaces_deleted, 0);
+
+    // Encryption runs only after the source Space is gone. It must retain
+    // ownership and all metadata across multiple batches and history pages.
+    let history = notegate_db::ChangeHistoryRepo::new(db.pool.clone(), PiiCrypto::test());
+    for expected in [100, 100, 1, 0] {
+        assert_eq!(history.encrypt_legacy_metadata().await?, expected);
+    }
+    let mut cursor = None;
+    for expected in [100, 100, 1] {
+        let events = history
+            .list_by_owner(owner, Some(space), 100, cursor.as_ref())
+            .await?;
+        assert_eq!(events.len(), expected);
+        assert!(events.iter().all(|event| {
+            event.space_id == space && event.metadata["item_name"] == "legacy private.md"
+        }));
+        let last = events.last().unwrap();
+        cursor = Some(notegate_model::FileChangeEventCursor {
+            created_at: last.created_at,
+            id: last.id,
+        });
+    }
+    assert!(
+        history
+            .list_by_owner(owner, Some(space), 100, cursor.as_ref())
+            .await?
+            .is_empty()
+    );
+    assert!(
+        history
+            .list_by_owner(Uuid::new_v4(), Some(space), 100, None)
+            .await?
+            .is_empty()
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn purge_receipts_keep_original_groups_after_space_removal_and_expire_after_180_days()
 -> Result<(), Box<dyn std::error::Error>> {
     let _guard = PURGE_TEST_MUTEX.lock().await;
