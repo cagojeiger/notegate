@@ -1108,14 +1108,14 @@ async fn permanent_folder_request_only_updates_its_target_with_many_retained_chi
             .await?;
     sqlx::query(
         "CREATE FUNCTION reject_retained_child_update() RETURNS trigger LANGUAGE plpgsql AS $$ \
-         BEGIN IF OLD.parent_id = TG_ARGV[0]::uuid THEN RAISE EXCEPTION 'descendant updated synchronously'; \
-         END IF; RETURN NEW; END; $$",
-    ).execute(&db.pool).await?;
-    sqlx::query(&format!(
+         BEGIN RAISE EXCEPTION 'descendant updated synchronously'; END; $$",
+    )
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
         "CREATE TRIGGER reject_retained_child_update BEFORE UPDATE ON nodes \
-         FOR EACH ROW EXECUTE FUNCTION reject_retained_child_update('{}')",
-        parent.id,
-    ))
+         FOR EACH ROW WHEN (OLD.name LIKE 'retained-%') EXECUTE FUNCTION reject_retained_child_update()",
+    )
     .execute(&db.pool)
     .await?;
     repo.request_trash_purge(owner, space, Some(parent.id), parent_version)
