@@ -594,7 +594,13 @@ async fn restored_folder_history_does_not_expose_private_descendant_counts()
             .find(|event| event.op_type == "item.restore")
             .unwrap();
         if channel == Channel::Browser {
-            assert_eq!(restored.metadata["restored_nodes"], 2);
+            assert_eq!(
+                restored
+                    .metadata
+                    .get("restored_nodes")
+                    .and_then(serde_json::Value::as_i64),
+                Some(2)
+            );
         } else {
             assert!(restored.metadata.get("restored_nodes").is_none());
         }
