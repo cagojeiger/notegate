@@ -232,6 +232,9 @@ file_change_events
 ```text
 command_invocations
   id bigserial pk
+  invocation_id uuid null unique
+  snapshot_id uuid null
+  private_payload jsonb null
   created_at timestamptz not null default now()
   owner_user_id uuid not null
   actor_account_id uuid not null
@@ -247,6 +250,8 @@ command_invocations
   error_code text null
   duration_ms bigint not null check >= 0
 ```
+
+새 호출 기록의 문서 관련 필드는 `private_payload`에 암호화해서 저장한다. 호환용 `purpose`/`space_name`/`response`는 NULL, `input`은 빈 object이며 조회 시 복호화한 값을 반환한다. `invocation_id`는 Changes와의 논리적 연결이고 retention 또는 기록 실패로 연결 대상이 없을 수 있어 FK를 두지 않는다.
 
 DB는 기록 경계에서 발생한 실패도 저장할 수 있도록 `purpose`, `op`, `response`에 NULL을 허용한다. `surface`는 서버가 판정한 호출 경계이며 client 신원을 뜻하지 않는다. Column별 의미와 정규화 규칙은 `docs/spec/event-logging.md`를 따른다.
 
@@ -282,6 +287,8 @@ file_change_events_unencrypted_idx(id) where private_metadata is null
 command_invocations_owner_surface_time_idx(owner_user_id, surface, created_at desc, id desc)
 command_invocations_actor_time_idx(actor_account_id, created_at desc, id desc)
 command_invocations_retention_idx(created_at)
+command_invocations_invocation_id_idx(invocation_id) unique where invocation_id is not null
+command_invocations_unencrypted_idx(id) where private_payload is null
 ```
 
 ## Space and connection tables
@@ -524,7 +531,7 @@ DB trigger는 content row가 올바른 node kind에만 붙도록 보장한다. F
 
 ## Text revision history
 
-`text_objects.revision_*` tracks body attribution and the current editing group independently of metadata updates. `text_revisions` stores immutable encrypted past bodies and precomputed cleanup eligibility. `text_revision_usage` tracks a separate Space history-body budget; deletion releases it transactionally. All three are detailed in [Text revisions](text-revisions.md).
+`text_objects.revision_*` tracks body attribution and the current editing group independently of metadata updates. `text_revisions` stores immutable encrypted past bodies and precomputed cleanup eligibility. `text_revision_usage` tracks a separate Space history-body budget; deletion releases it transactionally. Current `revision_private_purpose` and historical `private_purpose` encrypt change reasons independently of bodies. All three are detailed in [Text revisions](text-revisions.md).
 
 ### Change snapshot persistence
 
