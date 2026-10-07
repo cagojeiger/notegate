@@ -60,12 +60,15 @@ async fn event(
     op_type: &'static str,
     mut metadata: Value,
 ) -> Result<()> {
-    metadata["source"] = json!(ctx.capture.source);
+    let values = metadata
+        .as_object_mut()
+        .ok_or_else(|| notegate_core::Error::internal("change metadata must be an object"))?;
+    values.insert("source".into(), json!(ctx.capture.source));
     if let Some(purpose) = ctx.capture.purpose {
-        metadata["purpose"] = json!(purpose);
+        values.insert("purpose".into(), json!(purpose));
     }
     if let Some(id) = ctx.before_revision_id {
-        metadata["before_revision_id"] = json!(id);
+        values.insert("before_revision_id".into(), json!(id));
     }
     insert_file_change_event(
         tx,

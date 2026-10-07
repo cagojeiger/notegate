@@ -70,14 +70,18 @@ pub(crate) async fn insert_file_change_event(
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-    event.metadata["actor_kind"] = serde_json::json!(actor_kind);
+    let values = event
+        .metadata
+        .as_object_mut()
+        .ok_or_else(|| Error::internal("change metadata must be an object"))?;
+    values.insert("actor_kind".into(), serde_json::json!(actor_kind));
     if let Some(revision) = revision {
         let key = if event.op_type == "item.delete" {
             "before_revision_id"
         } else {
             "after_revision_id"
         };
-        event.metadata[key] = serde_json::json!(revision);
+        values.insert(key.into(), serde_json::json!(revision));
     }
     let (metadata, private) = protect_metadata(crypto, event.space_id, id, event.metadata)?;
     sqlx::query(
@@ -359,6 +363,15 @@ fn decode_rows(
         .collect()
 }
 
+#[derive(FromRow)]
+struct RevisionPresence {
+    id: Uuid,
+    space_id: Uuid,
+    node_id: Uuid,
+    state: String,
+    cleanup_at: Option<DateTime<Utc>>,
+}
+
 async fn with_revision_availability(
     pool: &PgPool,
     mut events: Vec<notegate_model::FileChangeEvent>,
@@ -374,14 +387,19 @@ async fn with_revision_availability(
         })
         .collect();
     if !ids.is_empty() {
-        let statuses: Vec<(Uuid, Uuid, Uuid, String, Option<DateTime<Utc>>)> = sqlx::query_as(
-            "SELECT revision_id, space_id, node_id, 'current'::text, NULL::timestamptz FROM text_objects \
+        let statuses: Vec<RevisionPresence> = sqlx::query_as(
+            "SELECT revision_id AS id, space_id, node_id, 'current'::text AS state, NULL::timestamptz AS cleanup_at FROM text_objects \
              WHERE revision_id = ANY($1) UNION ALL \
              SELECT id, space_id, node_id, 'retained'::text, cleanup_at FROM text_revisions WHERE id = ANY($1)",
         ).bind(&ids).fetch_all(pool).await.map_err(map_sqlx_error)?;
         let statuses: std::collections::HashMap<_, _> = statuses
             .into_iter()
-            .map(|(id, space, node, state, cleanup)| ((id, space, node), (state, cleanup)))
+            .map(|row| {
+                (
+                    (row.id, row.space_id, row.node_id),
+                    (row.state, row.cleanup_at),
+                )
+            })
             .collect();
         for event in &mut events {
             for side in ["before", "after"] {
@@ -396,10 +414,18 @@ async fn with_revision_availability(
                 let status = event
                     .node_id
                     .and_then(|node| statuses.get(&(id, event.space_id, node)));
-                event.metadata[format!("{side}_revision_status")] =
-                    serde_json::json!(status.map_or("unavailable", |r| r.0.as_str()));
-                event.metadata[format!("{side}_revision_cleanup_at")] =
-                    serde_json::json!(status.and_then(|r| r.1));
+                let metadata = event
+                    .metadata
+                    .as_object_mut()
+                    .ok_or_else(|| Error::internal("change metadata must be an object"))?;
+                metadata.insert(
+                    format!("{side}_revision_status"),
+                    serde_json::json!(status.map_or("unavailable", |r| r.0.as_str())),
+                );
+                metadata.insert(
+                    format!("{side}_revision_cleanup_at"),
+                    serde_json::json!(status.and_then(|r| r.1)),
+                );
             }
         }
     }
