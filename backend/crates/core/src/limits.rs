@@ -64,9 +64,9 @@ pub const MAX_PATH_LEN: usize = 903;
 pub const MAX_PATH_DEPTH: usize = 7;
 /// Maximum live nodes per space.
 pub const SPACE_MAX_NODES: usize = 25_000;
-/// Maximum total live Text bytes per space (1 GiB).
+/// Maximum retained current Text bytes per space (1 GiB).
 pub const SPACE_MAX_TEXT_BYTES: usize = 1_073_741_824;
-/// Maximum total live File bytes per space (100 GiB).
+/// Maximum attached or deletion-pending File bytes per space (100 GiB).
 pub const SPACE_MAX_FILE_BYTES: usize = 107_374_182_400;
 /// Maximum bytes per uploaded file (100 GiB). Effective Space quota may be lower.
 pub const FILE_MAX_BYTES: usize = 107_374_182_400;
@@ -190,9 +190,9 @@ pub const ACCOUNT_DELETION_RETENTION_DAYS: i64 = 15;
 /// Days a revoked or expired API key row is retained before the purge run deletes it.
 pub const DEAD_API_KEY_RETENTION_DAYS: i64 = 30;
 /// Days a terminal object-storage ledger row is retained before the purge run deletes it.
-pub const OBJECT_STORAGE_HISTORY_RETENTION_DAYS: i64 = 90;
+pub const OBJECT_STORAGE_HISTORY_RETENTION_DAYS: i64 = 180;
 /// Days an audit event is retained before the purge run deletes it.
-pub const AUDIT_EVENT_RETENTION_DAYS: i64 = 365;
+pub const AUDIT_EVENT_RETENTION_DAYS: i64 = 180;
 /// Days a file change event is retained before the purge run deletes it.
 pub const FILE_CHANGE_EVENT_RETENTION_DAYS: i64 = 90;
 /// Days an external command invocation summary is retained before the purge run deletes it.

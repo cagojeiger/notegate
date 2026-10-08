@@ -57,7 +57,11 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
     let text_id: Uuid = serde_json::from_value(text["id"].clone())?;
 
     let upload_id = Uuid::new_v4();
-    let files = FilesRepo::new(db.pool.clone());
+    let files = FilesRepo::with_limits_and_crypto(
+        db.pool.clone(),
+        state.config.limits,
+        state.security.clone(),
+    );
     files
         .insert_object_upload(
             upload_id,

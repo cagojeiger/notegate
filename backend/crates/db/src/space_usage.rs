@@ -1,7 +1,7 @@
 //! Transactional quota enforcement and updates for Space usage counters.
 //!
 //! Lock order for every path that touches a Space's counters: per-Space
-//! gate → space owner (accounts row) → spaces row → space_usage row.
+//! gate → space owner (accounts row) → spaces row → live and stored counters.
 //! [`MutationGate`] witnesses the gate step, so counter mutations cannot
 //! compile without it.
 
@@ -125,10 +125,27 @@ pub(crate) async fn apply_quota_delta(
     delta: UsageDelta,
     limits: Limits,
 ) -> Result<()> {
-    apply_delta(tx, gate.space_id, delta, Some(limits)).await
+    apply_delta(
+        tx,
+        gate.space_id,
+        delta,
+        Some(limits),
+        (delta.text_bytes, delta.file_bytes),
+    )
+    .await
 }
 
-/// Release usage for a soft delete without blocking cleanup of over-limit data.
+/// Restore live counters without charging already-retained storage again.
+pub(crate) async fn restore_usage(
+    tx: &mut PgConnection,
+    gate: &MutationGate,
+    delta: UsageDelta,
+    limits: Limits,
+) -> Result<()> {
+    apply_delta(tx, gate.space_id, delta, Some(limits), (0, 0)).await
+}
+
+/// Release live counters only. Stored bytes remain until DB/S3 deletion succeeds.
 pub(crate) async fn release_usage(
     tx: &mut PgConnection,
     gate: &MutationGate,
@@ -137,7 +154,7 @@ pub(crate) async fn release_usage(
     if delta.nodes > 0 || delta.text_bytes > 0 || delta.file_bytes > 0 {
         return Err(Error::internal("usage release delta must not be positive"));
     }
-    apply_delta(tx, gate.space_id, delta, None).await
+    apply_delta(tx, gate.space_id, delta, None, (0, 0)).await
 }
 
 async fn apply_delta(
@@ -145,17 +162,24 @@ async fn apply_delta(
     space_id: Uuid,
     delta: UsageDelta,
     limits: Option<Limits>,
+    storage_delta: (i64, i64),
 ) -> Result<()> {
-    let current: Option<(i64, i64, i64)> = sqlx::query_as(
-        "SELECT live_node_count, live_text_bytes, live_file_bytes \
-         FROM space_usage WHERE space_id = $1 FOR UPDATE",
+    let current: Option<(i64, i64, i64, i64, i64)> = sqlx::query_as(
+        "SELECT u.live_node_count, u.live_text_bytes, u.live_file_bytes, stored.text_bytes, stored.file_bytes \
+         FROM space_usage u JOIN space_storage_usage stored ON stored.space_id = u.space_id \
+         WHERE u.space_id = $1 FOR UPDATE OF u, stored",
     )
     .bind(space_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    let (current_nodes, current_text_bytes, current_file_bytes) =
-        current.ok_or_else(|| Error::internal("live space is missing its usage counter"))?;
+    let (
+        current_nodes,
+        current_text_bytes,
+        current_file_bytes,
+        stored_text_bytes,
+        stored_file_bytes,
+    ) = current.ok_or_else(|| Error::internal("live space is missing its usage counter"))?;
 
     let projected_nodes = current_nodes
         .checked_add(delta.nodes)
@@ -171,6 +195,12 @@ async fn apply_delta(
     }
 
     if let Some(limits) = limits {
+        let stored_text_bytes = stored_text_bytes
+            .checked_add(storage_delta.0)
+            .ok_or_else(|| Error::internal("stored text byte counter overflow"))?;
+        let stored_file_bytes = stored_file_bytes
+            .checked_add(storage_delta.1)
+            .ok_or_else(|| Error::internal("stored file byte counter overflow"))?;
         let max_nodes = i64::try_from(limits.space_max_nodes)
             .map_err(|_error| Error::internal("space node limit exceeds bigint"))?;
         let max_text_bytes = i64::try_from(limits.space_max_text_bytes)
@@ -183,15 +213,15 @@ async fn apply_delta(
                 limits.space_max_nodes
             )));
         }
-        if delta.text_bytes > 0 && projected_text_bytes > max_text_bytes {
+        if storage_delta.0 > 0 && stored_text_bytes > max_text_bytes {
             return Err(Error::conflict(format!(
-                "space Text content would exceed the maximum of {} bytes; delete or split Text items",
+                "space Text content would exceed the maximum of {} bytes; permanently delete retained Text items or reduce content",
                 limits.space_max_text_bytes
             )));
         }
-        if delta.file_bytes > 0 && projected_file_bytes > max_file_bytes {
+        if storage_delta.1 > 0 && stored_file_bytes > max_file_bytes {
             return Err(Error::conflict(format!(
-                "space files would exceed the maximum of {} bytes; delete files",
+                "space files would exceed the maximum of {} bytes; permanently delete files and wait for storage cleanup",
                 limits.space_max_file_bytes
             )));
         }

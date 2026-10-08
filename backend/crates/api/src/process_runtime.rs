@@ -65,9 +65,16 @@ impl ProcessRuntime {
         &mut self,
         pool: &PgPool,
         object_storage: ObjectStorage,
+        crypto: notegate_core::security::PiiCrypto,
     ) -> anyhow::Result<()> {
         let job_kinds = background_jobs::registered_job_kinds();
-        let task = reconciliations::spawn(pool, object_storage, &job_kinds, self.shutdown.clone())?;
+        let task = reconciliations::spawn(
+            pool,
+            object_storage,
+            crypto,
+            &job_kinds,
+            self.shutdown.clone(),
+        )?;
         self.critical_tasks
             .push("reconciliation runtime", Some(task));
         Ok(())

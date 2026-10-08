@@ -24,7 +24,11 @@ impl InvocationSurface {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct InvocationId(pub(crate) uuid::Uuid);
+
 pub(crate) struct InvocationRecord<'a> {
+    pub(crate) id: Option<uuid::Uuid>,
     pub(crate) surface: InvocationSurface,
     pub(crate) tool: &'a str,
     pub(crate) op: Option<&'a str>,
@@ -51,6 +55,7 @@ pub(crate) async fn record(state: &AppState, caller: &Caller, invocation: Invoca
     if let Err(error) = state
         .command_invocations
         .insert(NewCommandInvocation {
+            invocation_id: invocation.id,
             owner_user_id,
             actor_account_id: caller.account_id(),
             caller_kind,

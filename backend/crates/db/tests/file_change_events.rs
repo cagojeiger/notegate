@@ -291,3 +291,221 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn encrypted_change_snapshots_keep_version_references_after_body_and_space_removal()
+-> Result<(), Box<dyn std::error::Error>> {
+    use chrono::{DateTime, Duration, Utc};
+    use notegate_core::security::PiiCrypto;
+    use notegate_db::ChangeHistoryRepo;
+    use uuid::Uuid;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "snapshot-history").await?;
+    let clock: DateTime<Utc> = "2026-01-01T00:00:00Z".parse()?;
+    let repo = FilesRepo::new(db.pool.clone())
+        .with_revision_context("mcp", Some(Uuid::new_v4()))
+        .with_revision_time(clock)
+        .with_revision_purpose(Some("Create confidential report".into()));
+    let (node, _) = repo
+        .insert_text(space, root, "confidential.md", &text("first"), owner)
+        .await?;
+    repo.clone()
+        .with_revision_time(clock + Duration::seconds(60))
+        .with_revision_purpose(Some("Correct confidential report".into()))
+        .save_text_content(
+            space,
+            node.id,
+            &text("second"),
+            None,
+            owner,
+            TextMutationKind::Write,
+        )
+        .await?;
+    let events = repo
+        .list_file_change_events(space, Some(node.id), 10, None)
+        .await?;
+    let saved = &events[0];
+    assert_eq!(saved.metadata["purpose"], "Correct confidential report");
+    assert_eq!(saved.metadata["source"], "mcp");
+    assert_eq!(saved.metadata["actor_kind"], "user");
+    assert_eq!(
+        saved.metadata["before_revision_id"],
+        events[1].metadata["after_revision_id"]
+    );
+    assert_eq!(saved.metadata["before_revision_status"], "retained");
+    assert_eq!(saved.metadata["after_revision_status"], "current");
+    assert!(saved.operation_id.is_some());
+    let before_id = saved.metadata["before_revision_id"].clone();
+    let (public, private): (serde_json::Value, serde_json::Value) =
+        sqlx::query_as("SELECT metadata, private_metadata FROM file_change_events WHERE id=$1")
+            .bind(saved.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert!(public.get("item_name").is_none());
+    assert!(public.get("purpose").is_none());
+    assert!(public.get("byte_len_after").is_none());
+    assert!(!private.to_string().contains("confidential"));
+    // A no-op does not create a revision or a purported successful change.
+    repo.save_text_content(
+        space,
+        node.id,
+        &text("second"),
+        None,
+        owner,
+        TextMutationKind::Write,
+    )
+    .await?;
+    assert_eq!(
+        repo.list_file_change_events(space, Some(node.id), 10, None)
+            .await?
+            .len(),
+        2
+    );
+    assert_eq!(
+        // The initial revision is a checkpoint retained for 30 days.
+        notegate_db::files::revisions::cleanup_at(&db.pool, clock + Duration::days(31)).await?,
+        1
+    );
+    let events = repo
+        .list_file_change_events(space, Some(node.id), 10, None)
+        .await?;
+    assert_eq!(events[0].metadata["before_revision_id"], before_id);
+    assert_eq!(events[0].metadata["before_revision_status"], "deleted");
+    assert_eq!(
+        events[0].metadata["before_revision_deletion_reason"],
+        "checkpoint_expired"
+    );
+    assert!(events[0].metadata["before_revision_deleted_at"].is_string());
+    assert_eq!(events[0].metadata["purpose"], "Correct confidential report");
+    // Force the resource cascade: history authorization must not depend on its existence.
+    sqlx::query("DELETE FROM spaces WHERE id=$1")
+        .bind(space)
+        .execute(&db.pool)
+        .await?;
+    let history = ChangeHistoryRepo::new(db.pool.clone(), PiiCrypto::test());
+    let retained = history.list_by_owner(owner, Some(space), 10, None).await?;
+    assert_eq!(retained.len(), 2);
+    assert_eq!(retained[0].metadata["item_name"], "confidential.md");
+    assert_eq!(retained[0].metadata["after_revision_status"], "deleted");
+    assert_eq!(
+        retained[0].metadata["after_revision_deletion_reason"],
+        "unknown"
+    );
+    assert!(retained[0].metadata["after_revision_deleted_at"].is_string());
+    assert!(
+        history
+            .list_by_owner(Uuid::new_v4(), None, 10, None)
+            .await?
+            .is_empty()
+    );
+    // AEAD prevents copying a protected snapshot into another event in the same Space.
+    sqlx::query("UPDATE file_change_events SET private_metadata=$2 WHERE id=$1")
+        .bind(retained[1].id)
+        .bind(private)
+        .execute(&db.pool)
+        .await?;
+    assert!(history.list_by_owner(owner, None, 10, None).await.is_err());
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn change_snapshot_failure_rolls_back_document_and_revision()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "snapshot-rollback").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let (node, _) = repo
+        .insert_text(space, root, "note.md", &text("first"), owner)
+        .await?;
+    sqlx::raw_sql("CREATE FUNCTION reject_snapshot() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'snapshot failure'; END $$; CREATE TRIGGER reject_snapshot BEFORE INSERT ON file_change_events FOR EACH ROW EXECUTE FUNCTION reject_snapshot();")
+        .execute(&db.pool).await?;
+    assert!(
+        repo.save_text_content(
+            space,
+            node.id,
+            &text("second"),
+            None,
+            owner,
+            TextMutationKind::Write
+        )
+        .await
+        .is_err()
+    );
+    let content: String =
+        sqlx::query_scalar("SELECT content_text FROM text_objects WHERE node_id=$1")
+            .bind(node.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(content, "first");
+    assert!(
+        repo.list_text_revisions(space, node.id, 10, None)
+            .await?
+            .revisions
+            .is_empty()
+    );
+    assert_eq!(
+        repo.list_file_change_events(space, None, 10, None)
+            .await?
+            .len(),
+        1
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn legacy_snapshot_migration_preserves_only_provable_ownership_and_encrypts_in_batches()
+-> Result<(), Box<dyn std::error::Error>> {
+    use notegate_core::security::PiiCrypto;
+    use notegate_db::ChangeHistoryRepo;
+    use uuid::Uuid;
+    let Some(db) = TestDb::setup_before(48).await? else {
+        return Ok(());
+    };
+    let (owner, space, _) = space_with_root(&db.pool, "legacy-change-snapshots").await?;
+    sqlx::query("INSERT INTO file_change_events(space_id, op_type, metadata) SELECT $1, 'text.write', '{\"item_name\":\"legacy private.md\",\"name_changed\":false}'::jsonb FROM generate_series(1,101)")
+        .bind(space).execute(&db.pool).await?;
+    let (_, missing_space, _) = space_with_root(&db.pool, "removed-legacy-space").await?;
+    sqlx::query("INSERT INTO file_change_events(space_id, op_type, metadata) VALUES($1,'item.delete','{\"item_name\":\"orphan.md\"}')")
+        .bind(missing_space).execute(&db.pool).await?;
+    sqlx::query("DELETE FROM spaces WHERE id=$1")
+        .bind(missing_space)
+        .execute(&db.pool)
+        .await?;
+    db.apply_migration(48).await?;
+    let history = ChangeHistoryRepo::new(db.pool.clone(), PiiCrypto::test());
+    assert_eq!(history.encrypt_legacy_metadata().await?, 100);
+    assert_eq!(history.encrypt_legacy_metadata().await?, 2);
+    assert_eq!(history.encrypt_legacy_metadata().await?, 0);
+    let events = history.list_by_owner(owner, None, 100, None).await?;
+    assert_eq!(events.len(), 100);
+    assert!(
+        events
+            .iter()
+            .all(|e| e.metadata["item_name"] == "legacy private.md")
+    );
+    assert!(events.iter().all(|e| {
+        !e.metadata
+            .as_object()
+            .unwrap()
+            .contains_key("after_revision_id")
+    }));
+    let plaintext: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM file_change_events WHERE metadata ? 'item_name'")
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(plaintext, 0);
+    let orphan_owner: Option<Uuid> =
+        sqlx::query_scalar("SELECT owner_user_id FROM file_change_events WHERE space_id=$1")
+            .bind(missing_space)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(orphan_owner, None);
+    db.cleanup().await;
+    Ok(())
+}

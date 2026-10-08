@@ -7,17 +7,29 @@ mod history;
 mod identities;
 mod resources;
 
+use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use sqlx::PgPool;
 
 #[derive(Debug, Clone)]
 pub struct PurgeRepo {
     pool: PgPool,
+    history_time: Option<DateTime<Utc>>,
 }
 
 impl PurgeRepo {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            history_time: None,
+        }
+    }
+
+    /// Fix the history retention clock without changing resource cleanup time.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn with_history_time(mut self, now: DateTime<Utc>) -> Self {
+        self.history_time = Some(now);
+        self
     }
 
     /// Run cleanup groups in order, committing each resource batch separately.
@@ -34,9 +46,11 @@ impl PurgeRepo {
         let identities = identities::purge(&self.pool).await.inspect_err(|error| {
             tracing::warn!(event = "purge.group_failed", group = "identities", %error);
         });
-        let history = history::purge(&self.pool).await.inspect_err(|error| {
-            tracing::warn!(event = "purge.group_failed", group = "history", %error);
-        });
+        let history = history::purge(&self.pool, self.history_time)
+            .await
+            .inspect_err(|error| {
+                tracing::warn!(event = "purge.group_failed", group = "history", %error);
+            });
 
         let resources = resources?;
         let identities = identities?;

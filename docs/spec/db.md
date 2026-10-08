@@ -27,6 +27,7 @@ file_change_events
 command_invocations
 spaces
 space_usage
+space_storage_usage
 background_jobs
 background_job_attempts
 space_agent_connections
@@ -206,29 +207,35 @@ audit_events
   metadata jsonb not null default '{}'
 ```
 
-`audit_events`는 account, browser session, credential, agent, space, connection 관리 변경을 기록한다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
+`audit_events`는 account, browser session, credential, agent, space, connection 관리 변경과 node/Space DB 정리 완료를 기록한다. 완료 기록은 원본 삭제와 같은 transaction에 저장하며 리소스 삭제 뒤에도 identifier snapshot으로 180일 보존한다. `object.delete`는 별도로 S3 삭제 acknowledgement를 기록한다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
 ```text
 file_change_events
   id bigserial pk
   operation_id uuid null
   created_at timestamptz not null default now()
+  owner_user_id uuid null
   space_id uuid not null
   node_id uuid null
   actor_account_id uuid null
   op_type text not null
   metadata jsonb not null default '{}'
+  private_metadata jsonb null
+  snapshot_id uuid null
 ```
 
 `file_change_events`는 space 안의 파일/폴더/문서 변경을 기록하며 space 전체 조회와 node별 조회를 위한 index를 둔다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
-`operation_id`는 휴지통 lifecycle 작업마다 생성하는 UUID이며 event의 순서/cursor인 `id`와 별개다. `nodes`/`spaces.deletion_operation_id`는 현재 삭제 작업을 식별한다. `nodes.deletion_target_node_id`는 해당 노드를 포함한 삭제 요청이 직접 대상으로 삼은 노드 ID다. 대상 노드는 자기 ID를, 함께 삭제한 자손은 같은 대상 ID를 저장한다. 직접 부모나 파일 트리의 root를 뜻하지 않으며, 먼저 개별 삭제했던 자손의 값은 변경하지 않는다. 이 식별자에는 FK를 두지 않으며 기존 행은 NULL로 유지한다.
+`operation_id`는 새 Changes 및 휴지통 lifecycle 작업마다 생성하는 UUID이며 event의 순서/cursor인 `id`와 별개다. `nodes`/`spaces.deletion_operation_id`는 현재 삭제 작업을 식별한다. `nodes.deletion_target_node_id`는 해당 노드를 포함한 삭제 요청이 직접 대상으로 삼은 노드 ID다. 대상 노드는 자기 ID를, 함께 삭제한 자손은 같은 대상 ID를 저장한다. 직접 부모나 파일 트리의 root를 뜻하지 않으며, 먼저 개별 삭제했던 자손의 값은 변경하지 않는다. 이 식별자에는 FK를 두지 않으며 기존 행은 NULL로 유지한다.
 
 `command_invocations`는 domain event와 분리된 MCP·CLI 실행 이력이다. 저장 대상과 redaction, 크기 제한, retention 계약은 `docs/spec/event-logging.md`가 소유한다.
 
 ```text
 command_invocations
   id bigserial pk
+  invocation_id uuid null unique
+  snapshot_id uuid null
+  private_payload jsonb null
   created_at timestamptz not null default now()
   owner_user_id uuid not null
   actor_account_id uuid not null
@@ -244,6 +251,8 @@ command_invocations
   error_code text null
   duration_ms bigint not null check >= 0
 ```
+
+새 호출 기록의 문서 관련 필드는 `private_payload`에 암호화해서 저장한다. 호환용 `purpose`/`space_name`/`response`는 NULL, `input`은 빈 object이며 조회 시 복호화한 값을 반환한다. `invocation_id`는 Changes와의 논리적 연결이고 retention 또는 기록 실패로 연결 대상이 없을 수 있어 FK를 두지 않는다.
 
 DB는 기록 경계에서 발생한 실패도 저장할 수 있도록 `purpose`, `op`, `response`에 NULL을 허용한다. `surface`는 서버가 판정한 호출 경계이며 client 신원을 뜻하지 않는다. Column별 의미와 정규화 규칙은 `docs/spec/event-logging.md`를 따른다.
 
@@ -273,10 +282,14 @@ file_change_events_space_id_idx(space_id, id)
 file_change_events_actor_time_idx(actor_account_id, created_at desc, id desc)
 file_change_events_retention_idx(created_at)
 file_change_events_operation_idx(space_id, operation_id) where operation_id is not null
+file_change_events_owner_time_idx(owner_user_id, created_at desc, id desc) where owner_user_id is not null
+file_change_events_unencrypted_idx(id) where private_metadata is null
 
 command_invocations_owner_surface_time_idx(owner_user_id, surface, created_at desc, id desc)
 command_invocations_actor_time_idx(actor_account_id, created_at desc, id desc)
 command_invocations_retention_idx(created_at)
+command_invocations_invocation_id_idx(invocation_id) unique where invocation_id is not null
+command_invocations_unencrypted_idx(id) where private_payload is null
 ```
 
 ## Space and connection tables
@@ -317,7 +330,18 @@ space_usage
   reconciled_at timestamptz not null
 ```
 
-`space_usage`는 일반 쿼터 검사와 Usage 조회를 위한 authoritative counter를 보관한다. Root node는 `live_node_count`에 포함한다. Space 생성은 root node와 usage row를 같은 transaction에서 만든다. File-tree 변경은 예상 delta를 검증하고 source row와 counter를 같은 transaction에서 갱신한다. 정확한 계산과 복구 기준은 `usage-and-quotas.md`를 따른다.
+`space_usage`는 활성 항목 수와 활성 본문 bytes를 보관한다. Byte quota는 `space_storage_usage`의 보관량을 사용한다. Root node는 `live_node_count`에 포함한다. Space 생성은 root node와 usage row를 같은 transaction에서 만든다. File-tree 변경은 예상 delta를 검증하고 source row와 counter를 같은 transaction에서 갱신한다. 정확한 계산과 복구 기준은 `usage-and-quotas.md`를 따른다.
+
+```text
+space_storage_usage
+  space_id uuid pk -- no FK
+  owner_user_id uuid not null -- immutable ownership, no FK
+  text_bytes bigint not null check >= 0
+  file_bytes bigint not null check >= 0
+```
+
+이름/본문 없이 소유자와 용량만 저장한다. Text source 및 object 상태 trigger가 갱신하며 Space 제거 뒤 S3 삭제가 끝날 때까지 유지한다. Byte가 0이고 Space와 nonterminal object 참조가 없으면 bounded history cleanup에서 제거한다.
+
 
 ```text
 background_jobs
@@ -445,13 +469,14 @@ file_objects
 
 `File` metadata는 `file_objects`에 저장하고 실제 bytes는 S3 호환 저장소에 저장한다. NoteGate는 외부에 노출하지 않는 `object_key`만 저장한다. `media_type`은 client 선언값이고 `detected_media_type`은 object bytes에서 감지한 값이다. `NULL`은 아직 감지하지 못한 상태다.
 
-Space content quota는 `space_usage.live_text_bytes`와 `space_usage.live_file_bytes`로 독립 검사한다. Text는 `text_objects.byte_len`, File은 `file_objects.byte_len`을 사용한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다.
+Space content quota는 `space_storage_usage.text_bytes`와 `file_bytes`로 독립 검사한다. 휴지통 Text와 attached/delete_pending object bytes를 포함하며 DB/S3 완료 transaction이 용량을 반환한다. 과거 revision 본문은 별도 예산이다.
 
 ```text
 object_storage_objects
   id uuid pk
   object_key text unique not null
   space_id/parent_node_id/node_id/requested_by_account_id uuid null
+  usage_space_id uuid null -- immutable accounting scope, no FK
   name/declared_byte_len/media_type/encryption metadata
   upload_mode text check ('single','multipart')
   multipart_upload_id text null
@@ -462,7 +487,9 @@ object_storage_objects
   deletion_operation_id uuid null
 ```
 
-`object_storage_objects`는 업로드 연결과 물리 삭제 재시도를 위한 운영 원장이다. Node/Space soft delete는 현재 본문과 연결된 object를 30일 보존한다. 보관 기간 만료 또는 사용자 영구 삭제 요청 이후 hard purge가 object를 `delete_pending`으로 전환한 뒤 semantic rows를 제거한다. Purge는 객체 원장의 `deletion_operation_id`에 원래 node 삭제 ID(없으면 Space 삭제 ID)를 복사한다. 원장은 Node/Space purge 뒤에도 남도록 참조 FK가 `ON DELETE SET NULL`이며, `expired`/`deleted` 이력은 cluster-singleton purge가 90일 뒤 bounded batch로 삭제한다. Retention 조회는 terminal state와 `COALESCE(deleted_at, last_activity_at)` 순서의 partial index를 사용한다. `expire_pending`과 `delete_pending`은 S3 삭제 실패를 재시도하는 중간 상태다.
+`object_storage_objects`는 업로드 연결과 물리 삭제 재시도를 위한 운영 원장이다. Node/Space soft delete는 현재 본문과 연결된 object를 30일 보존한다. 보관 기간 만료 또는 사용자 영구 삭제 요청 이후 hard purge가 object를 `delete_pending`으로 전환한 뒤 semantic rows를 제거한다. Purge는 객체 원장의 `deletion_operation_id`에 원래 node 삭제 ID(없으면 Space 삭제 ID)를 복사한다. 원장은 Node/Space purge 뒤에도 남도록 참조 FK가 `ON DELETE SET NULL`이며, `expired`/`deleted` 이력은 cluster-singleton purge가 180일 뒤 bounded batch로 삭제한다. Retention 조회는 terminal state와 `COALESCE(deleted_at, last_activity_at)` 순서의 partial index를 사용한다. `expire_pending`과 `delete_pending`은 S3 삭제 실패를 재시도하는 중간 상태다.
+
+`usage_space_id`는 최초 Space ID를 보존하고 FK가 NULL이 되어도 유지한다. 이미 소속이 끊긴 legacy object는 NULL이다. S3 삭제 성공 후 `deleted` 전환, 저장 용량 감소, `object.delete` receipt를 하나의 transaction으로 처리한다. Provider 내부 disk GC는 이 완료 기준에 포함하지 않는다.
 
 Content FK invariant:
 
@@ -519,4 +546,8 @@ DB trigger는 content row가 올바른 node kind에만 붙도록 보장한다. F
 
 ## Text revision history
 
-`text_objects.revision_*` tracks body attribution and the current editing group independently of metadata updates. `text_revisions` stores immutable encrypted past bodies and precomputed cleanup eligibility. `text_revision_usage` tracks a separate Space history-body budget; deletion releases it transactionally. All three are detailed in [Text revisions](text-revisions.md).
+`text_objects.revision_*` tracks body attribution and the current editing group independently of metadata updates. `text_revisions` stores immutable encrypted past bodies and precomputed cleanup eligibility. `text_revision_usage` tracks a separate Space history-body budget; deletion releases it transactionally. Current `revision_private_purpose` and historical `private_purpose` encrypt change reasons independently of bodies. All three are detailed in [Text revisions](text-revisions.md).
+
+### Change snapshot persistence
+
+`file_change_events.owner_user_id`는 소유 이력 조회를 위한 변경 당시 소유자 ID이며 resource FK를 두지 않는다. `private_metadata`에는 행/Space에 묶인 암호화 envelope를 저장한다. `metadata`에는 식별자와 구조 플래그만 남긴다. 소유자·시각 인덱스는 삭제된 Space의 이력 조회에 사용한다. 버전 존재 조회는 `text_objects.revision_id` unique index와 `text_revisions` PK를 사용하고 본문은 읽지 않는다.

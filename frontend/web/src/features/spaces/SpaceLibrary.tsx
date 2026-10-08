@@ -5,6 +5,7 @@ import type { UpdateSpaceInput } from "../../api/spaces";
 import type { Space } from "../../api/types";
 import type { CurrentUserUsage } from "../../api/usage";
 import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
+import { formatBytes } from "../../shared/lib/formatBytes";
 import { Button, Card, Modal } from "../../shared/ui";
 import { SortableSpaceGrid } from "./SortableSpaceGrid";
 import { SpaceInspector, type SpaceInspectorProps } from "./SpaceInspector";
@@ -46,6 +47,7 @@ export function SpaceLibrary({
     [usageQuery.data?.spaces]
   );
   const selectedUsage = selectedSpace ? usageBySpaceId.get(selectedSpace.id) : undefined;
+  const deletedStorage = usageQuery.data?.deleted_spaces;
   const currentUsageState = usageState(usageQuery);
   const updatePending = updateSpace.isPending || updateInspectorSpace.isPending;
   const selectedCheckError = checkUsage.isError && checkUsage.variables === selectedSpace?.id
@@ -130,6 +132,15 @@ export function SpaceLibrary({
                 />
               </section>
             )}
+            {deletedStorage && deletedStorage.count > 0 ? (
+              <section aria-label="Retained storage" className="mt-6 space-y-3">
+                <h2 className="text-sm font-medium">Retained storage</h2>
+                <Card className="space-y-2 p-4 text-xs">
+                  <p>{deletedStorage.count} deleted {deletedStorage.count === 1 ? "space" : "spaces"} still use storage while in trash or awaiting file deletion.</p>
+                  <p className="text-muted">Text {formatBytes(deletedStorage.text_bytes)} · Files {formatBytes(deletedStorage.file_bytes)}</p>
+                </Card>
+              </section>
+            ) : null}
           </div>
         </div>
       </section>

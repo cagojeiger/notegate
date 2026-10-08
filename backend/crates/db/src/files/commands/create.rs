@@ -21,8 +21,10 @@ use crate::file_change_events;
 use crate::space_usage::{self, UsageDelta};
 
 /// Insert a folder under `parent_id`, attributing it to `created_by`.
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_folder(
     pool: &PgPool,
+    capture: file_change_events::ChangeCapture<'_>,
     external_only: bool,
     space_id: Uuid,
     parent_id: Uuid,
@@ -58,7 +60,7 @@ pub async fn insert_folder(
 
     file_change_events::folder_created(
         &mut tx,
-        file_change_events::context(created_by, space_id),
+        file_change_events::context(created_by, space_id, capture),
         row.id,
         &row.name,
         parent_id,
@@ -72,6 +74,7 @@ pub async fn insert_folder(
 /// Insert a text node + its `text_objects` row, attributing both to
 /// `created_by`. `content` carries the pre-computed metrics from the service.
 pub struct InsertTextArgs<'a> {
+    pub capture: file_change_events::ChangeCapture<'a>,
     pub pool: &'a PgPool,
     pub external_only: bool,
     pub crypto: &'a PiiCrypto,
@@ -88,6 +91,7 @@ pub struct InsertTextArgs<'a> {
 
 pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)> {
     let InsertTextArgs {
+        capture,
         pool,
         external_only,
         crypto,
@@ -140,13 +144,21 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
         space_id,
         node_row.id,
     )?;
+    let revision_id = Uuid::new_v4();
+    let private_purpose = super::super::revisions::protect_purpose(
+        crypto,
+        space_id,
+        node_row.id,
+        revision_id,
+        revision_purpose,
+    )?;
     let doc_row = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
             "WITH clock AS MATERIALIZED (SELECT COALESCE($17::timestamptz, clock_timestamp()) AS written_at) \
          INSERT INTO text_objects \
             (node_id, space_id, storage_format, content_text, encrypted_payload, content_sha256, byte_len, line_count, \
              at_rest_encryption, content_ciphertext, content_nonce, content_enc_key_id, content_enc_version, \
-             created_by_account_id, updated_by_account_id, revision_source, revision_purpose, revision_written_at, revision_group_started_at) \
-         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14, $15, $16, clock.written_at, clock.written_at FROM clock \
+             created_by_account_id, updated_by_account_id, revision_source, revision_private_purpose, revision_written_at, revision_group_started_at, revision_id) \
+         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14, $15, $16, clock.written_at, clock.written_at, $18 FROM clock \
          RETURNING {TEXT_COLUMNS}"
         )))
         .bind(node_row.id)
@@ -164,15 +176,16 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
         .bind(stored.content_enc_version)
         .bind(created_by)
         .bind(revision_source)
-        .bind(revision_purpose)
+        .bind(private_purpose)
         .bind(revision_time)
+        .bind(revision_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
 
     file_change_events::text_created(
         &mut tx,
-        file_change_events::context(created_by, space_id),
+        file_change_events::context(created_by, space_id, capture),
         node_row.id,
         &node_row.name,
         parent_id,

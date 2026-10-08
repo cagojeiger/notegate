@@ -83,6 +83,19 @@ describe("SpaceLibrary usage", () => {
     expect(screen.getByRole("progressbar", { name: "Items usage" })).toHaveAttribute("aria-valuenow", "319");
   });
 
+  it("explains retained content and keeps deleted spaces out of active navigation", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({
+      ...usage,
+      spaces: [{ ...usage.spaces[0], retained_text_bytes: 1024, retained_file_bytes: 2048 }],
+      deleted_spaces: { count: 200, text_bytes: 0, file_bytes: 4096 }
+    }));
+    renderLibrary();
+    expect(await screen.findByText(/Includes retained content: 1 KB text and 2 KB files/)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Retained storage" })).toHaveTextContent("200 deleted spaces");
+    expect(screen.getByRole("region", { name: "Retained storage" })).toHaveTextContent("Files 4 KB");
+    expect(screen.queryByRole("button", { name: /Recalculate Deleted space/ })).not.toBeInTheDocument();
+  });
+
   it("consumes the desktop polling owner's cached usage without a second request", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse(usage));
 

@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
-import { getBackgroundJob, listAuditEvents, listBackgroundJobs, listCommandInvocations, listFileChangeEvents } from "../../api/events";
+import { getBackgroundJob, listAuditEvents, listBackgroundJobs, listCommandInvocations, listFileChangeEvents, listOwnedFileChangeEvents } from "../../api/events";
 import { queryKeys } from "../../api/queryKeys";
 import type { CommandInvocationSurface } from "../../api/types";
 
@@ -51,16 +51,17 @@ export function useBackgroundJobQuery(jobId: string, enabled: boolean) {
   });
 }
 
-export function useFileChangeEventsQuery(spaceId: string | null, nodeId: string | null) {
+export function useFileChangeEventsQuery(spaceId: string | null, nodeId: string | null, ownedHistory = false) {
   const client = useApiClient();
   return useInfiniteQuery({
-    queryKey: spaceId ? queryKeys.fileChangeEvents(spaceId, nodeId) : queryKeys.fileChangeEvents("none", nodeId),
+    queryKey: ownedHistory ? ["ownedFileChangeEvents"] : spaceId ? queryKeys.fileChangeEvents(spaceId, nodeId) : queryKeys.fileChangeEvents("none", nodeId),
     queryFn: ({ pageParam }) => {
+      if (ownedHistory) return listOwnedFileChangeEvents(client, pageParam);
       if (!spaceId) throw new Error("Space is required");
       return listFileChangeEvents(client, spaceId, { nodeId, cursor: pageParam });
     },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => (lastPage.page.has_more ? lastPage.page.next_cursor : undefined),
-    enabled: Boolean(spaceId)
+    enabled: ownedHistory || Boolean(spaceId)
   });
 }

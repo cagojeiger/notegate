@@ -21,6 +21,294 @@ use uuid::Uuid;
 static PURGE_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test]
+async fn space_purge_preserves_legacy_change_owners_before_background_encryption()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup_before(48).await? else {
+        return Ok(());
+    };
+    let (owner, space, _) =
+        common::legacy_space_with_root(&db.pool, "purge-legacy-changes").await?;
+    sqlx::query(
+        "INSERT INTO file_change_events(space_id, op_type, metadata) \
+         SELECT $1, 'text.write', '{\"item_name\":\"legacy private.md\"}'::jsonb \
+         FROM generate_series(1, 201)",
+    )
+    .bind(space)
+    .execute(&db.pool)
+    .await?;
+    for version in 48..=51 {
+        db.apply_migration(version).await?;
+    }
+    sqlx::query(
+        "UPDATE spaces SET deleted_at = now(), deleted_by_user_id = $2, \
+         purge_after = now(), purge_requested_at = now() WHERE id = $1",
+    )
+    .bind(space)
+    .bind(owner)
+    .execute(&db.pool)
+    .await?;
+
+    // Hold the same row lock that background encryption takes. Purge must
+    // preserve other owners in bounded batches without deleting this Space.
+    let mut encryption = db.pool.begin().await?;
+    let locked_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM file_change_events WHERE space_id = $1 \
+         ORDER BY id LIMIT 1 FOR UPDATE",
+    )
+    .bind(space)
+    .fetch_one(&mut *encryption)
+    .await?;
+    let purge = PurgeRepo::new(db.pool.clone());
+    for remaining in [101_i64, 1, 1] {
+        let run = purge.run_once().await?;
+        assert_eq!(run.spaces_deleted, 0);
+        assert!(run.resources_pending);
+        let state: (i64, bool) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM file_change_events \
+                 WHERE space_id = $1 AND owner_user_id IS NULL), \
+             EXISTS(SELECT 1 FROM spaces WHERE id = $1)",
+        )
+        .bind(space)
+        .fetch_one(&db.pool)
+        .await?;
+        assert_eq!(state, (remaining, true));
+    }
+    let locked_owner: Option<Uuid> =
+        sqlx::query_scalar("SELECT owner_user_id FROM file_change_events WHERE id = $1")
+            .bind(locked_id)
+            .fetch_one(&mut *encryption)
+            .await?;
+    assert_eq!(locked_owner, None);
+    encryption.rollback().await?;
+
+    let run = purge.run_once().await?;
+    assert_eq!(run.spaces_deleted, 1);
+    assert!(!run.resources_pending);
+    let preserved: (i64, i64, bool) = sqlx::query_as(
+        "SELECT count(*), count(*) FILTER (WHERE owner_user_id = $2 AND private_metadata IS NULL), \
+         EXISTS(SELECT 1 FROM spaces WHERE id = $1) \
+         FROM file_change_events WHERE space_id = $1",
+    )
+    .bind(space)
+    .bind(owner)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(preserved, (201, 201, false));
+    assert_eq!(purge.run_once().await?.spaces_deleted, 0);
+
+    // Encryption runs only after the source Space is gone. It must retain
+    // ownership and all metadata across multiple batches and history pages.
+    let history = notegate_db::ChangeHistoryRepo::new(db.pool.clone(), PiiCrypto::test());
+    for expected in [100, 100, 1, 0] {
+        assert_eq!(history.encrypt_legacy_metadata().await?, expected);
+    }
+    let mut cursor = None;
+    for expected in [100, 100, 1] {
+        let events = history
+            .list_by_owner(owner, Some(space), 100, cursor.as_ref())
+            .await?;
+        assert_eq!(events.len(), expected);
+        assert!(events.iter().all(|event| {
+            event.space_id == space && event.metadata["item_name"] == "legacy private.md"
+        }));
+        let last = events.last().unwrap();
+        cursor = Some(notegate_model::FileChangeEventCursor {
+            created_at: last.created_at,
+            id: last.id,
+        });
+    }
+    assert!(
+        history
+            .list_by_owner(owner, Some(space), 100, cursor.as_ref())
+            .await?
+            .is_empty()
+    );
+    assert!(
+        history
+            .list_by_owner(Uuid::new_v4(), Some(space), 100, None)
+            .await?
+            .is_empty()
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn purge_receipts_keep_original_groups_after_space_removal_and_expire_after_180_days()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "purge-receipts").await?;
+    let other_owner = insert_user_account(&db.pool, "other-receipts", "other@example.test").await?;
+    let parent = retained_node(&db.pool, space, root, owner, "folder", false).await?;
+    let child = retained_node(&db.pool, space, parent, owner, "text", false).await?;
+    let files = notegate_db::FilesRepo::new(db.pool.clone());
+    let (file, _) = attach_file(&files, space, root, "private-name.bin", 10, owner).await?;
+    files.soft_delete_node(space, file.id, owner, false).await?;
+    let original: Vec<(Uuid, String, Uuid, Uuid)> = sqlx::query_as(
+        "SELECT id, kind, deletion_operation_id, deletion_target_node_id FROM nodes \
+         WHERE id = ANY($1) ORDER BY id",
+    )
+    .bind(vec![parent, child, file.id])
+    .fetch_all(&db.pool)
+    .await?;
+    let space_operation = Uuid::new_v4();
+    sqlx::query(
+        "UPDATE spaces SET deleted_at = now(), deleted_by_user_id = $2, \
+         purge_after = now() - interval '1 second', deletion_operation_id = $3 WHERE id = $1",
+    )
+    .bind(space)
+    .bind(owner)
+    .bind(space_operation)
+    .execute(&db.pool)
+    .await?;
+
+    let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!((first.nodes_deleted, first.spaces_deleted), (2, 0));
+    let second = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!((second.nodes_deleted, second.spaces_deleted), (1, 1));
+    let repeated = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!((repeated.nodes_deleted, repeated.spaces_deleted), (0, 0));
+
+    let history = notegate_db::AuditEventRepo::new(db.pool.clone());
+    let events = history.list_by_owner(owner, 100, None).await?;
+    let receipts: Vec<_> = events
+        .iter()
+        .filter(|event| event.op_type.ends_with(".purge"))
+        .collect();
+    assert_eq!(
+        receipts.len(),
+        4,
+        "one receipt per removed resource, none for the internal root"
+    );
+    for (id, kind, operation, target) in original {
+        let receipt = receipts
+            .iter()
+            .find(|event| event.resource_id == Some(id))
+            .unwrap();
+        assert_eq!(receipt.op_type, "node.purge");
+        assert_eq!(receipt.source, "system");
+        assert_eq!(receipt.actor_account_id, None);
+        assert_eq!(receipt.operation_id, Some(operation));
+        assert_eq!(
+            receipt.metadata,
+            serde_json::json!({
+                "space_id": space,
+                "item_kind": kind,
+                "deletion_target_node_id": target,
+                "completion_scope": "database"
+            })
+        );
+    }
+    let space_receipt = receipts
+        .iter()
+        .find(|event| event.resource_id == Some(space))
+        .unwrap();
+    assert_eq!(space_receipt.op_type, "space.purge");
+    assert_eq!(space_receipt.operation_id, Some(space_operation));
+    assert_eq!(
+        space_receipt.metadata,
+        serde_json::json!({ "completion_scope": "database" })
+    );
+    assert!(
+        history
+            .list_by_owner(other_owner, 100, None)
+            .await?
+            .iter()
+            .all(|event| !event.op_type.ends_with(".purge"))
+    );
+    let state: String = sqlx::query_scalar(
+        "SELECT state FROM object_storage_objects WHERE deletion_operation_id = \
+         (SELECT operation_id FROM audit_events WHERE resource_id = $1 AND op_type = 'node.purge')",
+    )
+    .bind(file.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        state, "delete_pending",
+        "DB receipt is not an S3 completion claim"
+    );
+
+    let expires = space_receipt.created_at + chrono::Duration::days(180);
+    for (now, expected) in [
+        (expires - chrono::Duration::microseconds(1), true),
+        (expires, false),
+    ] {
+        PurgeRepo::new(db.pool.clone())
+            .with_history_time(now)
+            .run_once()
+            .await?;
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM audit_events WHERE id = $1)")
+                .bind(space_receipt.id)
+                .fetch_one(&db.pool)
+                .await?;
+        assert_eq!(exists, expected);
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn receipt_failure_rolls_back_database_deletion_and_storage_intent()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    for op_type in ["node.purge", "space.purge"] {
+        let Some(db) = TestDb::setup().await? else {
+            return Ok(());
+        };
+        let (owner, space, root) = space_with_root(&db.pool, "receipt-failure").await?;
+        let files = notegate_db::FilesRepo::new(db.pool.clone());
+        let (file, _) = attach_file(&files, space, root, "retained.bin", 10, owner).await?;
+        sqlx::query(
+            "UPDATE spaces SET deleted_at = now(), deleted_by_user_id = $2, \
+             purge_after = now() - interval '1 second' WHERE id = $1",
+        )
+        .bind(space)
+        .bind(owner)
+        .execute(&db.pool)
+        .await?;
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+            "CREATE FUNCTION fail_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN RAISE EXCEPTION 'injected receipt failure'; END; $$; \
+             CREATE TRIGGER fail_receipt BEFORE INSERT ON audit_events FOR EACH ROW \
+             WHEN (NEW.op_type = '{op_type}') EXECUTE FUNCTION fail_receipt()"
+        )))
+        .execute(&db.pool)
+        .await?;
+
+        assert!(PurgeRepo::new(db.pool.clone()).run_once().await.is_err());
+        let state: (String, bool, bool, i64) = sqlx::query_as(
+            "SELECT o.state, EXISTS(SELECT 1 FROM nodes WHERE id = $1), \
+                 EXISTS(SELECT 1 FROM spaces WHERE id = $2), \
+                 (SELECT count(*) FROM audit_events WHERE op_type IN ('node.purge', 'space.purge')) \
+             FROM object_storage_objects o WHERE o.node_id = $1",
+        ).bind(file.id).bind(space).fetch_one(&db.pool).await?;
+        assert_eq!(state, ("attached".to_owned(), true, true, 0));
+
+        sqlx::query("DROP TRIGGER fail_receipt ON audit_events")
+            .execute(&db.pool)
+            .await?;
+        let retry = PurgeRepo::new(db.pool.clone()).run_once().await?;
+        assert_eq!((retry.nodes_deleted, retry.spaces_deleted), (1, 1));
+        PurgeRepo::new(db.pool.clone()).run_once().await?;
+        let receipts: (i64, i64) = sqlx::query_as(
+            "SELECT count(*), count(operation_id) FROM audit_events WHERE op_type IN ('node.purge', 'space.purge')",
+        ).fetch_one(&db.pool).await?;
+        assert_eq!(
+            receipts,
+            (2, 0),
+            "legacy deletion IDs stay unknown; retries do not duplicate receipts"
+        );
+        db.cleanup().await;
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::Error>> {
     let _guard = PURGE_TEST_MUTEX.lock().await;
     let Some(db) = TestDb::setup().await? else {
@@ -184,7 +472,7 @@ async fn purge_deletes_expired_event_history_in_bounded_batches()
     sqlx::query(
         "INSERT INTO audit_events \
          (created_at, owner_user_id, actor_account_id, source, op_type, resource_type, metadata) \
-         SELECT now() - interval '366 days', $1, $1, 'rest', 'test.expired', 'test', \
+         SELECT now() - interval '181 days', $1, $1, 'rest', 'test.expired', 'test', \
                 jsonb_build_object('sequence', value) \
          FROM generate_series(1, 1001) AS value",
     )
@@ -194,7 +482,7 @@ async fn purge_deletes_expired_event_history_in_bounded_batches()
     sqlx::query(
         "INSERT INTO audit_events \
          (created_at, owner_user_id, actor_account_id, source, op_type, resource_type) \
-         VALUES (now() - interval '364 days', $1, $1, 'rest', 'test.recent', 'test')",
+         VALUES (now() - interval '179 days', $1, $1, 'rest', 'test.recent', 'test')",
     )
     .bind(user)
     .execute(&db.pool)
@@ -269,7 +557,7 @@ async fn purge_deletes_terminal_object_history_in_bounded_batches()
          SELECT gen_random_uuid(), $1 || value::text, 'expired.bin', 1, \
                 'application/octet-stream', \
                 CASE WHEN value % 2 = 0 THEN 'expired' ELSE 'deleted' END, \
-                now() - interval '91 days', now() - interval '91 days' \
+                now() - interval '181 days', now() - interval '181 days' \
          FROM generate_series(1, 1001) AS value",
     )
     .bind(&object_key_prefix)
@@ -280,7 +568,7 @@ async fn purge_deletes_terminal_object_history_in_bounded_batches()
         "INSERT INTO object_storage_objects \
          (id, object_key, name, declared_byte_len, media_type, state, last_activity_at, deleted_at) \
          VALUES (gen_random_uuid(), $1, 'recent.bin', 1, 'application/octet-stream', \
-                 'deleted', now() - interval '89 days', now() - interval '89 days')",
+                 'deleted', now() - interval '179 days', now() - interval '179 days')",
     )
     .bind(&recent_object_key)
     .execute(&db.pool)
@@ -307,6 +595,118 @@ async fn purge_deletes_terminal_object_history_in_bounded_batches()
     assert_eq!(old_remaining, 0);
     assert_eq!(recent_remaining, 1);
 
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn history_retention_uses_injected_boundaries_and_keeps_pending_cleanup()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, _) = space_with_root(&db.pool, "history-boundary").await?;
+    let now =
+        chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")?.with_timezone(&chrono::Utc);
+    let audit_cutoff = now - chrono::Duration::days(180);
+    let ordinary_cutoff = now - chrono::Duration::days(90);
+    let mut audits = Vec::new();
+    let mut changes = Vec::new();
+    let mut invocations = Vec::new();
+    let mut objects = Vec::new();
+    for offset in [-1, 0, 1] {
+        let delta = chrono::Duration::microseconds(offset);
+        audits.push(sqlx::query_scalar::<_, i64>(
+            "INSERT INTO audit_events (created_at, owner_user_id, actor_account_id, source, op_type, resource_type) \
+             VALUES ($1, $2, $2, 'system', 'test.boundary', 'test') RETURNING id",
+        ).bind(audit_cutoff + delta).bind(owner).fetch_one(&db.pool).await?);
+        changes.push(
+            sqlx::query_scalar::<_, i64>(
+                "INSERT INTO file_change_events (created_at, space_id, actor_account_id, op_type) \
+             VALUES ($1, $2, $3, 'test.boundary') RETURNING id",
+            )
+            .bind(ordinary_cutoff + delta)
+            .bind(space)
+            .bind(owner)
+            .fetch_one(&db.pool)
+            .await?,
+        );
+        invocations.push(sqlx::query_scalar::<_, i64>(
+            "INSERT INTO command_invocations (created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, input, outcome, duration_ms) \
+             VALUES ($1, $2, $2, 'user', 'mcp', 'read', '{}', 'success', 0) RETURNING id",
+        ).bind(ordinary_cutoff + delta).bind(owner).fetch_one(&db.pool).await?);
+        let object = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO object_storage_objects (id, object_key, name, declared_byte_len, media_type, state, deleted_at) \
+             VALUES ($1, $2, 'boundary.bin', 1, 'application/octet-stream', 'deleted', $3)",
+        ).bind(object).bind(format!("objects/{object}")).bind(audit_cutoff + delta)
+            .execute(&db.pool).await?;
+        objects.push(object);
+    }
+    let pending = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO object_storage_objects (id, object_key, name, declared_byte_len, media_type, state, last_activity_at) \
+         VALUES ($1, $2, 'pending.bin', 1, 'application/octet-stream', 'delete_pending', $3)",
+    ).bind(pending).bind(format!("objects/{pending}")).bind(audit_cutoff - chrono::Duration::days(1))
+        .execute(&db.pool).await?;
+
+    let repo = PurgeRepo::new(db.pool.clone()).with_history_time(now);
+    let run = repo.run_once().await?;
+    assert_eq!(run.audit_events_deleted, 2);
+    assert_eq!(run.file_change_events_deleted, 2);
+    assert_eq!(run.command_invocations_deleted, 2);
+    assert_eq!(run.object_storage_history_deleted, 2);
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<i64>>(
+            "SELECT array_agg(id ORDER BY id) FROM audit_events WHERE id = ANY($1)",
+        )
+        .bind(&audits)
+        .fetch_one(&db.pool)
+        .await?,
+        vec![audits[2]]
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<i64>>(
+            "SELECT array_agg(id ORDER BY id) FROM file_change_events WHERE id = ANY($1)",
+        )
+        .bind(&changes)
+        .fetch_one(&db.pool)
+        .await?,
+        vec![changes[2]]
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<i64>>(
+            "SELECT array_agg(id ORDER BY id) FROM command_invocations WHERE id = ANY($1)",
+        )
+        .bind(&invocations)
+        .fetch_one(&db.pool)
+        .await?,
+        vec![invocations[2]]
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<Uuid>>(
+            "SELECT array_agg(id) FROM object_storage_objects WHERE id = ANY($1)",
+        )
+        .bind(&objects)
+        .fetch_one(&db.pool)
+        .await?,
+        vec![objects[2]]
+    );
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM object_storage_objects WHERE id = $1")
+            .bind(pending)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(state, "delete_pending");
+    let repeated = repo.run_once().await?;
+    assert_eq!(
+        repeated.audit_events_deleted
+            + repeated.file_change_events_deleted
+            + repeated.command_invocations_deleted
+            + repeated.object_storage_history_deleted,
+        0
+    );
     db.cleanup().await;
     Ok(())
 }
@@ -548,7 +948,7 @@ async fn assert_purge_failure_isolation(
     sqlx::query(
         "INSERT INTO audit_events \
          (created_at, owner_user_id, actor_account_id, source, op_type, resource_type) \
-         VALUES (now() - interval '366 days', $1, $1, 'system', 'test.expired', 'test')",
+         VALUES (now() - interval '181 days', $1, $1, 'system', 'test.expired', 'test')",
     )
     .bind(user)
     .execute(&db.pool)
@@ -708,10 +1108,16 @@ async fn large_physical_subtree_drains_children_before_parent_and_survives_resta
     )
     .await?;
 
+    let mut total_deleted = 0_i64;
     for (expected, remaining) in [(101, 105), (100, 5), (5, 0), (1, 0)] {
         // A fresh instance on every pass cannot rely on an in-memory cursor.
         let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
         assert_eq!(run.nodes_deleted, expected);
+        total_deleted += expected as i64;
+        let receipts: (i64, i64) = sqlx::query_as(
+            "SELECT count(*), count(DISTINCT resource_id) FROM audit_events WHERE op_type = 'node.purge'",
+        ).fetch_one(&db.pool).await?;
+        assert_eq!(receipts, (total_deleted, total_deleted));
         let children: i64 = sqlx::query_scalar("SELECT count(*) FROM nodes WHERE parent_id = $1")
             .bind(parent)
             .fetch_one(&db.pool)
@@ -782,6 +1188,21 @@ async fn hard_purge_drains_revisions_without_cascading_or_losing_usage_accountin
         .fetch_one(&db.pool)
         .await?;
         assert_eq!(stored, (remaining, remaining * 2, node_exists));
+        let receipts: (i64, i64) = sqlx::query_as(
+            "SELECT count(*), COALESCE(sum((metadata->>'released_bytes')::bigint), 0)::bigint \
+             FROM audit_events WHERE op_type = 'text_revision.delete' \
+                 AND owner_user_id = $1 AND metadata->>'reason' = 'resource_purge'",
+        )
+        .bind(owner)
+        .fetch_one(&db.pool)
+        .await?;
+        assert_eq!(
+            receipts,
+            (
+                201 - remaining + i64::from(!node_exists),
+                (201 - remaining) * 2 + if node_exists { 0 } else { 7 },
+            )
+        );
         assert_eq!(run.resources_pending, node_exists);
         if node_exists {
             let error = notegate_db::FilesRepo::new(db.pool.clone())
@@ -1019,7 +1440,7 @@ async fn failed_space_batch_preserves_its_intent_but_not_other_spaces_committed_
     }
     sqlx::query(
         "INSERT INTO audit_events(created_at, owner_user_id, actor_account_id, source, op_type, resource_type) \
-         VALUES (now() - interval '366 days', $1, $1, 'system', 'test.expired', 'test')",
+         VALUES (now() - interval '181 days', $1, $1, 'system', 'test.expired', 'test')",
     ).bind(owner).execute(&db.pool).await?;
     sqlx::query("CREATE TABLE fail_node_purge(id uuid PRIMARY KEY)")
         .execute(&db.pool)

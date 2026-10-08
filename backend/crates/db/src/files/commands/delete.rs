@@ -28,6 +28,7 @@ struct SubtreeUsage {
 /// Soft-delete `node_id` and its live subtree, attributing it to `deleted_by`.
 pub async fn soft_delete_node(
     pool: &PgPool,
+    capture: file_change_events::ChangeCapture<'_>,
     external_only: bool,
     space_id: Uuid,
     node_id: Uuid,
@@ -136,7 +137,7 @@ pub async fn soft_delete_node(
 
     file_change_events::node_deleted(
         &mut tx,
-        file_change_events::context(deleted_by, space_id).with_operation_id(operation_id),
+        file_change_events::context(deleted_by, space_id, capture).with_operation_id(operation_id),
         node_id,
         file_change_events::NodeDeleted {
             item_kind: &node.kind,

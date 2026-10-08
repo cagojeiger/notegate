@@ -10,7 +10,7 @@ NoteGate는 관리 변경과 파일트리 변경을 별도 stream으로 기록�
 
 ```text
 audit_events
-  account, session, credential, agent, space, connection 관리 이력
+  account, session, credential, agent, space, connection 관리 이력과 DB 리소스 정리 완료
 
 file_change_events
   file-tree/file content change 이력
@@ -20,6 +20,8 @@ command_invocations
 ```
 
 외부 command 호출 자체는 domain mutation stream과 다른 `command_invocations`에 기록한다. 이 표는 MCP와 Command API의 read와 실패 호출도 포함하는 실행 이력이며 현재 state나 mutation history의 source of truth가 아니다.
+
+`invocation_id`는 서버가 MCP/CLI 호출 경계에서 생성하는 UUID다. 호출 이력과 그 호출로 성공한 Changes에 함께 남기며, 한 sequence의 여러 변경은 같은 호출 ID를 갖는다. 삭제·복원의 작업 범위를 결정하는 `operation_id`는 별개다. Invocation 저장은 best-effort이므로 연결된 호출 행이 없을 수도 있고, legacy 행에는 연결 ID를 추측해 넣지 않는다.
 
 두 mutation stream(`audit_events`, `file_change_events`)은 성공적으로 commit된 domain mutation의 이력이다. 현재 state의 source of truth는 normalized domain table이다. `command_invocations`는 실행 관찰 이력이며 이 mutation 보장에 포함되지 않는다.
 
@@ -45,10 +47,15 @@ Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-event
 - 새 node/subtree 또는 Space 삭제마다 UUID `operation_id`를 생성한다. 같은 transaction에서 domain의 `deletion_operation_id`와 삭제 event의 `operation_id`를 기록한다.
 - 복원과 영구 삭제 요청은 각각 새 `operation_id`를 갖고, `metadata.related_deletion_operation_id`로 원래 삭제를 참조한다. 복원은 domain의 삭제 ID를 해제하지만 event 참조는 유지한다. 재삭제는 새 ID를 사용한다.
 - `deletion_target_node_id`는 삭제 요청이 직접 대상으로 삼은 노드 ID이며 함께 복원할 범위를 구분한다. `parent_id`와 파일 트리 root는 별개다. `deletion_operation_id`는 삭제 작업 식별자다. 먼저 삭제된 자식의 ID는 상위 폴더 삭제 때 변경하지 않는다.
-- 기존 행과 이 계약 범위 밖의 event는 `operation_id=NULL`이다. 기존 삭제와 event를 시각 또는 리소스 ID로 추측해서 연결하지 않는다. 연결 ID가 없는 복원/영구 삭제 요청은 `related_deletion_operation_id=null`이다.
+- 기존 행과 이 계약 범위 밖의 Audit event는 `operation_id=NULL`이다. 새 Changes는 모든 변경에 `operation_id`를 기록한다. 기존 삭제와 event를 시각 또는 리소스 ID로 추측해서 연결하지 않는다. 연결 ID가 없는 복원/영구 삭제 요청은 `related_deletion_operation_id=null`이다.
 - ID는 correlation 용도이며 authorization, request idempotency, event cursor 또는 문서 snapshot을 대체하지 않는다. Event retention은 유지하고, 로그가 없어도 domain state에 따라 복원한다.
 - 비동기 purge는 semantic row 제거 전에 원래 삭제 ID를 object 원장에 보존한다. 이는 S3 물리 삭제 완료 event/receipt가 아니며 원장도 기존 retention을 따른다.
-- MCP/CLI invocation 및 Text revision과의 직접 연결은 이 계약에 포함하지 않는다. `read op=changes`는 저장된 event의 `operation_id`를 반환한다.
+- DB purge는 실제로 삭제한 node마다 `node.purge`, 마지막 Space 행을 삭제할 때 `space.purge`를 Audit에 같은 transaction으로 기록한다. 내부 root node는 Space 완료에 포함하며 별도 node 기록을 만들지 않는다. 기록 실패는 해당 삭제 batch를 rollback하고, 재시도는 남아 있는 리소스만 처리하므로 완료 기록이 중복되지 않는다.
+- 완료 기록의 `operation_id`는 원래 node 삭제 ID이며, 없으면 Space 삭제 ID를 사용한다. 먼저 개별 삭제된 자식의 ID는 유지한다. 둘 다 없으면 NULL로 두며 과거 삭제에 대한 기록을 추측해서 만들지 않는다.
+- 이 기록은 `source=system`, `actor_account_id=NULL`, `completion_scope=database`다. 이름·경로·본문·object key 없이 owner/resource/Space/삭제 대상 ID와 node 종류만 저장한다. 삭제된 리소스에 FK로 연결하지 않으며 소유자의 Audit에서 180일 보관한다. File의 S3 삭제 성공이나 저장소 내부 물리 정리 완료를 의미하지 않는다. Text 용량은 해당 DB 삭제와 함께 반환된다.
+- S3 DeleteObject 성공 후 `object.delete`를 `source=system`, `actor_account_id=NULL`, `completion_scope=s3`로 기록한다. Resource는 object UUID이고 metadata는 `space_id`만 포함한다. 원래 삭제 ID를 유지하며 object 상태·용량 반환·receipt가 함께 commit된다. 재시도는 이미 완료된 object에 중복 receipt를 만들지 않는다. Owner는 보관 용량 원장에서 가져오고 과거 orphan은 NULL로 둔다. Receipt는 180일 유지되며 provider 내부 GC 완료 증명은 아니다.
+- 현재 본문(`text_objects.revision_id`)과 과거 버전(`text_revisions.id`)의 실제 DELETE는 각각 DB trigger가 `text_revision.delete`로 기록한다. 일반 저장 UPDATE나 휴지통 이동은 삭제 완료가 아니다. 정리 경로가 전달한 사유만 사용하며 직접 SQL/FK cascade는 사유가 없으면 `unknown`이다. 현재 본문에는 버전 보존 기간 만료 사유를 적용하지 않는다. `source=system`은 DB 기록 경로를 뜻하며 실행자를 추정하지 않는다. 본문·이름·변경 이유 없이 ID, 정리 사유, 해제 용량만 남기고 삭제·용량 차감·기록을 함께 commit한다. 해제 용량은 각 원장 기준으로 현재 본문은 `byte_len`, 과거 버전은 `stored_bytes`다. 기존 Audit 보관 기간은 180일이다.
+- MCP/CLI invocation과의 직접 연결은 별도이며, Changes의 Text revision 연결은 아래 snapshot 계약을 따른다. `read op=changes`는 저장된 event의 `operation_id`를 반환한다.
 
 ## Capture guarantee
 
@@ -73,6 +80,8 @@ file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 
 `input`과 `response`는 실제 실행/응답 객체와 분리된 저장 전용 복사본이다. Tool/op별 allowlist는 purpose, target/path, 구조적 flag/count/hash처럼 분석에 필요한 값만 유지한다. Text `content`, patch/edit 문자열과 `diff`, grep 일치 줄, 검색어, 모든 cursor, 원본 파일명과 암호화 metadata, multipart ETag, presigned URL/header, PII와 자유 형식 오류 문구는 `{"_redacted":true,"category":"..."}` marker로 대체한다. 알려지지 않은 field의 이름과 값은 저장하지 않고 `_omitted_field_count`만 남긴다. 각 snapshot은 redaction 후 256 KiB를 넘으면 전체를 크기 marker로 대체한다.
 
+저장할 때 `purpose`, `space_name`, redacted `input`/`response`는 한 암호화 envelope로 묶는다. 소유자 ID와 snapshot UUID를 AEAD에 바인딩하며, 조회 시 소유권으로 먼저 필터링한 뒤 복호화한다. 식별자, 시간, 호출 경로, tool/op, 결과 및 오류 코드는 조회를 위해 평문으로 유지한다. 기존 평문 행은 `history.encryption` Reconciler가 최대 100행씩 이관하며, 이관 중에는 기존 형식도 읽는다. 암호화 오류를 평문 fallback으로 숨기지 않는다.
+
 MCP `response`는 protocol `ErrorData` 또는 `structured_content`에서 만들며 RMCP가 같은 JSON을 복제하는 wire `content[].text`와 `_meta`는 저장하지 않는다. CLI response와 구조화 오류는 같은 저장 전용 JSON 정책으로 정규화한다. Sequence tool은 한 invocation row만 만들고 commands/results에 재귀 redaction을 적용하며 내부 command별 행은 만들지 않는다. Response snapshot이 없는 행은 `response=NULL`이고 모든 행은 90일 retention을 따른다. 호출 이력 조회용 MCP/CLI command는 없으며 user browser의 History > MCP 또는 History > CLI에서 자기 소유 범위만 조회한다.
 
 ## Audit event sources
@@ -89,7 +98,7 @@ system
 
 ## Audit events
 
-Audit event는 account, session, credential, agent, space, connection 관리 변경을 기록한다.
+Audit event는 account, session, credential, agent, space, connection 관리 변경과 비동기 DB 리소스 정리 완료를 기록한다.
 
 Audit event type:
 
@@ -105,6 +114,10 @@ space.create
 space.update
 space.delete
 space.restore
+space.purge
+node.purge
+object.delete
+text_revision.delete
 trash.purge.request
 
 agent.create
@@ -139,6 +152,27 @@ connection.upsert
 
 session.revoke
   reason: "refresh_failed"
+
+node.purge
+  completion_scope: "database"
+  space_id: uuid
+  item_kind: "folder" | "text" | "file"
+  deletion_target_node_id: uuid (known only)
+
+space.purge
+  completion_scope: "database"
+
+object.delete
+  completion_scope: "s3"
+  space_id: uuid | null
+
+text_revision.delete
+  completion_scope: "database"
+  recorded_by: "database_trigger"
+  space_id: uuid
+  node_id: uuid
+  reason: "intermediate_expired" | "checkpoint_expired" | "resource_purge" | "unknown"
+  released_bytes: integer
 ```
 
 Audit event target mapping:
@@ -159,6 +193,14 @@ session.*
 space.*
   resource_type: "space"
   resource_id: space_id
+
+node.purge
+  resource_type: "node"
+  resource_id: node_id
+
+object.delete
+  resource_type: "storage_object"
+  resource_id: object_id
 
 agent.*
   resource_type: "agent"
@@ -277,17 +319,21 @@ audit_events
   resource_id
 ```
 
-`file_change_events`는 space/node 기준 조회 축만 column으로 둔다.
+`file_change_events`는 owner/space/node 조회 축을 column으로 두고 내용 메타데이터는 암호화한다.
 
 ```text
 file_change_events
   id
+  operation_id
+  owner_user_id
   created_at
   space_id
   node_id
   actor_account_id
   op_type
   metadata
+  private_metadata
+  snapshot_id
 ```
 
 권장 index와 column type은 `docs/spec/db.md`의 Event history tables가 정본이다.
@@ -297,9 +343,21 @@ file_change_events
 Retention policy:
 
 ```text
-audit_events: 365 days
+audit_events: 180 days
 file_change_events: 90 days
 command_invocations: 90 days
 ```
 
-각 event table은 retention 조회/삭제를 위한 `created_at` index를 둔다. Purge worker는 `audit_events` 365일, `file_change_events`와 `command_invocations` 90일을 초과한 행을 테이블별 bounded batch로 삭제한다.
+각 event table은 retention 조회/삭제를 위한 `created_at` index를 둔다. Purge worker는 `audit_events` 180일, `file_change_events`와 `command_invocations` 90일을 초과한 행을 테이블별 bounded batch로 삭제한다.
+
+## Changes snapshots
+
+- 새 Changes의 문서 이름·수정 이유·크기 등 내용 메타데이터는 전용 HKDF subkey와 AES-GCM으로 암호화한다. AAD는 Space ID와 행별 `snapshot_id` UUID에 묶인다. 순서/cursor용 event ID와 암호화 snapshot 식별자는 별개다. 식별자·시각·고정된 구조 변경 플래그는 조회와 링크 그래프 갱신을 위해 평문으로 둔다.
+- 성공한 변경과 snapshot은 같은 트랜잭션에 저장한다. snapshot 기록 실패는 문서 변경도 롤백하며, 내용이 같은 저장은 새 event/version을 만들지 않는다.
+- `metadata.source`는 기록 경로, `actor_kind`는 인증된 계정 종류다. 계정이 Agent라는 사실만으로 AI 실행이라고 단정하지 않는다.
+- 지원되는 문서 변경에는 `before_revision_id`/`after_revision_id`를 남긴다. 기존 기록의 연결은 추정해서 채우지 않는다. 폴더 단위 변경은 하위 문서 전체의 버전을 나열하지 않는다.
+- 목록의 `before_revision_status`/`after_revision_status`는 실제 본문을 우선 확인한다. 있으면 `current`/`retained`, 없고 삭제 기록이 있으면 `deleted`, 둘 다 없으면 `unavailable`이다. `*_revision_deleted_at`/`*_revision_deletion_reason`은 확인된 기록만 반환한다. 본문과 삭제 기록이 동시에 있으면 본문 상태를 유지하고 `*_revision_deletion_conflict=true`로 표시한다.
+- `*_revision_cleanup_at`은 정리 시작 가능 시각이며 실제 삭제 증거가 아니다. 조회 실패를 본문 없음으로 바꾸지 않는다. 존재 여부·삭제 기록은 한 DB snapshot에서 metadata만 batch 조회하며 본문 접근 권한을 부여하지 않는다. 기록이 없는 과거 삭제, TRUNCATE, trigger 우회는 사유를 추정하지 않는다.
+- `GET /api/v1/me/file-change-events`는 현재 User의 소유 이력을 Space 삭제 뒤에도 90일 보존 기간 내 조회한다. 선택적 `space_id`, `limit`, `cursor`를 받는다. 외부 Agent 접근과 기존 Space별 권한은 바뀌지 않는다.
+- 기존 plaintext Changes는 `history.encryption` Reconciler가 최대 100행씩 암호화한다. 이관 중에는 이전 형식도 읽는다. 이미 삭제된 Space의 소유자를 입증할 수 없는 과거 행은 소유 이력에 노출하지 않는다.
+- Space 영구 삭제는 암호화와 별개로 기존 Changes의 소유자 ID를 최대 100행씩 보존한다. 소유자 미확정 행이 남거나 다른 트랜잭션에서 잠긴 경우 Space 삭제를 다음 회차로 넘긴다. 이후 암호화는 보존된 소유자 ID를 유지한다.

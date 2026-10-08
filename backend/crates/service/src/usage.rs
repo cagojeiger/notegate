@@ -84,14 +84,24 @@ pub struct SpaceUsage {
     pub items: QuotaUsage,
     pub text_bytes: QuotaUsage,
     pub file_bytes: QuotaUsage,
+    pub retained_text_bytes: usize,
+    pub retained_file_bytes: usize,
     pub reconciliation_pending: bool,
     pub reconciliation_available_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletedSpaceUsage {
+    pub count: usize,
+    pub text_bytes: usize,
+    pub file_bytes: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CurrentUserUsage {
     pub tier: UserTier,
     pub spaces: Vec<SpaceUsage>,
+    pub deleted_spaces: DeletedSpaceUsage,
 }
 
 fn build_usage(snapshot: UserUsageSnapshot, runtime_limits: Limits) -> CurrentUserUsage {
@@ -107,13 +117,19 @@ fn build_usage(snapshot: UserUsageSnapshot, runtime_limits: Limits) -> CurrentUs
                 limit: limits.space_max_nodes.saturating_sub(1),
             },
             text_bytes: QuotaUsage {
-                used: space.live_text_bytes,
+                used: space.stored_text_bytes,
                 limit: limits.space_max_text_bytes,
             },
             file_bytes: QuotaUsage {
-                used: space.live_file_bytes,
+                used: space.stored_file_bytes,
                 limit: limits.space_max_file_bytes,
             },
+            retained_text_bytes: space
+                .stored_text_bytes
+                .saturating_sub(space.live_text_bytes),
+            retained_file_bytes: space
+                .stored_file_bytes
+                .saturating_sub(space.live_file_bytes),
             reconciliation_pending: space.reconciliation_pending,
             reconciliation_available_at: space.reconciliation_available_at,
         })
@@ -121,6 +137,11 @@ fn build_usage(snapshot: UserUsageSnapshot, runtime_limits: Limits) -> CurrentUs
 
     CurrentUserUsage {
         tier: snapshot.tier,
+        deleted_spaces: DeletedSpaceUsage {
+            count: snapshot.deleted_space_count,
+            text_bytes: snapshot.deleted_text_bytes,
+            file_bytes: snapshot.deleted_file_bytes,
+        },
         spaces,
     }
 }
@@ -147,6 +168,9 @@ mod tests {
         let space_id = Uuid::new_v4();
         let usage = build_usage(
             UserUsageSnapshot {
+                deleted_space_count: 0,
+                deleted_text_bytes: 0,
+                deleted_file_bytes: 0,
                 tier: UserTier::Tier0,
                 spaces: vec![SpaceUsageSnapshot {
                     id: space_id,
@@ -154,6 +178,8 @@ mod tests {
                     live_nodes: 7,
                     live_text_bytes: 512,
                     live_file_bytes: 128,
+                    stored_text_bytes: 512,
+                    stored_file_bytes: 128,
                     reconciliation_pending: true,
                     reconciliation_available_at: Utc::now(),
                 }],
@@ -198,6 +224,9 @@ mod tests {
     fn usage_excludes_the_space_root_from_items() {
         let usage = build_usage(
             UserUsageSnapshot {
+                deleted_space_count: 0,
+                deleted_text_bytes: 0,
+                deleted_file_bytes: 0,
                 tier: UserTier::Tier0,
                 spaces: vec![SpaceUsageSnapshot {
                     id: Uuid::new_v4(),
@@ -205,6 +234,8 @@ mod tests {
                     live_nodes: 1,
                     live_text_bytes: 0,
                     live_file_bytes: 0,
+                    stored_text_bytes: 0,
+                    stored_file_bytes: 0,
                     reconciliation_pending: false,
                     reconciliation_available_at: Utc::now(),
                 }],

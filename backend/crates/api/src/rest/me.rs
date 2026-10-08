@@ -52,6 +52,8 @@ pub(crate) struct SpaceUsageOut {
     items: QuotaUsageOut,
     text_bytes: QuotaUsageOut,
     file_bytes: QuotaUsageOut,
+    retained_text_bytes: usize,
+    retained_file_bytes: usize,
     reconciliation: UsageReconciliationStatusOut,
 }
 
@@ -69,9 +71,17 @@ pub(crate) enum UsageReconciliationStatus {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct DeletedSpaceUsageOut {
+    count: usize,
+    text_bytes: usize,
+    file_bytes: usize,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct CurrentUserUsageOut {
     tier: String,
     spaces: Vec<SpaceUsageOut>,
+    deleted_spaces: DeletedSpaceUsageOut,
 }
 
 impl From<CurrentUserUsage> for CurrentUserUsageOut {
@@ -79,6 +89,11 @@ impl From<CurrentUserUsage> for CurrentUserUsageOut {
         let now = Utc::now();
         Self {
             tier: value.tier.as_str().to_owned(),
+            deleted_spaces: DeletedSpaceUsageOut {
+                count: value.deleted_spaces.count,
+                text_bytes: value.deleted_spaces.text_bytes,
+                file_bytes: value.deleted_spaces.file_bytes,
+            },
             spaces: value
                 .spaces
                 .into_iter()
@@ -96,6 +111,8 @@ impl From<CurrentUserUsage> for CurrentUserUsageOut {
                         items: space.items.into(),
                         text_bytes: space.text_bytes.into(),
                         file_bytes: space.file_bytes.into(),
+                        retained_text_bytes: space.retained_text_bytes,
+                        retained_file_bytes: space.retained_file_bytes,
                         reconciliation: UsageReconciliationStatusOut {
                             status: if space.reconciliation_pending {
                                 UsageReconciliationStatus::Pending

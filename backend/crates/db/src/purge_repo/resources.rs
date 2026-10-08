@@ -13,6 +13,7 @@ const REVISION_PURGE_BATCH: i64 = 100;
 const OBJECT_PURGE_BATCH: i64 = 100;
 const LINK_REF_PURGE_BATCH: i64 = 1_000;
 const CONNECTION_PURGE_BATCH: i64 = 100;
+const CHANGE_HISTORY_OWNER_BATCH: i64 = 100;
 const LINK_GRAPH_PROJECTION_PURGE_BATCH: i64 = 1_000;
 const RESOURCE_PASS_BUDGET: Duration = Duration::from_secs(30);
 const SPACE_BATCH_TIMEOUT: Duration = Duration::from_secs(15);
@@ -152,11 +153,11 @@ async fn purge_space(pool: &PgPool, space_id: Uuid) -> Result<PurgedResources> {
     if !crate::space_usage::try_acquire_reconciliation_gate(&mut tx, space_id).await? {
         return Ok(PurgedResources::default());
     }
-    let due_space: Option<bool> = sqlx::query_scalar(
-        "SELECT deleted_at IS NOT NULL AND (purge_requested_at IS NOT NULL OR purge_after <= now()) \
+    let space: Option<(bool, Uuid)> = sqlx::query_as(
+        "SELECT deleted_at IS NOT NULL AND (purge_requested_at IS NOT NULL OR purge_after <= now()), owner_user_id \
          FROM spaces WHERE id = $1 FOR UPDATE SKIP LOCKED",
     ).bind(space_id).fetch_optional(&mut *tx).await.map_err(map_sqlx_error)?;
-    let Some(due_space) = due_space else {
+    let Some((due_space, owner_user_id)) = space else {
         return Ok(PurgedResources::default());
     };
     // Walk ancestors of leaves rather than expanding/cascading the entire tree.
@@ -175,6 +176,10 @@ async fn purge_space(pool: &PgPool, space_id: Uuid) -> Result<PurgedResources> {
          )) ORDER BY n.id LIMIT $3 FOR UPDATE OF n SKIP LOCKED",
     ).bind(space_id).bind(due_space).bind(NODE_PURGE_BATCH)
         .fetch_all(&mut *tx).await.map_err(map_sqlx_error)?;
+    sqlx::query("SELECT set_config('notegate.revision_deletion_reason', 'resource_purge', true)")
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
     let text_revisions_deleted = sqlx::query(
         "WITH due AS (SELECT id FROM text_revisions WHERE space_id = $1 AND node_id = ANY($2) \
              ORDER BY node_id, id LIMIT $3 FOR UPDATE SKIP LOCKED) \
@@ -243,13 +248,17 @@ async fn purge_space(pool: &PgPool, space_id: Uuid) -> Result<PurgedResources> {
          AND NOT EXISTS (SELECT 1 FROM node_link_refs r WHERE r.space_id = $1 AND (r.source_node_id = n.id OR r.target_node_id = n.id)) \
          AND NOT EXISTS (SELECT 1 FROM object_storage_objects f WHERE f.parent_node_id = n.id OR (f.node_id = n.id AND f.state = 'attached'))",
     ).bind(space_id).bind(&leaves).fetch_all(&mut *tx).await.map_err(map_sqlx_error)?;
-    result.nodes_deleted = sqlx::query("DELETE FROM nodes WHERE space_id = $1 AND id = ANY($2)")
+    let purged_nodes = sqlx::query_as::<_, crate::audit_events::PurgedNode>(
+        "DELETE FROM nodes n USING spaces s WHERE n.space_id = $1 AND n.id = ANY($2) AND s.id = n.space_id \
+         RETURNING n.id, n.kind, COALESCE(n.deletion_operation_id, s.deletion_operation_id) AS operation_id, n.deletion_target_node_id",
+    )
         .bind(space_id)
         .bind(&ready)
-        .execute(&mut *tx)
+        .fetch_all(&mut *tx)
         .await
-        .map_err(map_sqlx_error)?
-        .rows_affected();
+        .map_err(map_sqlx_error)?;
+    crate::audit_events::nodes_purged(&mut tx, owner_user_id, space_id, &purged_nodes).await?;
+    result.nodes_deleted = purged_nodes.len() as u64;
     result.link_graph_projections_deleted = sqlx::query(
         "DELETE FROM node_link_projections WHERE space_id = $1 AND source_node_id = ANY($2)",
     )
@@ -287,17 +296,38 @@ async fn purge_space(pool: &PgPool, space_id: Uuid) -> Result<PurgedResources> {
                  ORDER BY agent_id LIMIT $2 FOR UPDATE SKIP LOCKED) \
              DELETE FROM space_agent_connections c USING due WHERE c.space_id = $1 AND c.agent_id = due.agent_id",
         ).bind(space_id).bind(CONNECTION_PURGE_BATCH).execute(&mut *tx).await.map_err(map_sqlx_error)?;
-        result.spaces_deleted = sqlx::query(
+        // Preserve legacy ownership independently of background encryption.
+        // Locked or remaining rows keep the Space alive for the next batch.
+        sqlx::query(
+            "WITH pending AS (SELECT id FROM file_change_events \
+                 WHERE space_id = $1 AND owner_user_id IS NULL \
+                 ORDER BY id LIMIT $3 FOR UPDATE SKIP LOCKED) \
+             UPDATE file_change_events e SET owner_user_id = $2 FROM pending \
+             WHERE e.id = pending.id",
+        )
+        .bind(space_id)
+        .bind(owner_user_id)
+        .bind(CHANGE_HISTORY_OWNER_BATCH)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let purged_space: Option<Option<Uuid>> = sqlx::query_scalar(
             "DELETE FROM spaces s WHERE s.id = $1 \
              AND NOT EXISTS (SELECT 1 FROM object_storage_objects WHERE space_id = $1) \
              AND NOT EXISTS (SELECT 1 FROM space_agent_connections WHERE space_id = $1) \
-             AND NOT EXISTS (SELECT 1 FROM node_link_refs WHERE space_id = $1)",
+             AND NOT EXISTS (SELECT 1 FROM node_link_refs WHERE space_id = $1) \
+             AND NOT EXISTS (SELECT 1 FROM file_change_events WHERE space_id = $1 AND owner_user_id IS NULL) \
+             RETURNING s.deletion_operation_id",
         )
         .bind(space_id)
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
-        .map_err(map_sqlx_error)?
-        .rows_affected();
+        .map_err(map_sqlx_error)?;
+        if let Some(operation_id) = purged_space {
+            crate::audit_events::space_purged(&mut tx, owner_user_id, space_id, operation_id)
+                .await?;
+            result.spaces_deleted = 1;
+        }
     }
     tx.commit().await.map_err(map_sqlx_error)?;
     tracing::info!(event = "purge.space_completed", %space_id,

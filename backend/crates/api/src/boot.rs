@@ -247,7 +247,7 @@ pub(crate) async fn run() -> anyhow::Result<()> {
             .as_ref()
             .map(|state| state.object_storage.clone())
             .unwrap_or_else(|| object_storage::ObjectStorage::new(&config.s3));
-        process_runtime.start_reconciler(&pool, object_storage)?;
+        process_runtime.start_reconciler(&pool, object_storage, pii_crypto.clone())?;
     }
     if plan.runs_api {
         let state = state

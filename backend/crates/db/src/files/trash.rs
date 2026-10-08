@@ -167,8 +167,8 @@ impl FilesRepo {
             },
         )?)?;
         require_restore_fanout(&mut tx, space_id, Some(node_id), caps.folder_max_children).await?;
-        require_attached_objects(&mut tx, space_id, Some(node_id)).await?;
-        space_usage::apply_quota_delta(
+        require_restorable_content(&mut tx, space_id, Some(node_id)).await?;
+        space_usage::restore_usage(
             &mut tx,
             &gate,
             UsageDelta::subtree(count, text_bytes, file_bytes),
@@ -188,9 +188,11 @@ impl FilesRepo {
         .map_err(map_sqlx_error)?;
         file_change_events::node_restored(
             &mut tx,
-            file_change_events::context(owner, space_id).with_operation_id(Uuid::new_v4()),
+            file_change_events::context(owner, space_id, self.change_capture())
+                .with_operation_id(Uuid::new_v4()),
             node_id,
             &node.kind,
+            &node.name,
             node.parent_id,
             count,
             node.deletion_operation_id,
@@ -248,19 +250,21 @@ impl FilesRepo {
             return Err(Error::conflict("a space with this name already exists"));
         }
         let caps = effective_file_tree_limits(tier, self.limits);
-        let (nodes, text, files): (i64, i64, i64) = sqlx::query_as(
-            "SELECT live_node_count, live_text_bytes, live_file_bytes FROM space_usage WHERE space_id = $1 FOR UPDATE",
-        ).bind(space_id).fetch_one(&mut *tx).await.map_err(map_sqlx_error)?;
-        if crate::to_usize(nodes, "node")? > caps.space_max_nodes
-            || crate::to_usize(text, "text bytes")? > caps.space_max_text_bytes
-            || crate::to_usize(files, "file bytes")? > caps.space_max_file_bytes
-        {
+        let nodes: i64 = sqlx::query_scalar(
+            "SELECT live_node_count FROM space_usage WHERE space_id = $1 FOR UPDATE",
+        )
+        .bind(space_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        // Retained bytes are already charged while the Space is in trash.
+        if crate::to_usize(nodes, "node")? > caps.space_max_nodes {
             return Err(Error::conflict(
                 "restored space would exceed its current tier limits",
             ));
         }
         require_restore_fanout(&mut tx, space_id, None, caps.folder_max_children).await?;
-        require_attached_objects(&mut tx, space_id, None).await?;
+        require_restorable_content(&mut tx, space_id, None).await?;
         // Restoration must not silently reopen external agent access.
         sqlx::query(
             "UPDATE space_agent_connections SET disconnected_at = now(), disconnected_by_user_id = $2 \
@@ -401,19 +405,24 @@ async fn deleted_node(
         .ok_or_else(|| Error::not_found("trash item not found"))
 }
 
-async fn require_attached_objects(
+/// Restore requires current content only. Historical revisions may have expired
+/// independently, and separately trashed descendants are outside this restore.
+async fn require_restorable_content(
     tx: &mut Transaction<'_, Postgres>,
     space: Uuid,
     deletion_target: Option<Uuid>,
 ) -> Result<()> {
     let unavailable: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM file_objects f JOIN nodes n ON n.id = f.node_id \
+        "SELECT EXISTS (SELECT 1 FROM nodes n \
+         LEFT JOIN text_objects t ON t.node_id = n.id AND t.space_id = n.space_id \
+         LEFT JOIN file_objects f ON f.node_id = n.id AND f.space_id = n.space_id \
          LEFT JOIN object_storage_objects o ON o.object_key = f.object_key \
          WHERE n.space_id = $1 AND (($2::uuid IS NULL AND n.deleted_at IS NULL) OR n.deletion_target_node_id = $2) \
-           AND (o.id IS NULL OR o.state <> 'attached'))",
+           AND ((n.kind = 'text' AND t.node_id IS NULL) \
+             OR (n.kind = 'file' AND (f.node_id IS NULL OR o.id IS NULL OR o.state <> 'attached'))))",
     ).bind(space).bind(deletion_target).fetch_one(&mut **tx).await.map_err(map_sqlx_error)?;
     if unavailable {
-        return Err(Error::conflict("file content is no longer recoverable"));
+        return Err(Error::conflict("current content is no longer recoverable"));
     }
     Ok(())
 }

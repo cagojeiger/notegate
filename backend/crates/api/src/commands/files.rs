@@ -41,16 +41,14 @@ pub async fn list(
     }
 
     if depth == 1 {
-        let folder = state
-            .files
-            .for_channel(caller.channel)
+        let folder = context
+            .files(&state.files)
             .resolve_path(account_id, space_id, &path)
             .await
             .map_err(service_error)?;
 
-        let page = state
-            .files
-            .for_channel(caller.channel)
+        let page = context
+            .files(&state.files)
             .canonical_children(
                 account_id,
                 space_id,
@@ -77,9 +75,8 @@ pub async fn list(
         }));
     }
 
-    let page = state
-        .files
-        .for_channel(caller.channel)
+    let page = context
+        .files(&state.files)
         .tree(
             account_id,
             space_id,
@@ -118,9 +115,8 @@ pub async fn stat(
     let caller = context.caller();
     let (resolved, path) = resolve_target(state, caller, &target).await?;
 
-    let view = state
-        .files
-        .for_channel(caller.channel)
+    let view = context
+        .files(&state.files)
         .resolve_path(caller.account_id(), resolved.space_id(), &path)
         .await
         .map_err(service_error)?;
@@ -166,9 +162,8 @@ pub async fn mkdir(
     let space_id = resolved.space_id();
 
     if parents {
-        let (view, created_paths) = state
-            .files
-            .for_channel(caller.channel)
+        let (view, created_paths) = context
+            .files(&state.files)
             .create_folder_recursive(account_id, space_id, &path)
             .await
             .map_err(service_error)?;
@@ -181,16 +176,14 @@ pub async fn mkdir(
     }
 
     let (parent_path, name) = split_parent_name(&path)?;
-    let parent = state
-        .files
-        .for_channel(caller.channel)
+    let parent = context
+        .files(&state.files)
         .resolve_path(account_id, space_id, &parent_path)
         .await
         .map_err(service_error)?;
 
-    let view = state
-        .files
-        .for_channel(caller.channel)
+    let view = context
+        .files(&state.files)
         .create_folder(
             account_id,
             space_id,
@@ -222,16 +215,14 @@ pub async fn read(
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
-    let node = state
-        .files
-        .for_channel(caller.channel)
+    let node = context
+        .files(&state.files)
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
-    let result = state
-        .files
-        .for_channel(caller.channel)
+    let result = context
+        .files(&state.files)
         .read_text(
             account_id,
             space_id,
@@ -337,11 +328,7 @@ pub async fn write(
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
-    let files = state
-        .files
-        .for_channel(caller.channel)
-        .with_revision_session(context.edit_session_id())
-        .with_revision_purpose(context.write_purpose());
+    let files = context.files(&state.files);
     let (target, existing) =
         resolve_write_target(&files, account_id, space_id, &path, create).await?;
 
@@ -395,11 +382,7 @@ pub async fn append(
     let space_id = resolved.space_id();
 
     let (target, _existing) = resolve_write_target(
-        &state
-            .files
-            .for_channel(caller.channel)
-            .with_revision_session(context.edit_session_id())
-            .with_revision_purpose(context.write_purpose()),
+        &context.files(&state.files),
         account_id,
         space_id,
         &path,
@@ -407,11 +390,8 @@ pub async fn append(
     )
     .await?;
 
-    let view = state
-        .files
-        .for_channel(caller.channel)
-        .with_revision_session(context.edit_session_id())
-        .with_revision_purpose(context.write_purpose())
+    let view = context
+        .files(&state.files)
         .append_text(
             account_id,
             space_id,
@@ -448,20 +428,14 @@ pub async fn patch(
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
-    let node = state
-        .files
-        .for_channel(caller.channel)
-        .with_revision_session(context.edit_session_id())
-        .with_revision_purpose(context.write_purpose())
+    let node = context
+        .files(&state.files)
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
-    let result = state
-        .files
-        .for_channel(caller.channel)
-        .with_revision_session(context.edit_session_id())
-        .with_revision_purpose(context.write_purpose())
+    let result = context
+        .files(&state.files)
         .patch_text(
             account_id,
             space_id,
@@ -501,20 +475,14 @@ pub async fn edit(
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
-    let node = state
-        .files
-        .for_channel(caller.channel)
-        .with_revision_session(context.edit_session_id())
-        .with_revision_purpose(context.write_purpose())
+    let node = context
+        .files(&state.files)
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
-    let result = state
-        .files
-        .for_channel(caller.channel)
-        .with_revision_session(context.edit_session_id())
-        .with_revision_purpose(context.write_purpose())
+    let result = context
+        .files(&state.files)
         .edit_text(
             account_id,
             space_id,
@@ -559,24 +527,21 @@ pub async fn mv(
         ));
     }
 
-    let source = state
-        .files
-        .for_channel(caller.channel)
+    let source = context
+        .files(&state.files)
         .resolve_path(account_id, space_id, &source_path)
         .await
         .map_err(service_error)?;
 
     let (dest_parent_path, new_name) = split_parent_name(&destination_path)?;
-    let dest_parent = state
-        .files
-        .for_channel(caller.channel)
+    let dest_parent = context
+        .files(&state.files)
         .resolve_path(account_id, space_id, &dest_parent_path)
         .await
         .map_err(service_error)?;
 
-    let view = state
-        .files
-        .for_channel(caller.channel)
+    let view = context
+        .files(&state.files)
         .move_node(
             account_id,
             space_id,
@@ -615,23 +580,20 @@ pub async fn copy(
         ));
     }
 
-    let source = state
-        .files
-        .for_channel(caller.channel)
+    let source = context
+        .files(&state.files)
         .resolve_path(account_id, space_id, &source_path)
         .await
         .map_err(service_error)?;
     let (parent_path, new_name) = split_parent_name(&destination_path)?;
-    let parent = state
-        .files
-        .for_channel(caller.channel)
+    let parent = context
+        .files(&state.files)
         .resolve_path(account_id, space_id, &parent_path)
         .await
         .map_err(service_error)?;
 
-    let result = state
-        .files
-        .for_channel(caller.channel)
+    let result = context
+        .files(&state.files)
         .copy_node(
             account_id,
             space_id,
@@ -669,16 +631,14 @@ pub async fn rm(
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
-    let node = state
-        .files
-        .for_channel(caller.channel)
+    let node = context
+        .files(&state.files)
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
-    let result = state
-        .files
-        .for_channel(caller.channel)
+    let result = context
+        .files(&state.files)
         .delete_node(
             account_id,
             space_id,

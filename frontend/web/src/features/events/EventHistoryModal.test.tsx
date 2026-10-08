@@ -24,6 +24,79 @@ function jsonResponse(body: unknown) {
 }
 
 describe("EventHistoryModal", () => {
+  it("does not identify a database recorder as the person who deleted a version", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => jsonResponse({
+      events: String(input).includes("/audit-events") ? [{
+        ...auditEvent(43, "text_revision.delete"), actor_account_id: null,
+        source: "system", resource_type: "text_revision", resource_id: "version-43",
+        metadata: { completion_scope: "database", recorded_by: "database_trigger", reason: "unknown" }
+      }] : [], page
+    }));
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    await user.click(screen.getByRole("tab", { name: "Audit" }));
+    expect(await screen.findByText("Removed version body from database")).toBeInTheDocument();
+    expect(screen.getByText("Reason not recorded")).toBeInTheDocument();
+    expect(screen.getByText("Actor not recorded")).toBeInTheDocument();
+    expect(screen.getByText("Version body removed. Current document status is tracked separately.")).toBeInTheDocument();
+    expect(screen.queryByText("System")).not.toBeInTheDocument();
+  });
+
+  it("shows database purge receipts without claiming file storage deletion is complete", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => jsonResponse({
+      events: String(input).includes("/audit-events") ? [{
+        ...auditEvent(41, "node.purge"),
+        operation_id: "delete-41",
+        actor_account_id: null,
+        source: "system",
+        resource_type: "node",
+        resource_id: "removed-file",
+        metadata: { item_kind: "file", completion_scope: "database" }
+      }] : [],
+      page
+    }));
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    await user.click(screen.getByRole("tab", { name: "Audit" }));
+    expect(await screen.findByText("Removed item from database")).toBeInTheDocument();
+    expect(screen.getByText("File removed-file")).toBeInTheDocument();
+    expect(screen.getByText("Database cleanup only. File storage cleanup is tracked separately.")).toBeInTheDocument();
+    expect(screen.getByText("Operation delete-41")).toBeInTheDocument();
+    expect(screen.getByText("System")).toBeInTheDocument();
+  });
+
+  it("distinguishes S3 deletion acknowledgement from provider disk cleanup", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => jsonResponse({
+      events: String(input).includes("/audit-events") ? [{
+        ...auditEvent(42, "object.delete"), operation_id: "delete-42", actor_account_id: null,
+        source: "system", resource_type: "storage_object", resource_id: "object-42",
+        metadata: { completion_scope: "s3", space_id: "removed-space" }
+      }] : [], page
+    }));
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    await user.click(screen.getByRole("tab", { name: "Audit" }));
+    expect(await screen.findByText("File deletion confirmed by storage")).toBeInTheDocument();
+    expect(screen.getByText("Stored file object-42")).toBeInTheDocument();
+    expect(screen.getByText(/Storage confirmed deletion and released the file quota/)).toHaveTextContent("Internal disk cleanup is managed by the storage provider.");
+    expect(screen.getByText("Operation delete-42")).toBeInTheDocument();
+  });
+
+  it("shows retained changes when all owned spaces have been removed", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({
+      events: [{ id: 40, operation_id: "operation-40", created_at: "2026-07-10T00:00:00Z", space_id: "removed-space", node_id: "removed-note", actor_account_id: null, actor: null, op_type: "text.write",
+        metadata: { item_kind: "text", item_name: "old.md", purpose: "Correct a date", source: "mcp", before_revision_id: "old-revision", before_revision_status: "unavailable" } }],
+      page: { ...page, returned: 1 }
+    }));
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    expect(await screen.findByText("Document · old.md")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain("/api/v1/me/file-change-events?limit=50");
+    await user.click(screen.getByRole("button", { name: "Show change details for Document · old.md" }));
+    expect(screen.getByText("Correct a date")).toBeInTheDocument();
+    expect(screen.getByText("old-revision · Body unavailable")).toBeInTheDocument();
+  });
+
   it("does not call the user-only audit endpoint when audit is unavailable", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({ events: [], page }));
 

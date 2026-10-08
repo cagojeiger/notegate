@@ -1714,6 +1714,72 @@ async fn cleanup_retries_after_temporary_storage_failure() -> Result<(), Box<dyn
 }
 
 #[tokio::test]
+async fn attached_file_quota_survives_s3_failure_and_crash_before_completion_commit()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3.clone());
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+    let upload = begin_upload(&state, &caller, space_id, root_id, "retained.bin", 5).await?;
+    put_upload(&upload, b"quota").await?.error_for_status()?;
+    let (status, completed) = complete_upload(&state, &caller, space_id, upload.id).await?;
+    assert_eq!(status, StatusCode::CREATED, "{completed}");
+    let node: Uuid = serde_json::from_value(completed["node"]["id"].clone())?;
+    let unavailable = state_with_s3(&db, unavailable_internal_storage(s3));
+    delete_attached_file(&db, &unavailable, &caller, space_id, node).await?;
+    assert_eq!(object_state(&db, upload.id).await?, "delete_pending");
+    assert_eq!(object_get_status(&state, upload.id).await, StatusCode::OK);
+    let retained: i64 =
+        sqlx::query_scalar("SELECT file_bytes FROM space_storage_usage WHERE space_id = $1")
+            .bind(space_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(retained, 5);
+    let failed: (i32, bool) = sqlx::query_as(
+        "SELECT retry_count, retry_after > now() FROM object_storage_objects WHERE id = $1",
+    )
+    .bind(upload.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(failed, (1, true));
+
+    // Crash window: S3 acknowledged deletion, but the DB completion never ran.
+    state
+        .object_storage
+        .delete(&format!("objects/{}", upload.id))
+        .await
+        .expect("S3 acknowledged deletion");
+    assert_eq!(
+        object_get_status(&state, upload.id).await,
+        StatusCode::NOT_FOUND
+    );
+    let retained: i64 =
+        sqlx::query_scalar("SELECT file_bytes FROM space_storage_usage WHERE space_id = $1")
+            .bind(space_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(retained, 5);
+    sqlx::query(
+        "UPDATE object_storage_objects SET retry_after = now() - interval '1 second' WHERE id = $1",
+    )
+    .bind(upload.id)
+    .execute(&db.pool)
+    .await?;
+    run_cleanup(&db, &state).await;
+    run_cleanup(&db, &state).await;
+    assert_eq!(object_state(&db, upload.id).await?, "deleted");
+    let result: (i64, i64) = sqlx::query_as("SELECT file_bytes, (SELECT count(*) FROM audit_events WHERE op_type = 'object.delete' AND resource_id = $2) FROM space_storage_usage WHERE space_id = $1")
+        .bind(space_id).bind(upload.id).fetch_one(&db.pool).await?;
+    assert_eq!(result, (0, 1));
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn cleanup_recovers_when_object_was_deleted_before_state_commit()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some((db, state, caller, space_id, root_id)) = upload_test().await? else {

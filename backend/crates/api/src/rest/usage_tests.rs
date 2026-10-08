@@ -29,6 +29,53 @@ fn space_gate_seed(space_id: Uuid) -> i64 {
 }
 
 #[tokio::test]
+async fn usage_distinguishes_live_items_from_retained_content()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state(&db);
+    let (owner, space, root) = caller_and_space(&state).await?;
+    let files = notegate_db::FilesRepo::new(db.pool.clone());
+    let content = notegate_model::files::StoredContent {
+        body: notegate_model::files::WriteTextBody::Plain("body".into()),
+        content_sha256: "a".repeat(64),
+        byte_len: 4,
+        line_count: 1,
+    };
+    let (node, _) = files
+        .insert_text(space, root, "note.md", &content, owner.account_id())
+        .await?;
+    files
+        .soft_delete_node(space, node.id, owner.account_id(), false)
+        .await?;
+    let (status, usage) = get_json(
+        rest_app(state.clone(), owner.clone()),
+        "/v1/me/usage".into(),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(usage["spaces"][0]["items"]["used"], 0);
+    assert_eq!(usage["spaces"][0]["text_bytes"]["used"], 4);
+    assert_eq!(usage["spaces"][0]["retained_text_bytes"], 4);
+    notegate_db::SpaceRepo::new(db.pool.clone())
+        .delete_space(space, owner.account_id(), owner.account_id())
+        .await?;
+    let (_, usage) = get_json(
+        rest_app(state.clone(), owner.clone()),
+        "/v1/me/usage".into(),
+    )
+    .await?;
+    assert_eq!(usage["spaces"], json!([]));
+    assert_eq!(
+        usage["deleted_spaces"],
+        json!({"count": 1, "text_bytes": 4, "file_bytes": 0})
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dyn std::error::Error>>
 {
     let Some(db) = TestDb::setup().await? else {

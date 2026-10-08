@@ -48,7 +48,7 @@ pub use background_job_repo::BackgroundJobRepo;
 pub use browser_session_repo::BrowserSessionRepo;
 pub use command_invocation_repo::{CommandInvocationRepo, NewCommandInvocation};
 pub use connection_repo::ConnectionRepo;
-pub use file_change_event_repo::FileChangeSyncRows;
+pub use file_change_event_repo::{ChangeHistoryRepo, FileChangeSyncRows};
 pub use files_repo::{FilesRepo, TextMutationKind};
 pub use key_epoch_repo::CryptoKeyEpochRepo;
 pub use link_graph_repo::{

@@ -58,6 +58,7 @@ pub(crate) struct AuditEventListResponse {
 /// `GET /api/v1/me/command-invocations`.
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct CommandInvocationOut {
+    pub invocation_id: Option<Uuid>,
     pub id: i64,
     pub created_at: DateTime<Utc>,
     pub actor_account_id: Uuid,
@@ -82,6 +83,7 @@ impl CommandInvocationOut {
     ) -> Self {
         Self {
             id: invocation.id,
+            invocation_id: invocation.invocation_id,
             created_at: invocation.created_at,
             actor_account_id: invocation.actor_account_id,
             actor: refs.get(&invocation.actor_account_id).map(AccountRef::from),

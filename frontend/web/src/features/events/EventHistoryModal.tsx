@@ -46,7 +46,7 @@ export function EventHistoryModal({
         {canViewAuditEvents && tab === "mcp" ? <CommandInvocationsPanel surface="mcp" /> : null}
         {canViewAuditEvents && tab === "cli" ? <CommandInvocationsPanel surface="cli" /> : null}
         {canViewAuditEvents && tab === "jobs" ? <BackgroundJobsPanel /> : null}
-        {tab === "files" ? <FileChangeEventsPanel spaces={spaces} initialSpaceId={initialSpaceId} /> : null}
+        {tab === "files" ? <FileChangeEventsPanel spaces={spaces} initialSpaceId={initialSpaceId} canViewOwnedHistory={canViewAuditEvents} /> : null}
       </div>
     </Modal>
   );

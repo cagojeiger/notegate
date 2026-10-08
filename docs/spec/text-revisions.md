@@ -30,9 +30,11 @@ Policy constants live together in `backend/crates/db/src/files/revisions.rs`:
 - There is no last-N cap that can silently truncate the protected 24-hour window.
 - Each Space has a separate 1 GiB history-body budget. `text_revision_usage.stored_bytes` counts ciphertext plus nonce bytes, including soft-deleted documents. This is not physical database size: table/index overhead and backups are additional.
 - When a changed save would exceed that budget, return `422` (`text_revision_storage_full`) and leave current content/history unchanged. Do not silently delete protected revisions or save without history. Identical saves remain no-ops.
-- Successful expiration/hard deletion releases the budget transactionally. Soft deletion hides history but retains it until normal expiration or document purge.
+- Successful expiration/hard deletion releases the budget transactionally. Soft deletion of a document, folder or Space hides history without pausing its normal expiration. Trash restoration exposes only revisions that still remain.
 
-The budget is intentionally separate from tier-dependent live text/file quotas and their existing recalculation. Operators can inspect `text_revision_usage` and compare it with `SUM(text_revisions.stored_bytes)` per Space. The frontend usage display excludes history bytes.
+Changes retains revision IDs independently of historical bodies. Revision expiration does not remove the current document or its Changes, and missing historical bodies do not prevent trash restoration when current content remains available. Restoring a selected revision requires reading that revision's body; an already removed body returns 404 without changing the current document.
+
+The budget is separate from tier-dependent text/file quotas. Existing Space usage reconciliation also repairs `text_revision_usage` from `SUM(text_revisions.stored_bytes)`, including trashed documents, under the Space gate and counter lock. It repairs accounting without recreating missing bodies or inventing deletion receipts. It is an explicit reconciliation path, not a continuous detector of external database edits. The frontend usage display excludes history bytes.
 
 ## History API and restore
 
@@ -44,7 +46,7 @@ Browser endpoints (under `/api`):
 
 Lists return metadata only, newest first, with the shared `page` object (`limit`, `returned`, `has_more`, `next_cursor`) and a signed document-scoped cursor; limit is 1–100. A selected body is loaded/decrypted separately. Current content is obtained through the existing Text read API. An expired and already deleted revision returns 404.
 
-Revision metadata includes nullable `purpose`. Lists also return nullable `current` metadata (`content_sha256`, `purpose`) without reading or decrypting a body. The web modal displays the selected version's change reason, and shows the current reason only when its hash matches the comparison baseline. Missing reasons are displayed as `Not recorded`. Purpose is bounded, caller-supplied metadata under the same current document/Space access checks; it is stored as plaintext like the existing invocation purpose and must not contain secrets.
+Revision metadata includes nullable `purpose`. Lists also return nullable `current` metadata (`content_sha256`, `purpose`) without reading or decrypting a body. The web modal displays the selected version's change reason, and shows the current reason only when its hash matches the comparison baseline. Missing reasons are displayed as `Not recorded`. Purpose is bounded, caller-supplied metadata under the same current document/Space access checks; it is encrypted separately from the body, bound to Space, document and revision IDs. Lists decrypt only this small metadata field. New writes store no plaintext purpose. The history privacy reconciler migrates legacy current and historical reasons in batches of at most 100 rows per table. Rolling-deployment triggers preserve encrypted reasons when an older writer archives a body; an old reader may temporarily show a missing reason until it is upgraded.
 
 The service checks current Space permission, document visibility and external-access policy for every call. A revision ID does not bypass document/Space scoping. Restore requires write permission and uses the existing guarded write path, including current write locks, format validation, quotas and encryption policy. A stale current hash returns 409. Restoring identical content is a no-op; otherwise the replaced current body is preserved. Restore does not rewind or erase history. History list/read/restore are Browser V1 endpoints; Public V2 and MCP expose no history browsing tools. All text mutation surfaces record revisions.
 
@@ -58,9 +60,13 @@ Revision bodies use the configured encryption key without key rotation or an old
 
 The `text_revisions.retention` kind runs in the shared reconciliation runtime with its schedule, advisory lock and metrics.
 
-Every ten minutes, process at most 100 eligible rows from one live Space in one transaction, using the existing Space mutation lock order. Indexes support due-time selection and per-Space cleanup. If rows were deleted, release the runtime lock and request a follow-up after one second. Lock acquisition is bounded to two seconds; failure/timeout retries on the next normal schedule. Irreversible resource purge removes retained revisions in batches before deleting their document or Space.
+Every ten minutes, process at most 100 eligible rows from one Space, including a soft-deleted Space, in one transaction. Retention acquires the existing shared Space gate and then the Space row lock; it does not require a live Space. This keeps it mutually exclusive with resource purge's exclusive gate without changing ordinary write authorization. A Space removed after candidate selection is a no-op. Indexes support due-time selection and per-Space cleanup. If rows were deleted, release the runtime lock and request a follow-up after one second. Row-lock waits are bounded to two seconds; failure/timeout retries on the next normal schedule. Irreversible resource purge removes remaining revisions in batches before deleting their document or Space.
 
 A cleanup failure retains extra history rather than losing a checkpoint. It can delay capacity recovery; existing reconciliation outcome/duration/last-success metrics and `text_revisions.cleaned` counts provide operational evidence. Deletion triggers release history usage, including revision batches drained by resource purge.
+
+AFTER DELETE triggers on `text_objects` and `text_revisions` record identifier-only `text_revision.delete` Audit receipts in the same transaction as body removal and usage release. The current body's receipt preserves its `revision_id`; ordinary save UPDATEs and archival do not create deletion receipts. Receipts use the actual database deletion time and retain for 180 days; cleanup's test/policy cutoff is not a claimed deletion timestamp. Retention supplies an explicit context, distinguishing intermediate/checkpoint expiration for historical bodies only; resource purge supplies its own context for both tables. Ordinary SQL and FK cascades without that context record `unknown`, even if the body was old. Transaction-local context cannot leak to another transaction. The retained accounting scope preserves receipt ownership after Space removal. Migrations install capture for subsequent DELETEs; they do not reconstruct receipts for previously missing bodies.
+
+Changes checks actual body presence before interpreting receipts. Missing bodies without receipts remain unavailable with unknown cause; a receipt alongside an existing body is a visible inconsistency, not grounds for hiding/deleting the body. Query/authorization/decryption failures are not deletion evidence. Row triggers do not cover TRUNCATE, disabled triggers, or administrator tampering. Existing deadlines remain stored in `cleanup_at`; changing policy constants alone does not rewrite them.
 
 ## Validation
 
@@ -69,6 +75,8 @@ The database is the revision policy clock in production. Creation and each chang
 CI checks one microsecond before, exactly at, and one microsecond after the 120-second idle, 600-second group, 24-hour intermediate and 30-day checkpoint boundaries. Continued writes isolate the group-age limit from the idle limit. Tests also verify replacement-based retention, unchanged current content during cleanup, transactional usage accounting, and that no-op, hash-conflict, quota-rejected and rolled-back writes do not refresh an editing group.
 
 CI exercises atomic rollback, no-op and competing writes, group boundaries, recent protection of old current content, repeated cleanup, expiration, quota accounting, cascade deletion, encrypted identity binding, access controls, write locks, encryption transitions, pagination and guarded restore.
+
+Trash-retention tests cover document, folder and Space deletion, the exact intermediate expiry boundary, current-body preservation and restoration of remaining checkpoints. A database-lock-controlled test runs retention and Space purge in both orders and verifies retry behavior, single byte release and one receipt per deleted revision.
 
 ## Write cost and CI comparison
 

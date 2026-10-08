@@ -77,7 +77,8 @@ async fn compare_text_writes() -> TestResult {
                 let mut writers = Vec::new();
                 let mut shared = None;
                 let a = Arc::new("a".repeat(bytes));
-                let b = Arc::new("b".repeat(bytes));
+                // Exercise byte-counter updates as well as body/revision writes.
+                let b = Arc::new("b".repeat(bytes - 1));
                 for worker in 0..workers {
                     let actor = if shape == "different_owners" && worker > 0 {
                         let id = insert_user_account(

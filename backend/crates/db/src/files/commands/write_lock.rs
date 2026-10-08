@@ -14,6 +14,7 @@ use crate::file_change_events;
 
 pub async fn update_node_write_lock(
     pool: &PgPool,
+    capture: file_change_events::ChangeCapture<'_>,
     space_id: Uuid,
     command: &UpdateNodeWriteLock,
     updated_by: Uuid,
@@ -52,7 +53,7 @@ pub async fn update_node_write_lock(
 
     file_change_events::node_write_lock_updated(
         &mut tx,
-        file_change_events::context(updated_by, space_id),
+        file_change_events::context(updated_by, space_id, capture),
         command.node_id,
         &row.kind,
         &row.name,

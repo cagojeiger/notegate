@@ -36,6 +36,43 @@ impl SpaceUsageRepo {
         .fetch_optional(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+        // Serialize exact storage repair with S3 completion, whose counter
+        // trigger holds this row until its transaction commits.
+        sqlx::query("SELECT space_id FROM space_storage_usage WHERE space_id = $1 FOR UPDATE")
+            .bind(space_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        sqlx::query(
+            "INSERT INTO space_storage_usage(space_id, owner_user_id, text_bytes, file_bytes) \
+             SELECT s.id, s.owner_user_id, \
+                 COALESCE((SELECT sum(t.byte_len) FROM text_objects t WHERE t.space_id = s.id), 0), \
+                 COALESCE((SELECT sum(o.declared_byte_len) FROM object_storage_objects o \
+                     WHERE o.usage_space_id = s.id AND o.state IN ('attached', 'delete_pending')), 0) \
+             FROM spaces s WHERE s.id = $1 \
+             ON CONFLICT (space_id) DO UPDATE SET text_bytes = EXCLUDED.text_bytes, file_bytes = EXCLUDED.file_bytes",
+        ).bind(space_id).execute(&mut *tx).await.map_err(map_sqlx_error)?;
+        // Lock before summing so a concurrent direct DELETE's usage trigger
+        // either commits before the snapshot or subtracts after this repair.
+        sqlx::query("INSERT INTO text_revision_usage(space_id) VALUES ($1) ON CONFLICT DO NOTHING")
+            .bind(space_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        sqlx::query("SELECT space_id FROM text_revision_usage WHERE space_id = $1 FOR UPDATE")
+            .bind(space_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        sqlx::query(
+            "UPDATE text_revision_usage SET stored_bytes = \
+             (SELECT COALESCE(sum(stored_bytes), 0)::bigint FROM text_revisions WHERE space_id = $1) \
+             WHERE space_id = $1",
+        )
+        .bind(space_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
         let actual = exact_usage(&mut tx, space_id).await?;
         sqlx::query(
             "INSERT INTO space_usage ( \

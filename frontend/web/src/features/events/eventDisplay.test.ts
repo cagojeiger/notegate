@@ -16,6 +16,53 @@ import {
 } from "./eventDisplay";
 
 describe("eventDisplay", () => {
+  it.each([
+    ["deleted", "Body deleted", "Before deletion reason", "Checkpoint retention expired"],
+    ["unavailable", "Body unavailable", "Before availability", "No body or deletion record found"]
+  ])("distinguishes %s version bodies from the evidence available", (status, bodyLabel, label, value) => {
+    const event: FileChangeEvent = {
+      id: 1, created_at: "2026-07-13T00:00:00Z", space_id: "space", node_id: null,
+      actor_account_id: null, op_type: "text.write",
+      metadata: {
+        before_revision_id: "revision", before_revision_status: status,
+        before_revision_deletion_reason: "checkpoint_expired"
+      }
+    };
+    expect(formatFileChangeDetails(event)).toEqual([
+      { label: "Before version", value: `revision · ${bodyLabel}` },
+      { label, value }
+    ]);
+  });
+
+  it("keeps existing bodies visible when a deletion receipt contradicts them", () => {
+    const event: FileChangeEvent = {
+      id: 1, created_at: "2026-07-13T00:00:00Z", space_id: "space", node_id: null,
+      actor_account_id: null, op_type: "text.write",
+      metadata: {
+        after_revision_id: "revision", after_revision_status: "current",
+        after_revision_deletion_conflict: true, after_revision_deletion_reason: "unknown",
+        after_revision_deleted_at: "2026-07-13T00:00:00Z"
+      }
+    };
+    const details = formatFileChangeDetails(event);
+    expect(details).toContainEqual({ label: "After version", value: "revision · Current body" });
+    expect(details).toContainEqual({ label: "After status", value: "Deletion record conflicts with existing body" });
+    expect(details).toContainEqual({ label: "After recorded deletion", value: expect.any(String) });
+    expect(details.some(detail => detail.label === "After deletion reason")).toBe(false);
+  });
+
+  it("does not reinterpret future availability states or deletion reasons", () => {
+    const event: FileChangeEvent = {
+      id: 1, created_at: "2026-07-13T00:00:00Z", space_id: "space", node_id: null,
+      actor_account_id: null, op_type: "text.write",
+      metadata: { before_revision_id: "revision", before_revision_status: "new-state" }
+    };
+    expect(formatFileChangeDetails(event)).toEqual([{ label: "Before version", value: "revision · Availability unknown" }]);
+    expect(formatFileChangeDetails({
+      ...event, metadata: { ...event.metadata, before_revision_status: "deleted", before_revision_deletion_reason: "unknown" }
+    })).toContainEqual({ label: "Before deletion reason", value: "Reason not recorded" });
+  });
+
   it("formats audit events for people instead of exposing raw operation names", () => {
     const event = {
       id: 1,

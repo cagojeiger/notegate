@@ -153,7 +153,7 @@ Node/content-level limits
   node_metadata_string_max_chars = 2048
 ```
 
-`space_max_text_bytes`와 `space_max_file_bytes`는 독립 quota다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다. S3 object bytes는 soft delete transaction에서 비동기 삭제 대상으로 전환한다.
+`space_max_text_bytes`와 `space_max_file_bytes`는 독립 quota다. 휴지통 bytes도 quota에 포함한다. Text는 DB 삭제 commit, File은 S3 삭제 acknowledgement를 기록하는 transaction에서 반환한다. Soft delete는 30일 보관하며 영구 삭제 요청 또는 만료 후 비동기 정리를 시작한다. 집계 기준은 `usage-and-quotas.md`를 따른다.
 
 Object upload 상한:
 
@@ -296,8 +296,8 @@ deleted_node_retention_days = 30
 account_deletion_retention_days = 15
 subtree_delete_max_nodes = 1000
 api_key_retention_days = 30
-object_storage_history_retention_days = 90
-audit_event_retention_days = 365
+object_storage_history_retention_days = 180
+audit_event_retention_days = 180
 file_change_event_retention_days = 90
 command_invocation_retention_days = 90
 purge_batch_spaces = 10

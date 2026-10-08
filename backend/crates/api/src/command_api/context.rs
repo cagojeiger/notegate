@@ -35,10 +35,11 @@ where
             )
         })?;
 
-        Ok(Self(CommandContext::new(
-            caller,
-            RequestContext::from_parts(parts),
-        )))
+        Ok(Self(
+            CommandContext::new(caller, RequestContext::from_parts(parts))
+                .with_source("cli")
+                .with_invocation(uuid::Uuid::new_v4()),
+        ))
     }
 }
 

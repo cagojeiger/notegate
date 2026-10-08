@@ -41,6 +41,8 @@ pub struct FilesRepo {
     external_only: bool,
     revision_session: Option<Uuid>,
     revision_source: &'static str,
+    change_source: &'static str,
+    invocation_id: Option<Uuid>,
     revision_purpose: Option<String>,
     revision_time: Option<DateTime<Utc>>,
     trash_time: Option<DateTime<Utc>>,
@@ -107,6 +109,8 @@ impl FilesRepo {
             external_only: false,
             revision_session: None,
             revision_source: "unknown",
+            change_source: "unknown",
+            invocation_id: None,
             revision_purpose: None,
             revision_time: None,
             trash_time: None,
@@ -120,6 +124,9 @@ impl FilesRepo {
 
     pub fn with_revision_context(mut self, source: &'static str, session: Option<Uuid>) -> Self {
         self.revision_source = source;
+        if source != "restore" {
+            self.change_source = source;
+        }
         self.revision_session = session;
         self.revision_purpose = None;
         self
@@ -132,9 +139,29 @@ impl FilesRepo {
         self
     }
 
+    pub fn with_invocation_id(mut self, id: Option<Uuid>) -> Self {
+        self.invocation_id = id;
+        self
+    }
+
+    pub fn with_history_source(mut self, source: &'static str) -> Self {
+        self.change_source = source;
+        self.revision_source = source;
+        self
+    }
+
     pub fn with_revision_purpose(mut self, purpose: Option<String>) -> Self {
         self.revision_purpose = purpose;
         self
+    }
+
+    pub(crate) fn change_capture(&self) -> crate::file_change_events::ChangeCapture<'_> {
+        crate::file_change_events::ChangeCapture {
+            invocation_id: self.invocation_id,
+            crypto: &self.crypto,
+            source: self.change_source,
+            purpose: self.revision_purpose.as_deref(),
+        }
     }
 
     pub fn with_metrics_enabled(mut self, enabled: bool) -> Self {
@@ -435,7 +462,12 @@ impl FilesRepo {
         cursor: Option<&notegate_model::FileChangeEventCursor>,
     ) -> Result<Vec<notegate_model::FileChangeEvent>> {
         file_change_event_repo::list_file_change_events(
-            &self.pool, space_id, node_id, limit, cursor,
+            &self.pool,
+            &self.crypto,
+            space_id,
+            node_id,
+            limit,
+            cursor,
         )
         .await
     }
@@ -447,7 +479,11 @@ impl FilesRepo {
         before_id: Option<i64>,
     ) -> Result<Vec<notegate_model::FileChangeEvent>> {
         file_change_event_repo::list_file_change_events_by_id(
-            &self.pool, space_id, limit, before_id,
+            &self.pool,
+            &self.crypto,
+            space_id,
+            limit,
+            before_id,
         )
         .await
     }
@@ -458,7 +494,14 @@ impl FilesRepo {
         after_id: Option<i64>,
         limit: i64,
     ) -> Result<crate::FileChangeSyncRows> {
-        file_change_event_repo::sync_file_change_events(&self.pool, space_id, after_id, limit).await
+        file_change_event_repo::sync_file_change_events(
+            &self.pool,
+            &self.crypto,
+            space_id,
+            after_id,
+            limit,
+        )
+        .await
     }
 
     pub async fn search_node_candidates(
@@ -534,6 +577,7 @@ impl FilesRepo {
     ) -> Result<Node> {
         commands::create::insert_folder(
             &self.pool,
+            self.change_capture(),
             self.external_only,
             space_id,
             command.parent_node_id,
@@ -554,6 +598,7 @@ impl FilesRepo {
     ) -> Result<(Node, TextObject)> {
         commands::create::insert_text(commands::create::InsertTextArgs {
             pool: &self.pool,
+            capture: self.change_capture(),
             external_only: self.external_only,
             crypto: &self.crypto,
             space_id,
@@ -652,6 +697,7 @@ impl FilesRepo {
     ) -> Result<(Node, FileObject)> {
         crate::files::object_uploads::attach(crate::files::object_uploads::AttachUploadArgs {
             pool: &self.pool,
+            capture: self.change_capture(),
             external_only: self.external_only,
             id,
             space_id,
@@ -702,6 +748,7 @@ impl FilesRepo {
     ) -> Result<(Node, TextObject)> {
         commands::save::save_text_content(commands::save::SaveTextContentArgs {
             pool: &self.pool,
+            capture: self.change_capture(),
             external_only: self.external_only,
             crypto: &self.crypto,
             space_id,
@@ -727,6 +774,7 @@ impl FilesRepo {
     ) -> Result<Node> {
         commands::move_node::move_node(commands::move_node::MoveNodeArgs {
             pool: &self.pool,
+            capture: self.change_capture(),
             external_only: self.external_only,
             space_id,
             node_id: command.node_id,
@@ -747,6 +795,7 @@ impl FilesRepo {
     ) -> Result<(Node, CopyCounts)> {
         commands::copy_node::copy_node(commands::copy_node::CopyNodeArgs {
             pool: &self.pool,
+            capture: self.change_capture(),
             external_only: self.external_only,
             crypto: &self.crypto,
             space_id,
@@ -768,6 +817,7 @@ impl FilesRepo {
     ) -> Result<Node> {
         commands::update::update_node(
             &self.pool,
+            self.change_capture(),
             self.external_only,
             space_id,
             command,
@@ -783,7 +833,11 @@ impl FilesRepo {
         updated_by: Uuid,
     ) -> Result<Node> {
         commands::update::update_node_external_access_policy(
-            &self.pool, space_id, command, updated_by,
+            &self.pool,
+            self.change_capture(),
+            space_id,
+            command,
+            updated_by,
         )
         .await
     }
@@ -796,6 +850,7 @@ impl FilesRepo {
     ) -> Result<Node> {
         commands::write_lock::update_node_write_lock(
             &self.pool,
+            self.change_capture(),
             space_id,
             command,
             updated_by,
@@ -812,6 +867,7 @@ impl FilesRepo {
     ) -> Result<Node> {
         commands::update::update_text_encryption(
             &self.pool,
+            self.change_capture(),
             &self.crypto,
             space_id,
             command,
@@ -830,6 +886,7 @@ impl FilesRepo {
     ) -> Result<DateTime<Utc>> {
         commands::delete::soft_delete_node(
             &self.pool,
+            self.change_capture(),
             self.external_only,
             space_id,
             node_id,
@@ -860,6 +917,7 @@ impl FilesRepo {
     ) -> Result<notegate_model::text_revision::TextRevisionPage> {
         crate::files::revisions::list(
             &self.pool,
+            &self.crypto,
             space_id,
             node_id,
             limit,

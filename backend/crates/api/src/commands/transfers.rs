@@ -30,6 +30,8 @@ pub async fn upload(
     input: FileUploadInput,
 ) -> Result<Value, CommandError> {
     validate_purpose(&input.purpose)?;
+    let scoped = context.clone().with_write_purpose(input.purpose.clone());
+    let context = &scoped;
     match input.op.as_str() {
         FILE_UPLOAD_OP_BEGIN_UPLOAD => begin_upload(state, context, input).await,
         FILE_UPLOAD_OP_PREPARE_PARTS => prepare_parts(state, context, input).await,
@@ -60,7 +62,7 @@ async fn begin_upload(
     let purpose = input.purpose.clone();
     let caller = context.caller();
     let mut scoped = state.clone();
-    scoped.files = state.files.for_channel(caller.channel);
+    scoped.files = context.files(&state.files);
     let state = &scoped;
     let target = required(input.target, "target", FILE_UPLOAD_OP_BEGIN_UPLOAD)?;
     let byte_len = input.byte_len.ok_or_else(|| {
@@ -176,7 +178,7 @@ async fn prepare_parts(
     let purpose = input.purpose.clone();
     let caller = context.caller();
     let mut scoped = state.clone();
-    scoped.files = state.files.for_channel(caller.channel);
+    scoped.files = context.files(&state.files);
     let state = &scoped;
     let upload_id = upload_id(&input)?;
     let part_numbers = input
@@ -261,7 +263,7 @@ async fn complete_upload(
 ) -> Result<Value, CommandError> {
     let caller = context.caller();
     let mut scoped = state.clone();
-    scoped.files = state.files.for_channel(caller.channel);
+    scoped.files = context.files(&state.files);
     let state = &scoped;
     let upload_id = upload_id(&input)?;
     let upload = state
@@ -304,7 +306,7 @@ async fn abort_upload(
 ) -> Result<Value, CommandError> {
     let caller = context.caller();
     let mut scoped = state.clone();
-    scoped.files = state.files.for_channel(caller.channel);
+    scoped.files = context.files(&state.files);
     let state = &scoped;
     let upload_id = upload_id(&input)?;
     let upload = state
@@ -348,7 +350,7 @@ async fn prepare_download(
 ) -> Result<Value, CommandError> {
     let caller = context.caller();
     let mut scoped = state.clone();
-    scoped.files = state.files.for_channel(caller.channel);
+    scoped.files = context.files(&state.files);
     let state = &scoped;
     let (resolved, path) = resolve_target(state, caller, &target).await?;
     let node = state

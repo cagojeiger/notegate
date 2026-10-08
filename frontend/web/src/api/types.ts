@@ -268,6 +268,7 @@ export type AuditEventListResponse = {
 export type CommandInvocationSurface = "mcp" | "cli";
 
 export type CommandInvocation = {
+  invocation_id?: string | null;
   id: number;
   created_at: string;
   actor_account_id: string;

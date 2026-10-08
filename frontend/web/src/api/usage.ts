@@ -12,6 +12,8 @@ export type SpaceUsage = {
   items: QuotaUsage;
   text_bytes: QuotaUsage;
   file_bytes: QuotaUsage;
+  retained_text_bytes?: number;
+  retained_file_bytes?: number;
   reconciliation: {
     status: "idle" | "pending";
     availability: CommandAvailability;
@@ -21,6 +23,7 @@ export type SpaceUsage = {
 export type CurrentUserUsage = {
   tier: string;
   spaces: SpaceUsage[];
+  deleted_spaces?: { count: number; text_bytes: number; file_bytes: number };
 };
 
 export function getCurrentUserUsage(client: ApiClient): Promise<CurrentUserUsage> {

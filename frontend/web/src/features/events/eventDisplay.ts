@@ -19,6 +19,7 @@ const FILE_CHANGE_ACTIONS: Record<string, string> = {
   "item.move": "Moved",
   "item.copy": "Copied",
   "item.delete": "Deleted",
+  "item.restore": "Restored",
   "metadata.replace": "Updated metadata",
   "metadata.patch": "Updated metadata"
 };
@@ -34,6 +35,9 @@ const AUDIT_TARGET_LABELS: Record<string, string> = {
   agent: "Agent",
   api_key: "API key",
   browser_session: "Browser session",
+  node: "Item",
+  storage_object: "Stored file",
+  text_revision: "Document version",
   space: "Space"
 };
 
@@ -46,6 +50,10 @@ const AUDIT_ACTIONS: Record<string, string> = {
   "space.create": "Created a space",
   "space.update": "Updated a space",
   "space.delete": "Deleted a space",
+  "space.purge": "Removed space from database",
+  "node.purge": "Removed item from database",
+  "object.delete": "File deletion confirmed by storage",
+  "text_revision.delete": "Removed version body from database",
   "agent.create": "Created an agent",
   "agent.delete": "Deleted an agent",
   "user_key.create": "Created a user API key",
@@ -56,6 +64,13 @@ const AUDIT_ACTIONS: Record<string, string> = {
   "agent_key.revoke": "Revoked an agent API key",
   "connection.upsert": "Changed agent access",
   "connection.disconnect": "Disconnected an agent"
+};
+
+const REVISION_DELETION_REASONS: Record<string, string> = {
+  intermediate_expired: "Intermediate version retention expired",
+  checkpoint_expired: "Checkpoint retention expired",
+  resource_purge: "Permanent document deletion cleanup",
+  unknown: "Reason not recorded"
 };
 
 export function formatEventTime(value: string): string {
@@ -132,12 +147,18 @@ export function formatAuditAction(event: AuditEvent): string {
 }
 
 export function formatAuditTarget(event: AuditEvent): string {
-  const label = AUDIT_TARGET_LABELS[event.resource_type] ?? event.resource_type.replace(/_/g, " ");
+  const itemKind = typeof event.metadata.item_kind === "string" ? event.metadata.item_kind : "";
+  const label = (event.resource_type === "node" ? ITEM_KIND_LABELS[itemKind] : undefined)
+    ?? AUDIT_TARGET_LABELS[event.resource_type] ?? event.resource_type.replace(/_/g, " ");
   if (event.resource_type === "browser_session") return label;
   return event.resource_id ? `${label} ${shortId(event.resource_id)}` : label;
 }
 
 export function formatAuditDetail(event: AuditEvent): string | null {
+  if (event.op_type === "text_revision.delete") {
+    const reason = event.metadata.reason;
+    return typeof reason === "string" ? REVISION_DELETION_REASONS[reason] ?? reason : "Reason not recorded";
+  }
   if (typeof event.metadata.reason === "string") return event.metadata.reason.replace(/_/g, " ");
   if (typeof event.metadata.permission === "string") return `${event.metadata.permission} access`;
   if (Array.isArray(event.metadata.changed_fields)) return `Changed ${event.metadata.changed_fields.join(", ")}`;
@@ -153,6 +174,38 @@ export function formatFileChangeTarget(event: FileChangeEvent): string {
 export function formatFileChangeDetails(event: FileChangeEvent): FileChangeDetail[] {
   const metadata = event.metadata;
   const details: FileChangeDetail[] = [];
+  if (typeof metadata.source === "string") details.push({ label: "Source", value: metadata.source });
+  if (typeof metadata.purpose === "string") details.push({ label: "Purpose", value: metadata.purpose });
+  addIdDetail(details, "Operation", event.operation_id);
+  addIdDetail(details, "Call", metadata.invocation_id);
+  for (const side of ["before", "after"] as const) {
+    const revision = metadata[`${side}_revision_id`];
+    const status = metadata[`${side}_revision_status`];
+    if (typeof revision === "string") {
+      const availability = status === "current" ? "Current body"
+        : status === "retained" ? "Body retained"
+        : status === "deleted" ? "Body deleted"
+        : status === "unavailable" ? "Body unavailable" : "Availability unknown";
+      details.push({ label: side === "before" ? "Before version" : "After version", value: `${shortId(revision)} · ${availability}` });
+      const label = side === "before" ? "Before" : "After";
+      const conflict = metadata[`${side}_revision_deletion_conflict`] === true;
+      if (conflict) {
+        details.push({ label: `${label} status`, value: "Deletion record conflicts with existing body" });
+      } else if (status === "deleted") {
+        const reason = metadata[`${side}_revision_deletion_reason`];
+        details.push({ label: `${label} deletion reason`, value: typeof reason === "string" ? REVISION_DELETION_REASONS[reason] ?? reason : "Reason not recorded" });
+      } else if (status === "unavailable") {
+        details.push({ label: `${label} availability`, value: "No body or deletion record found" });
+      }
+      const deletedAt = metadata[`${side}_revision_deleted_at`];
+      if ((status === "deleted" || conflict) && typeof deletedAt === "string") {
+        details.push({ label: `${label} recorded deletion`, value: formatEventTime(deletedAt) });
+      }
+    }
+    const cleanup = metadata[`${side}_revision_cleanup_at`];
+    if (typeof cleanup === "string") details.push({ label: `${side === "before" ? "Before" : "After"} cleanup from`, value: formatEventTime(cleanup) });
+  }
+
 
   if (event.op_type === "folder.create" || event.op_type === "text.create" || event.op_type === "file.create") {
     addIdDetail(details, "Parent", metadata.parent_node_id);

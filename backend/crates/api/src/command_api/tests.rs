@@ -338,3 +338,133 @@ async fn cli_read_sequence_executes_the_shared_engine_and_records_one_invocation
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn cli_mutations_record_transport_and_purpose_in_changes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state(&db);
+    let (mut caller, space_id, _) = caller_and_space(&state).await?;
+    state
+        .spaces
+        .update(
+            caller.account.kind,
+            caller.account_id(),
+            UpdateSpace {
+                space_id,
+                name: None,
+                sort_order: None,
+                navigation_pinned: None,
+                user_mcp_enabled: Some(true),
+                default_external_access_enabled: Some(true),
+                default_text_encryption_enabled: None,
+            },
+        )
+        .await?;
+    caller.channel = Channel::Api;
+    let app = Router::new()
+        .merge(routes())
+        .layer(Extension(caller.clone()))
+        .with_state(state.clone());
+    let (status, body) = cli_request(app.clone(), cli_headers(), json!({
+        "tool": "manage", "input": {"op": "mkdir", "target": "rest-test:/notes", "purpose": "Organize meeting notes"}
+    })).await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = cli_request(app.clone(), cli_headers(), json!({
+        "tool": "write", "input": {"op": "write", "target": "rest-test:/notes/draft.md", "content": "draft", "create": true, "purpose": "Capture the meeting result"}
+    })).await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let events = state
+        .history
+        .list_file_changes(
+            caller.account.kind,
+            caller.account_id(),
+            Some(space_id),
+            Some(10),
+            None,
+        )
+        .await?;
+    assert_eq!(events.items.len(), 2);
+    assert!(
+        events
+            .items
+            .iter()
+            .all(|event| event.metadata["source"] == "cli")
+    );
+    assert_eq!(
+        events.items[0].metadata["purpose"],
+        "Capture the meeting result"
+    );
+    assert_eq!(
+        events.items[1].metadata["purpose"],
+        "Organize meeting notes"
+    );
+    let invocations = state
+        .command_invocations
+        .list_by_owner(
+            caller.account_id(),
+            notegate_model::CommandInvocationSurface::Cli,
+            10,
+            None,
+        )
+        .await?;
+    assert_eq!(invocations.len(), 2);
+    for (event, invocation) in events.items.iter().zip(&invocations) {
+        assert!(invocation.invocation_id.is_some());
+        assert_eq!(
+            event.metadata["invocation_id"],
+            json!(invocation.invocation_id)
+        );
+    }
+    assert_ne!(invocations[0].invocation_id, invocations[1].invocation_id);
+    // One call, two deletion operations: restoring the parent must not restore
+    // a child that was deleted in an earlier step of the same command sequence.
+    let (status, body) = cli_request(
+        app,
+        cli_headers(),
+        json!({
+            "tool": "run_write_sequence", "input": {
+                "purpose": "Remove obsolete draft and folder",
+                "commands": [
+                    {"tool":"manage", "op":"rm", "target":"rest-test:/notes/draft.md"},
+                    {"tool":"manage", "op":"rm", "target":"rest-test:/notes", "recursive":true}
+                ]
+            }
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["completed"], 2, "{body}");
+    let changes = state
+        .history
+        .list_file_changes(
+            caller.account.kind,
+            caller.account_id(),
+            Some(space_id),
+            Some(2),
+            None,
+        )
+        .await?;
+    let invocations = state
+        .command_invocations
+        .list_by_owner(
+            caller.account_id(),
+            notegate_model::CommandInvocationSurface::Cli,
+            1,
+            None,
+        )
+        .await?;
+    assert_eq!(changes.items.len(), 2);
+    for event in &changes.items {
+        assert_eq!(
+            event.metadata["invocation_id"],
+            json!(invocations[0].invocation_id)
+        );
+        assert_eq!(event.op_type, "item.delete");
+    }
+    assert_ne!(changes.items[0].operation_id, changes.items[1].operation_id);
+    db.cleanup().await;
+    Ok(())
+}

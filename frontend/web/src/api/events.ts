@@ -49,6 +49,15 @@ export function listFileChangeEvents(
   return client.get<FileChangeEventListResponse>(`/api/v1/spaces/${spaceId}/file-change-events?${params}`);
 }
 
+export function listOwnedFileChangeEvents(
+  client: ApiClient,
+  cursor?: string | null
+): Promise<FileChangeEventListResponse> {
+  const params = new URLSearchParams({ limit: String(DEFAULT_EVENT_LIMIT) });
+  if (cursor) params.set("cursor", cursor);
+  return client.get<FileChangeEventListResponse>(`/api/v1/me/file-change-events?${params}`);
+}
+
 export function syncFileChanges(
   client: ApiClient,
   spaceId: string,

@@ -233,6 +233,12 @@ function UsageRows({ usage }: { usage: SpaceUsage }) {
       <UsageRow label="Items" used={usage.items.used} limit={usage.items.limit} format={(value) => value.toLocaleString()} />
       <UsageRow label="Text" used={usage.text_bytes.used} limit={usage.text_bytes.limit} format={formatBytes} />
       <UsageRow label="Files" used={usage.file_bytes.used} limit={usage.file_bytes.limit} format={formatBytes} />
+      {(usage.retained_text_bytes ?? 0) > 0 || (usage.retained_file_bytes ?? 0) > 0 ? (
+        <p className="text-xs text-muted">
+          Includes retained content: {formatBytes(usage.retained_text_bytes ?? 0)} text and {formatBytes(usage.retained_file_bytes ?? 0)} files.
+          Trash and files awaiting deletion still count toward these limits.
+        </p>
+      ) : null}
     </div>
   );
 }

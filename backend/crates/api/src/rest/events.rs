@@ -24,6 +24,7 @@ use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .route("/v1/me/file-change-events", get(list_owned_file_changes))
         .route("/v1/me/audit-events", get(list_audit_events))
         .route("/v1/me/command-invocations", get(list_command_invocations))
         .route("/v1/me/jobs", get(list_background_jobs))
@@ -260,6 +261,53 @@ pub(crate) async fn list_file_change_events(
         events,
         page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct OwnedChangesQuery {
+    space_id: Option<Uuid>,
+    limit: Option<i64>,
+    cursor: Option<String>,
+}
+
+#[utoipa::path(
+    get, path = "/api/v1/me/file-change-events", tag = "events",
+    params(("space_id" = Option<Uuid>, Query), ("limit" = Option<i64>, Query), ("cursor" = Option<String>, Query)),
+    responses((status = 200, description = "Owned change snapshots, including removed Spaces", body = FileChangeEventListResponse)),
+    security(("browser_session" = []))
+)]
+pub(crate) async fn list_owned_file_changes(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Query(query): Query<OwnedChangesQuery>,
+) -> Result<Response, ApiError> {
+    let page = state
+        .history
+        .list_file_changes(
+            caller.account.kind,
+            caller.account_id(),
+            query.space_id,
+            query.limit,
+            query.cursor,
+        )
+        .await?;
+    let ids: Vec<_> = page
+        .items
+        .iter()
+        .filter_map(|e| e.actor_account_id)
+        .collect();
+    let refs = state.accounts.find_account_refs(&ids).await?;
+    let mut response = Json(FileChangeEventListResponse {
+        events: page
+            .items
+            .iter()
+            .map(|e| FileChangeEventOut::from_event(e, &refs))
+            .collect(),
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
+    })
+    .into_response();
+    set_private_no_store(&mut response);
+    Ok(response)
 }
 
 #[derive(Debug, Deserialize)]
