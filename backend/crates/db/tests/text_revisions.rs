@@ -1098,10 +1098,11 @@ async fn trash_restore_keeps_the_current_revision_but_does_not_freeze_revision_r
         assert_eq!(revisions::cleanup_at(&db.pool, cleanup_at).await?, 0);
         assert_eq!(revision_head(&db.pool, node.id).await?, head);
         assert_history_usage(&db.pool, space).await?;
-        assert!(
-            repo.find_text(space, node.id).await?.is_none(),
-            "retention must not reactivate trash"
-        );
+        // Service reads authorize the Space first; find_text itself filters
+        // node deletion, since a trashed Space preserves its node flags.
+        let accessible = repo.permission_for(space, actor).await?.is_some()
+            && repo.find_text(space, node.id).await?.is_some();
+        assert!(!accessible, "retention must not reactivate {scope} trash");
         assert!(matches!(
             save(&repo, space, node.id, actor, "blocked").await,
             Err(Error::NotFound(_))
