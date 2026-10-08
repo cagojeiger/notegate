@@ -10,7 +10,10 @@ mod common;
 use chrono::{DateTime, Duration, Utc};
 use common::{TestDb, attach_file, insert_user_account, legacy_space_with_root, space_with_root};
 use notegate_core::{Error, limits::Limits};
-use notegate_db::{AgentRepo, AuditEventRepo, ConnectionRepo, FilesRepo, PurgeRepo, SpaceRepo};
+use notegate_db::{
+    AgentRepo, AuditEventRepo, ConnectionRepo, FilesRepo, PurgeRepo, SpaceRepo, TextMutationKind,
+    files::revisions,
+};
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
 use notegate_model::trash::TrashEntryVersion;
 use notegate_model::{ConnectAgent, CreateAgent, Permission};
@@ -51,6 +54,227 @@ async fn entry_version(
         deleted_at,
         deletion_operation_id,
     })
+}
+
+fn text_content(value: &str) -> StoredContent {
+    StoredContent {
+        body: WriteTextBody::Plain(value.to_owned()),
+        content_sha256: format!("{value:0<64}"),
+        byte_len: value.len() as i64,
+        line_count: 1,
+    }
+}
+
+async fn restore_state(
+    db: &TestDb,
+    space: Uuid,
+    owner: Uuid,
+) -> Result<serde_json::Value, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT jsonb_build_object( \
+            'space', (SELECT to_jsonb(s) FROM spaces s WHERE id = $1), \
+            'nodes', (SELECT jsonb_agg(to_jsonb(n) ORDER BY n.id) FROM nodes n WHERE space_id = $1), \
+            'live_usage', (SELECT to_jsonb(u) FROM space_usage u WHERE space_id = $1), \
+            'stored_usage', (SELECT to_jsonb(u) FROM space_storage_usage u WHERE space_id = $1), \
+            'changes', (SELECT count(*) FROM file_change_events WHERE space_id = $1), \
+            'audit', (SELECT count(*) FROM audit_events WHERE owner_user_id = $2))",
+    ).bind(space).bind(owner).fetch_one(&db.pool).await
+}
+
+#[tokio::test]
+async fn missing_current_content_rejects_item_folder_and_space_restore_atomically() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = FilesRepo::new(db.pool.clone());
+    for scope in ["item", "folder", "space"] {
+        for kind in ["text", "file"] {
+            let (owner, space, root) =
+                space_with_root(&db.pool, &format!("missing-{scope}-{kind}")).await?;
+            let parent = if scope == "folder" {
+                folder(&repo, owner, space, root, "notes").await?.id
+            } else {
+                root
+            };
+            let broken = if kind == "text" {
+                repo.insert_text(space, parent, "broken.md", &text_content("body"), owner)
+                    .await?
+                    .0
+                    .id
+            } else {
+                attach_file(&repo, space, parent, "broken.bin", 4, owner)
+                    .await?
+                    .0
+                    .id
+            };
+            // Folder/Space restore must not partly reactivate this healthy sibling.
+            folder(&repo, owner, space, parent, "healthy").await?;
+            let target = if scope == "space" {
+                SpaceRepo::new(db.pool.clone())
+                    .delete_space(space, owner, owner)
+                    .await?;
+                None
+            } else {
+                let target = if scope == "folder" { parent } else { broken };
+                repo.soft_delete_node(space, target, owner, scope == "folder")
+                    .await?;
+                Some(target)
+            };
+            // Simulate out-of-band loss of only the content row, preserving its node.
+            let deletion = if kind == "text" {
+                "DELETE FROM text_objects WHERE node_id = $1"
+            } else {
+                "DELETE FROM file_objects WHERE node_id = $1"
+            };
+            sqlx::query(deletion).bind(broken).execute(&db.pool).await?;
+            let before = restore_state(&db, space, owner).await?;
+            let expected = entry_version(&db.pool, space, target).await?;
+            let restored = match target {
+                Some(node) => {
+                    repo.restore_trashed_node(owner, space, node, expected)
+                        .await
+                }
+                None => repo.restore_trashed_space(owner, space, expected).await,
+            };
+            assert!(
+                matches!(&restored, Err(Error::Conflict(message)) if message == "current content is no longer recoverable"),
+                "{scope}/{kind}: {restored:?}"
+            );
+            assert_eq!(
+                restore_state(&db, space, owner).await?,
+                before,
+                "{scope}/{kind}"
+            );
+        }
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn expired_revisions_and_separately_trashed_damage_do_not_block_restore() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let now: DateTime<Utc> = "2026-01-01T00:00:00Z".parse()?;
+    let repo = FilesRepo::new(db.pool.clone()).with_revision_time(now);
+    for scope in ["item", "folder", "space"] {
+        let (owner, space, root) = space_with_root(&db.pool, &format!("expired-{scope}")).await?;
+        let parent = folder(&repo, owner, space, root, "notes").await?.id;
+        let (node, _) = repo
+            .insert_text(space, parent, "note.md", &text_content("old"), owner)
+            .await?;
+        repo.clone()
+            .with_revision_time(now + Duration::seconds(1))
+            .save_text_content(
+                space,
+                node.id,
+                &text_content("current"),
+                None,
+                owner,
+                TextMutationKind::Write,
+            )
+            .await?;
+        let archived = repo
+            .list_text_revisions(space, node.id, 10, None)
+            .await?
+            .revisions[0]
+            .id;
+        let current_id: Uuid =
+            sqlx::query_scalar("SELECT revision_id FROM text_objects WHERE node_id = $1")
+                .bind(node.id)
+                .fetch_one(&db.pool)
+                .await?;
+        assert_eq!(
+            revisions::cleanup_at(&db.pool, now + Duration::days(31)).await?,
+            1
+        );
+        assert!(
+            repo.list_text_revisions(space, node.id, 10, None)
+                .await?
+                .revisions
+                .is_empty()
+        );
+
+        // These were trashed independently, so neither belongs to the restore.
+        let (old_text, _) = repo
+            .insert_text(space, parent, "old.md", &text_content("old"), owner)
+            .await?;
+        let (old_file, _) = attach_file(&repo, space, parent, "old.bin", 3, owner).await?;
+        for id in [old_text.id, old_file.id] {
+            repo.soft_delete_node(space, id, owner, false).await?;
+        }
+        sqlx::query("DELETE FROM text_objects WHERE node_id = $1")
+            .bind(old_text.id)
+            .execute(&db.pool)
+            .await?;
+        sqlx::query("DELETE FROM file_objects WHERE node_id = $1")
+            .bind(old_file.id)
+            .execute(&db.pool)
+            .await?;
+        let target = if scope == "space" {
+            SpaceRepo::new(db.pool.clone())
+                .delete_space(space, owner, owner)
+                .await?;
+            None
+        } else {
+            let target = if scope == "folder" { parent } else { node.id };
+            repo.soft_delete_node(space, target, owner, scope == "folder")
+                .await?;
+            Some(target)
+        };
+        let expected = entry_version(&db.pool, space, target).await?;
+        match target {
+            Some(id) => {
+                repo.restore_trashed_node(owner, space, id, expected)
+                    .await?
+            }
+            None => repo.restore_trashed_space(owner, space, expected).await?,
+        }
+        assert_eq!(
+            repo.find_text(space, node.id)
+                .await?
+                .unwrap()
+                .1
+                .content
+                .as_deref(),
+            Some("current")
+        );
+        assert!(
+            repo.list_text_revisions(space, node.id, 10, None)
+                .await?
+                .revisions
+                .is_empty()
+        );
+        for id in [old_text.id, old_file.id] {
+            assert!(repo.find_node(space, id).await?.is_none());
+        }
+        let after_id: Uuid =
+            sqlx::query_scalar("SELECT revision_id FROM text_objects WHERE node_id = $1")
+                .bind(node.id)
+                .fetch_one(&db.pool)
+                .await?;
+        assert_eq!(
+            after_id, current_id,
+            "trash restore does not create a body revision"
+        );
+        let events = repo
+            .list_file_change_events(space, Some(node.id), 20, None)
+            .await?;
+        let write = events
+            .iter()
+            .find(|event| event.op_type == "text.write")
+            .unwrap();
+        assert_eq!(write.metadata["before_revision_id"], archived.to_string());
+        assert_eq!(write.metadata["before_revision_status"], "deleted");
+        assert_eq!(
+            write.metadata["before_revision_deletion_reason"],
+            "checkpoint_expired"
+        );
+        assert_eq!(write.metadata["after_revision_status"], "current");
+    }
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]

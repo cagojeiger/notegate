@@ -179,6 +179,7 @@ Folder recursive delete는 subtree node를 같은 transaction에서 soft delete�
 - 기존 삭제 건은 S3 bytes가 이미 제거됐을 수 있으므로 복원을 제공하지 않고 기존 만료 시각을 연장하지 않는다. 새 정책은 모든 이전 replica가 교체된 뒤 발생한 삭제부터 보장한다.
 - 이미 발급된 S3 presigned URL은 원본 보존 중 만료 시각까지 동작할 수 있다. 새 URL 발급과 live content API는 soft delete 직후 차단한다.
 - 현재 본문 복원과 과거 Text revision 보존 정책은 별개다. 휴지통 이동은 과거 버전의 TTL을 연장하지 않는다.
+- 복원 범위의 Text는 현재 본문 행, File은 본문 행과 `attached` 상태의 객체 원장이 있어야 한다. 하나라도 누락되면 해당 복원 요청 전체를 409로 거절한다. 먼저 별도로 삭제된 자식과 만료된 과거 버전은 검사 대상이 아니다. 이 검사는 DB 상태 기준이며 S3 원본 존재나 본문 복호화를 검증하지 않는다.
 - 복원·영구 삭제 요청은 조회한 `deleted_at`과 `deletion_operation_id`를 query로 전달한다. 작업 ID가 없는 기존 행도 삭제 시각은 필수이며, 잠금 안에서 현재 삭제 건과 일치하지 않으면 409로 거절한다.
 - Space 복원은 기존 agent 연결을 끊고 링크 그래프 전체 재생성을 같은 transaction에서 예약한다.
 - Folder 영구 삭제 요청은 대상 node 하나에만 의도를 기록한다. Reconciler와 휴지통 목록은 조상의 만료/영구 삭제 상태를 검사하여, 먼저 별도로 삭제했던 항목까지 물리적 하위 트리 전체에 적용한다. 하위 node의 원래 삭제 작업 ID와 보존 시각은 덮어쓰지 않는다.

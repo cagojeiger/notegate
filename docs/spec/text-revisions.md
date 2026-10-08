@@ -32,6 +32,8 @@ Policy constants live together in `backend/crates/db/src/files/revisions.rs`:
 - When a changed save would exceed that budget, return `422` (`text_revision_storage_full`) and leave current content/history unchanged. Do not silently delete protected revisions or save without history. Identical saves remain no-ops.
 - Successful expiration/hard deletion releases the budget transactionally. Soft deletion hides history but retains it until normal expiration or document purge.
 
+Changes retains revision IDs independently of historical bodies. Revision expiration does not remove the current document or its Changes, and missing historical bodies do not prevent trash restoration when current content remains available. Restoring a selected revision requires reading that revision's body; an already removed body returns 404 without changing the current document.
+
 The budget is separate from tier-dependent text/file quotas. Existing Space usage reconciliation also repairs `text_revision_usage` from `SUM(text_revisions.stored_bytes)`, including trashed documents, under the Space gate and counter lock. It repairs accounting without recreating missing bodies or inventing deletion receipts. It is an explicit reconciliation path, not a continuous detector of external database edits. The frontend usage display excludes history bytes.
 
 ## History API and restore

@@ -167,7 +167,7 @@ impl FilesRepo {
             },
         )?)?;
         require_restore_fanout(&mut tx, space_id, Some(node_id), caps.folder_max_children).await?;
-        require_attached_objects(&mut tx, space_id, Some(node_id)).await?;
+        require_restorable_content(&mut tx, space_id, Some(node_id)).await?;
         space_usage::restore_usage(
             &mut tx,
             &gate,
@@ -264,7 +264,7 @@ impl FilesRepo {
             ));
         }
         require_restore_fanout(&mut tx, space_id, None, caps.folder_max_children).await?;
-        require_attached_objects(&mut tx, space_id, None).await?;
+        require_restorable_content(&mut tx, space_id, None).await?;
         // Restoration must not silently reopen external agent access.
         sqlx::query(
             "UPDATE space_agent_connections SET disconnected_at = now(), disconnected_by_user_id = $2 \
@@ -405,19 +405,24 @@ async fn deleted_node(
         .ok_or_else(|| Error::not_found("trash item not found"))
 }
 
-async fn require_attached_objects(
+/// Restore requires current content only. Historical revisions may have expired
+/// independently, and separately trashed descendants are outside this restore.
+async fn require_restorable_content(
     tx: &mut Transaction<'_, Postgres>,
     space: Uuid,
     deletion_target: Option<Uuid>,
 ) -> Result<()> {
     let unavailable: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM file_objects f JOIN nodes n ON n.id = f.node_id \
+        "SELECT EXISTS (SELECT 1 FROM nodes n \
+         LEFT JOIN text_objects t ON t.node_id = n.id AND t.space_id = n.space_id \
+         LEFT JOIN file_objects f ON f.node_id = n.id AND f.space_id = n.space_id \
          LEFT JOIN object_storage_objects o ON o.object_key = f.object_key \
          WHERE n.space_id = $1 AND (($2::uuid IS NULL AND n.deleted_at IS NULL) OR n.deletion_target_node_id = $2) \
-           AND (o.id IS NULL OR o.state <> 'attached'))",
+           AND ((n.kind = 'text' AND t.node_id IS NULL) \
+             OR (n.kind = 'file' AND (f.node_id IS NULL OR o.id IS NULL OR o.state <> 'attached'))))",
     ).bind(space).bind(deletion_target).fetch_one(&mut **tx).await.map_err(map_sqlx_error)?;
     if unavailable {
-        return Err(Error::conflict("file content is no longer recoverable"));
+        return Err(Error::conflict("current content is no longer recoverable"));
     }
     Ok(())
 }
