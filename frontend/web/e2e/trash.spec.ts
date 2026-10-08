@@ -230,7 +230,7 @@ for (const viewport of [{ name: "short-desktop", width: 900, height: 540 }, { na
       const folderDetails = dialog.getByRole("region", { name: `Details for ${folderName}`, exact: true });
       if (viewport.name === "short-desktop") {
         await expect.soft(folderDetails.getByRole("heading", { name: folderName, exact: true }), "A new selection must reveal its heading").toBeInViewport();
-        expect.soft(await scrollArea.evaluate((element) => element.scrollTop)).toBe(0);
+        expect.soft(await folderDetails.locator("..").evaluate((element) => element.scrollTop)).toBe(0);
       }
       expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
       expect(await list.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
