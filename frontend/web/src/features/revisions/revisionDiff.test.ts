@@ -60,6 +60,17 @@ describe("revision change sections", () => {
     expect(describeRevisionDiff(rows)).toMatchObject({ added: 2, removed: 2, changes: [{ start: 0, end: rows.length }] });
   });
 
+  it.each([
+    ["", "new", 1, 0], ["old", "", 0, 1],
+    ["line", "line\n", 0, 0], ["line\n", "line", 0, 0],
+    ["", "\n", 1, 0], ["\n", "", 0, 1],
+    ["line\n", "line\n\n", 1, 0], ["line\n\n", "line\n", 0, 1]
+  ])("counts logical lines while retaining newline-only changes: %j -> %j", (before, after, added, removed) => {
+    const view = describeRevisionDiff(reconstruct(before, after));
+    expect(view).toMatchObject({ added, removed });
+    expect(view.changes).not.toHaveLength(0);
+  });
+
   it("does not invent a change for identical content, including an empty document", () => {
     for (const text of ["", "same\ncontent\n"]) {
       expect(describeRevisionDiff(reconstruct(text, text))).toMatchObject({ added: 0, removed: 0, changes: [] });
