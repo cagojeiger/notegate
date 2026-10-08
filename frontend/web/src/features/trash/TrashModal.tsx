@@ -65,9 +65,13 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
   const SelectedIcon = itemAppearance[selected?.kind ?? "file"].icon;
 
   useEffect(() => {
+    if (detailsRef.current) detailsRef.current.scrollTop = 0;
+  }, [selected?.kind, selected?.id]);
+
+  useEffect(() => {
     if (!confirmation && returnFocus.current) {
       returnFocus.current = false;
-      detailsRef.current?.querySelector<HTMLButtonElement>("[data-trash-purge]")?.focus({ preventScroll: true });
+      detailsRef.current?.querySelector<HTMLButtonElement>("[data-trash-purge]")?.focus();
     }
   }, [confirmation]);
 
