@@ -372,7 +372,12 @@ async fn encrypted_change_snapshots_keep_version_references_after_body_and_space
         .list_file_change_events(space, Some(node.id), 10, None)
         .await?;
     assert_eq!(events[0].metadata["before_revision_id"], before_id);
-    assert_eq!(events[0].metadata["before_revision_status"], "unavailable");
+    assert_eq!(events[0].metadata["before_revision_status"], "deleted");
+    assert_eq!(
+        events[0].metadata["before_revision_deletion_reason"],
+        "checkpoint_expired"
+    );
+    assert!(events[0].metadata["before_revision_deleted_at"].is_string());
     assert_eq!(events[0].metadata["purpose"], "Correct confidential report");
     // Force the resource cascade: history authorization must not depend on its existence.
     sqlx::query("DELETE FROM spaces WHERE id=$1")

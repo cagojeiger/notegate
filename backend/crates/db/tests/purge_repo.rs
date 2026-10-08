@@ -1188,6 +1188,15 @@ async fn hard_purge_drains_revisions_without_cascading_or_losing_usage_accountin
         .fetch_one(&db.pool)
         .await?;
         assert_eq!(stored, (remaining, remaining * 2, node_exists));
+        let receipts: (i64, i64) = sqlx::query_as(
+            "SELECT count(*), COALESCE(sum((metadata->>'released_bytes')::bigint), 0)::bigint \
+             FROM audit_events WHERE op_type = 'text_revision.delete' \
+                 AND owner_user_id = $1 AND metadata->>'reason' = 'resource_purge'",
+        )
+        .bind(owner)
+        .fetch_one(&db.pool)
+        .await?;
+        assert_eq!(receipts, (201 - remaining, (201 - remaining) * 2));
         assert_eq!(run.resources_pending, node_exists);
         if node_exists {
             let error = notegate_db::FilesRepo::new(db.pool.clone())

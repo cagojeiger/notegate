@@ -1,0 +1,343 @@
+//! Deletion receipts explain absence; they never replace a live presence check.
+#![allow(clippy::indexing_slicing)]
+mod common;
+
+use chrono::{DateTime, Duration, Utc};
+use common::{TestDb, space_with_root};
+use notegate_core::security::PiiCrypto;
+use notegate_db::{
+    ChangeHistoryRepo, FilesRepo, PurgeRepo, SpaceUsageRepo, TextMutationKind, files::revisions,
+};
+use notegate_model::files::{StoredContent, WriteTextBody};
+use serde_json::{Value, json};
+use uuid::Uuid;
+
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+fn body(value: &str) -> StoredContent {
+    StoredContent {
+        body: WriteTextBody::Plain(value.into()),
+        content_sha256: format!("{value:0<64}"),
+        byte_len: value.len() as i64,
+        line_count: 1,
+    }
+}
+
+async fn usage(db: &TestDb, space: Uuid) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT stored_bytes FROM text_revision_usage WHERE space_id = $1")
+        .bind(space)
+        .fetch_one(&db.pool)
+        .await
+}
+
+#[tokio::test]
+async fn direct_delete_is_atomic_and_missing_receipts_do_not_imply_retention() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "direct-revision-delete").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let (node, _) = files
+        .insert_text(space, root, "secret.md", &body("private first"), owner)
+        .await?;
+    files
+        .save_text_content(
+            space,
+            node.id,
+            &body("private second"),
+            None,
+            owner,
+            TextMutationKind::Write,
+        )
+        .await?;
+    let history = ChangeHistoryRepo::new(db.pool.clone(), PiiCrypto::test());
+    let before = history.list_by_owner(owner, Some(space), 10, None).await?;
+    let revision: Uuid = serde_json::from_value(before[0].metadata["before_revision_id"].clone())?;
+    let retained_bytes = usage(&db, space).await?;
+    assert!(retained_bytes > 0);
+
+    // A failed receipt must roll back the DELETE and its accounting trigger.
+    sqlx::raw_sql("CREATE FUNCTION reject_revision_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.op_type = 'text_revision.delete' THEN RAISE EXCEPTION 'receipt failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_revision_receipt BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION reject_revision_receipt();")
+        .execute(&db.pool).await?;
+    assert!(
+        sqlx::query("DELETE FROM text_revisions WHERE id = $1")
+            .bind(revision)
+            .execute(&db.pool)
+            .await
+            .is_err()
+    );
+    assert_eq!(usage(&db, space).await?, retained_bytes);
+    assert_eq!(
+        history.list_by_owner(owner, Some(space), 10, None).await?[0].metadata["before_revision_status"],
+        "retained"
+    );
+    sqlx::query("DROP TRIGGER reject_revision_receipt ON audit_events")
+        .execute(&db.pool)
+        .await?;
+
+    assert_eq!(
+        sqlx::query("DELETE FROM text_revisions WHERE id = $1")
+            .bind(revision)
+            .execute(&db.pool)
+            .await?
+            .rows_affected(),
+        1
+    );
+    assert_eq!(usage(&db, space).await?, 0);
+    let (receipt_owner, actor, metadata): (Uuid, Option<Uuid>, Value) =
+        sqlx::query_as("SELECT owner_user_id, actor_account_id, metadata FROM audit_events WHERE resource_id = $1 AND op_type = 'text_revision.delete'")
+            .bind(revision).fetch_one(&db.pool).await?;
+    assert_eq!(receipt_owner, owner);
+    assert_eq!(actor, None);
+    assert_eq!(metadata["reason"], "unknown");
+    assert_eq!(metadata["released_bytes"], retained_bytes);
+    assert!(!metadata.to_string().contains("private"));
+    assert!(!metadata.to_string().contains("secret"));
+    let events = history.list_by_owner(owner, Some(space), 10, None).await?;
+    assert_eq!(events[0].metadata["before_revision_status"], "deleted");
+    assert_eq!(
+        events[0].metadata["before_revision_deletion_reason"],
+        "unknown"
+    );
+    assert!(events[0].metadata["before_revision_deleted_at"].is_string());
+    assert_eq!(events[0].metadata["after_revision_status"], "current");
+    assert!(
+        history
+            .list_by_owner(Uuid::new_v4(), None, 10, None)
+            .await?
+            .is_empty()
+    );
+
+    // Retried deletion cannot manufacture a second receipt.
+    sqlx::query("DELETE FROM text_revisions WHERE id = $1")
+        .bind(revision)
+        .execute(&db.pool)
+        .await?;
+    let receipts: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE resource_id = $1 AND op_type = 'text_revision.delete'")
+        .bind(revision).fetch_one(&db.pool).await?;
+    assert_eq!(receipts, 1);
+
+    // A missing/expired receipt must not fabricate a policy reason or timestamp.
+    sqlx::query("DELETE FROM audit_events WHERE resource_id = $1")
+        .bind(revision)
+        .execute(&db.pool)
+        .await?;
+    let events = history.list_by_owner(owner, Some(space), 10, None).await?;
+    assert_eq!(events[0].metadata["before_revision_status"], "unavailable");
+    assert!(events[0].metadata["before_revision_deleted_at"].is_null());
+    assert!(events[0].metadata["before_revision_deletion_reason"].is_null());
+
+    // A receipt for the same ID in a different scope cannot explain this absence.
+    sqlx::query("INSERT INTO audit_events(source, op_type, resource_type, resource_id, metadata) VALUES ('system', 'text_revision.delete', 'text_revision', $1, $2)")
+        .bind(revision).bind(json!({"space_id": Uuid::new_v4(), "node_id": node.id, "reason": "resource_purge"}))
+        .execute(&db.pool).await?;
+    assert_eq!(
+        history.list_by_owner(owner, Some(space), 10, None).await?[0].metadata["before_revision_status"],
+        "unavailable"
+    );
+
+    // Simulate restored data alongside an old receipt: the current body wins.
+    let current: Uuid = serde_json::from_value(events[0].metadata["after_revision_id"].clone())?;
+    sqlx::query("INSERT INTO audit_events(source, op_type, resource_type, resource_id, metadata) VALUES ('system', 'text_revision.delete', 'text_revision', $1, $2)")
+        .bind(current).bind(json!({"space_id": space, "node_id": node.id, "reason": "unknown"}))
+        .execute(&db.pool).await?;
+    let events = history.list_by_owner(owner, Some(space), 10, None).await?;
+    assert_eq!(events[0].metadata["after_revision_status"], "current");
+    assert_eq!(events[0].metadata["after_revision_deletion_conflict"], true);
+
+    // A DB failure is an error, never a successful "unavailable" response.
+    sqlx::query("ALTER TABLE audit_events RENAME TO temporarily_unavailable_audit")
+        .execute(&db.pool)
+        .await?;
+    assert!(
+        history
+            .list_by_owner(owner, Some(space), 10, None)
+            .await
+            .is_err()
+    );
+    sqlx::query("ALTER TABLE temporarily_unavailable_audit RENAME TO audit_events")
+        .execute(&db.pool)
+        .await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn retention_records_the_executed_policy_and_respects_persisted_deadlines() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "revision-policy-receipts").await?;
+    let now: DateTime<Utc> = "2026-01-01T00:00:00Z".parse()?;
+    let files = FilesRepo::new(db.pool.clone()).with_revision_time(now);
+    let (node, _) = files
+        .insert_text(space, root, "note.md", &body("a"), owner)
+        .await?;
+    let editing = files.with_revision_context("browser", Some(Uuid::new_v4()));
+    for (seconds, text) in [(60, "b"), (120, "c")] {
+        editing
+            .clone()
+            .with_revision_time(now + Duration::seconds(seconds))
+            .save_text_content(
+                space,
+                node.id,
+                &body(text),
+                None,
+                owner,
+                TextMutationKind::Write,
+            )
+            .await?;
+    }
+    // Policy migration/maintenance can explicitly extend an existing deadline.
+    sqlx::query("UPDATE text_revisions SET cleanup_at = $2 WHERE node_id = $1 AND NOT checkpoint")
+        .bind(node.id)
+        .bind(now + Duration::days(2))
+        .execute(&db.pool)
+        .await?;
+    assert_eq!(
+        revisions::cleanup_at(&db.pool, now + Duration::days(1) + Duration::minutes(3)).await?,
+        0
+    );
+    assert_eq!(
+        revisions::cleanup_at(&db.pool, now + Duration::days(2)).await?,
+        1
+    );
+    assert_eq!(
+        revisions::cleanup_at(&db.pool, now + Duration::days(31)).await?,
+        1
+    );
+    let reasons: Vec<String> = sqlx::query_scalar("SELECT metadata->>'reason' FROM audit_events WHERE op_type = 'text_revision.delete' ORDER BY id")
+        .fetch_all(&db.pool).await?;
+    assert_eq!(reasons, ["intermediate_expired", "checkpoint_expired"]);
+    assert_eq!(usage(&db, space).await?, 0);
+
+    // Transaction-local attribution must not leak into a later ordinary DELETE.
+    editing
+        .with_revision_time(now + Duration::days(32))
+        .save_text_content(
+            space,
+            node.id,
+            &body("d"),
+            None,
+            owner,
+            TextMutationKind::Write,
+        )
+        .await?;
+    sqlx::query("DELETE FROM text_revisions WHERE node_id = $1")
+        .bind(node.id)
+        .execute(&db.pool)
+        .await?;
+    let reason: String = sqlx::query_scalar("SELECT metadata->>'reason' FROM audit_events WHERE op_type = 'text_revision.delete' ORDER BY id DESC LIMIT 1")
+        .fetch_one(&db.pool).await?;
+    assert_eq!(reason, "unknown");
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn usage_reconciliation_repairs_revision_drift_without_recreating_bodies() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "revision-usage-repair").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let (node, _) = files
+        .insert_text(space, root, "note.md", &body("first"), owner)
+        .await?;
+    files
+        .save_text_content(
+            space,
+            node.id,
+            &body("second"),
+            None,
+            owner,
+            TextMutationKind::Write,
+        )
+        .await?;
+    files.soft_delete_node(space, node.id, owner, false).await?;
+    let bytes = usage(&db, space).await?;
+    sqlx::query("DELETE FROM text_revision_usage WHERE space_id = $1")
+        .bind(space)
+        .execute(&db.pool)
+        .await?;
+    let reconcile = SpaceUsageRepo::new(db.pool.clone());
+    reconcile.reconcile_space(space).await?;
+    assert_eq!(usage(&db, space).await?, bytes);
+
+    // TRUNCATE bypasses row DELETE triggers. Repair capacity, not history.
+    sqlx::query("TRUNCATE text_revisions")
+        .execute(&db.pool)
+        .await?;
+    assert_eq!(usage(&db, space).await?, bytes);
+    reconcile.reconcile_space(space).await?;
+    assert_eq!(usage(&db, space).await?, 0);
+    let receipts: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE op_type = 'text_revision.delete'",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(receipts, 0);
+    let history = ChangeHistoryRepo::new(db.pool.clone(), PiiCrypto::test());
+    let events = history.list_by_owner(owner, Some(space), 10, None).await?;
+    assert!(
+        events
+            .iter()
+            .any(|e| e.metadata["before_revision_status"] == "unavailable")
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn cascade_receipts_keep_the_owner_and_expire_at_the_audit_boundary() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "revision-cascade-receipts").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let (node, _) = files
+        .insert_text(space, root, "note.md", &body("first"), owner)
+        .await?;
+    files
+        .save_text_content(
+            space,
+            node.id,
+            &body("second"),
+            None,
+            owner,
+            TextMutationKind::Write,
+        )
+        .await?;
+    sqlx::query("DELETE FROM spaces WHERE id = $1")
+        .bind(space)
+        .execute(&db.pool)
+        .await?;
+    let (id, receipt_owner, created_at, reason): (i64, Uuid, DateTime<Utc>, String) =
+        sqlx::query_as("SELECT id, owner_user_id, created_at, metadata->>'reason' FROM audit_events WHERE op_type = 'text_revision.delete'")
+            .fetch_one(&db.pool).await?;
+    assert_eq!(receipt_owner, owner);
+    assert_eq!(
+        reason, "unknown",
+        "a direct cascade is not proof of policy-driven purge"
+    );
+    let history = ChangeHistoryRepo::new(db.pool.clone(), PiiCrypto::test());
+    assert_eq!(
+        history.list_by_owner(owner, Some(space), 10, None).await?[0].metadata["before_revision_status"],
+        "deleted"
+    );
+    let cutoff = created_at + Duration::days(180);
+    for (time, expected) in [(cutoff - Duration::microseconds(1), true), (cutoff, false)] {
+        PurgeRepo::new(db.pool.clone())
+            .with_history_time(time)
+            .run_once()
+            .await?;
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM audit_events WHERE id = $1)")
+                .bind(id)
+                .fetch_one(&db.pool)
+                .await?;
+        assert_eq!(exists, expected);
+    }
+    db.cleanup().await;
+    Ok(())
+}

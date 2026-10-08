@@ -32,7 +32,7 @@ Policy constants live together in `backend/crates/db/src/files/revisions.rs`:
 - When a changed save would exceed that budget, return `422` (`text_revision_storage_full`) and leave current content/history unchanged. Do not silently delete protected revisions or save without history. Identical saves remain no-ops.
 - Successful expiration/hard deletion releases the budget transactionally. Soft deletion hides history but retains it until normal expiration or document purge.
 
-The budget is intentionally separate from tier-dependent live text/file quotas and their existing recalculation. Operators can inspect `text_revision_usage` and compare it with `SUM(text_revisions.stored_bytes)` per Space. The frontend usage display excludes history bytes.
+The budget is separate from tier-dependent text/file quotas. Existing Space usage reconciliation also repairs `text_revision_usage` from `SUM(text_revisions.stored_bytes)`, including trashed documents, under the Space gate and counter lock. It repairs accounting without recreating missing bodies or inventing deletion receipts. It is an explicit reconciliation path, not a continuous detector of external database edits. The frontend usage display excludes history bytes.
 
 ## History API and restore
 
@@ -61,6 +61,10 @@ The `text_revisions.retention` kind runs in the shared reconciliation runtime wi
 Every ten minutes, process at most 100 eligible rows from one live Space in one transaction, using the existing Space mutation lock order. Indexes support due-time selection and per-Space cleanup. If rows were deleted, release the runtime lock and request a follow-up after one second. Lock acquisition is bounded to two seconds; failure/timeout retries on the next normal schedule. Irreversible resource purge removes retained revisions in batches before deleting their document or Space.
 
 A cleanup failure retains extra history rather than losing a checkpoint. It can delay capacity recovery; existing reconciliation outcome/duration/last-success metrics and `text_revisions.cleaned` counts provide operational evidence. Deletion triggers release history usage, including revision batches drained by resource purge.
+
+An AFTER DELETE trigger records an identifier-only `text_revision.delete` Audit receipt in the same transaction as body removal and usage release. Receipts use the actual database deletion time and retain for 180 days; cleanup's test/policy cutoff is not a claimed deletion timestamp. Retention supplies an explicit context, distinguishing intermediate/checkpoint expiration; resource purge supplies its own context. Ordinary SQL and FK cascades without that context record `unknown`, even if the body was old. Transaction-local context cannot leak to another transaction. The retained accounting scope preserves receipt ownership after Space removal.
+
+Changes checks actual body presence before interpreting receipts. Missing bodies without receipts remain unavailable with unknown cause; a receipt alongside an existing body is a visible inconsistency, not grounds for hiding/deleting the body. Query/authorization/decryption failures are not deletion evidence. Row triggers do not cover TRUNCATE, disabled triggers, or administrator tampering. Existing deadlines remain stored in `cleanup_at`; changing policy constants alone does not rewrite them.
 
 ## Validation
 

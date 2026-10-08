@@ -52,6 +52,27 @@ impl SpaceUsageRepo {
              FROM spaces s WHERE s.id = $1 \
              ON CONFLICT (space_id) DO UPDATE SET text_bytes = EXCLUDED.text_bytes, file_bytes = EXCLUDED.file_bytes",
         ).bind(space_id).execute(&mut *tx).await.map_err(map_sqlx_error)?;
+        // Lock before summing so a concurrent direct DELETE's usage trigger
+        // either commits before the snapshot or subtracts after this repair.
+        sqlx::query("INSERT INTO text_revision_usage(space_id) VALUES ($1) ON CONFLICT DO NOTHING")
+            .bind(space_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        sqlx::query("SELECT space_id FROM text_revision_usage WHERE space_id = $1 FOR UPDATE")
+            .bind(space_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        sqlx::query(
+            "UPDATE text_revision_usage SET stored_bytes = \
+             (SELECT COALESCE(sum(stored_bytes), 0)::bigint FROM text_revisions WHERE space_id = $1) \
+             WHERE space_id = $1",
+        )
+        .bind(space_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
         let actual = exact_usage(&mut tx, space_id).await?;
         sqlx::query(
             "INSERT INTO space_usage ( \

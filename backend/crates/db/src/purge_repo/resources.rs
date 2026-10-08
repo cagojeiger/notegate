@@ -176,6 +176,10 @@ async fn purge_space(pool: &PgPool, space_id: Uuid) -> Result<PurgedResources> {
          )) ORDER BY n.id LIMIT $3 FOR UPDATE OF n SKIP LOCKED",
     ).bind(space_id).bind(due_space).bind(NODE_PURGE_BATCH)
         .fetch_all(&mut *tx).await.map_err(map_sqlx_error)?;
+    sqlx::query("SELECT set_config('notegate.revision_deletion_reason', 'resource_purge', true)")
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
     let text_revisions_deleted = sqlx::query(
         "WITH due AS (SELECT id FROM text_revisions WHERE space_id = $1 AND node_id = ANY($2) \
              ORDER BY node_id, id LIMIT $3 FOR UPDATE SKIP LOCKED) \

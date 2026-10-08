@@ -389,6 +389,10 @@ async fn cleanup_with_time(pool: &PgPool, now: Option<DateTime<Utc>>) -> Result<
         .await
         .map_err(map_sqlx_error)?;
     checks::lock_space(&mut tx, space).await?;
+    sqlx::query("SELECT set_config('notegate.revision_deletion_reason', 'retention', true)")
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
     let deleted = sqlx::query(
         "DELETE FROM text_revisions WHERE id IN (SELECT id FROM text_revisions \
          WHERE space_id = $1 AND cleanup_at <= $3 ORDER BY cleanup_at, id LIMIT $2)",

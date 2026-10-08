@@ -355,16 +355,18 @@ struct RevisionPresence {
     id: Uuid,
     space_id: Uuid,
     node_id: Uuid,
-    state: String,
+    state: Option<String>,
     cleanup_at: Option<DateTime<Utc>>,
+    deleted_at: Option<DateTime<Utc>>,
+    deletion_reason: Option<String>,
 }
 
 async fn with_revision_availability(
     pool: &PgPool,
     mut events: Vec<notegate_model::FileChangeEvent>,
 ) -> Result<Vec<notegate_model::FileChangeEvent>> {
-    // One bounded batch lookup, never a body read or per-event query. A reference
-    // survives body deletion in Changes; missing bodies are explicitly unavailable.
+    // One bounded batch lookup and one DB snapshot, without reading bodies.
+    // Presence is authoritative; a receipt explains absence but never proves it.
     let ids: Vec<Uuid> = events
         .iter()
         .flat_map(|event| {
@@ -375,18 +377,23 @@ async fn with_revision_availability(
         .collect();
     if !ids.is_empty() {
         let statuses: Vec<RevisionPresence> = sqlx::query_as(
-            "SELECT revision_id AS id, space_id, node_id, 'current'::text AS state, NULL::timestamptz AS cleanup_at FROM text_objects \
-             WHERE revision_id = ANY($1) UNION ALL \
-             SELECT id, space_id, node_id, 'retained'::text, cleanup_at FROM text_revisions WHERE id = ANY($1)",
+            "WITH bodies AS ( \
+                 SELECT revision_id AS id, space_id, node_id, 'current'::text AS state, NULL::timestamptz AS cleanup_at \
+                 FROM text_objects WHERE revision_id = ANY($1) UNION ALL \
+                 SELECT id, space_id, node_id, 'retained'::text, cleanup_at FROM text_revisions WHERE id = ANY($1) \
+             ), receipts AS ( \
+                 SELECT DISTINCT ON (resource_id, metadata->>'space_id', metadata->>'node_id') \
+                     resource_id AS id, (metadata->>'space_id')::uuid AS space_id, \
+                     (metadata->>'node_id')::uuid AS node_id, created_at AS deleted_at, metadata->>'reason' AS deletion_reason \
+                 FROM audit_events WHERE resource_type = 'text_revision' AND resource_id = ANY($1) \
+                     AND op_type = 'text_revision.delete' \
+                 ORDER BY resource_id, metadata->>'space_id', metadata->>'node_id', created_at DESC, audit_events.id DESC \
+             ) SELECT id, space_id, node_id, bodies.state, bodies.cleanup_at, receipts.deleted_at, receipts.deletion_reason \
+             FROM bodies FULL JOIN receipts USING (id, space_id, node_id)",
         ).bind(&ids).fetch_all(pool).await.map_err(map_sqlx_error)?;
         let statuses: std::collections::HashMap<_, _> = statuses
             .into_iter()
-            .map(|row| {
-                (
-                    (row.id, row.space_id, row.node_id),
-                    (row.state, row.cleanup_at),
-                )
-            })
+            .map(|row| ((row.id, row.space_id, row.node_id), row))
             .collect();
         for event in &mut events {
             for side in ["before", "after"] {
@@ -407,11 +414,27 @@ async fn with_revision_availability(
                     .ok_or_else(|| Error::internal("change metadata must be an object"))?;
                 metadata.insert(
                     format!("{side}_revision_status"),
-                    serde_json::json!(status.map_or("unavailable", |r| r.0.as_str())),
+                    serde_json::json!(status.map_or("unavailable", |r| {
+                        r.state.as_deref().unwrap_or("deleted")
+                    })),
                 );
                 metadata.insert(
                     format!("{side}_revision_cleanup_at"),
-                    serde_json::json!(status.and_then(|r| r.1)),
+                    serde_json::json!(status.and_then(|r| r.cleanup_at)),
+                );
+                metadata.insert(
+                    format!("{side}_revision_deleted_at"),
+                    serde_json::json!(status.and_then(|r| r.deleted_at)),
+                );
+                metadata.insert(
+                    format!("{side}_revision_deletion_reason"),
+                    serde_json::json!(status.and_then(|r| r.deletion_reason.as_deref())),
+                );
+                metadata.insert(
+                    format!("{side}_revision_deletion_conflict"),
+                    serde_json::json!(
+                        status.is_some_and(|r| r.state.is_some() && r.deleted_at.is_some())
+                    ),
                 );
             }
         }
