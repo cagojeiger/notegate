@@ -89,7 +89,8 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
           {query.isPending ? <p role="status">Loading trash…</p> : null}
           {query.error ? <p role="alert" className="text-danger">Could not load trash. Try refreshing.</p> : null}
           {!query.isPending && !query.error && items.length === 0 ? <p className="text-muted">Trash is empty.</p> : null}
-          <ul aria-label="Deleted items" className="max-h-[24dvh] space-y-1 overflow-y-auto empty:hidden md:min-h-0 md:max-h-none md:flex-1">
+          {/* Keep absolutely positioned screen-reader text inside the list's scroll area. */}
+          <ul aria-label="Deleted items" className="relative max-h-[24dvh] space-y-1 overflow-y-auto overscroll-contain empty:hidden md:min-h-0 md:max-h-none md:flex-1">
             {items.map((item) => {
               const key = `${item.kind}:${item.id}`;
               const itemDescriptionId = `${descriptionId}-${key}`;
@@ -121,7 +122,7 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
           </ul>
           {query.hasNextPage ? <Button secondary className="mt-2 shrink-0" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void query.fetchNextPage(); }}>{query.isFetchingNextPage ? "Loading…" : "Load more"}</Button> : null}
         </Card>
-        <div ref={detailsRef} className="min-h-0 min-w-0 border-t border-seam pt-4 md:overflow-y-auto md:border-l md:border-t-0 md:pl-4 md:pt-0">
+        <div ref={detailsRef} className="min-h-0 min-w-0 border-t border-seam pt-4 md:overflow-y-auto md:overscroll-contain md:border-l md:border-t-0 md:pl-4 md:pt-0">
           {confirmation ? (
             <section aria-label="Confirm permanent deletion" className="flex h-full flex-col gap-3">
               <div id={`${descriptionId}-confirmation`}>

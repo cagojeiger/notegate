@@ -147,6 +147,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     const dialog = page.getByRole("dialog", { name: "Trash" });
     const list = dialog.getByRole("list", { name: "Deleted items" });
     await expect(list.getByRole("button")).toHaveCount(50);
+    const initialScrollHeight = await dialog.evaluate((element) => element.scrollHeight);
     if (viewport.name === "desktop") {
       const geometry = await dialog.evaluate((element) => ({
         height: element.clientHeight,
@@ -158,6 +159,15 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
       expect.soft(geometry.scrollHeight, "Only the list should scroll when the desktop panes fit").toBeLessThanOrEqual(geometry.height + 1);
     }
     await dialog.getByRole("button", { name: "Load more" }).click();
+    await expect(list.getByRole("button")).toHaveCount(60);
+    expect(await dialog.evaluate((element) => element.scrollHeight), "Loading another page must not create blank space outside the list").toBeLessThanOrEqual(initialScrollHeight + 1);
+    await list.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    const outerScrollTop = await dialog.evaluate((element) => element.scrollTop);
+    await list.hover();
+    await page.mouse.wheel(0, 600);
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    expect(await dialog.evaluate((element) => element.scrollTop), "Wheeling at the list boundary must not move the outer dialog").toBe(outerScrollTop);
+    await page.screenshot({ path: `test-results/trash-${viewport.name}-list-end.png` });
     await dialog.getByRole("button", { name: "Select note-55.md" }).click();
     const scrollTop = await list.evaluate((element) => element.scrollTop);
     expect(scrollTop).toBeGreaterThan(0);
