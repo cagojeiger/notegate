@@ -11,8 +11,8 @@ const MAX_CELLS = 1_000_000;
 // changes share one section; expanding a gap never needs another body read.
 export function describeRevisionDiff(rows: DiffRow[]) {
   const changes: DiffSection[] = [];
-  const lastBefore = rows.findLast((row) => row.before)?.before;
-  const lastAfter = rows.findLast((row) => row.after)?.after;
+  const lastBefore = rows.reduce<DiffLine | null>((last, row) => row.before ?? last, null);
+  const lastAfter = rows.reduce<DiffLine | null>((last, row) => row.after ?? last, null);
   let added = 0;
   let removed = 0;
   rows.forEach((row, index) => {
@@ -43,8 +43,8 @@ export function compareRevisions(before: string, after: string): RevisionDiff {
   // Preserve trailing empty lines and CR characters: newline-only changes must be visible.
   const left = before.split("\n");
   const right = after.split("\n");
-  const leftLineCount = left.length - (left.at(-1) === "" ? 1 : 0);
-  const rightLineCount = right.length - (right.at(-1) === "" ? 1 : 0);
+  const leftLineCount = left.length - (left[left.length - 1] === "" ? 1 : 0);
+  const rightLineCount = right.length - (right[right.length - 1] === "" ? 1 : 0);
   // Do not align a trailing placeholder with an actual blank line.
   const same = (i: number, j: number) => left[i] === right[j] && (i < leftLineCount) === (j < rightLineCount);
   if (left.length + right.length > MAX_LINES) return { status: "limited" };
