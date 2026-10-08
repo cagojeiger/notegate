@@ -85,7 +85,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
           {list.hasNextPage ? <Button secondary size="sm" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>Load more</Button> : null}
         </nav>
         <section aria-label="Version content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-visible">
-          <Tabs items={[{ id: "diff", label: "Compare changes" }, { id: "full", label: "Full version" }]} value={view} onChange={setView} label="Version view" />
+          <Tabs items={[{ id: "diff", label: "Compare changes", disabled: showingCurrent }, { id: "full", label: "Full version" }]} value={showingCurrent ? "full" : view} onChange={setView} label="Version view" />
           <details key={showingCurrent ? "current" : selected?.id} className="mb-2 shrink-0 text-sm text-muted">
             <summary aria-label="Change reason" className="cursor-pointer list-inside truncate"><span className="font-medium">{showingCurrent ? "Current" : "Selected"} version save reason:</span> {purpose ?? "Not recorded"}</summary>
             <p className="mt-1 whitespace-pre-wrap break-words">{purpose ?? "Not recorded"}</p>
@@ -95,7 +95,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
           {error ? <p role="alert" className="mb-2 text-sm text-danger">{error}</p> : null}
           {externalChange && !conflict ? <p role="status" className="mb-2 text-sm text-warning">The saved document changed while this window was open.</p> : null}
           {externalChange || conflict || baseline.isError || restore.isError ? <div className="mb-2"><Button secondary size="sm" disabled={baseline.isFetching || restore.isPending} onClick={() => void reload()}>Reload saved version</Button></div> : null}
-          {unchanged ? <p className="mb-2 text-sm text-muted">This version matches the current saved content.</p> : null}
+          {unchanged && view === "full" ? <p className="mb-2 text-sm text-muted">This version matches the current saved content.</p> : null}
           {baseline.isPending ? <p role="status" className="text-muted">Loading current saved version…</p>
             : baseline.isError ? <p role="alert" className="text-danger">Could not load the current saved version.</p>
               : !plainCurrent ? <p className="text-muted">History is unavailable for client-encrypted documents.</p>

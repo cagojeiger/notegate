@@ -77,6 +77,8 @@ test("lazily opens revision comparison and restores with the reviewed current ha
   await expect(dialog.getByText("MTU: 1450", { exact: true })).toBeVisible();
   await expect(dialog.getByLabel("Change reason")).toContainText(revision.purpose);
   await dialog.getByRole("button", { name: "Current saved version", exact: true }).click();
+  await expect(dialog.getByRole("tab", { name: "Full version" })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("tab", { name: "Compare changes" })).toBeDisabled();
   await expect(dialog.getByLabel("Change reason")).toContainText("Correct MTU to 1450");
   await dialog.getByRole("button", { name: /Edited via MCP/ }).click();
   await dialog.getByRole("tab", { name: "Full version" }).click();
