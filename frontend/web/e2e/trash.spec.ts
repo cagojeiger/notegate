@@ -121,7 +121,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     expect(deletionRequests).toBe(1);
   });
 
-  test(`trash preserves loaded pages and scroll after restoration on ${viewport.name}`, async ({ page }) => {
+  test(`trash preserves loaded pages and scroll after restoration on ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     let items = Array.from({ length: 60 }, (_, index) => ({ ...item, id: `node-${index}`, name: `note-${index}.md`, path: `/notes/note-${index}.md` }));
     let nextPageRequests = 0;
@@ -146,13 +146,38 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     await page.getByRole("button", { name: "Trash", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Trash" });
     const list = dialog.getByRole("list", { name: "Deleted items" });
+    await expect(list.getByRole("button")).toHaveCount(50);
+    const initialScrollHeight = await dialog.evaluate((element) => element.scrollHeight);
+    if (viewport.name === "desktop") {
+      const geometry = await dialog.evaluate((element) => ({
+        height: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+        scrollTop: element.scrollTop
+      }));
+      await testInfo.attach("trash-long-list-geometry", { body: JSON.stringify(geometry), contentType: "application/json" });
+      await page.screenshot({ path: "test-results/trash-desktop-long-list.png" });
+      expect.soft(geometry.scrollHeight, "Only the list should scroll when the desktop panes fit").toBeLessThanOrEqual(geometry.height + 1);
+    }
     await dialog.getByRole("button", { name: "Load more" }).click();
+    await expect(list.getByRole("button")).toHaveCount(60);
+    expect(await dialog.evaluate((element) => element.scrollHeight), "Loading another page must not create blank space outside the list").toBeLessThanOrEqual(initialScrollHeight + 1);
+    await list.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    const outerScrollTop = await dialog.evaluate((element) => element.scrollTop);
+    await list.hover();
+    await page.mouse.wheel(0, 600);
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    expect(await dialog.evaluate((element) => element.scrollTop), "Wheeling at the list boundary must not move the outer dialog").toBe(outerScrollTop);
+    await page.screenshot({ path: `test-results/trash-${viewport.name}-list-end.png` });
     await dialog.getByRole("button", { name: "Select note-55.md" }).click();
     const scrollTop = await list.evaluate((element) => element.scrollTop);
     expect(scrollTop).toBeGreaterThan(0);
     await dialog.getByRole("button", { name: "Permanently delete note-55.md" }).click();
     await dialog.getByRole("button", { name: "Cancel" }).click();
     expect(await list.evaluate((element) => element.scrollTop)).toBe(scrollTop);
+    if (viewport.name === "desktop") {
+      expect.soft(await dialog.evaluate((element) => element.scrollTop), "Selecting or confirming an item must not scroll the modal heading away").toBe(0);
+      await expect.soft(dialog.getByRole("heading", { name: "Trash", exact: true })).toBeInViewport();
+    }
     await dialog.getByRole("button", { name: "Restore note-55.md" }).click();
     await expect(list.getByRole("button", { name: "Select note-55.md" })).toHaveCount(0);
     await expect(list.getByRole("button", { name: "Select note-59.md" })).toHaveCount(1);
@@ -161,4 +186,73 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     expect(await list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
     expect(nextPageRequests).toBe(2);
   });
+}
+
+for (const viewport of [{ name: "short-desktop", width: 900, height: 540 }, { name: "small-mobile", width: 360, height: 640 }]) {
+  for (const theme of ["light", "dark"] as const) {
+    test(`trash keeps long details navigable on ${viewport.name} in ${theme} mode`, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport);
+      await page.addInitScript((value) => window.localStorage.setItem("notegate.theme", value), theme);
+      const documentName = "2026-10-08-운영환경-정기점검-회의록과-후속조치-상세기록.md";
+      const folderName = "팀공유-운영문서-정기점검-보관자료와-후속조치-상세기록";
+      const longPath = `/work/${"팀공유/운영문서/정기점검/상세기록/".repeat(8)}`;
+      const items: TrashItem[] = [
+        item,
+        { ...item, id: "long-document", name: documentName, path: `${longPath}${documentName}` },
+        { ...item, id: "long-folder", kind: "folder", name: folderName, path: `${longPath}${folderName}` },
+        ...Array.from({ length: 45 }, (_, index) => ({ ...item, id: `old-${index}`, name: `old-${index}.md`, recoverable: false, deletion_pending: index % 2 === 0 }))
+      ];
+      const meta = { limit: 50, returned: 0, has_more: false, next_cursor: null };
+      let mutations = 0;
+      await routeJsonApi(page, (url, request) => {
+        if (request.method() !== "GET") mutations++;
+        if (url.pathname === "/api/v1/me") return { account: { id: "user-1", kind: "user", display_name: "User" }, user: { email: "user@example.com" }, capabilities: { can_create_space: true, can_manage_agents: true } };
+        if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
+        if (url.pathname === "/api/v1/spaces") return { spaces: [space], page: meta };
+        if (url.pathname === "/api/v1/me/trash") return { items, page: { ...meta, returned: items.length } };
+        if (url.pathname.endsWith("/children")) return { parent: { id: space.root_node_id, path: "/" }, children: [], page: meta };
+        if (url.pathname.endsWith("/nodes")) return { nodes: [], page: meta };
+        if (url.pathname.endsWith("/file-change-sync")) return { changes: [], next_after_id: 0, has_more: false, resync_required: false };
+        throw new Error(`Unhandled request: ${request.method()} ${url.pathname}`);
+      });
+      await page.goto("/");
+      const opener = page.getByRole("button", { name: "Trash", exact: true });
+      await opener.click();
+      const dialog = page.getByRole("dialog", { name: "Trash" });
+      const list = dialog.getByRole("list", { name: "Deleted items" });
+      await dialog.getByRole("button", { name: `Select ${documentName}`, exact: true }).click();
+      const documentDetails = dialog.getByRole("region", { name: `Details for ${documentName}`, exact: true });
+      const scrollArea = viewport.name === "short-desktop" ? documentDetails.locator("..") : dialog;
+      await documentDetails.getByRole("heading", { name: documentName, exact: true }).hover();
+      await page.mouse.wheel(0, 1200);
+      await expect.poll(() => scrollArea.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      await dialog.getByRole("button", { name: `Select ${folderName}`, exact: true }).click();
+      const folderDetails = dialog.getByRole("region", { name: `Details for ${folderName}`, exact: true });
+      if (viewport.name === "short-desktop") {
+        await expect.soft(folderDetails.getByRole("heading", { name: folderName, exact: true }), "A new selection must reveal its heading").toBeInViewport();
+        expect.soft(await folderDetails.locator("..").evaluate((element) => element.scrollTop)).toBe(0);
+      }
+      expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+      expect(await list.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+      const purge = dialog.getByRole("button", { name: `Permanently delete ${folderName}`, exact: true });
+      await purge.click();
+      const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+      await expect(cancel).toBeFocused();
+      await expect(cancel).toBeInViewport();
+      await testInfo.attach(`trash-${viewport.name}-${theme}-long-confirmation`, { body: await page.screenshot({ path: `test-results/trash-${viewport.name}-${theme}-long-confirmation.png` }), contentType: "image/png" });
+      await cancel.click();
+      await expect(purge).toBeFocused();
+      await expect.soft(purge, "Cancelling confirmation must return focus to a visible action").toBeInViewport();
+      await page.screenshot({ path: `test-results/trash-${viewport.name}-${theme}-long-details.png` });
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+      await expect(opener).toBeFocused();
+      await opener.click();
+      await expect(dialog.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+      await expect(dialog.getByRole("heading", { name: "Trash", exact: true })).toBeInViewport();
+      expect(await dialog.evaluate((element) => element.scrollTop)).toBe(0);
+      expect(await list.evaluate((element) => element.scrollTop)).toBe(0);
+      expect(mutations).toBe(0);
+    });
+  }
 }
