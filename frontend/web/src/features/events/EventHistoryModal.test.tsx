@@ -24,6 +24,24 @@ function jsonResponse(body: unknown) {
 }
 
 describe("EventHistoryModal", () => {
+  it("does not identify a database recorder as the person who deleted a version", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => jsonResponse({
+      events: String(input).includes("/audit-events") ? [{
+        ...auditEvent(43, "text_revision.delete"), actor_account_id: null,
+        source: "system", resource_type: "text_revision", resource_id: "version-43",
+        metadata: { completion_scope: "database", recorded_by: "database_trigger", reason: "unknown" }
+      }] : [], page
+    }));
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    await user.click(screen.getByRole("tab", { name: "Audit" }));
+    expect(await screen.findByText("Removed version body from database")).toBeInTheDocument();
+    expect(screen.getByText("Reason not recorded")).toBeInTheDocument();
+    expect(screen.getByText("Actor not recorded")).toBeInTheDocument();
+    expect(screen.getByText("Version body removed. Current document status is tracked separately.")).toBeInTheDocument();
+    expect(screen.queryByText("System")).not.toBeInTheDocument();
+  });
+
   it("shows database purge receipts without claiming file storage deletion is complete", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => jsonResponse({

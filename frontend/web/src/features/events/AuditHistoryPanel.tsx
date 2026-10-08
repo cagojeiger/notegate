@@ -25,9 +25,11 @@ export function AuditEventsPanel() {
             const detail = formatAuditDetail(event);
             const action = formatAuditAction(event);
             const target = formatAuditTarget(event);
-            const actor = event.source === "system" && !event.actor_account_id
-              ? "System"
-              : formatActor(event.actor, event.actor_account_id);
+            const actor = event.metadata.recorded_by === "database_trigger" && !event.actor_account_id
+              ? "Actor not recorded"
+              : event.source === "system" && !event.actor_account_id
+                ? "System"
+                : formatActor(event.actor, event.actor_account_id);
             return (
               <li key={event.id} className="group relative flex gap-3 border-b border-seam py-2 last:border-b-0">
                 <div className="relative flex w-4 shrink-0 justify-center" aria-hidden="true">
@@ -45,7 +47,9 @@ export function AuditEventsPanel() {
                     <span className="shrink-0" aria-hidden="true">·</span>
                     <span className="truncate" title={event.actor_account_id ?? undefined}>{actor}</span>
                   </div>
-                  {event.metadata.completion_scope === "database" ? (
+                  {event.op_type === "text_revision.delete" ? (
+                    <p className="mt-1 text-xs text-muted">Version body removed. Current document status is tracked separately.</p>
+                  ) : event.metadata.completion_scope === "database" ? (
                     <p className="mt-1 text-xs text-muted">Database cleanup only. File storage cleanup is tracked separately.</p>
                   ) : null}
                   {event.metadata.completion_scope === "s3" ? (

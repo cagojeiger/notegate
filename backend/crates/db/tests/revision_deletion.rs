@@ -84,6 +84,10 @@ async fn direct_delete_is_atomic_and_missing_receipts_do_not_imply_retention() -
         1
     );
     assert_eq!(usage(&db, space).await?, 0);
+    assert!(matches!(
+        files.read_text_revision(space, node.id, revision).await,
+        Err(notegate_core::Error::NotFound(_))
+    ));
     let (receipt_owner, actor, metadata): (Uuid, Option<Uuid>, Value) =
         sqlx::query_as("SELECT owner_user_id, actor_account_id, metadata FROM audit_events WHERE resource_id = $1 AND op_type = 'text_revision.delete'")
             .bind(revision).fetch_one(&db.pool).await?;
