@@ -234,6 +234,12 @@ test("small phones keep long reasons and restore controls usable and return focu
   const comparison = dialog.getByLabel("Version comparison", { exact: true });
   await expect(comparison).toBeVisible();
   await expect(dialog.getByLabel("Change reason")).toContainText(purpose);
+  const reason = dialog.getByLabel("Change reason");
+  await reason.click();
+  await expect(reason.locator("..")).toHaveAttribute("open", "");
+  await expect(reason.locator("..").locator("p")).toHaveText(purpose);
+  await reason.click();
+  await expect(reason.locator("..")).not.toHaveAttribute("open", "");
   expect((await comparison.boundingBox())?.height).toBeGreaterThanOrEqual(100);
   await comparison.scrollIntoViewIfNeeded();
   await expect(comparison.getByText("MTU: 1500", { exact: true })).toBeInViewport();
