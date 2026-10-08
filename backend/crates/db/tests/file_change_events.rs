@@ -388,7 +388,12 @@ async fn encrypted_change_snapshots_keep_version_references_after_body_and_space
     let retained = history.list_by_owner(owner, Some(space), 10, None).await?;
     assert_eq!(retained.len(), 2);
     assert_eq!(retained[0].metadata["item_name"], "confidential.md");
-    assert_eq!(retained[0].metadata["after_revision_status"], "unavailable");
+    assert_eq!(retained[0].metadata["after_revision_status"], "deleted");
+    assert_eq!(
+        retained[0].metadata["after_revision_deletion_reason"],
+        "unknown"
+    );
+    assert!(retained[0].metadata["after_revision_deleted_at"].is_string());
     assert!(
         history
             .list_by_owner(Uuid::new_v4(), None, 10, None)

@@ -54,7 +54,7 @@ Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-event
 - 완료 기록의 `operation_id`는 원래 node 삭제 ID이며, 없으면 Space 삭제 ID를 사용한다. 먼저 개별 삭제된 자식의 ID는 유지한다. 둘 다 없으면 NULL로 두며 과거 삭제에 대한 기록을 추측해서 만들지 않는다.
 - 이 기록은 `source=system`, `actor_account_id=NULL`, `completion_scope=database`다. 이름·경로·본문·object key 없이 owner/resource/Space/삭제 대상 ID와 node 종류만 저장한다. 삭제된 리소스에 FK로 연결하지 않으며 소유자의 Audit에서 180일 보관한다. File의 S3 삭제 성공이나 저장소 내부 물리 정리 완료를 의미하지 않는다. Text 용량은 해당 DB 삭제와 함께 반환된다.
 - S3 DeleteObject 성공 후 `object.delete`를 `source=system`, `actor_account_id=NULL`, `completion_scope=s3`로 기록한다. Resource는 object UUID이고 metadata는 `space_id`만 포함한다. 원래 삭제 ID를 유지하며 object 상태·용량 반환·receipt가 함께 commit된다. 재시도는 이미 완료된 object에 중복 receipt를 만들지 않는다. Owner는 보관 용량 원장에서 가져오고 과거 orphan은 NULL로 둔다. Receipt는 180일 유지되며 provider 내부 GC 완료 증명은 아니다.
-- 과거 버전의 실제 DELETE는 DB trigger가 `text_revision.delete`로 기록한다. 정리 경로가 전달한 사유만 사용하며 직접 SQL/FK cascade는 사유가 없으면 `unknown`이다. `source=system`은 DB 기록 경로를 뜻하며 실행자를 추정하지 않는다. 본문·이름·변경 이유 없이 ID, 정리 사유, 해제 용량만 남기고 삭제·용량 차감·기록을 함께 commit한다. 기존 Audit 보관 기간은 180일이다.
+- 현재 본문(`text_objects.revision_id`)과 과거 버전(`text_revisions.id`)의 실제 DELETE는 각각 DB trigger가 `text_revision.delete`로 기록한다. 일반 저장 UPDATE나 휴지통 이동은 삭제 완료가 아니다. 정리 경로가 전달한 사유만 사용하며 직접 SQL/FK cascade는 사유가 없으면 `unknown`이다. 현재 본문에는 버전 보존 기간 만료 사유를 적용하지 않는다. `source=system`은 DB 기록 경로를 뜻하며 실행자를 추정하지 않는다. 본문·이름·변경 이유 없이 ID, 정리 사유, 해제 용량만 남기고 삭제·용량 차감·기록을 함께 commit한다. 해제 용량은 각 원장 기준으로 현재 본문은 `byte_len`, 과거 버전은 `stored_bytes`다. 기존 Audit 보관 기간은 180일이다.
 - MCP/CLI invocation과의 직접 연결은 별도이며, Changes의 Text revision 연결은 아래 snapshot 계약을 따른다. `read op=changes`는 저장된 event의 `operation_id`를 반환한다.
 
 ## Capture guarantee

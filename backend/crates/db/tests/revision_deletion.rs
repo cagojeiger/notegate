@@ -31,6 +31,176 @@ async fn usage(db: &TestDb, space: Uuid) -> Result<i64, sqlx::Error> {
 }
 
 #[tokio::test]
+async fn current_body_delete_after_upgrade_is_atomic_and_records_unknown_reason() -> TestResult {
+    let Some(db) = TestDb::setup_before(53).await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "current-revision-delete").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let (node, _) = files
+        .insert_text(space, root, "secret.md", &body("private first"), owner)
+        .await?;
+    let history = ChangeHistoryRepo::new(db.pool.clone(), PiiCrypto::test());
+    let events = history.list_by_owner(owner, Some(space), 10, None).await?;
+    let revision: Uuid = serde_json::from_value(events[0].metadata["after_revision_id"].clone())?;
+    db.apply_migration(53).await?;
+
+    sqlx::raw_sql("CREATE FUNCTION reject_current_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.op_type = 'text_revision.delete' THEN RAISE EXCEPTION 'receipt failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_current_receipt BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION reject_current_receipt();")
+        .execute(&db.pool).await?;
+    assert!(
+        sqlx::query("DELETE FROM text_objects WHERE node_id = $1")
+            .bind(node.id)
+            .execute(&db.pool)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        history.list_by_owner(owner, Some(space), 10, None).await?[0].metadata["after_revision_status"],
+        "current"
+    );
+    let bytes: i64 =
+        sqlx::query_scalar("SELECT text_bytes FROM space_storage_usage WHERE space_id = $1")
+            .bind(space)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(bytes, body("private first").byte_len);
+    let receipts: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE op_type = 'text_revision.delete'",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(receipts, 0);
+    sqlx::query("DROP TRIGGER reject_current_receipt ON audit_events")
+        .execute(&db.pool)
+        .await?;
+
+    for expected in [1, 0] {
+        assert_eq!(
+            sqlx::query("DELETE FROM text_objects WHERE node_id = $1")
+                .bind(node.id)
+                .execute(&db.pool)
+                .await?
+                .rows_affected(),
+            expected
+        );
+    }
+    let receipts: Vec<(Uuid, Option<Uuid>, Value)> = sqlx::query_as(
+        "SELECT owner_user_id, actor_account_id, metadata FROM audit_events \
+         WHERE resource_id = $1 AND op_type = 'text_revision.delete'",
+    )
+    .bind(revision)
+    .fetch_all(&db.pool)
+    .await?;
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].0, owner);
+    assert_eq!(receipts[0].1, None);
+    assert_eq!(receipts[0].2["reason"], "unknown");
+    assert_eq!(receipts[0].2["released_bytes"], bytes);
+    assert_eq!(receipts[0].2["space_id"], space.to_string());
+    assert_eq!(receipts[0].2["node_id"], node.id.to_string());
+    assert!(!receipts[0].2.to_string().contains("private"));
+    assert!(!receipts[0].2.to_string().contains("secret"));
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT text_bytes FROM space_storage_usage WHERE space_id = $1")
+            .bind(space)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(remaining, 0);
+    let events = history.list_by_owner(owner, Some(space), 10, None).await?;
+    assert_eq!(events[0].metadata["after_revision_status"], "deleted");
+    assert_eq!(
+        events[0].metadata["after_revision_deletion_reason"],
+        "unknown"
+    );
+    assert!(events[0].metadata["after_revision_deleted_at"].is_string());
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn hard_purge_records_current_and_retained_revisions_only_when_deleted() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    for edited in [false, true] {
+        let (owner, space, root) =
+            space_with_root(&db.pool, &format!("current-purge-{edited}")).await?;
+        let files = FilesRepo::new(db.pool.clone());
+        let (node, _) = files
+            .insert_text(space, root, "note.md", &body("first"), owner)
+            .await?;
+        if edited {
+            files
+                .save_text_content(
+                    space,
+                    node.id,
+                    &body("second"),
+                    None,
+                    owner,
+                    TextMutationKind::Write,
+                )
+                .await?;
+        }
+        let history = ChangeHistoryRepo::new(db.pool.clone(), PiiCrypto::test());
+        let events = history.list_by_owner(owner, Some(space), 10, None).await?;
+        let revisions: Vec<Uuid> = events
+            .iter()
+            .map(|event| serde_json::from_value(event.metadata["after_revision_id"].clone()))
+            .collect::<Result<_, _>>()?;
+        assert_eq!(revisions.len(), if edited { 2 } else { 1 });
+        assert_eq!(events[0].metadata["after_revision_status"], "current");
+        if edited {
+            assert_eq!(events[0].metadata["before_revision_status"], "retained");
+        }
+        let receipts: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE resource_id = ANY($1) AND op_type = 'text_revision.delete'")
+            .bind(&revisions).fetch_one(&db.pool).await?;
+        assert_eq!(receipts, 0, "creation and ordinary saves are not deletions");
+
+        files.soft_delete_node(space, node.id, owner, false).await?;
+        let trash = files.list_trash(owner, 100, None).await?;
+        let entry = trash
+            .iter()
+            .find(|entry| entry.id == node.id)
+            .ok_or("missing trash entry")?;
+        files
+            .request_trash_purge(owner, space, Some(node.id), entry.into())
+            .await?;
+        let receipts: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE resource_id = ANY($1) AND op_type = 'text_revision.delete'")
+            .bind(&revisions).fetch_one(&db.pool).await?;
+        assert_eq!(
+            receipts, 0,
+            "trash and purge requests are not completed deletions"
+        );
+
+        for _ in 0..2 {
+            PurgeRepo::new(db.pool.clone()).run_once().await?;
+            let receipts: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE resource_id = ANY($1) AND op_type = 'text_revision.delete'")
+                .bind(&revisions).fetch_one(&db.pool).await?;
+            assert_eq!(
+                receipts as usize,
+                revisions.len(),
+                "retries do not duplicate receipts"
+            );
+        }
+        let events = history.list_by_owner(owner, Some(space), 10, None).await?;
+        for metadata in events.iter().map(|event| &event.metadata) {
+            for prefix in ["before", "after"] {
+                if metadata.get(format!("{prefix}_revision_id")).is_some() {
+                    assert_eq!(metadata[format!("{prefix}_revision_status")], "deleted");
+                    assert_eq!(
+                        metadata[format!("{prefix}_revision_deletion_reason")],
+                        "resource_purge"
+                    );
+                    assert!(metadata[format!("{prefix}_revision_deleted_at")].is_string());
+                }
+            }
+        }
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn direct_delete_is_atomic_and_missing_receipts_do_not_imply_retention() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -316,20 +486,27 @@ async fn cascade_receipts_keep_the_owner_and_expire_at_the_audit_boundary() -> T
         .bind(space)
         .execute(&db.pool)
         .await?;
-    let (id, receipt_owner, created_at, reason): (i64, Uuid, DateTime<Utc>, String) =
+    let receipts: Vec<(i64, Uuid, DateTime<Utc>, String)> =
         sqlx::query_as("SELECT id, owner_user_id, created_at, metadata->>'reason' FROM audit_events WHERE op_type = 'text_revision.delete'")
-            .fetch_one(&db.pool).await?;
-    assert_eq!(receipt_owner, owner);
+            .fetch_all(&db.pool).await?;
     assert_eq!(
-        reason, "unknown",
-        "a direct cascade is not proof of policy-driven purge"
+        receipts.len(),
+        2,
+        "current and historical bodies were deleted"
     );
+    for (_, receipt_owner, _, reason) in &receipts {
+        assert_eq!(*receipt_owner, owner);
+        assert_eq!(
+            reason, "unknown",
+            "a direct cascade is not proof of policy-driven purge"
+        );
+    }
     let history = ChangeHistoryRepo::new(db.pool.clone(), PiiCrypto::test());
-    assert_eq!(
-        history.list_by_owner(owner, Some(space), 10, None).await?[0].metadata["before_revision_status"],
-        "deleted"
-    );
-    let cutoff = created_at + Duration::days(180);
+    let events = history.list_by_owner(owner, Some(space), 10, None).await?;
+    assert_eq!(events[0].metadata["before_revision_status"], "deleted");
+    assert_eq!(events[0].metadata["after_revision_status"], "deleted");
+    let (id, _, created_at, _) = &receipts[0];
+    let cutoff = *created_at + Duration::days(180);
     for (time, expected) in [(cutoff - Duration::microseconds(1), true), (cutoff, false)] {
         PurgeRepo::new(db.pool.clone())
             .with_history_time(time)
