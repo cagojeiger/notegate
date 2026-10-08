@@ -30,7 +30,7 @@ Policy constants live together in `backend/crates/db/src/files/revisions.rs`:
 - There is no last-N cap that can silently truncate the protected 24-hour window.
 - Each Space has a separate 1 GiB history-body budget. `text_revision_usage.stored_bytes` counts ciphertext plus nonce bytes, including soft-deleted documents. This is not physical database size: table/index overhead and backups are additional.
 - When a changed save would exceed that budget, return `422` (`text_revision_storage_full`) and leave current content/history unchanged. Do not silently delete protected revisions or save without history. Identical saves remain no-ops.
-- Successful expiration/hard deletion releases the budget transactionally. Soft deletion hides history but retains it until normal expiration or document purge.
+- Successful expiration/hard deletion releases the budget transactionally. Soft deletion of a document, folder or Space hides history without pausing its normal expiration. Trash restoration exposes only revisions that still remain.
 
 Changes retains revision IDs independently of historical bodies. Revision expiration does not remove the current document or its Changes, and missing historical bodies do not prevent trash restoration when current content remains available. Restoring a selected revision requires reading that revision's body; an already removed body returns 404 without changing the current document.
 
@@ -60,7 +60,7 @@ Revision bodies use the configured encryption key without key rotation or an old
 
 The `text_revisions.retention` kind runs in the shared reconciliation runtime with its schedule, advisory lock and metrics.
 
-Every ten minutes, process at most 100 eligible rows from one live Space in one transaction, using the existing Space mutation lock order. Indexes support due-time selection and per-Space cleanup. If rows were deleted, release the runtime lock and request a follow-up after one second. Lock acquisition is bounded to two seconds; failure/timeout retries on the next normal schedule. Irreversible resource purge removes retained revisions in batches before deleting their document or Space.
+Every ten minutes, process at most 100 eligible rows from one Space, including a soft-deleted Space, in one transaction. Retention acquires the existing shared Space gate and then the Space row lock; it does not require a live Space. This keeps it mutually exclusive with resource purge's exclusive gate without changing ordinary write authorization. A Space removed after candidate selection is a no-op. Indexes support due-time selection and per-Space cleanup. If rows were deleted, release the runtime lock and request a follow-up after one second. Row-lock waits are bounded to two seconds; failure/timeout retries on the next normal schedule. Irreversible resource purge removes remaining revisions in batches before deleting their document or Space.
 
 A cleanup failure retains extra history rather than losing a checkpoint. It can delay capacity recovery; existing reconciliation outcome/duration/last-success metrics and `text_revisions.cleaned` counts provide operational evidence. Deletion triggers release history usage, including revision batches drained by resource purge.
 
@@ -75,6 +75,8 @@ The database is the revision policy clock in production. Creation and each chang
 CI checks one microsecond before, exactly at, and one microsecond after the 120-second idle, 600-second group, 24-hour intermediate and 30-day checkpoint boundaries. Continued writes isolate the group-age limit from the idle limit. Tests also verify replacement-based retention, unchanged current content during cleanup, transactional usage accounting, and that no-op, hash-conflict, quota-rejected and rolled-back writes do not refresh an editing group.
 
 CI exercises atomic rollback, no-op and competing writes, group boundaries, recent protection of old current content, repeated cleanup, expiration, quota accounting, cascade deletion, encrypted identity binding, access controls, write locks, encryption transitions, pagination and guarded restore.
+
+Trash-retention tests cover document, folder and Space deletion, the exact intermediate expiry boundary, current-body preservation and restoration of remaining checkpoints. A database-lock-controlled test runs retention and Space purge in both orders and verifies retry behavior, single byte release and one receipt per deleted revision.
 
 ## Write cost and CI comparison
 

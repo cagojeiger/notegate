@@ -9,8 +9,8 @@ use serde_json::Value;
 use sqlx::{PgConnection, PgPool, Row, postgres::PgRow};
 use uuid::Uuid;
 
-use super::{commands::checks, rows::TextRow};
-use crate::map_sqlx_error;
+use super::rows::TextRow;
+use crate::{map_sqlx_error, space_usage};
 
 const DAY_SECONDS: i32 = 24 * 60 * 60;
 pub const RECENT_SECONDS: i32 = DAY_SECONDS;
@@ -359,7 +359,7 @@ pub async fn read(
 }
 
 /// One Space, at most 100 rows, one transaction. Uses the normal mutation lock order.
-/// Space deletion owns its cascade; skip deleted Spaces rather than obstructing purge.
+/// Trash does not pause retention. The Space gate coordinates with resource purge.
 pub async fn cleanup(pool: &PgPool) -> Result<u64> {
     cleanup_with_time(pool, None).await
 }
@@ -374,8 +374,8 @@ async fn cleanup_with_time(pool: &PgPool, now: Option<DateTime<Utc>>) -> Result<
     // Keep selection and deletion on one cutoff, even if lock acquisition takes time.
     let (cutoff, space): (DateTime<Utc>, Option<Uuid>) = sqlx::query_as(
         "WITH clock AS MATERIALIZED (SELECT COALESCE($1::timestamptz, clock_timestamp()) AS cutoff) \
-         SELECT clock.cutoff, (SELECT r.space_id FROM text_revisions r JOIN spaces s ON s.id = r.space_id \
-         WHERE r.cleanup_at <= clock.cutoff AND s.deleted_at IS NULL ORDER BY r.cleanup_at, r.id LIMIT 1) \
+         SELECT clock.cutoff, (SELECT r.space_id FROM text_revisions r \
+         WHERE r.cleanup_at <= clock.cutoff ORDER BY r.cleanup_at, r.id LIMIT 1) \
          FROM clock",
     )
     .bind(now)
@@ -388,7 +388,17 @@ async fn cleanup_with_time(pool: &PgPool, now: Option<DateTime<Utc>>) -> Result<
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-    checks::lock_space(&mut tx, space).await?;
+    let _gate = space_usage::acquire_mutation_gate(&mut tx, space).await?;
+    let existing: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM spaces WHERE id = $1 FOR UPDATE")
+            .bind(space)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+    // Purge may have removed the Space after candidate selection.
+    if existing.is_none() {
+        return Ok(0);
+    }
     sqlx::query("SELECT set_config('notegate.revision_deletion_reason', 'retention', true)")
         .execute(&mut *tx)
         .await

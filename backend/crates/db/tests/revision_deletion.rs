@@ -4,9 +4,10 @@ mod common;
 
 use chrono::{DateTime, Duration, Utc};
 use common::{TestDb, space_with_root};
-use notegate_core::security::PiiCrypto;
+use notegate_core::{Error, security::PiiCrypto};
 use notegate_db::{
-    ChangeHistoryRepo, FilesRepo, PurgeRepo, SpaceUsageRepo, TextMutationKind, files::revisions,
+    ChangeHistoryRepo, FilesRepo, PurgeRepo, SpaceRepo, SpaceUsageRepo, TextMutationKind,
+    files::revisions,
 };
 use notegate_model::files::{StoredContent, WriteTextBody};
 use serde_json::{Value, json};
@@ -28,6 +29,126 @@ async fn usage(db: &TestDb, space: Uuid) -> Result<i64, sqlx::Error> {
         .bind(space)
         .fetch_one(&db.pool)
         .await
+}
+
+#[tokio::test]
+async fn retention_and_space_purge_serialize_without_duplicate_receipts_or_usage_release()
+-> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let now: DateTime<Utc> = "2026-01-01T00:00:00Z".parse()?;
+    let cutoff = now + Duration::days(31);
+    for retention_first in [true, false] {
+        let (owner, space, root) =
+            space_with_root(&db.pool, &format!("revision-purge-race-{retention_first}")).await?;
+        let files = FilesRepo::new(db.pool.clone()).with_revision_time(now);
+        let (node, _) = files
+            .insert_text(space, root, "note.md", &body("first"), owner)
+            .await?;
+        files
+            .save_text_content(
+                space,
+                node.id,
+                &body("second"),
+                None,
+                owner,
+                TextMutationKind::Write,
+            )
+            .await?;
+        let bytes = usage(&db, space).await? + body("second").byte_len;
+        SpaceRepo::new(db.pool.clone())
+            .delete_space(space, owner, owner)
+            .await?;
+        let trash = files.list_trash(owner, 100, None).await?;
+        let selected = trash
+            .iter()
+            .find(|entry| entry.id == space)
+            .ok_or("missing Space trash entry")?;
+        files
+            .request_trash_purge(owner, space, None, selected.into())
+            .await?;
+
+        // Hold the counter so the first real cleanup pauses inside its DELETE,
+        // after acquiring the production Space gate and row lock.
+        let mut blocker = db.pool.begin().await?;
+        let blocker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *blocker)
+            .await?;
+        sqlx::query("SELECT space_id FROM text_revision_usage WHERE space_id = $1 FOR UPDATE")
+            .bind(space)
+            .fetch_one(&mut *blocker)
+            .await?;
+        let pool = db.pool.clone();
+        let first = tokio::spawn(async move {
+            if retention_first {
+                revisions::cleanup_at(&pool, cutoff).await
+            } else {
+                PurgeRepo::new(pool)
+                    .run_once()
+                    .await
+                    .map(|run| run.text_revisions_deleted)
+            }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let waiting: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))",
+                ).bind(blocker_pid).fetch_one(&db.pool).await?;
+                if waiting { return Ok::<(), sqlx::Error>(()); }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }).await??;
+        if retention_first {
+            let blocked = PurgeRepo::new(db.pool.clone()).run_once().await?;
+            assert_eq!(blocked.nodes_deleted, 0);
+            assert_eq!(blocked.text_revisions_deleted, 0);
+            assert!(blocked.resources_pending);
+        } else {
+            assert!(matches!(
+                revisions::cleanup_at(&db.pool, cutoff).await,
+                Err(Error::UsageRecalculationInProgress { .. })
+            ));
+        }
+        blocker.commit().await?;
+        assert_eq!(first.await??, 1);
+
+        // Retry both paths after the winner commits. Each body releases its
+        // bytes and receives a receipt exactly once, regardless of order.
+        for _ in 0..2 {
+            PurgeRepo::new(db.pool.clone()).run_once().await?;
+            assert_eq!(revisions::cleanup_at(&db.pool, cutoff).await?, 0);
+        }
+        let remaining: (i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM text_objects WHERE space_id = $1), \
+                    (SELECT count(*) FROM text_revisions WHERE space_id = $1), \
+                    (SELECT COALESCE(sum(stored_bytes), 0)::bigint FROM text_revision_usage WHERE space_id = $1), \
+                    (SELECT COALESCE(sum(text_bytes), 0)::bigint FROM space_storage_usage WHERE space_id = $1)",
+        ).bind(space).fetch_one(&db.pool).await?;
+        assert_eq!(remaining, (0, 0, 0, 0));
+        let receipts: (i64, i64, i64) = sqlx::query_as(
+            "SELECT count(*), count(DISTINCT resource_id), sum((metadata->>'released_bytes')::bigint)::bigint \
+             FROM audit_events WHERE op_type = 'text_revision.delete' AND metadata->>'node_id' = $1",
+        ).bind(node.id.to_string()).fetch_one(&db.pool).await?;
+        assert_eq!(receipts, (2, 2, bytes));
+        let reasons: Vec<String> = sqlx::query_scalar(
+            "SELECT metadata->>'reason' FROM audit_events WHERE op_type = 'text_revision.delete' \
+             AND metadata->>'node_id' = $1 ORDER BY metadata->>'reason'",
+        )
+        .bind(node.id.to_string())
+        .fetch_all(&db.pool)
+        .await?;
+        assert_eq!(
+            reasons,
+            if retention_first {
+                vec!["checkpoint_expired", "resource_purge"]
+            } else {
+                vec!["resource_purge", "resource_purge"]
+            }
+        );
+    }
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
