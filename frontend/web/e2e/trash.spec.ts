@@ -121,7 +121,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     expect(deletionRequests).toBe(1);
   });
 
-  test(`trash preserves loaded pages and scroll after restoration on ${viewport.name}`, async ({ page }) => {
+  test(`trash preserves loaded pages and scroll after restoration on ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     let items = Array.from({ length: 60 }, (_, index) => ({ ...item, id: `node-${index}`, name: `note-${index}.md`, path: `/notes/note-${index}.md` }));
     let nextPageRequests = 0;
@@ -146,6 +146,17 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     await page.getByRole("button", { name: "Trash", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Trash" });
     const list = dialog.getByRole("list", { name: "Deleted items" });
+    await expect(list.getByRole("button")).toHaveCount(50);
+    if (viewport.name === "desktop") {
+      const geometry = await dialog.evaluate((element) => ({
+        height: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+        scrollTop: element.scrollTop
+      }));
+      await testInfo.attach("trash-long-list-geometry", { body: JSON.stringify(geometry), contentType: "application/json" });
+      await page.screenshot({ path: "test-results/trash-desktop-long-list.png" });
+      expect.soft(geometry.scrollHeight, "Only the list should scroll when the desktop panes fit").toBeLessThanOrEqual(geometry.height + 1);
+    }
     await dialog.getByRole("button", { name: "Load more" }).click();
     await dialog.getByRole("button", { name: "Select note-55.md" }).click();
     const scrollTop = await list.evaluate((element) => element.scrollTop);
@@ -153,6 +164,10 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     await dialog.getByRole("button", { name: "Permanently delete note-55.md" }).click();
     await dialog.getByRole("button", { name: "Cancel" }).click();
     expect(await list.evaluate((element) => element.scrollTop)).toBe(scrollTop);
+    if (viewport.name === "desktop") {
+      expect.soft(await dialog.evaluate((element) => element.scrollTop), "Selecting or confirming an item must not scroll the modal heading away").toBe(0);
+      await expect.soft(dialog.getByRole("heading", { name: "Trash", exact: true })).toBeInViewport();
+    }
     await dialog.getByRole("button", { name: "Restore note-55.md" }).click();
     await expect(list.getByRole("button", { name: "Select note-55.md" })).toHaveCount(0);
     await expect(list.getByRole("button", { name: "Select note-59.md" })).toHaveCount(1);
