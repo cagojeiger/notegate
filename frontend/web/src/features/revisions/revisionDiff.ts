@@ -2,9 +2,37 @@
 export type DiffLine = { number: number; text: string };
 export type DiffRow = { kind: "same" | "change"; before: DiffLine | null; after: DiffLine | null };
 export type RevisionDiff = { status: "ready"; rows: DiffRow[] } | { status: "limited" };
+export type DiffSection = { kind: "changes" | "unchanged"; start: number; end: number };
 const MAX_CHARS = 256_000;
 const MAX_LINES = 1_500;
 const MAX_CELLS = 1_000_000;
+
+// Half-open row ranges keep three context lines around each change. Nearby
+// changes share one section; expanding a gap never needs another body read.
+export function describeRevisionDiff(rows: DiffRow[]) {
+  const changes: DiffSection[] = [];
+  let added = 0;
+  let removed = 0;
+  rows.forEach((row, index) => {
+    if (row.kind === "same") return;
+    if (row.before) removed++;
+    if (row.after) added++;
+    const start = Math.max(0, index - 3);
+    const end = Math.min(rows.length, index + 4);
+    const previous = changes[changes.length - 1];
+    if (previous && start <= previous.end) previous.end = end;
+    else changes.push({ kind: "changes", start, end });
+  });
+  const sections: DiffSection[] = [];
+  let end = 0;
+  for (const change of changes) {
+    if (end < change.start) sections.push({ kind: "unchanged", start: end, end: change.start });
+    sections.push(change);
+    end = change.end;
+  }
+  if (end < rows.length) sections.push({ kind: "unchanged", start: end, end: rows.length });
+  return { sections, changes, added, removed };
+}
 
 export function compareRevisions(before: string, after: string): RevisionDiff {
   if (before.length + after.length > MAX_CHARS) return { status: "limited" };

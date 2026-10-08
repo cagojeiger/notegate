@@ -28,11 +28,13 @@ const revision = {
 const textPath = `/api/v1/spaces/${space.id}/text/${initialNode.id}`;
 const pageInfo = (returned: number) => ({ limit: 50, returned, has_more: false, next_cursor: null });
 
-async function setup(page: Page, options: { mobile?: boolean; readOnly?: boolean; purpose?: string } = {}) {
+async function setup(page: Page, options: { mobile?: boolean; readOnly?: boolean; purpose?: string; previousContent?: string; currentContent?: string } = {}) {
   await page.emulateMedia({ colorScheme: options.mobile ? "light" : "dark" });
   await page.setViewportSize(options.mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
-  let content = newContent;
-  let node = { ...initialNode };
+  const historicalContent = options.previousContent ?? oldContent;
+  const historicalRevision = { ...revision, byte_len: historicalContent.length, line_count: historicalContent.split("\n").length, purpose: options.purpose ?? revision.purpose };
+  let content = options.currentContent ?? newContent;
+  let node = { ...initialNode, byte_len: content.length, line_count: content.split("\n").length, content_sha256: content === historicalContent ? revision.content_sha256 : initialNode.content_sha256 };
   const requests: { path: string; method: string; body: Record<string, unknown> | null }[] = [];
   await routeJsonApi(page, (url, request) => {
     requests.push({ path: url.pathname, method: request.method(), body: request.postDataJSON() });
@@ -43,17 +45,17 @@ async function setup(page: Page, options: { mobile?: boolean; readOnly?: boolean
     if (url.pathname === `/api/v1/spaces/${space.id}/nodes`) return { nodes: [node], page: pageInfo(1) };
     if (url.pathname.endsWith(`/nodes/${node.id}`)) return node;
     if (url.pathname.endsWith(`/nodes/${node.id}/reveal`)) return { ancestors: [], target: node };
-    if (url.pathname === `${textPath}/revisions`) return { current: { content_sha256: node.content_sha256, purpose: node.content_sha256 === initialNode.content_sha256 ? "Correct MTU to 1450 after verifying the overlay network." : null }, revisions: [{ ...revision, purpose: options.purpose ?? revision.purpose }], page: pageInfo(1) };
-    if (url.pathname === `${textPath}/revisions/${revision.id}`) return { revision, content: oldContent };
+    if (url.pathname === `${textPath}/revisions`) return { current: { content_sha256: node.content_sha256, purpose: node.content_sha256 === initialNode.content_sha256 ? "Correct MTU to 1450 after verifying the overlay network." : null }, revisions: [historicalRevision], page: pageInfo(1) };
+    if (url.pathname === `${textPath}/revisions/${revision.id}`) return { revision: historicalRevision, content: historicalContent };
     if (url.pathname === `${textPath}/revisions/${revision.id}/restore`) {
-      content = oldContent;
+      content = historicalContent;
       node = { ...node, content_sha256: revision.content_sha256, updated_at: "2026-10-04T05:30:00Z" };
-      return { node_id: node.id, content_sha256: node.content_sha256, byte_len: content.length, line_count: 4 };
+      return { node_id: node.id, content_sha256: node.content_sha256, byte_len: content.length, line_count: content.split("\n").length };
     }
     if (url.pathname === textPath) return {
       node: { id: node.id, path: node.path }, text: { node_id: node.id, storage_format: "plain", content,
-        content_sha256: node.content_sha256, byte_len: content.length, line_count: 4, start_line: 1, end_line: 4,
-        returned_lines: 4, truncated: false, next_start_line: null, updated_by: me.account, updated_at: node.updated_at }
+        content_sha256: node.content_sha256, byte_len: content.length, line_count: content.split("\n").length, start_line: 1, end_line: content.split("\n").length,
+        returned_lines: content.split("\n").length, truncated: false, next_start_line: null, updated_by: me.account, updated_at: node.updated_at }
     };
     if (url.pathname.endsWith("/file-change-sync")) return { changes: [], next_after_id: 0, has_more: false, resync_required: false };
     throw new Error(`Unhandled request: ${request.method()} ${url.pathname}`);
@@ -287,4 +289,84 @@ test("a conflicted restore reloads the new baseline and requires another confirm
   await expect(dialog).not.toBeVisible();
   expect(restoreCalls).toBe(2);
   expect(requests.filter((r) => r.method === "PUT")).toHaveLength(0);
+});
+
+for (const mobile of [false, true]) {
+  for (const colorScheme of ["dark", "light"] as const) {
+    test(`long comparisons reveal changes and navigate locally on ${mobile ? "mobile" : "desktop"} in ${colorScheme}`, async ({ page }) => {
+      const before = Array.from({ length: 320 }, (_, index) => index === 0 ? "# Network" : `Line ${index + 1}`);
+      const after = before.map((line, index) => (index >= 80 && index < 105) || index === 230 ? `Updated ${line}` : line);
+      const requests = await setup(page, { mobile, previousContent: before.join("\n"), currentContent: after.join("\n") });
+      await page.emulateMedia({ colorScheme });
+      if (mobile) await page.getByRole("button", { name: "More actions", exact: true }).first().click();
+      await page.getByRole("button", { name: "Version history", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      const comparison = dialog.getByRole("region", { name: "Version comparison", exact: true });
+      await expect(comparison.getByText("Updated Line 81", { exact: true })).toBeInViewport();
+      await expect(comparison.getByText("Line 2", { exact: true })).toHaveCount(0);
+      await expect(dialog.getByLabel("Change summary")).toHaveText("+26 added−26 removed");
+      await expect(dialog.getByText("Change 1 of 2", { exact: true })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Previous change" })).toBeDisabled();
+      await expect(dialog.getByText(/Cumulative comparison:/)).toBeVisible();
+      await expect(dialog.getByLabel("Change reason")).toContainText("Selected version save reason:");
+      await expect(dialog.getByText(/Restores the entire selected version/)).toBeVisible();
+      const bodyReads = () => requests.filter((request) => request.method === "GET" && (request.path === textPath || request.path === `${textPath}/revisions/${revision.id}`)).length;
+      const reads = bodyReads();
+      const dialogBox = await dialog.boundingBox();
+      const outsideScroll = await dialog.getByRole("region", { name: "Version content" }).evaluate((element) => element.scrollTop);
+      const next = dialog.getByRole("button", { name: "Next change" });
+      await next.focus();
+      await page.keyboard.press("Enter");
+      await expect(comparison.getByText("Updated Line 231", { exact: true })).toBeInViewport();
+      await expect(dialog.getByText("Change 2 of 2", { exact: true })).toBeVisible();
+      await expect(next).toBeDisabled();
+      expect(await dialog.boundingBox()).toEqual(dialogBox);
+      expect(await dialog.getByRole("region", { name: "Version content" }).evaluate((element) => element.scrollTop)).toBe(outsideScroll);
+      await dialog.getByRole("button", { name: "Previous change" }).click();
+      await expect(comparison.getByText("Updated Line 81", { exact: true })).toBeInViewport();
+      await expectNoAccessibilityViolations(page);
+      await page.screenshot({ path: `test-results/text-revisions-changes-${mobile ? "mobile" : "desktop"}-${colorScheme}.png` });
+      await comparison.getByRole("button", { name: "77 unchanged lines · Expand", exact: true }).click();
+      await expect(comparison.getByText("Line 2", { exact: true }).first()).toBeVisible();
+      await comparison.getByRole("button", { name: "77 unchanged lines · Collapse", exact: true }).click();
+      await expect(comparison.getByText("Line 2", { exact: true })).toHaveCount(0);
+      expect(bodyReads()).toBe(reads);
+    });
+  }
+}
+
+test("identical saved content states that there are no changes and cannot be restored", async ({ page }) => {
+  await setup(page, { currentContent: oldContent });
+  await page.getByRole("button", { name: "Version history", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("No changes compared with the current saved version.", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Next change" })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeDisabled();
+  await dialog.getByRole("tab", { name: "Full version" }).click();
+  await expect(dialog.getByRole("heading", { name: "Network", exact: true })).toBeVisible();
+});
+
+test("switching versions resets expanded context and distinguishes saves within the same minute", async ({ page }) => {
+  const before = Array.from({ length: 180 }, (_, index) => index === 0 ? "# Network" : `Line ${index + 1}`);
+  const after = before.map((line, index) => index === 80 || index === 150 ? `Updated ${line}` : line);
+  await setup(page, { previousContent: before.join("\n"), currentContent: after.join("\n") });
+  const older = { ...revision, id: "revision-2", written_at: "2026-10-04T05:12:01Z", purpose: "Record the earlier experiment." };
+  await page.route(`**${textPath}/revisions?*`, (route) => route.fulfill({ json: { revisions: [revision, older], page: pageInfo(2) } }));
+  await page.route(`**${textPath}/revisions/${older.id}`, (route) => route.fulfill({ json: { revision: older, content: before.join("\n") } }));
+  await page.getByRole("button", { name: "Version history", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  const comparison = dialog.getByRole("region", { name: "Version comparison", exact: true });
+  await comparison.getByRole("button", { name: "77 unchanged lines · Expand", exact: true }).click();
+  await dialog.getByRole("button", { name: "Next change" }).click();
+  await expect(dialog.getByText("Change 2 of 2", { exact: true })).toBeVisible();
+  const versions = dialog.getByRole("navigation", { name: "Saved versions" });
+  const first = versions.getByRole("button", { name: /Document the original MTU/ });
+  const second = versions.getByRole("button", { name: /Record the earlier experiment/ });
+  await expect(first.locator("time")).toHaveText(/:00/);
+  await expect(second.locator("time")).toHaveText(/:01/);
+  await second.click();
+  await expect(dialog.getByText("Change 1 of 2", { exact: true })).toBeVisible();
+  await expect(comparison.getByText("Updated Line 81", { exact: true })).toBeInViewport();
+  await expect(comparison.getByText("Line 2", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByLabel("Change reason")).toContainText(older.purpose);
 });

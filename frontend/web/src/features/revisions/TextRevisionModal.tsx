@@ -59,7 +59,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
       <div className="flex w-full flex-wrap items-center justify-between gap-3 border-t border-seam pt-4">
         <p className="max-w-xl text-xs text-muted" role="status">{confirming
           ? "Restore this entire version? The current saved content will remain in history."
-          : "Comparing with the current saved version. Unsaved edits are not included."}</p>
+          : "Restores the entire selected version. Unsaved edits are not included in the comparison."}</p>
         <div className="flex flex-wrap gap-2">
           <Button secondary disabled={restore.isPending} onClick={() => confirming ? setConfirming(false) : onClose()}>{confirming ? "Cancel" : "Close"}</Button>
           <Button disabled={blocked || showingCurrent} onClick={submit}>{restore.isPending ? "Restoring…" : confirming ? "Confirm restore" : "Restore this version"}</Button>
@@ -79,13 +79,17 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
             <button key={revision.id} type="button" disabled={restore.isPending} aria-pressed={selected?.id === revision.id} onClick={() => select(revision.id)} className={`rounded-workbench border-l-2 px-3 py-2 text-left text-sm ${selected?.id === revision.id ? "border-primary bg-primary/15 text-text" : "border-transparent text-muted hover:bg-[var(--ng-hover)]"}`}>
               <time dateTime={revision.written_at}>{formatTime(revision.written_at)}</time>
               <span className="block text-xs text-muted">{sourceLabel(revision.source)}</span>
+              {revision.purpose ? <span className="block truncate text-xs text-muted" title={revision.purpose}>{revision.purpose}</span> : null}
             </button>
           ))}
           {list.hasNextPage ? <Button secondary size="sm" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>Load more</Button> : null}
         </nav>
         <section aria-label="Version content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-visible">
           <Tabs items={[{ id: "diff", label: "Compare changes" }, { id: "full", label: "Full version" }]} value={view} onChange={setView} label="Version view" />
-          <p aria-label="Change reason" className="mb-2 whitespace-pre-wrap break-words text-sm text-muted"><span className="font-medium">Change reason:</span> {purpose ?? "Not recorded"}</p>
+          <details key={showingCurrent ? "current" : selected?.id} className="mb-2 shrink-0 text-sm text-muted">
+            <summary aria-label="Change reason" className="cursor-pointer list-inside truncate"><span className="font-medium">{showingCurrent ? "Current" : "Selected"} version save reason:</span> {purpose ?? "Not recorded"}</summary>
+            <p className="mt-1 whitespace-pre-wrap break-words">{purpose ?? "Not recorded"}</p>
+          </details>
           {dirty ? <p role="status" className="mb-2 text-sm text-warning">Unsaved edits are preserved. Close this window and save or cancel your edits before restoring.</p> : null}
           {!canRestore ? <p className="mb-2 text-sm text-muted">History is read-only. Restoring requires write access and an unlocked document.</p> : null}
           {error ? <p role="alert" className="mb-2 text-sm text-danger">{error}</p> : null}
@@ -99,7 +103,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
                   : body.isError || list.isError ? <p role="alert" className="text-danger">Could not read this version. It may have expired or access may have changed.</p>
                     : body.isFetching ? <p role="status" className="text-muted">Loading selected version…</p>
                       : body.data && selected ? <>
-                        <p className="mb-2 text-xs text-muted">Selected: {formatTime(selected.written_at)} · Current: {formatTime(plainCurrent.updated_at)}</p>
+                        <p className="mb-2 shrink-0 text-xs text-muted">{view === "diff" ? "Cumulative comparison: " : "Selected: "}{formatTime(selected.written_at)}{view === "diff" ? ` → Current saved: ${formatTime(plainCurrent.updated_at)}` : ""}</p>
                         {view === "full" ? <VersionPreview node={node} content={body.data.content} identity={selected.id} />
                           : plainCurrent.truncated ? <p className="text-muted">Current content is incomplete. Comparison is unavailable; use Full version.</p>
                             : <RevisionComparison key={`${selected.id}:${plainCurrent.content_sha256}`} before={body.data.content} after={plainCurrent.content} />}
@@ -123,7 +127,7 @@ function VersionPreview({ node, content, identity }: { node: RestNode; content: 
   </div>;
 }
 function formatTime(value: string) {
-  return new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", year: "numeric" });
+  return new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", year: "numeric" });
 }
 function sourceLabel(source: string) {
   return ({ browser: "Edited on web", api: "Edited via API", mcp: "Edited via MCP", restore: "Restored version", unknown: "Saved version" } as Record<string, string>)[source] ?? "Saved version";
