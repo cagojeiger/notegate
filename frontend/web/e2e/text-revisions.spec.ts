@@ -300,6 +300,13 @@ for (const mobile of [false, true]) {
       const after = before.map((line, index) => (index >= 80 && index < 105) || index === 230 ? `Updated ${line}` : line);
       const requests = await setup(page, { mobile, previousContent: before.join("\n"), currentContent: after.join("\n") });
       await page.emulateMedia({ colorScheme });
+      const preview = page.getByRole("region", { name: "Document preview", exact: true });
+      await preview.focus();
+      await expect(preview).toBeFocused();
+      await page.keyboard.press("End");
+      await expect.poll(() => preview.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      await page.keyboard.press("Home");
+      await expect.poll(() => preview.evaluate((element) => element.scrollTop)).toBe(0);
       if (mobile) await page.getByRole("button", { name: "More actions", exact: true }).first().click();
       await page.getByRole("button", { name: "Version history", exact: true }).click();
       const dialog = page.getByRole("dialog");

@@ -116,7 +116,7 @@ export function MarkdownPreview({ content, frontmatter, linkPolicy, imagePolicy,
   }, [clearOutline, content, frontmatter, idPrefix, outlineIdentity, publishOutline, readScrollPosition, writeScrollPosition]);
 
   return (
-    <div ref={scrollRootRef} className="min-h-0 w-full flex-1 overflow-y-auto px-5 py-8 md:px-6 md:py-10 lg:px-8 lg:py-12" data-testid="markdown-preview-scroll-region">
+    <div ref={scrollRootRef} role="region" aria-label="Document preview" tabIndex={0} className="min-h-0 w-full flex-1 overflow-y-auto px-5 py-8 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 md:px-6 md:py-10 lg:px-8 lg:py-12" data-testid="markdown-preview-scroll-region">
       <Markdown content={content} frontmatter={frontmatter} linkPolicy={linkPolicy} imagePolicy={imagePolicy} imageViewportRoot={scrollRootRef} />
     </div>
   );
