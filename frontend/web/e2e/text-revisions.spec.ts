@@ -168,8 +168,7 @@ test("mobile opens history from More actions and keeps read-only history accessi
   await expectNoAccessibilityViolations(page);
   const comparison = dialog.getByRole("region", { name: "Version comparison", exact: true });
   await comparison.focus();
-  await page.keyboard.press("End");
-  await expect.poll(() => comparison.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await expect(comparison).toBeFocused();
   await page.keyboard.press("Home");
   await expect.poll(() => comparison.evaluate((el) => el.scrollTop)).toBe(0);
   await page.screenshot({ path: "test-results/text-revisions-mobile.png" });
@@ -321,11 +320,16 @@ for (const mobile of [false, true]) {
       await expect(comparison.getByText("Updated Line 81", { exact: true })).toBeInViewport();
       await expect(comparison.getByText("Line 2", { exact: true })).toHaveCount(0);
       await expect(dialog.getByLabel("Change summary")).toHaveText("+26 added−26 removed");
-      await expect(dialog.getByText("Change 1 of 2", { exact: true })).toBeVisible();
+      await expect(dialog.getByRole("status", { name: "Change 1 of 2", exact: true })).toBeVisible();
       await expect(dialog.getByRole("button", { name: "Previous change" })).toBeDisabled();
-      await expect(dialog.getByText(/Cumulative comparison:/)).toBeVisible();
-      await expect(dialog.getByLabel("Change reason")).toContainText("Selected version save reason:");
+      await expect(dialog.getByText(mobile ? "Selected → current saved (cumulative)" : /Cumulative comparison:/)).toBeVisible();
+      await expect(dialog.getByLabel("Change reason")).toContainText("Save reason:");
       await expect(dialog.getByText(/Restores the entire selected version/)).toBeVisible();
+      if (mobile) {
+        await expect(dialog.getByRole("button", { name: "Choose saved version" })).toHaveAttribute("aria-expanded", "false");
+        expect((await comparison.boundingBox())!.height).toBeGreaterThan(260);
+        await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeInViewport({ ratio: 1 });
+      }
       const bodyReads = () => requests.filter((request) => request.method === "GET" && (request.path === textPath || request.path === `${textPath}/revisions/${revision.id}`)).length;
       const reads = bodyReads();
       const dialogBox = await dialog.boundingBox();
@@ -334,7 +338,7 @@ for (const mobile of [false, true]) {
       await next.focus();
       await page.keyboard.press("Enter");
       await expect(comparison.getByText("Updated Line 231", { exact: true })).toBeInViewport();
-      await expect(dialog.getByText("Change 2 of 2", { exact: true })).toBeVisible();
+      await expect(dialog.getByRole("status", { name: "Change 2 of 2", exact: true })).toBeVisible();
       await expect(next).toBeDisabled();
       expect(await dialog.boundingBox()).toEqual(dialogBox);
       expect(await dialog.getByRole("region", { name: "Version content" }).evaluate((element) => element.scrollTop)).toBe(outsideScroll);
@@ -346,6 +350,14 @@ for (const mobile of [false, true]) {
       await expect(comparison.getByText("Line 2", { exact: true }).first()).toBeVisible();
       await comparison.getByRole("button", { name: "77 unchanged lines · Collapse", exact: true }).click();
       await expect(comparison.getByText("Line 2", { exact: true })).toHaveCount(0);
+      await comparison.focus();
+      await page.keyboard.press("End");
+      await expect(dialog.getByRole("status", { name: "Change 2 of 2", exact: true })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Next change" })).toBeDisabled();
+      await expect(dialog.getByRole("button", { name: "Previous change" })).toBeEnabled();
+      await page.keyboard.press("Home");
+      await expect(dialog.getByRole("status", { name: "Change 1 of 2", exact: true })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Previous change" })).toBeDisabled();
       expect(bodyReads()).toBe(reads);
     });
   }
@@ -374,15 +386,47 @@ test("switching versions resets expanded context and distinguishes saves within 
   const comparison = dialog.getByRole("region", { name: "Version comparison", exact: true });
   await comparison.getByRole("button", { name: "77 unchanged lines · Expand", exact: true }).click();
   await dialog.getByRole("button", { name: "Next change" }).click();
-  await expect(dialog.getByText("Change 2 of 2", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("status", { name: "Change 2 of 2", exact: true })).toBeVisible();
   const versions = dialog.getByRole("navigation", { name: "Saved versions" });
   const first = versions.getByRole("button", { name: /Document the original MTU/ });
   const second = versions.getByRole("button", { name: /Record the earlier experiment/ });
   await expect(first.locator("time")).toHaveText(/:00/);
   await expect(second.locator("time")).toHaveText(/:01/);
   await second.click();
-  await expect(dialog.getByText("Change 1 of 2", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("status", { name: "Change 1 of 2", exact: true })).toBeVisible();
   await expect(comparison.getByText("Updated Line 81", { exact: true })).toBeInViewport();
   await expect(comparison.getByText("Line 2", { exact: true })).toHaveCount(0);
   await expect(dialog.getByLabel("Change reason")).toContainText(older.purpose);
 });
+
+for (const colorScheme of ["dark", "light"] as const) {
+  test(`mobile version picker preserves reading space for Korean paragraphs in ${colorScheme}`, async ({ page }) => {
+    const before = Array.from({ length: 120 }, (_, index) => index === 0 ? "# Network" : `${index + 1}. 네트워크 연결 상태를 확인하고 노드별 설정과 측정 결과를 기록합니다. 장애가 발생했던 구간의 원인을 추적하고 다음 실험에서 비교할 기준을 남깁니다.`);
+    const after = before.map((line, index) => index === 60 || index === 100 ? line.replace("연결 상태를 확인하고", "최대 전송 단위를 1450으로 조정하고") : line);
+    await page.addInitScript((theme) => window.localStorage.setItem("notegate.theme", theme), colorScheme);
+    await setup(page, { mobile: true, previousContent: before.join("\n"), currentContent: after.join("\n"), purpose: "오버레이 네트워크의 단편화를 줄이기 위해 MTU 측정 결과를 반영했습니다." });
+    await page.getByRole("button", { name: "More actions", exact: true }).first().click();
+    await page.getByRole("button", { name: "Version history", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const picker = dialog.getByRole("button", { name: "Choose saved version", exact: true });
+    const comparison = dialog.getByRole("region", { name: "Version comparison", exact: true });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", colorScheme);
+    await expect(comparison.getByText(after[60], { exact: true })).toBeInViewport();
+    expect((await comparison.boundingBox())!.height).toBeGreaterThan(260);
+    expect(await comparison.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await picker.click();
+    await expect(picker).toHaveAttribute("aria-expanded", "true");
+    await dialog.getByRole("button", { name: "Current saved version", exact: true }).click();
+    await expect(picker).toBeFocused();
+    await expect(picker).toHaveAttribute("aria-expanded", "false");
+    await expect(dialog.getByRole("tab", { name: "Full version" })).toHaveAttribute("aria-selected", "true");
+    await picker.click();
+    await dialog.getByRole("navigation", { name: "Saved versions" }).getByRole("button", { name: /Edited via MCP/ }).click();
+    await expect(picker).toBeFocused();
+    await expect(picker).toHaveAttribute("aria-expanded", "false");
+    await expect(comparison.getByText(after[60], { exact: true })).toBeInViewport();
+    await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeInViewport({ ratio: 1 });
+    await expectNoAccessibilityViolations(page);
+    await page.screenshot({ path: `test-results/text-revisions-korean-mobile-${colorScheme}.png` });
+  });
+}

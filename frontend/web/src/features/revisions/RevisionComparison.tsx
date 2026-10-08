@@ -45,23 +45,58 @@ function ComparisonContent({ rows }: { rows: DiffRow[] }) {
   const [activeChange, setActiveChange] = useState(0);
   const viewport = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLDivElement>(null);
+  const navigatedScrollTop = useRef<number | null>(null);
 
   useEffect(() => {
-    scrollToChange(viewport.current, heading.current, changes[0]?.start);
+    navigatedScrollTop.current = scrollToChange(viewport.current, heading.current, changes[0]?.start);
   }, [changes]);
+
+  useEffect(() => {
+    const container = viewport.current;
+    if (!container || !changes.length) return;
+    const targets = changes.map(({ start }) => container.querySelector<HTMLElement>(`[data-change-start="${start}"] [data-changed-row]`));
+    let frame = 0;
+    function update() {
+      if (!container) return;
+      // Keep the requested section when scrolling is clamped (several changes
+      // may fit on screen). Recompute only when the viewport moves again.
+      if (container.scrollTop === navigatedScrollTop.current) return;
+      navigatedScrollTop.current = null;
+      const top = container.getBoundingClientRect().top + (heading.current?.offsetHeight ?? 0) + 2;
+      let index = 0;
+      targets.forEach((target, candidate) => {
+        if (target && target.getBoundingClientRect().top <= top) index = candidate;
+      });
+      // A short final section cannot always reach the sticky heading.
+      if (container.scrollHeight > container.clientHeight + 1 && container.scrollTop >= container.scrollHeight - container.clientHeight - 1) index = changes.length - 1;
+      setActiveChange(index);
+    }
+    function schedule() {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(update);
+    }
+    container.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    schedule();
+    return () => {
+      cancelAnimationFrame(frame);
+      container.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+    };
+  }, [changes, expanded]);
 
   function navigate(index: number) {
     setActiveChange(index);
-    scrollToChange(viewport.current, heading.current, changes[index].start);
+    navigatedScrollTop.current = scrollToChange(viewport.current, heading.current, changes[index].start);
   }
 
   if (!changes.length) return <p role="status" className="p-4 text-muted">No changes compared with the current saved version.</p>;
   return (
     <div className="flex min-h-48 flex-1 shrink-0 flex-col md:min-h-0 md:shrink">
       <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2 text-xs">
-        <p aria-label="Change summary"><span className="text-success">+{added} added</span><span className="mx-2 text-danger">−{removed} removed</span></p>
+        <p aria-label="Change summary" className="shrink-0"><span className="text-success">+{added}<span className="sr-only md:not-sr-only"> added</span></span><span className="ml-2 text-danger">−{removed}<span className="sr-only md:not-sr-only"> removed</span></span></p>
         <div className="flex items-center gap-2">
-          <span role="status">Change {activeChange + 1} of {changes.length}</span>
+          <span role="status" aria-label={`Change ${activeChange + 1} of ${changes.length}`}><span className="hidden md:inline">Change </span>{activeChange + 1}<span className="hidden md:inline"> of </span><span className="md:hidden">/</span>{changes.length}</span>
           <Button secondary size="xs" aria-label="Previous change" disabled={activeChange === 0} onClick={() => navigate(activeChange - 1)}><ChevronUp size={16} aria-hidden="true" /></Button>
           <Button secondary size="xs" aria-label="Next change" disabled={activeChange === changes.length - 1} onClick={() => navigate(activeChange + 1)}><ChevronDown size={16} aria-hidden="true" /></Button>
         </div>
@@ -97,9 +132,10 @@ function ComparisonContent({ rows }: { rows: DiffRow[] }) {
 
 function scrollToChange(container: HTMLDivElement | null, heading: HTMLDivElement | null, start: number | undefined) {
   const target = container?.querySelector<HTMLElement>(`[data-change-start="${start}"] [data-changed-row]`);
-  if (!container || !target) return;
+  if (!container || !target) return null;
   // Scroll only the comparison, preserving the modal and keyboard focus.
   container.scrollTop += target.getBoundingClientRect().top - container.getBoundingClientRect().top - (heading?.offsetHeight ?? 0) - 1;
+  return container.scrollTop;
 }
 
 function Line({ line, kind, second = false }: { line: DiffLine | null; kind: "same" | "removed" | "added"; second?: boolean }) {

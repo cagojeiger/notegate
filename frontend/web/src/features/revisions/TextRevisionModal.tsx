@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { ApiError } from "../../api/errors";
@@ -20,6 +21,9 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<"diff" | "full">("diff");
   const [confirming, setConfirming] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const versionsId = useId();
+  const versionPicker = useRef<HTMLButtonElement>(null);
   const { list, revisions, selected, body, baseline, restore } = useTextRevisions(node, selectedId, onRestored);
   const current = baseline.data?.text;
   const plainCurrent = current?.storage_format === "plain" && "content" in current ? current : null;
@@ -34,6 +38,8 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
   function select(id: string) {
     setSelectedId(id);
     setConfirming(false);
+    setVersionsOpen(false);
+    if (versionPicker.current?.offsetParent) versionPicker.current.focus();
     // Do not clear a stale-hash error by switching historical versions; reload is required.
     if (!conflict) restore.reset();
   }
@@ -59,7 +65,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
       <div className="flex w-full flex-wrap items-center justify-between gap-3 border-t border-seam pt-4">
         <p className="max-w-xl text-xs text-muted" role="status">{confirming
           ? "Restore this entire version? The current saved content will remain in history."
-          : "Restores the entire selected version. Unsaved edits are not included in the comparison."}</p>
+          : <>Restores the entire selected version.<span className="hidden md:inline"> Unsaved edits are not included in the comparison.</span></>}</p>
         <div className="flex flex-wrap gap-2">
           <Button secondary disabled={restore.isPending} onClick={() => confirming ? setConfirming(false) : onClose()}>{confirming ? "Cancel" : "Close"}</Button>
           <Button disabled={blocked || showingCurrent} onClick={submit}>{restore.isPending ? "Restoring…" : confirming ? "Confirm restore" : "Restore this version"}</Button>
@@ -67,7 +73,11 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
       </div>
     }>
       <div className="flex h-[min(62dvh,42rem)] min-h-64 flex-col gap-4 md:flex-row">
-        <nav aria-label="Saved versions" className="flex max-h-36 shrink-0 flex-col gap-1 overflow-y-auto border-b border-seam pb-2 md:max-h-none md:w-48 md:border-b-0 md:border-r md:pb-0 md:pr-3">
+        <button ref={versionPicker} type="button" aria-label="Choose saved version" aria-controls={versionsId} aria-expanded={versionsOpen} disabled={restore.isPending} onClick={() => setVersionsOpen(!versionsOpen)} className="flex min-h-workbench-control shrink-0 items-center justify-between gap-2 rounded-workbench border border-border-strong bg-surface px-3 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary/45 md:hidden">
+          <span>{showingCurrent ? "Current saved version" : selected ? <>{formatTime(selected.written_at)} · {sourceLabel(selected.source)}</> : "Choose saved version"}</span>
+          <ChevronDown size={16} aria-hidden="true" className={`shrink-0 ${versionsOpen ? "rotate-180" : ""}`} />
+        </button>
+        <nav id={versionsId} aria-label="Saved versions" className={`${versionsOpen ? "flex" : "hidden"} max-h-36 shrink-0 flex-col gap-1 overflow-y-auto border-b border-seam pb-2 md:flex md:max-h-none md:w-48 md:border-b-0 md:border-r md:pb-0 md:pr-3`}>
           <button type="button" disabled={restore.isPending} aria-pressed={showingCurrent} onClick={() => select("current")} className={`rounded-workbench px-3 py-2 text-left text-sm ${showingCurrent ? "bg-primary/15 text-text" : "text-muted hover:bg-[var(--ng-hover)]"}`}>
             Current saved version
           </button>
@@ -87,8 +97,9 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
         <section aria-label="Version content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-visible">
           <Tabs items={[{ id: "diff", label: "Compare changes", disabled: showingCurrent }, { id: "full", label: "Full version" }]} value={showingCurrent ? "full" : view} onChange={setView} label="Version view" />
           <details key={showingCurrent ? "current" : selected?.id} className="mb-2 shrink-0 text-sm text-muted">
-            <summary aria-label="Change reason" className="cursor-pointer list-inside truncate"><span className="font-medium">{showingCurrent ? "Current" : "Selected"} version save reason:</span> {purpose ?? "Not recorded"}</summary>
+            <summary aria-label="Change reason" className="cursor-pointer list-inside truncate"><span className="font-medium">Save reason:</span> {purpose ?? "Not recorded"}</summary>
             <p className="mt-1 whitespace-pre-wrap break-words">{purpose ?? "Not recorded"}</p>
+            {selected && plainCurrent ? <dl className="mt-2 text-xs md:hidden"><dt>Selected version saved</dt><dd>{formatTime(selected.written_at)}</dd><dt>Current version saved</dt><dd>{formatTime(plainCurrent.updated_at)}</dd></dl> : null}
           </details>
           {dirty ? <p role="status" className="mb-2 text-sm text-warning">Unsaved edits are preserved. Close this window and save or cancel your edits before restoring.</p> : null}
           {!canRestore ? <p className="mb-2 text-sm text-muted">History is read-only. Restoring requires write access and an unlocked document.</p> : null}
@@ -103,7 +114,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
                   : body.isError || list.isError ? <p role="alert" className="text-danger">Could not read this version. It may have expired or access may have changed.</p>
                     : body.isFetching ? <p role="status" className="text-muted">Loading selected version…</p>
                       : body.data && selected ? <>
-                        <p className="mb-2 shrink-0 text-xs text-muted">{view === "diff" ? "Cumulative comparison: " : "Selected: "}{formatTime(selected.written_at)}{view === "diff" ? ` → Current saved: ${formatTime(plainCurrent.updated_at)}` : ""}</p>
+                        <p className="mb-2 shrink-0 text-xs text-muted"><span className="md:hidden">{view === "diff" ? "Selected → current saved (cumulative)" : "Selected version"}</span><span className="hidden md:inline">{view === "diff" ? "Cumulative comparison: " : "Selected: "}{formatTime(selected.written_at)}{view === "diff" ? ` → Current saved: ${formatTime(plainCurrent.updated_at)}` : ""}</span></p>
                         {view === "full" ? <VersionPreview node={node} content={body.data.content} identity={selected.id} />
                           : plainCurrent.truncated ? <p className="text-muted">Current content is incomplete. Comparison is unavailable; use Full version.</p>
                             : <RevisionComparison key={`${selected.id}:${plainCurrent.content_sha256}`} before={body.data.content} after={plainCurrent.content} />}
