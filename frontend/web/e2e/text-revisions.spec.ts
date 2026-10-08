@@ -304,8 +304,9 @@ for (const mobile of [false, true]) {
     test(`long comparisons reveal changes and navigate locally on ${mobile ? "mobile" : "desktop"} in ${colorScheme}`, async ({ page }) => {
       const before = Array.from({ length: 320 }, (_, index) => index === 0 ? "# Network" : `Line ${index + 1}`);
       const after = before.map((line, index) => (index >= 80 && index < 105) || index === 230 ? `Updated ${line}` : line);
+      await page.addInitScript((theme) => window.localStorage.setItem("notegate.theme", theme), colorScheme);
       const requests = await setup(page, { mobile, previousContent: before.join("\n"), currentContent: after.join("\n") });
-      await page.emulateMedia({ colorScheme });
+      await expect(page.locator("html")).toHaveAttribute("data-theme", colorScheme);
       const preview = page.getByRole("region", { name: "Document preview", exact: true });
       await preview.focus();
       await expect(preview).toBeFocused();
