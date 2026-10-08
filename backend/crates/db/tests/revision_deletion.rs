@@ -345,3 +345,69 @@ async fn cascade_receipts_keep_the_owner_and_expire_at_the_audit_boundary() -> T
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn usage_repair_waits_for_a_direct_delete_before_taking_its_snapshot() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "revision-concurrent-repair").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let (node, _) = files
+        .insert_text(space, root, "note.md", &body("first"), owner)
+        .await?;
+    files
+        .save_text_content(
+            space,
+            node.id,
+            &body("second"),
+            None,
+            owner,
+            TextMutationKind::Write,
+        )
+        .await?;
+    {
+        let mut blocker = db.pool.begin().await?;
+        sqlx::query("SELECT space_id FROM text_revision_usage WHERE space_id = $1 FOR UPDATE")
+            .bind(space)
+            .fetch_one(&mut *blocker)
+            .await?;
+        let mut deletion_connection = db.pool.acquire().await?;
+        let deletion_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *deletion_connection)
+            .await?;
+        let deletion = sqlx::query("DELETE FROM text_revisions WHERE space_id = $1")
+            .bind(space)
+            .execute(&mut *deletion_connection);
+        tokio::pin!(deletion);
+        // Drive DELETE until its row trigger is blocked on the counter held above.
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), &mut deletion)
+                .await
+                .is_err()
+        );
+        let waiting: bool = sqlx::query_scalar(
+            "SELECT wait_event_type = 'Lock' FROM pg_stat_activity WHERE pid = $1",
+        )
+        .bind(deletion_pid)
+        .fetch_one(&db.pool)
+        .await?;
+        assert!(waiting);
+
+        let reconcile = SpaceUsageRepo::new(db.pool.clone());
+        let repair = reconcile.reconcile_space(space);
+        tokio::pin!(repair);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), &mut repair)
+                .await
+                .is_err()
+        );
+        blocker.commit().await?;
+        let (deleted, repaired) = tokio::join!(deletion, repair);
+        assert_eq!(deleted?.rows_affected(), 1);
+        repaired?;
+    }
+    assert_eq!(usage(&db, space).await?, 0);
+    db.cleanup().await;
+    Ok(())
+}
