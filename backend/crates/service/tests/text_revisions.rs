@@ -654,6 +654,7 @@ async fn new_channel_resets_request_attribution_and_restore_preserves_transport(
         repo.find_text(space, node)
             .await?
             .unwrap()
+            .1
             .content
             .as_deref(),
         Some("first")

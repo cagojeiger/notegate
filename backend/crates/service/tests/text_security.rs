@@ -815,7 +815,7 @@ async fn write_metadata_matches_reads_and_noop_preserves_attribution()
                 )
                 .await?;
             let node = saved.node.node.id;
-            let stored = repo.find_text(space, node).await?.unwrap();
+            let (_, stored) = repo.find_text(space, node).await?.unwrap();
             assert_eq!(saved.text.node_id, node);
             assert_eq!(saved.text.space_id, space);
             assert_eq!(saved.text.content_sha256, stored.content_sha256);
