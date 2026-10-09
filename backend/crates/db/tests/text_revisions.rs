@@ -734,7 +734,7 @@ async fn actor_channel_and_session_boundaries_cannot_coalesce() -> TestResult {
             &repo
                 .clone()
                 .with_mutation_context(FileMutationContext {
-                    source: source,
+                    source,
                     edit_session_id: id,
                     ..FileMutationContext::default()
                 })

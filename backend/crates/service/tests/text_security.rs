@@ -770,3 +770,115 @@ async fn conditional_text_reads_keep_hash_and_body_together_during_writes()
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn write_metadata_matches_reads_and_noop_preserves_attribution()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(&db.pool, "write-result", "write-result@example.test").await?;
+    sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
+        .bind(owner)
+        .execute(&db.pool)
+        .await?;
+    let (space, root) = setup_space(&SpaceRepo::new(db.pool.clone()), owner, "write-result").await;
+    let repo = FilesRepo::new(db.pool.clone());
+    let files = FilesService::new(repo.clone());
+    for mode in ["plain", "server", "client"] {
+        sqlx::query("UPDATE spaces SET default_text_encryption_enabled = $2 WHERE id = $1")
+            .bind(space)
+            .bind(mode == "server")
+            .execute(&db.pool)
+            .await?;
+        let mut target = WriteTarget::Create {
+            parent_node_id: root,
+            name: format!("{mode}.md"),
+        };
+        for value in ["first\n본문", "second\n수정된 본문"] {
+            let body = if mode == "client" {
+                WriteTextBody::Encrypted(serde_json::json!({
+                    "version": 1, "alg": "AES-256-GCM", "ciphertext_b64": value
+                }))
+            } else {
+                WriteTextBody::Plain(value.into())
+            };
+            let saved = files
+                .write_text(
+                    owner,
+                    space,
+                    WriteText {
+                        target,
+                        body: body.clone(),
+                        expected_sha256: None,
+                    },
+                )
+                .await?;
+            let node = saved.node.node.id;
+            let stored = repo.find_text(space, node).await?.unwrap();
+            assert_eq!(saved.text.node_id, node);
+            assert_eq!(saved.text.space_id, space);
+            assert_eq!(saved.text.content_sha256, stored.content_sha256);
+            assert_eq!(saved.text.byte_len, stored.byte_len);
+            assert_eq!(saved.text.line_count, stored.line_count);
+            assert_eq!(saved.text.storage_format, stored.storage_format);
+            assert_eq!(saved.text.at_rest_encryption, stored.at_rest_encryption);
+            assert_eq!(
+                saved.text.created_by_account_id,
+                stored.created_by_account_id
+            );
+            assert_eq!(
+                saved.text.updated_by_account_id,
+                stored.updated_by_account_id
+            );
+            assert_eq!(saved.text.created_at, stored.created_at);
+            assert_eq!(saved.text.updated_at, stored.updated_at);
+            assert_eq!(
+                saved.text.at_rest_encryption,
+                if mode == "server" {
+                    TextAtRestEncryption::Server
+                } else {
+                    TextAtRestEncryption::None
+                }
+            );
+            match &body {
+                WriteTextBody::Plain(value) => assert_eq!(stored.content.as_ref(), Some(value)),
+                WriteTextBody::Encrypted(payload) => {
+                    assert_eq!(stored.encrypted_payload.as_ref(), Some(payload))
+                }
+            }
+            let changes_before = repo
+                .list_file_change_events(space, Some(node), 10, None)
+                .await?;
+            let revisions_before = repo.list_text_revisions(space, node, 10, None).await?;
+            let unchanged = files
+                .write_text(
+                    owner,
+                    space,
+                    WriteText {
+                        target: WriteTarget::Existing { node_id: node },
+                        body,
+                        expected_sha256: Some(saved.text.content_sha256.clone()),
+                    },
+                )
+                .await?;
+            assert_eq!(
+                unchanged, saved,
+                "unchanged save must preserve metadata and attribution"
+            );
+            assert_eq!(
+                repo.list_file_change_events(space, Some(node), 10, None)
+                    .await?,
+                changes_before
+            );
+            let revisions_after = repo.list_text_revisions(space, node, 10, None).await?;
+            assert_eq!(
+                serde_json::to_value(revisions_after)?,
+                serde_json::to_value(revisions_before)?
+            );
+            target = WriteTarget::Existing { node_id: node };
+        }
+    }
+    db.cleanup().await;
+    Ok(())
+}

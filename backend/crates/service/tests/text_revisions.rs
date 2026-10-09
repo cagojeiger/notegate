@@ -520,3 +520,162 @@ async fn cursor_is_document_bound_and_opaque_current_content_hides_history() -> 
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn new_channel_resets_request_attribution_and_restore_preserves_transport() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(&db.pool, "context", "context@example.test").await?;
+    let (space, root) = setup_space(&SpaceRepo::new(db.pool.clone()), owner, "context").await;
+    sqlx::query("UPDATE spaces SET default_external_access_enabled = true WHERE id = $1")
+        .bind(space)
+        .execute(&db.pool)
+        .await?;
+    sqlx::query("UPDATE nodes SET external_access_enabled = true WHERE space_id = $1")
+        .bind(space)
+        .execute(&db.pool)
+        .await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let files = FilesService::new(repo.clone());
+    let context = FileMutationContext {
+        source: "cli",
+        edit_session_id: Some(Uuid::new_v4()),
+        invocation_id: Some(Uuid::new_v4()),
+        purpose: Some("Update the document from CLI".into()),
+    };
+    let cli = files
+        .for_channel(Channel::Api)
+        .with_mutation_context(context.clone());
+    let first = cli
+        .write_text(
+            owner,
+            space,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root,
+                    name: "note.md".into(),
+                },
+                body: WriteTextBody::Plain("first".into()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    let node = first.node.node.id;
+    let second = cli
+        .write_text(
+            owner,
+            space,
+            WriteText {
+                target: WriteTarget::Existing { node_id: node },
+                body: WriteTextBody::Plain("second".into()),
+                expected_sha256: Some(first.text.content_sha256),
+            },
+        )
+        .await?;
+    let head: (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT revision_source, revision_session_id FROM text_objects WHERE node_id=$1",
+    )
+    .bind(node)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(head, ("cli".into(), context.edit_session_id));
+    let history = cli.text_revisions(owner, space, node, 10, None).await?;
+    assert_eq!(history.current.unwrap().purpose, context.purpose);
+    let original = history.revisions[0].id;
+    let events = repo
+        .list_file_change_events(space, Some(node), 10, None)
+        .await?;
+    assert_eq!(events[0].metadata["source"], "cli");
+    assert_eq!(
+        events[0].metadata["purpose"],
+        serde_json::json!(context.purpose)
+    );
+    assert_eq!(
+        events[0].metadata["invocation_id"],
+        serde_json::json!(context.invocation_id)
+    );
+
+    // A fresh channel must not inherit another request's reason, session or invocation.
+    let browser = cli.for_channel(Channel::Browser);
+    let third = browser
+        .write_text(
+            owner,
+            space,
+            WriteText {
+                target: WriteTarget::Existing { node_id: node },
+                body: WriteTextBody::Plain("third".into()),
+                expected_sha256: Some(second.text.content_sha256),
+            },
+        )
+        .await?;
+    let head: (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT revision_source, revision_session_id FROM text_objects WHERE node_id=$1",
+    )
+    .bind(node)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(head, ("browser".into(), None));
+    let events = repo
+        .list_file_change_events(space, Some(node), 10, None)
+        .await?;
+    assert_eq!(events[0].metadata["source"], "browser");
+    assert!(events[0].metadata.get("invocation_id").is_none());
+    assert!(events[0].metadata.get("purpose").is_none());
+
+    let restored = cli
+        .restore_text_revision(owner, space, node, original, third.text.content_sha256)
+        .await?;
+    let head: (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT revision_source, revision_session_id FROM text_objects WHERE node_id=$1",
+    )
+    .bind(node)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(head, ("restore".into(), None));
+    let events = repo
+        .list_file_change_events(space, Some(node), 10, None)
+        .await?;
+    assert_eq!(events[0].metadata["source"], "cli");
+    assert_eq!(
+        events[0].metadata["invocation_id"],
+        serde_json::json!(context.invocation_id)
+    );
+    assert!(events[0].metadata.get("purpose").is_none());
+    assert!(
+        cli.text_revisions(owner, space, node, 10, None)
+            .await?
+            .current
+            .unwrap()
+            .purpose
+            .is_none()
+    );
+    assert_eq!(
+        repo.find_text(space, node)
+            .await?
+            .unwrap()
+            .content
+            .as_deref(),
+        Some("first")
+    );
+    // The restore override is confined to the cloned service used for that operation.
+    cli.write_text(
+        owner,
+        space,
+        WriteText {
+            target: WriteTarget::Existing { node_id: node },
+            body: WriteTextBody::Plain("fourth".into()),
+            expected_sha256: Some(restored.text.content_sha256),
+        },
+    )
+    .await?;
+    let head: (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT revision_source, revision_session_id FROM text_objects WHERE node_id=$1",
+    )
+    .bind(node)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(head, ("cli".into(), context.edit_session_id));
+    db.cleanup().await;
+    Ok(())
+}
