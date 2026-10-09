@@ -10,12 +10,12 @@ use notegate_core::Result;
 use notegate_core::limits::Limits;
 use notegate_core::security::PiiCrypto;
 use notegate_model::files::StoredContent;
-use notegate_model::{Node, TextObject};
+use notegate_model::{Node, SavedText};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::super::error::{map_constraint_error, map_sqlx_error};
-use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
+use super::super::rows::{NODE_COLUMNS, NodeRow, SAVED_TEXT_COLUMNS, SavedTextRow};
 use super::{checks, stored_text_parts};
 use crate::file_change_events;
 use crate::space_usage::{self, UsageDelta};
@@ -89,7 +89,7 @@ pub struct InsertTextArgs<'a> {
     pub revision_time: Option<DateTime<Utc>>,
 }
 
-pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)> {
+pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, SavedText)> {
     let InsertTextArgs {
         capture,
         pool,
@@ -152,14 +152,14 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
         revision_id,
         revision_purpose,
     )?;
-    let doc_row = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
+    let doc_row = sqlx::query_as::<_, SavedTextRow>(sqlx::AssertSqlSafe(format!(
             "WITH clock AS MATERIALIZED (SELECT COALESCE($17::timestamptz, clock_timestamp()) AS written_at) \
          INSERT INTO text_objects \
             (node_id, space_id, storage_format, content_text, encrypted_payload, content_sha256, byte_len, line_count, \
              at_rest_encryption, content_ciphertext, content_nonce, content_enc_key_id, content_enc_version, \
              created_by_account_id, updated_by_account_id, revision_source, revision_private_purpose, revision_written_at, revision_group_started_at, revision_id) \
          SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14, $15, $16, clock.written_at, clock.written_at, $18 FROM clock \
-         RETURNING {TEXT_COLUMNS}"
+         RETURNING {SAVED_TEXT_COLUMNS}"
         )))
         .bind(node_row.id)
         .bind(space_id)
@@ -195,7 +195,7 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
     .await?;
 
     tx.commit().await.map_err(map_sqlx_error)?;
-    Ok((node_row.into_node()?, doc_row.into_text(crypto)?))
+    Ok((node_row.into_node()?, doc_row.into_saved_text()?))
 }
 
 /// Shared in-tx create pre-checks: parent live folder, path bounds,

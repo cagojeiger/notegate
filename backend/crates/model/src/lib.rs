@@ -47,6 +47,6 @@ pub use space::{
     SpaceAgentConnection, SpaceCursor, SpaceOrderUpdate, SpacePage, SpaceView, UpdateSpace,
 };
 pub use text::{
-    FileEncryptionMode, FileObject, TextAtRestEncryption, TextObject, TextStorageFormat,
+    FileEncryptionMode, FileObject, SavedText, TextAtRestEncryption, TextObject, TextStorageFormat,
 };
 pub use user::User;

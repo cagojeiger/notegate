@@ -357,8 +357,10 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
     assert_eq!(encrypted.text.line_count, 0);
-    assert!(encrypted.text.content.is_none());
-    assert!(encrypted.text.encrypted_payload.is_some());
+    assert_eq!(
+        encrypted.text.storage_format,
+        notegate_model::TextStorageFormat::Encrypted
+    );
     let encrypted_read = files
         .read_text(
             owner,

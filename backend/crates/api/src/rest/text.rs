@@ -21,8 +21,9 @@ use crate::rest::dto::{AccountRef, NodeOut, NodeRef, attribution_ids};
 use crate::state::AppState;
 
 use notegate_service::files::{
-    Edit as ServiceEdit, NodeView, PatchMode, PatchResult, PatchText, ReadResult, ReadText,
-    ReadTextBody, TextView, UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody,
+    Edit as ServiceEdit, FileMutationContext, NodeView, PatchMode, PatchResult, PatchText,
+    ReadResult, ReadText, ReadTextBody, TextWriteResult, UpdateTextEncryption, WriteTarget,
+    WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
@@ -184,7 +185,10 @@ pub(crate) async fn replace(
     let view = state
         .files
         .clone()
-        .with_revision_session(body.edit_session_id)
+        .with_mutation_context(FileMutationContext {
+            edit_session_id: body.edit_session_id,
+            ..FileMutationContext::for_channel(caller.channel)
+        })
         .write_text(
             caller.account_id(),
             space_id,
@@ -327,7 +331,10 @@ pub(crate) async fn patch(
     let result = state
         .files
         .clone()
-        .with_revision_session(body.edit_session_id)
+        .with_mutation_context(FileMutationContext {
+            edit_session_id: body.edit_session_id,
+            ..FileMutationContext::for_channel(caller.channel)
+        })
         .patch_text(
             caller.account_id(),
             space_id,
@@ -419,7 +426,7 @@ fn parse_patch_mode(raw: Option<&str>) -> Result<PatchMode, ApiError> {
         .ok_or_else(|| ApiError::invalid_field("mode must be 'unique', 'first', or 'all'"))
 }
 
-fn text_response(view: &TextView, updated_by: AccountRef) -> TextResponse {
+fn text_response(view: &TextWriteResult, updated_by: AccountRef) -> TextResponse {
     TextResponse {
         node: NodeRef::from(&view.node),
         text: TextMetaOut {
