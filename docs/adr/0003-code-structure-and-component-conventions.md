@@ -60,6 +60,12 @@ api transport adapters ──▶ api commands ──┬─▶ service ──▶ 
   각 handler에 중복하지 않고 api의 공용 모듈에 둔다.
 - 공용 업로드 흐름은 전체 `AppState` 대신 함수별로 필요한 `FilesService`, `ObjectStorage`,
   `DocxValidationAdmission` 참조를 받는다. 채널별 파일 서비스 선택은 transport adapter에 둔다.
+- 파일 쓰기의 출처·편집 세션·호출 ID·변경 이유는 `FileMutationContext`로 함께 전달한다.
+  인증된 actor와 접근 권한은 이 문맥과 별개다. 복원은 revision에 `restore`를 기록하고 Changes에는
+  실제 호출 경로를 유지한다. 새로운 채널 문맥은 이전 요청의 호출 ID나 변경 이유를 이어받지 않는다.
+- 텍스트 쓰기는 본문 없는 `SavedText` 메타데이터를 반환하고, service는 이를 `TextWriteResult`로
+  구성한다. 본문 조회는 `TextObject`를 사용한다. 본문·이전 버전·용량·Changes는 기존처럼 하나의
+  쓰기 트랜잭션에서 커밋하며, 저장 응답을 만들기 위한 본문 반환·복호화는 하지 않는다.
 - cli는 command 입력 타입과 생성 schema를 직접 재사용하되 api 구현 crate에는 의존하지 않는다.
   인증 facade, OAuth protocol 처리, credential persistence와 URL 보안 정책은 CLI 내부 책임으로 유지한다.
 

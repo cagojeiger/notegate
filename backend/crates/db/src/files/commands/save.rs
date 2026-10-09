@@ -9,12 +9,14 @@ use notegate_core::limits::Limits;
 use notegate_core::security::PiiCrypto;
 use notegate_core::{Error, Result};
 use notegate_model::files::StoredContent;
-use notegate_model::{Node, TextObject};
+use notegate_model::{Node, SavedText};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::super::error::{map_constraint_error, map_sqlx_error};
-use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
+use super::super::rows::{
+    NODE_COLUMNS, NodeRow, SAVED_TEXT_COLUMNS, SavedTextRow, TEXT_COLUMNS, TextRow,
+};
 use super::{checks, stored_text_parts};
 use crate::file_change_events;
 use crate::files_repo::TextMutationKind;
@@ -40,7 +42,7 @@ pub struct SaveTextContentArgs<'a> {
 
 /// Replace a live text's content + metrics, attributing the update to
 /// `updated_by` on both the text and its node.
-pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, TextObject)> {
+pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, SavedText)> {
     let SaveTextContentArgs {
         capture,
         pool,
@@ -131,7 +133,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         || current_text.line_count != content.line_count;
     if !content_changed {
         tx.commit().await.map_err(map_sqlx_error)?;
-        return Ok((node_row.into_node()?, current_text.into_text(crypto)?));
+        return Ok((node_row.into_node()?, current_text.into_saved_text()?));
     }
     checks::require_node_write(&mut tx, space_id, node_id).await?;
 
@@ -173,7 +175,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         revision.id,
         revision_purpose,
     )?;
-    let doc_row = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
+    let doc_row = sqlx::query_as::<_, SavedTextRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE text_objects \
          SET storage_format = $3, content_text = $4, encrypted_payload = $5, \
              content_sha256 = $6, byte_len = $7, line_count = $8, \
@@ -183,7 +185,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
              revision_id = $15, revision_written_at = $16, revision_author_id = $14, \
              revision_group_id = $17, revision_group_started_at = $18, \
              revision_session_id = $19, revision_source = $20, revision_purpose = NULL, revision_private_purpose = $21 \
-         WHERE space_id = $1 AND node_id = $2 RETURNING {TEXT_COLUMNS}"
+         WHERE space_id = $1 AND node_id = $2 RETURNING {SAVED_TEXT_COLUMNS}"
     )))
     .bind(space_id)
     .bind(node_id)
@@ -237,5 +239,5 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     .await?;
 
     tx.commit().await.map_err(map_sqlx_error)?;
-    Ok((node_row.into_node()?, doc_row.into_text(crypto)?))
+    Ok((node_row.into_node()?, doc_row.into_saved_text()?))
 }

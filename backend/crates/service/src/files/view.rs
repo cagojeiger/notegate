@@ -1,10 +1,10 @@
 use notegate_model::files::WriteLockSource;
-use notegate_model::{FileObject, Node, NodeKind, NodeSummary, TextObject};
+use notegate_model::{FileObject, Node, NodeKind, NodeSummary, SavedText, TextObject};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::error::ServiceResult;
-use crate::files::{FileStats, NodeSummaryView, NodeView, TextStats, TextView};
+use crate::files::{FileStats, NodeSummaryView, NodeView, TextStats, TextWriteResult};
 use notegate_db::FilesRepo;
 
 use super::FilesService;
@@ -105,15 +105,17 @@ impl FilesService {
         })
     }
 
-    /// Build a [`TextView`] for an existing text node.
-    pub(super) async fn text_view(
+    /// Build a [`TextWriteResult`] for an existing text node.
+    pub(super) async fn text_write_result(
         &self,
         space_id: Uuid,
         node: Node,
-        text: TextObject,
-    ) -> ServiceResult<TextView> {
-        let node = self.text_node_view(space_id, node, &text).await?;
-        Ok(TextView { node, text })
+        text: SavedText,
+    ) -> ServiceResult<TextWriteResult> {
+        let node = self
+            .text_node_view_with_stats(space_id, node, stats_from_saved_text(&text))
+            .await?;
+        Ok(TextWriteResult { node, text })
     }
 
     /// Build a text node view from an already-loaded text, avoiding an
@@ -166,9 +168,13 @@ impl FilesService {
     }
 }
 
-pub(super) fn text_view_at_path(node: Node, path: String, text: TextObject) -> TextView {
-    let stats = stats_from_text(&text);
-    TextView {
+pub(super) fn text_write_result_at_path(
+    node: Node,
+    path: String,
+    text: SavedText,
+) -> TextWriteResult {
+    let stats = stats_from_saved_text(&text);
+    TextWriteResult {
         node: NodeView {
             node,
             path,
@@ -231,6 +237,16 @@ pub(crate) async fn write_lock_sources_many(
 }
 
 fn stats_from_text(text: &TextObject) -> TextStats {
+    TextStats {
+        content_sha256: text.content_sha256.clone(),
+        byte_len: text.byte_len,
+        line_count: text.line_count,
+        storage_format: text.storage_format,
+        at_rest_encryption: text.at_rest_encryption,
+    }
+}
+
+fn stats_from_saved_text(text: &SavedText) -> TextStats {
     TextStats {
         content_sha256: text.content_sha256.clone(),
         byte_len: text.byte_len,

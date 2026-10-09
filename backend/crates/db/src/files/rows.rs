@@ -6,8 +6,8 @@ use chrono::{DateTime, Utc};
 use notegate_core::security::{EncryptedField, PiiCrypto};
 use notegate_core::{Error, Result};
 use notegate_model::{
-    FileEncryptionMode, FileObject, Node, NodeKind, NodeSummary, TextAtRestEncryption, TextObject,
-    TextStorageFormat,
+    FileEncryptionMode, FileObject, Node, NodeKind, NodeSummary, SavedText, TextAtRestEncryption,
+    TextObject, TextStorageFormat,
 };
 use serde_json::Value;
 use sqlx::FromRow;
@@ -113,6 +113,23 @@ pub struct TextRow {
 }
 
 impl TextRow {
+    pub fn into_saved_text(self) -> Result<SavedText> {
+        SavedTextRow {
+            node_id: self.node_id,
+            space_id: self.space_id,
+            content_sha256: self.content_sha256,
+            byte_len: self.byte_len,
+            line_count: self.line_count,
+            storage_format: self.storage_format,
+            at_rest_encryption: self.at_rest_encryption,
+            created_by_account_id: self.created_by_account_id,
+            updated_by_account_id: self.updated_by_account_id,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+        .into_saved_text()
+    }
+
     pub fn into_text(self, crypto: &PiiCrypto) -> Result<TextObject> {
         let storage_format = TextStorageFormat::parse(&self.storage_format).ok_or_else(|| {
             Error::internal(format!(
@@ -170,6 +187,56 @@ impl TextRow {
         })
     }
 }
+
+/// Metadata returned by text writes. Bodies and ciphertext stay in the database.
+#[derive(Debug, FromRow)]
+pub struct SavedTextRow {
+    pub node_id: Uuid,
+    pub space_id: Uuid,
+    pub content_sha256: String,
+    pub byte_len: i64,
+    pub line_count: i32,
+    pub storage_format: String,
+    pub at_rest_encryption: String,
+    pub created_by_account_id: Uuid,
+    pub updated_by_account_id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl SavedTextRow {
+    pub fn into_saved_text(self) -> Result<SavedText> {
+        let storage_format = TextStorageFormat::parse(&self.storage_format).ok_or_else(|| {
+            Error::internal(format!(
+                "unknown text storage format: {}",
+                self.storage_format
+            ))
+        })?;
+        let at_rest_encryption =
+            TextAtRestEncryption::parse(&self.at_rest_encryption).ok_or_else(|| {
+                Error::internal(format!(
+                    "unknown text at-rest encryption: {}",
+                    self.at_rest_encryption
+                ))
+            })?;
+        Ok(SavedText {
+            node_id: self.node_id,
+            space_id: self.space_id,
+            content_sha256: self.content_sha256,
+            byte_len: self.byte_len,
+            line_count: self.line_count,
+            storage_format,
+            at_rest_encryption,
+            created_by_account_id: self.created_by_account_id,
+            updated_by_account_id: self.updated_by_account_id,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        })
+    }
+}
+
+pub const SAVED_TEXT_COLUMNS: &str = "node_id, space_id, content_sha256, byte_len, line_count, \
+    storage_format, at_rest_encryption, created_by_account_id, updated_by_account_id, created_at, updated_at";
 
 /// Selectable columns of `nodes`, in [`NodeRow`] order.
 pub const NODE_COLUMNS: &str = "id, space_id, parent_id, name, kind, sort_order, metadata, external_access_enabled, write_locked, \

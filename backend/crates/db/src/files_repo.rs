@@ -18,7 +18,7 @@ use notegate_core::Result;
 use notegate_core::limits::Limits;
 use notegate_core::security::PiiCrypto;
 use notegate_model::search::{SearchDateFilters, SearchNodeCandidate, SearchTextCandidate};
-use notegate_model::{FileObject, Node, NodeKind, NodeSummary, Permission, TextObject};
+use notegate_model::{FileObject, Node, NodeKind, NodeSummary, Permission, SavedText, TextObject};
 use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
@@ -27,9 +27,9 @@ use uuid::Uuid;
 use crate::file_change_event_repo;
 use crate::files::{commands, queries};
 use notegate_model::files::{
-    BeginObjectUpload, ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileStats, MoveNode,
-    NodeListCursor, NodeListSort, ObjectUploadMode, ObjectUploadRegistration, PendingObjectUpload,
-    StoredContent, TextRead, TextStats,
+    BeginObjectUpload, ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileMutationContext,
+    FileStats, MoveNode, NodeListCursor, NodeListSort, ObjectUploadMode, ObjectUploadRegistration,
+    PendingObjectUpload, StoredContent, TextRead, TextStats,
 };
 
 #[derive(Debug, Clone)]
@@ -39,11 +39,8 @@ pub struct FilesRepo {
     crypto: PiiCrypto,
     metrics_enabled: bool,
     external_only: bool,
-    revision_session: Option<Uuid>,
-    revision_source: &'static str,
-    change_source: &'static str,
-    invocation_id: Option<Uuid>,
-    revision_purpose: Option<String>,
+    mutation_context: FileMutationContext,
+    revision_source_override: Option<&'static str>,
     revision_time: Option<DateTime<Utc>>,
     trash_time: Option<DateTime<Utc>>,
 }
@@ -107,11 +104,8 @@ impl FilesRepo {
             crypto,
             metrics_enabled: false,
             external_only: false,
-            revision_session: None,
-            revision_source: "unknown",
-            change_source: "unknown",
-            invocation_id: None,
-            revision_purpose: None,
+            mutation_context: FileMutationContext::default(),
+            revision_source_override: None,
             revision_time: None,
             trash_time: None,
         }
@@ -122,14 +116,24 @@ impl FilesRepo {
         self
     }
 
-    pub fn with_revision_context(mut self, source: &'static str, session: Option<Uuid>) -> Self {
-        self.revision_source = source;
-        if source != "restore" {
-            self.change_source = source;
-        }
-        self.revision_session = session;
-        self.revision_purpose = None;
+    /// Replace all request attribution together; authorization is independent.
+    pub fn with_mutation_context(mut self, context: FileMutationContext) -> Self {
+        self.mutation_context = context;
+        self.revision_source_override = None;
         self
+    }
+
+    /// Restore starts a new revision group while retaining its transport and invocation.
+    pub fn for_revision_restore(mut self) -> Self {
+        self.revision_source_override = Some("restore");
+        self.mutation_context.edit_session_id = None;
+        self.mutation_context.purpose = None;
+        self
+    }
+
+    fn revision_source(&self) -> &'static str {
+        self.revision_source_override
+            .unwrap_or(self.mutation_context.source)
     }
 
     /// Pin the revision policy clock without changing the database or runtime clock.
@@ -139,28 +143,12 @@ impl FilesRepo {
         self
     }
 
-    pub fn with_invocation_id(mut self, id: Option<Uuid>) -> Self {
-        self.invocation_id = id;
-        self
-    }
-
-    pub fn with_history_source(mut self, source: &'static str) -> Self {
-        self.change_source = source;
-        self.revision_source = source;
-        self
-    }
-
-    pub fn with_revision_purpose(mut self, purpose: Option<String>) -> Self {
-        self.revision_purpose = purpose;
-        self
-    }
-
     pub(crate) fn change_capture(&self) -> crate::file_change_events::ChangeCapture<'_> {
         crate::file_change_events::ChangeCapture {
-            invocation_id: self.invocation_id,
+            invocation_id: self.mutation_context.invocation_id,
             crypto: &self.crypto,
-            source: self.change_source,
-            purpose: self.revision_purpose.as_deref(),
+            source: self.mutation_context.source,
+            purpose: self.mutation_context.purpose.as_deref(),
         }
     }
 
@@ -595,7 +583,7 @@ impl FilesRepo {
         name: &str,
         content: &StoredContent,
         created_by: Uuid,
-    ) -> Result<(Node, TextObject)> {
+    ) -> Result<(Node, SavedText)> {
         commands::create::insert_text(commands::create::InsertTextArgs {
             pool: &self.pool,
             capture: self.change_capture(),
@@ -606,8 +594,8 @@ impl FilesRepo {
             name,
             content,
             created_by,
-            revision_source: self.revision_source,
-            revision_purpose: self.revision_purpose.as_deref(),
+            revision_source: self.revision_source(),
+            revision_purpose: self.mutation_context.purpose.as_deref(),
             revision_time: self.revision_time,
             caps: self.limits,
         })
@@ -745,7 +733,7 @@ impl FilesRepo {
         expected_sha256: Option<&str>,
         updated_by: Uuid,
         mutation_kind: TextMutationKind,
-    ) -> Result<(Node, TextObject)> {
+    ) -> Result<(Node, SavedText)> {
         commands::save::save_text_content(commands::save::SaveTextContentArgs {
             pool: &self.pool,
             capture: self.change_capture(),
@@ -757,9 +745,9 @@ impl FilesRepo {
             expected_sha256,
             updated_by,
             mutation_kind,
-            revision_source: self.revision_source,
-            revision_session: self.revision_session,
-            revision_purpose: self.revision_purpose.as_deref(),
+            revision_source: self.revision_source(),
+            revision_session: self.mutation_context.edit_session_id,
+            revision_purpose: self.mutation_context.purpose.as_deref(),
             revision_time: self.revision_time,
             caps: self.limits,
         })

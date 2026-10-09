@@ -24,11 +24,12 @@ pub use notegate_model::files::{
     AppendText, BatchChildrenRequest, BatchChildrenResult, BeginObjectUpload,
     CanonicalChildrenPage, CanonicalNodeListPage, ChildrenCursor, ChildrenPage, ChildrenRequest,
     CopyCounts, CopyNode, CopyResult, CreateFolder, CreateText, DeleteNode, DeleteResult, Edit,
-    EditText, FileStats, FileView, LineEdit, ListNodesRequest, MoveNode, NodeListCursor,
-    NodeListPage, NodeListSort, NodeReveal, NodeSummaryView, NodeView, PatchMode, PatchResult,
-    PatchText, PendingObjectUpload, ReadContent, ReadResult, ReadText, ReadTextBody, StoredContent,
-    TextStats, TextView, UpdateNode, UpdateNodeExternalAccessPolicy, UpdateNodeWriteLock,
-    UpdateTextEncryption, WriteLockSource, WriteTarget, WriteText, WriteTextBody,
+    EditText, FileMutationContext, FileStats, FileView, LineEdit, ListNodesRequest, MoveNode,
+    NodeListCursor, NodeListPage, NodeListSort, NodeReveal, NodeSummaryView, NodeView, PatchMode,
+    PatchResult, PatchText, PendingObjectUpload, ReadContent, ReadResult, ReadText, ReadTextBody,
+    StoredContent, TextStats, TextWriteResult, UpdateNode, UpdateNodeExternalAccessPolicy,
+    UpdateNodeWriteLock, UpdateTextEncryption, WriteLockSource, WriteTarget, WriteText,
+    WriteTextBody,
 };
 pub use notegate_model::search::{TreePage, TreeRequest};
 pub use notegate_model::{
@@ -66,7 +67,7 @@ pub struct FilesService {
 impl FilesService {
     pub fn new(store: FilesRepo) -> Self {
         Self {
-            store: store.with_revision_context("browser", None),
+            store: store.with_mutation_context(FileMutationContext::for_channel(Channel::Browser)),
             channel: Channel::Browser,
         }
     }
@@ -77,16 +78,14 @@ impl FilesService {
                 .store
                 .clone()
                 .with_external_access_only(channel != Channel::Browser)
-                .with_revision_context(
-                    match channel {
-                        Channel::Browser => "browser",
-                        Channel::Api => "api",
-                        Channel::Mcp => "mcp",
-                    },
-                    None,
-                ),
+                .with_mutation_context(FileMutationContext::for_channel(channel)),
             channel,
         }
+    }
+
+    pub fn with_mutation_context(mut self, context: FileMutationContext) -> Self {
+        self.store = self.store.with_mutation_context(context);
+        self
     }
 }
 

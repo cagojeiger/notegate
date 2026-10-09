@@ -77,6 +77,23 @@ impl FileEncryptionMode {
     }
 }
 
+/// Metadata returned by a committed text mutation. Reading a body is a separate
+/// operation; creating this result never requires decrypting the saved content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedText {
+    pub node_id: Uuid,
+    pub space_id: Uuid,
+    pub content_sha256: String,
+    pub byte_len: i64,
+    pub line_count: i32,
+    pub storage_format: TextStorageFormat,
+    pub at_rest_encryption: TextAtRestEncryption,
+    pub created_by_account_id: Uuid,
+    pub updated_by_account_id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 /// The stored content of a text node, with plaintext-derived metrics.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TextObject {

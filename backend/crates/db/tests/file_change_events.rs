@@ -8,6 +8,7 @@
     clippy::unwrap_in_result
 )]
 mod common;
+use notegate_model::files::FileMutationContext;
 
 use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
@@ -304,16 +305,24 @@ async fn encrypted_change_snapshots_keep_version_references_after_body_and_space
     };
     let (owner, space, root) = space_with_root(&db.pool, "snapshot-history").await?;
     let clock: DateTime<Utc> = "2026-01-01T00:00:00Z".parse()?;
+    let context = FileMutationContext {
+        source: "mcp",
+        edit_session_id: Some(Uuid::new_v4()),
+        purpose: Some("Create confidential report".into()),
+        ..FileMutationContext::default()
+    };
     let repo = FilesRepo::new(db.pool.clone())
-        .with_revision_context("mcp", Some(Uuid::new_v4()))
-        .with_revision_time(clock)
-        .with_revision_purpose(Some("Create confidential report".into()));
+        .with_mutation_context(context.clone())
+        .with_revision_time(clock);
     let (node, _) = repo
         .insert_text(space, root, "confidential.md", &text("first"), owner)
         .await?;
     repo.clone()
         .with_revision_time(clock + Duration::seconds(60))
-        .with_revision_purpose(Some("Correct confidential report".into()))
+        .with_mutation_context(FileMutationContext {
+            purpose: Some("Correct confidential report".into()),
+            ..context
+        })
         .save_text_content(
             space,
             node.id,
