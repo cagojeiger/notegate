@@ -60,7 +60,7 @@ machine JSON surface used by `notegate-cli`.
   excluding history capture. Completion duration includes awaited history capture,
   ending immediately before the adapter returns. It excludes upstream authentication,
   response serialization and network delivery; it is not end-to-end client latency.
-- History duration includes metadata preparation, redaction, encryption, connection
+- History duration covers post-execution snapshot preparation, redaction, encryption, connection
   acquisition and insertion. MCP calls without a caller do not attempt history capture
   and emit no history sample.
 - In-flight includes history capture. Cancellation releases the gauge but emits no

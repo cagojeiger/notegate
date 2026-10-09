@@ -845,7 +845,7 @@ mod tests {
             metrics.execution_finished("success", Duration::from_millis(10));
             assert_eq!(
                 sample(
-                    &handle.render(),
+                    &handle.0.render(),
                     "notegate_command_invocations_in_flight",
                     None
                 ),
@@ -854,7 +854,7 @@ mod tests {
             metrics.history_finished(false, Duration::from_millis(30));
             metrics.finish("success", Duration::from_millis(45));
         });
-        let body = handle.render();
+        let body = handle.0.render();
         for (name, outcome, expected) in [
             (
                 "notegate_command_invocation_duration_seconds_sum",
@@ -891,13 +891,13 @@ mod tests {
             disabled.execution_finished("success", Duration::ZERO);
             disabled.history_finished(true, Duration::ZERO);
             disabled.finish("success", Duration::ZERO);
-            assert!(!handle.render().contains("notegate_command_"));
+            assert!(!handle.0.render().contains("notegate_command_"));
 
             let cancelled = CommandInvocationMetrics::start(true, "mcp", "read");
             cancelled.execution_finished("success", Duration::from_millis(10));
             drop(cancelled); // Cancelled while awaiting history persistence.
         });
-        let body = handle.render();
+        let body = handle.0.render();
         assert_eq!(
             sample(&body, "notegate_command_invocations_total", Some("success")),
             Some(1.0)
