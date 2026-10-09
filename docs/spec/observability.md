@@ -42,17 +42,37 @@ machine JSON surface used by `notegate-cli`.
 |---|---|
 | `notegate_command_invocations_total` | `surface, tool, outcome` |
 | `notegate_command_invocation_duration_seconds` | `surface, tool, outcome` |
+| `notegate_command_history_records_total` | `surface, tool, outcome` |
+| `notegate_command_history_duration_seconds` | `surface, tool, outcome` |
+| `notegate_command_completion_duration_seconds` | `surface, tool, outcome` |
 | `notegate_command_invocations_in_flight` | `surface, tool` |
 
 - `surface` is `mcp` or `cli`.
 - `tool` is one of `me`, `read`, `search`, `write`, `manage`,
   `file_download`, `file_upload`, `run_read_sequence`,
   `run_write_sequence`, or `unknown`.
-- `outcome` is `success` or `error`.
+- `outcome` is `success` or `error`. History metrics describe persistence success;
+  invocation and completion metrics describe the command result. A history failure
+  does not change the command result.
 - MCP records only calls that reach tool dispatch. Authentication failures before
   dispatch remain visible through HTTP RED metrics.
-- Duration is recorded in seconds using the HTTP RED bucket layout from 5 ms
-  through 30 s.
+- Invocation duration and persisted history `duration_ms` measure command execution,
+  excluding history capture. Completion duration includes awaited history capture,
+  ending immediately before the adapter returns. It excludes upstream authentication,
+  response serialization and network delivery; it is not end-to-end client latency.
+- History duration covers post-execution snapshot preparation, redaction, encryption, connection
+  acquisition and insertion. MCP calls without a caller do not attempt history capture
+  and emit no history sample.
+- In-flight includes history capture. Cancellation releases the gauge but emits no
+  completion sample; an already finished command execution remains counted.
+- Invocation/completion durations use HTTP RED buckets (5 ms–30 s); history uses
+  search-duration buckets (1 ms–30 s). Metrics do not change the awaited, best-effort
+  history policy or add background tasks.
+- Compare history and completion averages using their `_sum / _count` rates with
+  the same `surface, tool` aggregation. Compute percentiles from aggregated buckets;
+  subtracting independently calculated p95 values does not measure history overhead.
+  CI's ignored `measure_command_completion` tests report isolated adapter/history
+  timings in a debug build; they are diagnostic, not a production latency budget.
 
 ## Resource utilization metrics
 

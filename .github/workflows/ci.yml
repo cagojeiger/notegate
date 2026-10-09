@@ -98,6 +98,9 @@ jobs:
       - name: Measure search date candidate filtering
         run: cargo test --locked -p notegate-service --test search search_date_filters_measure_candidate_work -- --exact --ignored --nocapture
 
+      - name: Measure command completion and history capture
+        run: cargo test --locked -p notegate-api measure_command_completion -- --ignored --nocapture --test-threads=1
+
   rust-audit:
     name: Main RustSec Audit
     if: github.event_name == 'push'

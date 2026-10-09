@@ -7,6 +7,8 @@ use notegate_service::files::parse_target;
 use serde_json::Value;
 
 pub(crate) mod redaction;
+#[cfg(test)]
+pub(crate) mod test_support;
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +42,12 @@ pub(crate) struct InvocationRecord<'a> {
     pub(crate) elapsed_ms: u128,
 }
 
-pub(crate) async fn record(state: &AppState, caller: &Caller, invocation: InvocationRecord<'_>) {
+/// Return whether history was stored, without changing the command result.
+pub(crate) async fn record(
+    state: &AppState,
+    caller: &Caller,
+    invocation: InvocationRecord<'_>,
+) -> bool {
     let (owner_user_id, caller_kind) = match &caller.identity {
         CallerIdentity::User(_) => (caller.account_id(), "user"),
         CallerIdentity::Agent(agent) => (agent.owner_user_id, "agent"),
@@ -80,7 +87,9 @@ pub(crate) async fn record(state: &AppState, caller: &Caller, invocation: Invoca
             error = %error,
             "failed to record command invocation history"
         );
+        return false;
     }
+    true
 }
 
 pub(crate) fn canonical_tool(tool: &str) -> &'static str {

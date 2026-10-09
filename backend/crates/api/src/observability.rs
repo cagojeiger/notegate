@@ -68,6 +68,14 @@ pub(crate) fn install(
             HTTP_DURATION_BUCKETS_SECONDS,
         )?
         .set_buckets_for_metric(
+            Matcher::Full("notegate_command_history_duration".to_owned()),
+            SEARCH_DURATION_BUCKETS_SECONDS,
+        )?
+        .set_buckets_for_metric(
+            Matcher::Full("notegate_command_completion_duration".to_owned()),
+            HTTP_DURATION_BUCKETS_SECONDS,
+        )?
+        .set_buckets_for_metric(
             Matcher::Full("notegate_db_pool_acquire_duration".to_owned()),
             SEARCH_DURATION_BUCKETS_SECONDS,
         )?
@@ -186,7 +194,21 @@ fn describe_metrics() {
     metrics::describe_histogram!(
         "notegate_command_invocation_duration",
         Unit::Seconds,
-        "Command invocation duration in seconds"
+        "Command execution duration excluding invocation history capture"
+    );
+    metrics::describe_counter!(
+        "notegate_command_history_records",
+        "Invocation history persistence attempts by bounded surface, tool, and outcome"
+    );
+    metrics::describe_histogram!(
+        "notegate_command_history_duration",
+        Unit::Seconds,
+        "Invocation history preparation and persistence duration in seconds"
+    );
+    metrics::describe_histogram!(
+        "notegate_command_completion_duration",
+        Unit::Seconds,
+        "Command adapter duration including awaited invocation history capture"
     );
     metrics::describe_gauge!(
         "notegate_command_invocations_in_flight",
@@ -315,7 +337,7 @@ impl CommandInvocationMetrics {
         }
     }
 
-    pub(crate) fn finish(self, outcome: &'static str, duration: Duration) {
+    pub(crate) fn execution_finished(&self, outcome: &'static str, duration: Duration) {
         if self.in_flight.is_none() {
             return;
         }
@@ -329,6 +351,40 @@ impl CommandInvocationMetrics {
         .increment(1);
         metrics::histogram!(
             "notegate_command_invocation_duration",
+            "surface" => self.surface,
+            "tool" => self.tool,
+            "outcome" => outcome
+        )
+        .record(duration.as_secs_f64());
+    }
+
+    pub(crate) fn history_finished(&self, recorded: bool, duration: Duration) {
+        if self.in_flight.is_none() {
+            return;
+        }
+        let outcome = if recorded { "success" } else { "error" };
+        metrics::counter!(
+            "notegate_command_history_records",
+            "surface" => self.surface,
+            "tool" => self.tool,
+            "outcome" => outcome
+        )
+        .increment(1);
+        metrics::histogram!(
+            "notegate_command_history_duration",
+            "surface" => self.surface,
+            "tool" => self.tool,
+            "outcome" => outcome
+        )
+        .record(duration.as_secs_f64());
+    }
+
+    pub(crate) fn finish(self, outcome: &'static str, duration: Duration) {
+        if self.in_flight.is_none() {
+            return;
+        }
+        metrics::histogram!(
+            "notegate_command_completion_duration",
             "surface" => self.surface,
             "tool" => self.tool,
             "outcome" => outcome
@@ -741,6 +797,16 @@ mod tests {
             )
             .unwrap()
             .set_buckets_for_metric(
+                Matcher::Full("notegate_command_history_duration".to_owned()),
+                SEARCH_DURATION_BUCKETS_SECONDS,
+            )
+            .unwrap()
+            .set_buckets_for_metric(
+                Matcher::Full("notegate_command_completion_duration".to_owned()),
+                HTTP_DURATION_BUCKETS_SECONDS,
+            )
+            .unwrap()
+            .set_buckets_for_metric(
                 Matcher::Full("notegate_db_pool_acquire_duration".to_owned()),
                 SEARCH_DURATION_BUCKETS_SECONDS,
             )
@@ -767,6 +833,84 @@ mod tests {
             .unwrap()
             .build_recorder();
         (MetricsHandle(recorder.handle()), recorder)
+    }
+
+    #[test]
+    fn command_metrics_keep_execution_history_and_completion_separate() {
+        use crate::invocations::test_support::sample;
+        let (handle, recorder) = test_metrics();
+        metrics::with_local_recorder(&recorder, || {
+            describe_metrics();
+            let metrics = CommandInvocationMetrics::start(true, "mcp", "read");
+            metrics.execution_finished("success", Duration::from_millis(10));
+            assert_eq!(
+                sample(
+                    &handle.0.render(),
+                    "notegate_command_invocations_in_flight",
+                    None
+                ),
+                Some(1.0)
+            );
+            metrics.history_finished(false, Duration::from_millis(30));
+            metrics.finish("success", Duration::from_millis(45));
+        });
+        let body = handle.0.render();
+        for (name, outcome, expected) in [
+            (
+                "notegate_command_invocation_duration_seconds_sum",
+                "success",
+                0.01,
+            ),
+            (
+                "notegate_command_history_duration_seconds_sum",
+                "error",
+                0.03,
+            ),
+            (
+                "notegate_command_completion_duration_seconds_sum",
+                "success",
+                0.045,
+            ),
+        ] {
+            assert_eq!(sample(&body, name, Some(outcome)), Some(expected), "{body}");
+        }
+        assert!(body.contains("notegate_command_history_duration_seconds_bucket"));
+        assert!(body.contains("notegate_command_completion_duration_seconds_bucket"));
+        assert_eq!(
+            sample(&body, "notegate_command_invocations_in_flight", None),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn command_cancellation_and_disabled_metrics_do_not_report_completion() {
+        use crate::invocations::test_support::sample;
+        let (handle, recorder) = test_metrics();
+        metrics::with_local_recorder(&recorder, || {
+            let disabled = CommandInvocationMetrics::start(false, "cli", "read");
+            disabled.execution_finished("success", Duration::ZERO);
+            disabled.history_finished(true, Duration::ZERO);
+            disabled.finish("success", Duration::ZERO);
+            assert!(!handle.0.render().contains("notegate_command_"));
+
+            let cancelled = CommandInvocationMetrics::start(true, "mcp", "read");
+            cancelled.execution_finished("success", Duration::from_millis(10));
+            drop(cancelled); // Cancelled while awaiting history persistence.
+        });
+        let body = handle.0.render();
+        assert_eq!(
+            sample(&body, "notegate_command_invocations_total", Some("success")),
+            Some(1.0)
+        );
+        assert_eq!(
+            sample(&body, "notegate_command_invocations_in_flight", None),
+            Some(0.0)
+        );
+        assert!(
+            !body.contains("notegate_command_completion_duration"),
+            "{body}"
+        );
+        assert!(!body.contains("notegate_command_history_records"), "{body}");
     }
 
     #[test]
@@ -866,10 +1010,14 @@ mod tests {
                 .increment(32);
             metrics::counter!("notegate_search_cache_lookups", "result" => "hit").increment(3);
             record_search_deadline("grep", "during_execution");
-            CommandInvocationMetrics::start(true, "mcp", "search")
-                .finish("success", Duration::from_millis(15));
-            CommandInvocationMetrics::start(true, "cli", "read")
-                .finish("error", Duration::from_millis(20));
+            let mcp = CommandInvocationMetrics::start(true, "mcp", "search");
+            mcp.execution_finished("success", Duration::from_millis(15));
+            mcp.history_finished(true, Duration::from_millis(5));
+            mcp.finish("success", Duration::from_millis(20));
+            let cli = CommandInvocationMetrics::start(true, "cli", "read");
+            cli.execution_finished("error", Duration::from_millis(20));
+            cli.history_finished(false, Duration::from_millis(10));
+            cli.finish("error", Duration::from_millis(30));
             record_metadata_flush(true, "success", Duration::from_millis(2));
             record_metadata_items(true, "api_key", "flushed", 3);
             metrics::histogram!(

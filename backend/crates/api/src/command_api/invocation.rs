@@ -258,8 +258,6 @@ async fn finish(
     metrics: CommandInvocationMetrics,
 ) -> Result<Json<Value>, CommandHttpError> {
     let elapsed = started.elapsed();
-    let metadata = InvocationMetadata::from_input(tool, input);
-    let redacted_input = redact_input(tool, input);
     let error_code = result
         .as_ref()
         .err()
@@ -270,10 +268,13 @@ async fn finish(
     } else {
         "success"
     };
-    metrics.finish(outcome, elapsed);
+    metrics.execution_finished(outcome, elapsed);
 
+    let history_started = Instant::now();
+    let metadata = InvocationMetadata::from_input(tool, input);
+    let redacted_input = redact_input(tool, input);
     let response = redact_response(tool, &metadata.response_context, &result);
-    record(
+    let recorded = record(
         state,
         context.caller(),
         InvocationRecord {
@@ -290,6 +291,8 @@ async fn finish(
         },
     )
     .await;
+    metrics.history_finished(recorded, history_started.elapsed());
+    metrics.finish(outcome, started.elapsed());
 
     result.map(Json)
 }
