@@ -13,7 +13,7 @@ use notegate_service::{
     ServiceError,
     connections::ConnectionService,
     files::{
-        CreateText, DeleteNode, FilesService, ReadText, ReadTextBody,
+        CreateText, DeleteNode, FileMutationContext, FilesService, ReadText, ReadTextBody,
         UpdateNodeExternalAccessPolicy, UpdateNodeWriteLock, UpdateTextEncryption, WriteTarget,
         WriteText, WriteTextBody,
     },
@@ -33,8 +33,12 @@ async fn expired_revision_restore_leaves_current_document_readable_and_writable(
     let session = Uuid::new_v4();
     let repo = FilesRepo::new(db.pool.clone());
     let files_at = |time| {
-        FilesService::new(repo.clone().with_revision_time(time))
-            .with_revision_session(Some(session))
+        FilesService::new(repo.clone().with_revision_time(time)).with_mutation_context(
+            FileMutationContext {
+                edit_session_id: Some(session),
+                ..FileMutationContext::for_channel(Channel::Browser)
+            },
+        )
     };
     let created = files_at(now)
         .create_text(
@@ -426,7 +430,21 @@ async fn server_encryption_changes_do_not_create_versions_or_change_body_attribu
             decrypted_current.text.content_sha256,
         )
         .await?;
-    assert_eq!(restored.text.content, Some("secret-one".into()));
+    let read = files
+        .read_text(
+            owner,
+            space,
+            ReadText {
+                node_id: node,
+                start_line: None,
+                max_lines: None,
+                max_bytes: None,
+                if_none_match_sha256: None,
+            },
+        )
+        .await?;
+    assert_eq!(read.content_sha256, restored.text.content_sha256);
+    assert!(matches!(read.body, ReadTextBody::Content(body) if body.content == "secret-one"));
     db.cleanup().await;
     Ok(())
 }

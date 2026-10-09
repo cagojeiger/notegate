@@ -10,6 +10,7 @@ use chrono::{DateTime, Duration, Utc};
 use common::{TestDb, legacy_space_with_root, space_with_root};
 use notegate_core::{Error, security::PiiCrypto};
 use notegate_db::{FilesRepo, SpaceRepo, TextMutationKind, files::revisions};
+use notegate_model::files::FileMutationContext;
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
 use uuid::Uuid;
 
@@ -91,7 +92,11 @@ async fn editing_time_limits_are_strict_at_microsecond_boundaries() -> TestResul
                 )
                 .await?;
             assert_eq!(revision_head(&db.pool, node.id).await?.1, policy_time());
-            let editing = repo.with_revision_context("browser", Some(Uuid::new_v4()));
+            let editing = repo.with_mutation_context(FileMutationContext {
+                source: "browser",
+                edit_session_id: Some(Uuid::new_v4()),
+                ..FileMutationContext::default()
+            });
             save(
                 &editing.clone().with_revision_time(start),
                 space,
@@ -165,7 +170,11 @@ async fn retention_expires_at_the_exact_replacement_based_deadline() -> TestResu
                 .await?;
             // The initial body is old; retention must still start when it is replaced.
             let replacement = policy_time() + Duration::days(90);
-            let editing = repo.with_revision_context("browser", Some(Uuid::new_v4()));
+            let editing = repo.with_mutation_context(FileMutationContext {
+                source: "browser",
+                edit_session_id: Some(Uuid::new_v4()),
+                ..FileMutationContext::default()
+            });
             save(
                 &editing
                     .clone()
@@ -280,7 +289,11 @@ async fn unsuccessful_writes_do_not_refresh_the_editing_clock() -> TestResult {
         .await?;
     let start = policy_time() + Duration::seconds(1);
     let editing = repo
-        .with_revision_context("browser", Some(Uuid::new_v4()))
+        .with_mutation_context(FileMutationContext {
+            source: "browser",
+            edit_session_id: Some(Uuid::new_v4()),
+            ..FileMutationContext::default()
+        })
         .with_revision_time(start);
     save(&editing, space, node.id, actor, "b").await?;
     let head = revision_head(&db.pool, node.id).await?;
@@ -340,15 +353,25 @@ async fn purpose_follows_the_resulting_body_and_ignores_failed_or_unchanged_writ
         return Ok(());
     };
     let (actor, space, root) = space_with_root(&db.pool, "revision-purpose").await?;
-    let repo = FilesRepo::new(db.pool.clone()).with_revision_context("mcp", None);
+    let repo = FilesRepo::new(db.pool.clone()).with_mutation_context(FileMutationContext {
+        source: "mcp",
+        edit_session_id: None,
+        ..FileMutationContext::default()
+    });
     let (node, _) = repo
         .clone()
-        .with_revision_purpose(Some("Create the original note".into()))
+        .with_mutation_context(FileMutationContext {
+            source: "mcp",
+            purpose: Some("Create the original note".into()),
+            ..FileMutationContext::default()
+        })
         .insert_text(space, root, "note.md", &body("a"), actor)
         .await?;
-    let editing = repo
-        .clone()
-        .with_revision_purpose(Some("Correct the configuration".into()));
+    let editing = repo.clone().with_mutation_context(FileMutationContext {
+        source: "mcp",
+        purpose: Some("Correct the configuration".into()),
+        ..FileMutationContext::default()
+    });
     save(&editing, space, node.id, actor, "b").await?;
     let clear_count: i64 = sqlx::query_scalar(
         "SELECT (SELECT count(*) FROM text_objects WHERE revision_purpose IS NOT NULL) + \
@@ -373,9 +396,11 @@ async fn purpose_follows_the_resulting_body_and_ignores_failed_or_unchanged_writ
             .purpose,
         page.revisions[0].purpose
     );
-    let attempt = repo
-        .clone()
-        .with_revision_purpose(Some("Must not replace the saved reason".into()));
+    let attempt = repo.clone().with_mutation_context(FileMutationContext {
+        source: "mcp",
+        purpose: Some("Must not replace the saved reason".into()),
+        ..FileMutationContext::default()
+    });
     save(&attempt, space, node.id, actor, "b").await?;
     assert!(
         attempt
@@ -396,7 +421,11 @@ async fn purpose_follows_the_resulting_body_and_ignores_failed_or_unchanged_writ
         page.current.unwrap().purpose.as_deref(),
         Some("Correct the configuration")
     );
-    let browser = attempt.with_revision_context("browser", None);
+    let browser = attempt.with_mutation_context(FileMutationContext {
+        source: "browser",
+        edit_session_id: None,
+        ..FileMutationContext::default()
+    });
     save(&browser, space, node.id, actor, "c").await?;
     let page = browser
         .list_text_revisions(space, node.id, 10, None)
@@ -589,9 +618,11 @@ async fn grouping_preserves_boundaries_and_cleanup_is_repeatable() -> TestResult
     let (node, _) = repo
         .insert_text(space, root, "note.md", &body("a"), actor)
         .await?;
-    let editing = repo
-        .clone()
-        .with_revision_context("browser", Some(Uuid::new_v4()));
+    let editing = repo.clone().with_mutation_context(FileMutationContext {
+        source: "browser",
+        edit_session_id: Some(Uuid::new_v4()),
+        ..FileMutationContext::default()
+    });
     for (second, value) in [(1, "b"), (2, "c"), (3, "d")] {
         save(
             &editing
@@ -604,9 +635,11 @@ async fn grouping_preserves_boundaries_and_cleanup_is_repeatable() -> TestResult
         )
         .await?;
     }
-    let ai = repo
-        .clone()
-        .with_revision_context("mcp", Some(Uuid::new_v4()));
+    let ai = repo.clone().with_mutation_context(FileMutationContext {
+        source: "mcp",
+        edit_session_id: Some(Uuid::new_v4()),
+        ..FileMutationContext::default()
+    });
     save(
         &ai.with_revision_time(policy_time() + Duration::seconds(4)),
         space,
@@ -700,7 +733,11 @@ async fn actor_channel_and_session_boundaries_cannot_coalesce() -> TestResult {
         save(
             &repo
                 .clone()
-                .with_revision_context(source, id)
+                .with_mutation_context(FileMutationContext {
+                    source: source,
+                    edit_session_id: id,
+                    ..FileMutationContext::default()
+                })
                 .with_revision_time(policy_time() + Duration::seconds(second)),
             space,
             node.id,
@@ -729,7 +766,11 @@ async fn quota_failure_keeps_current_and_cascade_releases_history() -> TestResul
         .await?;
     let editing = repo
         .clone()
-        .with_revision_context("browser", Some(Uuid::new_v4()))
+        .with_mutation_context(FileMutationContext {
+            source: "browser",
+            edit_session_id: Some(Uuid::new_v4()),
+            ..FileMutationContext::default()
+        })
         .with_revision_time(policy_time() + Duration::seconds(1));
     save(&editing, space, node.id, actor, "b").await?;
     let head = revision_head(&db.pool, node.id).await?;
@@ -1044,9 +1085,11 @@ async fn trash_restore_keeps_the_current_revision_but_does_not_freeze_revision_r
         let (node, _) = repo
             .insert_text(space, parent, "note.md", &body("old"), actor)
             .await?;
-        let editing = repo
-            .clone()
-            .with_revision_context("browser", Some(Uuid::new_v4()));
+        let editing = repo.clone().with_mutation_context(FileMutationContext {
+            source: "browser",
+            edit_session_id: Some(Uuid::new_v4()),
+            ..FileMutationContext::default()
+        });
         for (second, value) in [(1, "intermediate"), (2, "current")] {
             save(
                 &editing

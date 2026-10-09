@@ -9,11 +9,12 @@ use crate::files::validation;
 use crate::files::{
     AppendText, BeginObjectUpload, CopyNode, CopyResult, CreateFolder, CreateText, DeleteNode,
     DeleteResult, EditText, FileCommand, MoveNode, NodeView, PatchResult, PatchText,
-    PendingObjectUpload, StoredContent, TextView, UpdateNode, UpdateNodeExternalAccessPolicy,
-    UpdateNodeWriteLock, UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody, content,
+    PendingObjectUpload, StoredContent, TextWriteResult, UpdateNode,
+    UpdateNodeExternalAccessPolicy, UpdateNodeWriteLock, UpdateTextEncryption, WriteTarget,
+    WriteText, WriteTextBody, content,
 };
 
-use super::view::text_view_at_path;
+use super::view::text_write_result_at_path;
 use super::{FilesService, validate_structured_text};
 
 impl FilesService {
@@ -106,7 +107,7 @@ impl FilesService {
         caller_account_id: Uuid,
         space_id: Uuid,
         command: CreateText,
-    ) -> ServiceResult<TextView> {
+    ) -> ServiceResult<TextWriteResult> {
         self.authorize(space_id, caller_account_id, FileCommand::Touch)
             .await?;
         validation::validate_basename(&command.name)?;
@@ -123,7 +124,7 @@ impl FilesService {
             )
             .await?;
         let path = self.path_of(space_id, node.id).await?;
-        Ok(text_view_at_path(node, path, text))
+        Ok(text_write_result_at_path(node, path, text))
     }
 
     pub async fn prepare_object_upload(
@@ -337,7 +338,7 @@ impl FilesService {
         caller_account_id: Uuid,
         space_id: Uuid,
         command: WriteText,
-    ) -> ServiceResult<TextView> {
+    ) -> ServiceResult<TextWriteResult> {
         self.authorize(space_id, caller_account_id, FileCommand::Write)
             .await?;
 
@@ -369,7 +370,7 @@ impl FilesService {
                         TextMutationKind::Write,
                     )
                     .await?;
-                self.text_view(space_id, node, text).await
+                self.text_write_result(space_id, node, text).await
             }
             WriteTarget::Create {
                 parent_node_id,
@@ -387,7 +388,7 @@ impl FilesService {
                     .store
                     .insert_text(space_id, parent_node_id, &name, &stored, caller_account_id)
                     .await?;
-                self.text_view(space_id, node, text).await
+                self.text_write_result(space_id, node, text).await
             }
         }
     }
@@ -398,7 +399,7 @@ impl FilesService {
         caller_account_id: Uuid,
         space_id: Uuid,
         command: AppendText,
-    ) -> ServiceResult<TextView> {
+    ) -> ServiceResult<TextWriteResult> {
         self.authorize(space_id, caller_account_id, FileCommand::Append)
             .await?;
 
@@ -428,7 +429,7 @@ impl FilesService {
                         TextMutationKind::Append,
                     )
                     .await?;
-                self.text_view(space_id, node, text).await
+                self.text_write_result(space_id, node, text).await
             }
             WriteTarget::Create {
                 parent_node_id,
@@ -547,7 +548,7 @@ impl FilesService {
                 mutation_kind,
             )
             .await?;
-        let view = self.text_view(space_id, node, text).await?;
+        let view = self.text_write_result(space_id, node, text).await?;
 
         Ok(PatchResult {
             node: view.node,

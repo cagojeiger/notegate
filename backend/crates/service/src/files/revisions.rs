@@ -3,7 +3,7 @@ use notegate_model::text_revision::{TextRevision, TextRevisionContent, TextRevis
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{FileCommand, FilesService, TextView, WriteTarget, WriteText, WriteTextBody};
+use super::{FileCommand, FilesService, TextWriteResult, WriteTarget, WriteText, WriteTextBody};
 use crate::{ServiceError, ServiceResult, cursor};
 
 #[derive(Debug, Serialize)]
@@ -34,33 +34,6 @@ impl FilesService {
             ));
         }
         Ok(())
-    }
-
-    pub fn with_revision_session(mut self, session: Option<Uuid>) -> Self {
-        self.store = self.store.with_revision_context(
-            match self.channel {
-                notegate_model::Channel::Browser => "browser",
-                notegate_model::Channel::Api => "api",
-                notegate_model::Channel::Mcp => "mcp",
-            },
-            session,
-        );
-        self
-    }
-
-    pub fn with_invocation_id(mut self, id: Option<Uuid>) -> Self {
-        self.store = self.store.with_invocation_id(id);
-        self
-    }
-
-    pub fn with_history_source(mut self, source: &'static str) -> Self {
-        self.store = self.store.with_history_source(source);
-        self
-    }
-
-    pub fn with_revision_purpose(mut self, purpose: Option<String>) -> Self {
-        self.store = self.store.with_revision_purpose(purpose);
-        self
     }
 
     pub async fn text_revisions(
@@ -123,7 +96,7 @@ impl FilesService {
         node: Uuid,
         revision: Uuid,
         expected_sha256: String,
-    ) -> ServiceResult<TextView> {
+    ) -> ServiceResult<TextWriteResult> {
         self.authorize(space, actor, FileCommand::Write).await?;
         if expected_sha256.len() != 64 || !expected_sha256.bytes().all(|c| c.is_ascii_hexdigit()) {
             return Err(ServiceError::InvalidInput(
@@ -132,7 +105,7 @@ impl FilesService {
         }
         let previous = self.text_revision(actor, space, node, revision).await?;
         let mut restoring = self.clone();
-        restoring.store = restoring.store.with_revision_context("restore", None);
+        restoring.store = restoring.store.for_revision_restore();
         restoring
             .write_text(
                 actor,

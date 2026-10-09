@@ -1,6 +1,7 @@
 //! Deletion receipts explain absence; they never replace a live presence check.
 #![allow(clippy::indexing_slicing)]
 mod common;
+use notegate_model::files::FileMutationContext;
 
 use chrono::{DateTime, Duration, Utc};
 use common::{TestDb, space_with_root};
@@ -468,7 +469,11 @@ async fn retention_records_the_executed_policy_and_respects_persisted_deadlines(
     let (node, _) = files
         .insert_text(space, root, "note.md", &body("a"), owner)
         .await?;
-    let editing = files.with_revision_context("browser", Some(Uuid::new_v4()));
+    let editing = files.with_mutation_context(FileMutationContext {
+        source: "browser",
+        edit_session_id: Some(Uuid::new_v4()),
+        ..FileMutationContext::default()
+    });
     for (seconds, text) in [(60, "b"), (120, "c")] {
         editing
             .clone()

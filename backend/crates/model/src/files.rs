@@ -8,8 +8,8 @@ use uuid::Uuid;
 pub use notegate_text::{Edit, LineEdit, PatchMode};
 
 use crate::{
-    FileEncryptionMode, FileObject, Node, NodeKind, NodeSummary, TextAtRestEncryption, TextObject,
-    TextStorageFormat,
+    Channel, FileEncryptionMode, FileObject, Node, NodeKind, NodeSummary, SavedText,
+    TextAtRestEncryption, TextObject, TextStorageFormat,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,6 +74,40 @@ pub struct ReadText {
     pub max_lines: Option<i64>,
     pub max_bytes: Option<usize>,
     pub if_none_match_sha256: Option<String>,
+}
+
+/// Attribution shared by file mutations; the authenticated actor remains the
+/// service method's account argument. This context does not grant access.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileMutationContext {
+    pub source: &'static str,
+    pub edit_session_id: Option<Uuid>,
+    pub invocation_id: Option<Uuid>,
+    pub purpose: Option<String>,
+}
+
+impl Default for FileMutationContext {
+    fn default() -> Self {
+        Self {
+            source: "unknown",
+            edit_session_id: None,
+            invocation_id: None,
+            purpose: None,
+        }
+    }
+}
+
+impl FileMutationContext {
+    pub fn for_channel(channel: Channel) -> Self {
+        Self {
+            source: match channel {
+                Channel::Browser => "browser",
+                Channel::Api => "api",
+                Channel::Mcp => "mcp",
+            },
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -297,9 +331,9 @@ pub struct NodeSummaryView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TextView {
+pub struct TextWriteResult {
     pub node: NodeView,
-    pub text: TextObject,
+    pub text: SavedText,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -425,7 +459,7 @@ pub struct ReadContent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchResult {
     pub node: NodeView,
-    pub text: TextObject,
+    pub text: SavedText,
     pub previous_sha256: String,
     pub edits_applied: usize,
     pub diff: String,

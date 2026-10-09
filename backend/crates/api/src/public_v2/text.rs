@@ -5,8 +5,9 @@ use chrono::{DateTime, Utc};
 use notegate_model::{Caller, TextStorageFormat};
 use notegate_service::ServiceError;
 use notegate_service::files::{
-    AppendText, Edit as ServiceEdit, EditText, LineEdit, PatchMode, PatchResult, PatchText,
-    ReadResult, ReadText, ReadTextBody, TextView, WriteTarget, WriteText, WriteTextBody,
+    AppendText, Edit as ServiceEdit, EditText, FileMutationContext, LineEdit, PatchMode,
+    PatchResult, PatchText, ReadResult, ReadText, ReadTextBody, TextWriteResult, WriteTarget,
+    WriteText, WriteTextBody,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -184,7 +185,10 @@ pub(crate) async fn replace(
     let files = state
         .files
         .for_channel(caller.channel)
-        .with_revision_session(body.edit_session_id);
+        .with_mutation_context(FileMutationContext {
+            edit_session_id: body.edit_session_id,
+            ..FileMutationContext::for_channel(caller.channel)
+        });
     let current_sha = guarded_plain_text_sha(
         &files,
         caller.account_id(),
@@ -249,7 +253,10 @@ pub(crate) async fn append(
     let view = state
         .files
         .for_channel(caller.channel)
-        .with_revision_session(body.edit_session_id)
+        .with_mutation_context(FileMutationContext {
+            edit_session_id: body.edit_session_id,
+            ..FileMutationContext::for_channel(caller.channel)
+        })
         .append_text(
             caller.account_id(),
             space_id,
@@ -351,7 +358,10 @@ pub(crate) async fn patch(
     let result = state
         .files
         .for_channel(caller.channel)
-        .with_revision_session(body.edit_session_id)
+        .with_mutation_context(FileMutationContext {
+            edit_session_id: body.edit_session_id,
+            ..FileMutationContext::for_channel(caller.channel)
+        })
         .patch_text(
             caller.account_id(),
             space_id,
@@ -440,7 +450,10 @@ pub(crate) async fn edit(
     let result = state
         .files
         .for_channel(caller.channel)
-        .with_revision_session(body.edit_session_id)
+        .with_mutation_context(FileMutationContext {
+            edit_session_id: body.edit_session_id,
+            ..FileMutationContext::for_channel(caller.channel)
+        })
         .edit_text(
             caller.account_id(),
             space_id,
@@ -475,7 +488,7 @@ pub(crate) struct TextEditResponse {
     updated_at: DateTime<Utc>,
 }
 
-fn text_mutation_response(view: &TextView) -> TextMutationResponse {
+fn text_mutation_response(view: &TextWriteResult) -> TextMutationResponse {
     TextMutationResponse {
         node: NodeOut::from(&view.node),
         content_sha256: view.text.content_sha256.clone(),
