@@ -106,6 +106,7 @@ pub(crate) fn report(surface: &str, scenario: &str, samples: &[String]) {
         use std::io::Write as _;
         writeln!(
             std::fs::OpenOptions::new()
+                .create(true)
                 .append(true)
                 .open(path)
                 .expect("CI summary"),
