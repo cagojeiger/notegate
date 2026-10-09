@@ -37,6 +37,9 @@ jobs:
       - name: Workflow checks
         run: make workflow-check
 
+      - name: Architecture boundaries
+        run: make architecture-check
+
       - name: Format
         run: cargo fmt --all --check
 

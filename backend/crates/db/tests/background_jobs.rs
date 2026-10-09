@@ -239,13 +239,33 @@ async fn enqueue_participates_in_the_callers_transaction() -> Result<(), Box<dyn
     assert_eq!(after_rollback, 0);
 
     let mut commit = db.pool.begin().await?;
-    JobQueue::enqueue_in(&mut commit, &job::<TransactionalJob>()).await?;
+    let enqueued = JobQueue::enqueue_in(&mut commit, &job::<TransactionalJob>()).await?;
+    let kinds = vec![TransactionalJob::KIND.to_owned()];
+    let queue = JobQueue::new(db.pool.clone());
+    assert!(
+        queue
+            .claim_many("before-commit", &kinds, Duration::from_secs(30), 1)
+            .await?
+            .is_empty(),
+        "a worker must not execute work from an uncommitted mutation"
+    );
     commit.commit().await?;
     let after_commit: i64 =
         sqlx::query_scalar("SELECT count(*) FROM background_jobs WHERE job_kind = 'transactional'")
             .fetch_one(&db.pool)
             .await?;
     assert_eq!(after_commit, 1);
+
+    // A new consumer needs only committed DB state, not an in-memory notification.
+    let restarted_queue = JobQueue::new(db.pool.clone());
+    let claims = restarted_queue
+        .claim_many("after-commit", &kinds, Duration::from_secs(30), 1)
+        .await?;
+    assert_eq!(claims.len(), 1);
+    assert_eq!(
+        claims.first().expect("committed claim").job_id,
+        enqueued.job_id
+    );
 
     db.cleanup().await;
     Ok(())

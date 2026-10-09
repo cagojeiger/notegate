@@ -22,6 +22,25 @@ notegate/
 └─ docker-compose.yml
 ```
 
+## CI 실행 계약
+
+| CI 검사 | 보장할 계약 |
+|---|---|
+| Hygiene · `make architecture-check` | 내부 crate의 production/build 의존 방향; generic jobs/reconciliation의 업무 독립성 |
+| Rust · `make test-integration` | 실제 PostgreSQL/S3를 사용한 저장·롤백·비동기 처리 계약 |
+| Text Write Performance | 동일 runner의 baseline/candidate 쓰기 성능 비교; 시간 수치는 보고용 |
+
+Rust 계약 검증은 전체 suite에서 한 번 실행한다. 본문·이전 버전·Changes의 동시 롤백은
+`db/tests/file_change_events.rs`와 `text_revisions.rs`, 커밋 전 작업 비노출·커밋 후 선점·lease 복구는
+`background_jobs.rs`, 오래된 결과 차단은 `link_graph.rs`, 정리 작업의 단일 실행은
+`reconciliation/tests/postgres_runtime.rs`가 검증한다. API의 `command_api/tests.rs`는 invocation
+저장 실패가 이미 커밋한 변경이나 원래 오류 응답을 바꾸지 않는지도 검사한다.
+
+통합 runner는 DB/S3 설정이 없으면 실패한다. 새 비동기 기능은 작업 등록의 원자성,
+재실행 안전성, 오래된 결과 처리 등 해당 도메인 계약을 추가해야 한다. 공통 queue 테스트가
+모든 새 handler의 정확성을 보장하지는 않는다. 실제 프로세스 강제 종료와 운영 부하까지
+이 테스트들이 재현하는 것은 아니며, 성능 수치에는 고정된 시간 기준의 merge gate를 두지 않는다.
+
 ## 로컬 개발
 
 Dashboard와 API를 분리해 실행한다.

@@ -62,6 +62,12 @@ api transport adapters ──▶ api commands ──┬─▶ service ──▶ 
   `DocxValidationAdmission` 참조를 받는다. 채널별 파일 서비스 선택은 transport adapter에 둔다.
 - cli는 command 입력 타입과 생성 schema를 직접 재사용하되 api 구현 crate에는 의존하지 않는다.
   인증 facade, OAuth protocol 처리, credential persistence와 URL 보안 정책은 CLI 내부 책임으로 유지한다.
+- jobs와 reconciliation은 실행 제어만 소유하며 production dependency로 NoteGate 업무 crate를
+  참조하지 않는다. 업무 처리는 API에서 등록한 handler가 db/service에 위임한다.
+- CI의 `make architecture-check`는 Cargo metadata의 내부 production/build dependency를 검사한다.
+  alias, optional, target별 선언도 검사하며 실제 PostgreSQL adapter를 사용하는 dev-dependency는
+  제외한다. 허용 방향은 `deploy/ci/check-architecture.py`에서 관리하며 새 crate는 경계를 명시해야 한다.
+  같은 crate 내부의 책임 혼합이나 트랜잭션 정확성은 이 검사로 판단하지 않는다.
 
 ### 4. 구조 컨벤션 (보조)
 

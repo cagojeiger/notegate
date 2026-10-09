@@ -1,4 +1,4 @@
-.PHONY: fmt check test test-integration test-fast clippy build cli-build frontend-check workflow-check version-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics split-up split-test split-test-isolation split-logs split-down
+.PHONY: fmt check test test-integration test-fast clippy build cli-build frontend-check workflow-check version-check architecture-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics split-up split-test split-test-isolation split-logs split-down
 
 fmt:
 	cargo fmt --all --check
@@ -36,13 +36,17 @@ version-check:
 	python3 deploy/ci/check-versions.py
 	python3 -B deploy/ci/check-versions.test.py
 
+architecture-check:
+	python3 deploy/ci/check-architecture.py
+	python3 -B deploy/ci/check-architecture.test.py
+
 workflow-check: version-check
 	actionlint
 	find deploy frontend -type f -name '*.sh' -print0 | xargs -0 shellcheck
 	deploy/ci/resolve-release-version.test.sh
 	deploy/ci/test-rust.test.sh
 
-release-check: fmt check test clippy build frontend-check workflow-check
+release-check: fmt check test clippy build frontend-check workflow-check architecture-check
 	git diff --check
 
 dev-db:

@@ -132,6 +132,107 @@ async fn cli_read_uses_the_shared_engine_and_records_the_cli_surface()
 }
 
 #[tokio::test]
+async fn invocation_storage_failure_preserves_committed_writes_and_original_errors()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state(&db);
+    let (mut caller, space_id, _) = caller_and_space(&state).await?;
+    state
+        .spaces
+        .update(
+            caller.account.kind,
+            caller.account_id(),
+            UpdateSpace {
+                space_id,
+                name: None,
+                sort_order: None,
+                navigation_pinned: None,
+                user_mcp_enabled: Some(true),
+                default_external_access_enabled: Some(true),
+                default_text_encryption_enabled: None,
+            },
+        )
+        .await?;
+    caller.channel = Channel::Api;
+    let app = Router::new()
+        .merge(routes())
+        .layer(Extension(caller.clone()))
+        .with_state(state.clone());
+
+    // Fail only the observation sink; domain writes and Changes must still work.
+    sqlx::raw_sql(
+        "CREATE FUNCTION reject_invocation() RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN RAISE EXCEPTION 'injected invocation storage failure'; END $$; \
+         CREATE TRIGGER reject_invocation BEFORE INSERT ON command_invocations \
+         FOR EACH ROW EXECUTE FUNCTION reject_invocation();",
+    )
+    .execute(&db.pool)
+    .await?;
+    for (content, create) in [("first", true), ("second", false)] {
+        let (status, body) = cli_request(
+            app.clone(),
+            cli_headers(),
+            json!({
+                "tool": "write",
+                "input": {
+                    "op": "write", "target": "rest-test:/contract.md",
+                    "content": content, "create": create,
+                    "purpose": "Verify the save boundary"
+                }
+            }),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    let (status, error) = cli_request(
+        app,
+        cli_headers(),
+        json!({"tool": "read", "input": {"op": "read", "purpose": "Verify the error boundary"}}),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert_eq!(error["error"], "required_field_missing");
+
+    let current: String =
+        sqlx::query_scalar("SELECT content_text FROM text_objects WHERE space_id = $1")
+            .bind(space_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(current, "second");
+    let revisions: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM text_revisions WHERE space_id = $1")
+            .bind(space_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(revisions, 1);
+    let changes = state
+        .history
+        .list_file_changes(
+            caller.account.kind,
+            caller.account_id(),
+            Some(space_id),
+            Some(10),
+            None,
+        )
+        .await?;
+    assert_eq!(changes.items.len(), 2);
+    for change in changes.items {
+        assert_eq!(change.metadata["source"], "cli");
+        assert_eq!(change.metadata["purpose"], "Verify the save boundary");
+        assert!(change.metadata["invocation_id"].is_string());
+    }
+    let invocations: i64 = sqlx::query_scalar("SELECT count(*) FROM command_invocations")
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(invocations, 0);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn rejected_cli_me_input_never_records_a_purpose() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
