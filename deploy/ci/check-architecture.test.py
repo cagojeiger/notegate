@@ -10,8 +10,8 @@ checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
 
 
-def metadata(source, target, **attributes):
-    dependency = {"name": target, "kind": None, **attributes}
+def metadata(source, dependency_name, **attributes):
+    dependency = {"name": dependency_name, "kind": None, **attributes}
     names = set(checker.ALLOWED) | {source}
     return {
         "workspace_members": sorted(names),
