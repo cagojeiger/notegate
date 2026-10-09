@@ -30,6 +30,7 @@ pub(crate) async fn execute_call(
     input: &Value,
     future: impl Future<Output = Result<CallToolResponse, ErrorData>>,
 ) -> Result<CallToolResponse, ErrorData> {
+    let completion_started = Instant::now();
     let raw_op = input.get("op").and_then(Value::as_str);
     let op = canonical_op(tool, raw_op);
     let known_tool = CommandTool::parse(tool);
@@ -66,12 +67,13 @@ pub(crate) async fn execute_call(
         "success"
     };
     let elapsed = started.elapsed();
-    metrics.finish(outcome, elapsed);
+    metrics.execution_finished(outcome, elapsed);
 
     if let Some(caller) = caller {
+        let history_started = Instant::now();
         let redacted_input = redact_input(tool, input);
         let redacted_response = redact_mcp_response(tool, input, &result);
-        record(
+        let recorded = record(
             state,
             caller,
             InvocationRecord {
@@ -88,8 +90,10 @@ pub(crate) async fn execute_call(
             },
         )
         .await;
+        metrics.history_finished(recorded, history_started.elapsed());
     }
 
+    metrics.finish(outcome, completion_started.elapsed());
     result
 }
 
@@ -210,7 +214,116 @@ mod tests {
     )]
 
     use super::*;
+    use crate::invocations::test_support::{assert_completed, capture, report};
     use notegate_model::CallerIdentity;
+
+    #[tokio::test]
+    async fn completion_separates_command_and_history_outcomes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let mut state = crate::rest::test_support::state(&db);
+        std::sync::Arc::make_mut(&mut state.config).metrics_enabled = true;
+        let (caller, _, _) = crate::rest::test_support::caller_and_space(&state).await?;
+        let input = json!({});
+        for history_outcome in ["success", "error"] {
+            if history_outcome == "error" {
+                sqlx::query("ALTER TABLE command_invocations ADD CONSTRAINT reject_history CHECK (false) NOT VALID")
+                    .execute(&db.pool).await?;
+            }
+            for outcome in ["success", "error"] {
+                let (response, body) = capture(execute_call(
+                    uuid::Uuid::new_v4(),
+                    &state,
+                    Some(&caller),
+                    "me",
+                    &input,
+                    async {
+                        if outcome == "success" {
+                            Ok(CallToolResult::structured(json!({"ok": true})).into())
+                        } else {
+                            Err(ErrorData::invalid_params("invalid input", None))
+                        }
+                    },
+                ))
+                .await;
+                assert_eq!(response.is_ok(), outcome == "success");
+                assert_completed(&body, outcome, history_outcome);
+            }
+        }
+        let (response, body) = capture(execute_call(
+            uuid::Uuid::new_v4(),
+            &state,
+            None,
+            "me",
+            &input,
+            async { Ok(CallToolResult::structured(json!({})).into()) },
+        ))
+        .await;
+        response?;
+        assert!(
+            !body.contains("notegate_command_history_records_total"),
+            "{body}"
+        );
+        assert!(
+            body.contains("notegate_command_completion_duration_seconds_count"),
+            "{body}"
+        );
+        let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM command_invocations")
+            .fetch_one(&db.pool)
+            .await?;
+        assert_eq!(rows, 2);
+        db.cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "diagnostic adapter/history timings; run separately in CI"]
+    async fn measure_command_completion() -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let mut state = crate::rest::test_support::state(&db);
+        std::sync::Arc::make_mut(&mut state.config).metrics_enabled = true;
+        let (caller, _, _) = crate::rest::test_support::caller_and_space(&state).await?;
+        let context = commands::CommandContext::new(caller.clone(), None);
+        for scenario in ["me", "read_1mib_response"] {
+            let input = if scenario == "me" {
+                json!({})
+            } else {
+                json!({"op": "read", "target": "rest-test:/note.md", "purpose": "measure history capture"})
+            };
+            let mut samples = Vec::new();
+            for iteration in 0..30 {
+                let tool = if scenario == "me" { "me" } else { "read" };
+                // A prebuilt response isolates history overhead from document retrieval.
+                let response = if scenario == "me" {
+                    serde_json::to_value(commands::identity::call(&context))?
+                } else {
+                    json!({"content": "x".repeat(1024 * 1024), "byte_len": 1024 * 1024})
+                };
+                let response = CallToolResult::structured(response).into();
+                let (result, body) = capture(execute_call(
+                    uuid::Uuid::new_v4(),
+                    &state,
+                    Some(&caller),
+                    tool,
+                    &input,
+                    async { Ok(response) },
+                ))
+                .await;
+                result?;
+                assert_completed(&body, "success", "success");
+                if iteration >= 5 {
+                    samples.push(body);
+                }
+            }
+            report("mcp", scenario, &samples);
+        }
+        db.cleanup().await;
+        Ok(())
+    }
 
     #[test]
     fn invocation_space_name_keeps_only_a_valid_space_segment() {

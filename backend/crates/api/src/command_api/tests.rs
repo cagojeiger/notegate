@@ -13,7 +13,83 @@ use serde_json::json;
 use tower::ServiceExt as _;
 
 use super::*;
+use crate::invocations::test_support::{assert_completed, capture, report};
 use crate::rest::test_support::{caller_and_space, state};
+
+#[tokio::test]
+async fn cli_completion_separates_command_and_history_outcomes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let mut state = state(&db);
+    std::sync::Arc::make_mut(&mut state.config).metrics_enabled = true;
+    let (mut caller, _, _) = caller_and_space(&state).await?;
+    caller.channel = Channel::Api;
+    let app = Router::new()
+        .merge(routes())
+        .layer(Extension(caller))
+        .with_state(state);
+
+    for history_outcome in ["success", "error"] {
+        if history_outcome == "error" {
+            sqlx::query("ALTER TABLE command_invocations ADD CONSTRAINT reject_history CHECK (false) NOT VALID")
+                .execute(&db.pool).await?;
+        }
+        for (tool, outcome) in [("me", "success"), ("unknown", "error")] {
+            let (response, body) = capture(cli_request(
+                app.clone(),
+                cli_headers(),
+                json!({"tool": tool, "input": {}}),
+            ))
+            .await;
+            let (status, _) = response?;
+            assert_eq!(status.is_success(), outcome == "success");
+            assert_completed(&body, outcome, history_outcome);
+        }
+    }
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM command_invocations")
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(rows, 2);
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "diagnostic adapter/history timings; run separately in CI"]
+async fn measure_command_completion() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let mut state = state(&db);
+    std::sync::Arc::make_mut(&mut state.config).metrics_enabled = true;
+    let (mut caller, _, _) = caller_and_space(&state).await?;
+    caller.channel = Channel::Api;
+    let app = Router::new()
+        .merge(routes())
+        .layer(Extension(caller))
+        .with_state(state);
+    for (tool, outcome) in [("me", "success"), ("unknown", "error")] {
+        let mut samples = Vec::new();
+        for iteration in 0..30 {
+            let (response, body) = capture(cli_request(
+                app.clone(),
+                cli_headers(),
+                json!({"tool": tool, "input": {}}),
+            ))
+            .await;
+            assert_eq!(response?.0.is_success(), outcome == "success");
+            assert_completed(&body, outcome, "success");
+            if iteration >= 5 {
+                samples.push(body);
+            }
+        }
+        report("cli", tool, &samples);
+    }
+    db.cleanup().await;
+    Ok(())
+}
 
 fn cli_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
