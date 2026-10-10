@@ -179,6 +179,7 @@ pub(crate) struct ReplaceBody {
 pub(crate) async fn replace(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Extension(mutation): Extension<FileMutationContext>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<ReplaceBody>,
 ) -> Result<Json<TextMutationResponse>, ApiError> {
@@ -187,7 +188,7 @@ pub(crate) async fn replace(
         .for_channel(caller.channel)
         .with_mutation_context(FileMutationContext {
             edit_session_id: body.edit_session_id,
-            ..FileMutationContext::for_channel(caller.channel)
+            ..mutation
         });
     let current_sha = guarded_plain_text_sha(
         &files,
@@ -247,6 +248,7 @@ pub(crate) struct AppendBody {
 pub(crate) async fn append(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Extension(mutation): Extension<FileMutationContext>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<AppendBody>,
 ) -> Result<Json<TextMutationResponse>, ApiError> {
@@ -255,7 +257,7 @@ pub(crate) async fn append(
         .for_channel(caller.channel)
         .with_mutation_context(FileMutationContext {
             edit_session_id: body.edit_session_id,
-            ..FileMutationContext::for_channel(caller.channel)
+            ..mutation
         })
         .append_text(
             caller.account_id(),
@@ -342,6 +344,7 @@ impl From<PatchMatchMode> for PatchMode {
 pub(crate) async fn patch(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Extension(mutation): Extension<FileMutationContext>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<PatchBody>,
 ) -> Result<Json<TextEditResponse>, ApiError> {
@@ -360,7 +363,7 @@ pub(crate) async fn patch(
         .for_channel(caller.channel)
         .with_mutation_context(FileMutationContext {
             edit_session_id: body.edit_session_id,
-            ..FileMutationContext::for_channel(caller.channel)
+            ..mutation
         })
         .patch_text(
             caller.account_id(),
@@ -439,6 +442,7 @@ pub(crate) enum LineEditOperation {
 pub(crate) async fn edit(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Extension(mutation): Extension<FileMutationContext>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<LineEditBody>,
 ) -> Result<Json<TextEditResponse>, ApiError> {
@@ -452,7 +456,7 @@ pub(crate) async fn edit(
         .for_channel(caller.channel)
         .with_mutation_context(FileMutationContext {
             edit_session_id: body.edit_session_id,
-            ..FileMutationContext::for_channel(caller.channel)
+            ..mutation
         })
         .edit_text(
             caller.account_id(),

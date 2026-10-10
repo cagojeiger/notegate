@@ -4,7 +4,7 @@ use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use notegate_model::{Caller, FileEncryptionMode};
+use notegate_model::{Caller, FileEncryptionMode, files::FileMutationContext};
 use notegate_service::files::BeginObjectUpload;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -131,11 +131,15 @@ pub(crate) enum UploadTransferOut {
 pub(crate) async fn begin(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Extension(mutation): Extension<FileMutationContext>,
     Path(space_id): Path<Uuid>,
     Json(body): Json<BeginUploadBody>,
 ) -> Result<(StatusCode, Json<BeginUploadResponse>), ApiError> {
     let state = AppState {
-        files: state.files.for_channel(caller.channel),
+        files: state
+            .files
+            .for_channel(caller.channel)
+            .with_mutation_context(mutation),
         ..state
     };
     let command = BeginObjectUpload {
@@ -220,11 +224,15 @@ pub(crate) struct UploadPartOut {
 pub(crate) async fn parts(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Extension(mutation): Extension<FileMutationContext>,
     Path((space_id, upload_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<PreparePartsBody>,
 ) -> Result<Json<PreparePartsResponse>, ApiError> {
     let state = AppState {
-        files: state.files.for_channel(caller.channel),
+        files: state
+            .files
+            .for_channel(caller.channel)
+            .with_mutation_context(mutation),
         ..state
     };
     let upload = state
@@ -301,11 +309,15 @@ pub(crate) struct FileResponse {
 pub(crate) async fn complete(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Extension(mutation): Extension<FileMutationContext>,
     Path((space_id, upload_id)): Path<(Uuid, Uuid)>,
     body: Option<Json<CompleteUploadBody>>,
 ) -> Result<(StatusCode, Json<FileResponse>), ApiError> {
     let state = AppState {
-        files: state.files.for_channel(caller.channel),
+        files: state
+            .files
+            .for_channel(caller.channel)
+            .with_mutation_context(mutation),
         ..state
     };
     let upload = state
@@ -353,10 +365,14 @@ pub(crate) async fn complete(
 pub(crate) async fn abort(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Extension(mutation): Extension<FileMutationContext>,
     Path((space_id, upload_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
     let state = AppState {
-        files: state.files.for_channel(caller.channel),
+        files: state
+            .files
+            .for_channel(caller.channel)
+            .with_mutation_context(mutation),
         ..state
     };
     let upload = state

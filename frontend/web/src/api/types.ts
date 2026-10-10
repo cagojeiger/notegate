@@ -265,7 +265,7 @@ export type AuditEventListResponse = {
   page: Page;
 };
 
-export type CommandInvocationSurface = "mcp" | "cli";
+export type CommandInvocationSurface = "mcp" | "cli" | "api";
 
 export type CommandInvocation = {
   invocation_id?: string | null;

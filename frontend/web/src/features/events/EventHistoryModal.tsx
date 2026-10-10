@@ -7,13 +7,14 @@ import { FileChangeEventsPanel } from "./ChangesHistoryPanel";
 import { BackgroundJobsPanel } from "./JobsHistoryPanel";
 import { CommandInvocationsPanel } from "./InvocationHistoryPanel";
 
-type HistoryTab = "audit" | "files" | "mcp" | "cli" | "jobs";
+type HistoryTab = "audit" | "files" | "mcp" | "cli" | "api" | "jobs";
 
 const TABS: { id: HistoryTab; label: string }[] = [
   { id: "files", label: "Changes" },
   { id: "audit", label: "Audit" },
   { id: "mcp", label: "MCP" },
   { id: "cli", label: "CLI" },
+  { id: "api", label: "API" },
   { id: "jobs", label: "Jobs" }
 ];
 
@@ -45,6 +46,7 @@ export function EventHistoryModal({
         {canViewAuditEvents && tab === "audit" ? <AuditEventsPanel /> : null}
         {canViewAuditEvents && tab === "mcp" ? <CommandInvocationsPanel surface="mcp" /> : null}
         {canViewAuditEvents && tab === "cli" ? <CommandInvocationsPanel surface="cli" /> : null}
+        {canViewAuditEvents && tab === "api" ? <CommandInvocationsPanel surface="api" /> : null}
         {canViewAuditEvents && tab === "jobs" ? <BackgroundJobsPanel /> : null}
         {tab === "files" ? <FileChangeEventsPanel spaces={spaces} initialSpaceId={initialSpaceId} canViewOwnedHistory={canViewAuditEvents} /> : null}
       </div>

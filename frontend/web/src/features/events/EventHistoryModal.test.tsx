@@ -24,6 +24,31 @@ function jsonResponse(body: unknown) {
 }
 
 describe("EventHistoryModal", () => {
+  it("loads public API history separately and labels HTTP summaries", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      if (String(input).includes("surface=api")) return jsonResponse({
+        command_invocations: [{
+          ...commandInvocation(20, "http", "PUT /api/v2/spaces/{space_id}/text/{node_id}", null, "success", "api"),
+          invocation_id: "api-call-20",
+          input: { method: "PUT", path_ids: { node_id: "node-20" }, body_recorded: false },
+          response: { status: 200, body_recorded: false }
+        }], page
+      });
+      return jsonResponse({ events: [], command_invocations: [], page });
+    });
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("surface=api"))).toBe(false);
+    await user.click(screen.getByRole("tab", { name: "API" }));
+    expect(await screen.findByText("API v2 request")).toBeInTheDocument();
+    expect(screen.getByText("PUT /api/v2/spaces/{space_id}/text/{node_id}")).toBeInTheDocument();
+    expect(screen.getByText("Call api-call-20")).toBeInTheDocument();
+    await user.click(screen.getByText("Response"));
+    expect(await screen.findByText(/"status": 200/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain("/api/v1/me/command-invocations?surface=api&limit=50");
+    expect(fetchMock.mock.calls.some(([input]) => /surface=(mcp|cli)/.test(String(input)))).toBe(false);
+  });
+
   it("does not identify a database recorder as the person who deleted a version", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => jsonResponse({
@@ -109,6 +134,7 @@ describe("EventHistoryModal", () => {
     expect(screen.queryByRole("tab", { name: "Audit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "MCP" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "CLI" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "API" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Changes" })).toBeInTheDocument();
 
     await screen.findByText("No changes yet.");
@@ -498,7 +524,7 @@ function commandInvocation(
   op: string | null,
   purpose: string | null,
   outcome: "success" | "error",
-  surface: "mcp" | "cli" = "mcp",
+  surface: "mcp" | "cli" | "api" = "mcp",
   spaceName: string | null = null,
   response: Record<string, unknown> | null = {
     kind: "complete",

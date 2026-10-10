@@ -34,7 +34,7 @@ Metrics are process-local, enabled only by `NOTEGATE_METRICS_ENABLED=true` (defa
 
 ## Command invocation metrics
 
-MCP tool dispatch and Command API requests share one bounded command-invocation
+MCP tool dispatch, Command API, and public API v2 requests share one bounded command-invocation
 metric family. The Command API surface is labelled `cli` because it is the
 machine JSON surface used by `notegate-cli`.
 
@@ -47,10 +47,10 @@ machine JSON surface used by `notegate-cli`.
 | `notegate_command_completion_duration_seconds` | `surface, tool, outcome` |
 | `notegate_command_invocations_in_flight` | `surface, tool` |
 
-- `surface` is `mcp` or `cli`.
+- `surface` is `mcp`, `cli`, or `api` (public v2).
 - `tool` is one of `me`, `read`, `search`, `write`, `manage`,
   `file_download`, `file_upload`, `run_read_sequence`,
-  `run_write_sequence`, or `unknown`.
+  `run_write_sequence`, or `unknown`; public v2 uses the fixed label `http`.
 - `outcome` is `success` or `error`. History metrics describe persistence success;
   invocation and completion metrics describe the command result. A history failure
   does not change the command result.
@@ -59,7 +59,9 @@ machine JSON surface used by `notegate-cli`.
 - Invocation duration and persisted history `duration_ms` measure command execution,
   excluding history capture. Completion duration includes awaited history capture,
   ending immediately before the adapter returns. It excludes upstream authentication,
-  response serialization and network delivery; it is not end-to-end client latency.
+  network delivery; it is not end-to-end client latency. MCP/CLI also exclude response
+  serialization. Public v2 measures through handler response construction, before
+  HTTP summary persistence; it does not wait for response-body delivery.
 - History duration covers post-execution snapshot preparation, redaction, encryption, connection
   acquisition and insertion. MCP calls without a caller do not attempt history capture
   and emit no history sample.

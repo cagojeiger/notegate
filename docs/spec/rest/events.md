@@ -1,6 +1,6 @@
 # REST Events
 
-Event history는 self-review를 위한 이력이다. User caller는 자기 계정과 space에 어떤 관리 변경과 파일 변경이 있었는지 확인하고, MCP·Command API 호출 목적과 결과를 검토한다. 스키마와 capture 계약은 `docs/spec/event-logging.md`가 정본이다.
+Event history는 self-review를 위한 이력이다. User caller는 자기 계정과 space에 어떤 관리 변경과 파일 변경이 있었는지 확인하고, MCP·CLI·외부 API v2 호출 결과를 검토한다. 스키마와 capture 계약은 `docs/spec/event-logging.md`가 정본이다.
 
 Audit/파일 변경 history에는 nullable `operation_id`를 추가로 반환한다. 휴지통 삭제·복원·영구 삭제 요청의 작업 ID이며 기존 기록과 다른 작업은 `null`일 수 있다. 복원/영구 삭제 요청의 `metadata.related_deletion_operation_id`는 원래 삭제를 가리킨다. Pagination은 기존 event `id`를 사용한다.
 
@@ -40,7 +40,7 @@ User caller만 가능하다. Caller의 `owner_user_id` scope에 속한 `audit_ev
 GET /api/v1/me/command-invocations?surface=mcp&limit=50&cursor=...
 ```
 
-User caller만 가능하다. `surface=mcp|cli`는 필수이며 한 surface의 caller 소유 호출만 `created_at desc, id desc` 순으로 반환한다. Cursor도 surface에 묶이므로 다른 tab에서 재사용할 수 없다. redacted `input`과 `response`, 짧은 `purpose`, tool/op, 성공 여부, 안정적인 error code, 실행 시간을 제공한다. `read op=changes`는 검증된 `space_name` summary도 반환한다. `me` 또는 입력 검증 실패는 `purpose`가 `null`일 수 있고, response snapshot이 없는 행은 `response=null`이다.
+User caller만 가능하다. `surface=mcp|cli|api`는 필수이며 한 surface의 caller 소유 호출만 `created_at desc, id desc` 순으로 반환한다. Cursor도 surface에 묶이므로 다른 tab에서 재사용할 수 없다. redacted `input`과 `response`, 짧은 `purpose`, tool/op, 성공 여부, 안정적인 error code, 실행 시간을 제공한다. `read op=changes`는 검증된 `space_name` summary도 반환한다. 외부 API v2는 HTTP 요청·응답 요약을 반환하며 `purpose=null`이다. `me` 또는 입력 검증 실패도 `purpose`가 `null`일 수 있고, response snapshot이 없는 행은 `response=null`이다.
 
 ```json
 {
@@ -86,7 +86,7 @@ User caller만 가능하다. `surface=mcp|cli`는 필수이며 한 surface의 ca
 
 - 기본 page size는 50, 최대 100이다.
 - `actor`는 현재 조회 가능한 account reference이며, account가 purge되었으면 `null`일 수 있다.
-- `surface`는 `mcp` 또는 `cli`이며 요청한 surface와 항상 같다.
+- `surface`는 `mcp`, `cli`, `api`이며 요청한 surface와 항상 같다.
 - `space_name`은 `read op=changes`에서만 값이 있고 다른 호출에서는 `null`이다. Target/path 등 허용된 입력 metadata는 `input`에 포함된다.
 - 입력·응답의 본문, 검색어, cursor, credential, PII와 자유 형식 오류 문구는 marker로 대체되며 알 수 없는 field 값은 반환하지 않는다.
 - 이 endpoint는 browser self-review용이다. MCP나 CLI에 호출 이력 조회 command는 추가하지 않는다.

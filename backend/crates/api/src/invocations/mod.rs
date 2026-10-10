@@ -15,6 +15,7 @@ use crate::state::AppState;
 pub(crate) enum InvocationSurface {
     Mcp,
     Cli,
+    Api,
 }
 
 impl InvocationSurface {
@@ -22,6 +23,7 @@ impl InvocationSurface {
         match self {
             Self::Mcp => "mcp",
             Self::Cli => "cli",
+            Self::Api => "api",
         }
     }
 }

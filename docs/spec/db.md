@@ -228,7 +228,7 @@ file_change_events
 
 `operation_id`는 새 Changes 및 휴지통 lifecycle 작업마다 생성하는 UUID이며 event의 순서/cursor인 `id`와 별개다. `nodes`/`spaces.deletion_operation_id`는 현재 삭제 작업을 식별한다. `nodes.deletion_target_node_id`는 해당 노드를 포함한 삭제 요청이 직접 대상으로 삼은 노드 ID다. 대상 노드는 자기 ID를, 함께 삭제한 자손은 같은 대상 ID를 저장한다. 직접 부모나 파일 트리의 root를 뜻하지 않으며, 먼저 개별 삭제했던 자손의 값은 변경하지 않는다. 이 식별자에는 FK를 두지 않으며 기존 행은 NULL로 유지한다.
 
-`command_invocations`는 domain event와 분리된 MCP·CLI 실행 이력이다. 저장 대상과 redaction, 크기 제한, retention 계약은 `docs/spec/event-logging.md`가 소유한다.
+`command_invocations`는 domain event와 분리된 MCP·CLI·외부 API v2 실행 이력이다. 저장 대상과 redaction, 크기 제한, retention 계약은 `docs/spec/event-logging.md`가 소유한다.
 
 ```text
 command_invocations
@@ -240,7 +240,7 @@ command_invocations
   owner_user_id uuid not null
   actor_account_id uuid not null
   caller_kind text check ('user','agent')
-  surface text check ('mcp','cli')
+  surface text check ('mcp','cli','api')
   tool text not null
   op text null
   purpose text null
@@ -261,7 +261,7 @@ Event history DB 제약:
 ```text
 audit_events.source: 'rest', 'mcp', 'system'
 metadata: JSON object
-command_invocations.surface: 'mcp' 또는 'cli'
+command_invocations.surface: 'mcp', 'cli', 'api'
 command_invocations.input: JSON object
 command_invocations.response: NULL 또는 JSON object
 created_at: DB timestamp 기준

@@ -20,7 +20,7 @@ export function CommandInvocationsPanel({ surface }: { surface: CommandInvocatio
       <EventQueryState
         query={query}
         itemCount={invocations.length}
-        emptyLabel={surface === "mcp" ? "No MCP calls." : "No CLI calls."}
+        emptyLabel={`No ${surface.toUpperCase()} calls.`}
       />
       {invocations.length > 0 ? (
         <ol className="rounded-lg border border-border bg-surface px-4">
@@ -38,8 +38,10 @@ function CommandInvocationRow({ invocation }: { invocation: CommandInvocation })
   const actor = invocation.actor
     ? formatActor(invocation.actor, invocation.actor_account_id)
     : `${invocation.caller_kind === "agent" ? "Agent" : "User"} ${shortId(invocation.actor_account_id)}`;
-  const operation = invocation.op ? `${invocation.tool} · ${invocation.op}` : invocation.tool;
-  const surface = invocation.surface === "mcp" ? "MCP" : "CLI";
+  const operation = invocation.surface === "api"
+    ? invocation.op ?? "HTTP request"
+    : invocation.op ? `${invocation.tool} · ${invocation.op}` : invocation.tool;
+  const surface = invocation.surface.toUpperCase();
   const status = invocation.outcome === "success"
     ? "Success"
     : `Error${invocation.error_code ? ` · ${invocation.error_code}` : ""}`;
@@ -47,7 +49,7 @@ function CommandInvocationRow({ invocation }: { invocation: CommandInvocation })
     ? `${invocation.duration_ms} ms`
     : `${(invocation.duration_ms / 1_000).toFixed(2)} s`;
   const purpose = invocation.purpose
-    ?? (invocation.tool === "me" ? "Checked caller identity" : "Purpose not recorded");
+    ?? (invocation.surface === "api" ? "API v2 request" : invocation.tool === "me" ? "Checked caller identity" : "Purpose not recorded");
 
   return (
     <li className="group relative flex gap-3 border-b border-seam py-2 last:border-b-0">
@@ -63,7 +65,7 @@ function CommandInvocationRow({ invocation }: { invocation: CommandInvocation })
           <EventTime value={invocation.created_at} />
         </div>
         <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted">
-          <span title={invocation.surface === "mcp" ? "MCP transport" : "CLI transport"}>
+          <span title={invocation.surface === "api" ? "Public API v2" : `${surface} transport`}>
             <Badge className="normal-case">{surface}</Badge>
           </span>
           <span className="font-mono text-text">{operation}</span>

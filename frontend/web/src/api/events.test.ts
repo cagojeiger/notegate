@@ -19,6 +19,7 @@ describe("events api", () => {
 
     await listCommandInvocations(client, "mcp", "cursor-mcp-1");
     await listCommandInvocations(client, "cli");
+    await listCommandInvocations(client, "api", "api-cursor");
 
     expect(client.get).toHaveBeenNthCalledWith(
       1,
@@ -27,6 +28,10 @@ describe("events api", () => {
     expect(client.get).toHaveBeenNthCalledWith(
       2,
       "/api/v1/me/command-invocations?surface=cli&limit=50"
+    );
+    expect(client.get).toHaveBeenNthCalledWith(
+      3,
+      "/api/v1/me/command-invocations?surface=api&limit=50&cursor=api-cursor"
     );
   });
 
