@@ -20,9 +20,11 @@ use uuid::Uuid;
 
 use crate::rest::test_support::{caller_and_space, empty_request, get_json, json_request, state};
 
+mod invocation;
+
 fn app(state: crate::state::AppState, caller: Caller) -> Router {
     Router::new()
-        .merge(super::routes())
+        .merge(super::routes(state.clone()))
         .layer(Extension(caller))
         .with_state(state)
 }
@@ -309,8 +311,33 @@ async fn v2_respects_connection_permission_and_space_visibility()
         )
         .await?;
     let (status, hidden_response) =
-        get_json(app(state, caller), format!("/spaces/{}", hidden.id)).await?;
+        get_json(app(state.clone(), caller), format!("/spaces/{}", hidden.id)).await?;
     assert_eq!(status, StatusCode::NOT_FOUND, "{hidden_response}");
+    let calls = state
+        .command_invocations
+        .list_by_owner(
+            owner.account_id(),
+            notegate_model::CommandInvocationSurface::Api,
+            10,
+            None,
+        )
+        .await?;
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].error_code.as_deref(), Some("http_404"));
+    assert_eq!(calls[1].error_code.as_deref(), Some("http_403"));
+    assert!(
+        state
+            .command_invocations
+            .list_by_owner(
+                hidden_owner.id,
+                notegate_model::CommandInvocationSurface::Api,
+                10,
+                None,
+            )
+            .await?
+            .is_empty(),
+        "denied calls belong to the caller owner, not the target owner"
+    );
 
     db.cleanup().await;
     Ok(())

@@ -74,7 +74,7 @@ file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 
 이 문서에서 `redaction`은 민감한 원문 값을 제거하거나 redaction marker로 대체하는 처리를 뜻한다. 허용되지 않은 field를 통째로 제외하는 것은 `omission`이다. 일부 문자를 남기는 `masking`과 범위가 모호한 `sanitization`은 이 기능의 용어로 사용하지 않는다.
 
-`command_invocations`는 `owner_user_id`, 실제 `actor_account_id`, user/agent 구분, 호출 경계인 `surface`, 정규화된 `tool`과 optional `op`, `purpose`, redacted `input`/`response` JSON object, success/error, 안정적인 error code, 실행 시간을 저장한다. `surface`는 MCP `tools/call`이면 `mcp`, `POST /cli`이면 `cli`다. Browser History는 두 surface를 독립 tab으로 표시한다.
+`command_invocations`는 `owner_user_id`, 실제 `actor_account_id`, user/agent 구분, 호출 경계인 `surface`, 정규화된 `tool`과 optional `op`, `purpose`, redacted `input`/`response` JSON object, success/error, 안정적인 error code, 실행 시간을 저장한다. `surface`는 MCP `tools/call`이면 `mcp`, `POST /cli`이면 `cli`, 외부 `/api/v2`이면 `api`다. Browser History는 세 surface를 독립 tab으로 표시한다.
 
 `read op=changes`는 어느 Space의 변경 stream을 조회했는지 목록에서 바로 확인할 수 있도록 검증된 `space_name` snapshot도 함께 저장한다. `me`는 purpose 예외이므로 NULL이다. 유효한 다른 command의 purpose는 1..200자의 짧은 호출 이유이며, purpose 검증 실패 행에서는 summary purpose가 NULL이고 `input.purpose`는 원문 대신 redaction marker다. Unknown MCP tool/op의 원문은 별도 summary column에 저장하지 않는다.
 
@@ -82,7 +82,15 @@ file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 
 저장할 때 `purpose`, `space_name`, redacted `input`/`response`는 한 암호화 envelope로 묶는다. 소유자 ID와 snapshot UUID를 AEAD에 바인딩하며, 조회 시 소유권으로 먼저 필터링한 뒤 복호화한다. 식별자, 시간, 호출 경로, tool/op, 결과 및 오류 코드는 조회를 위해 평문으로 유지한다. 기존 평문 행은 `history.encryption` Reconciler가 최대 100행씩 이관하며, 이관 중에는 기존 형식도 읽는다. 암호화 오류를 평문 fallback으로 숨기지 않는다.
 
-MCP `response`는 protocol `ErrorData` 또는 `structured_content`에서 만들며 RMCP가 같은 JSON을 복제하는 wire `content[].text`와 `_meta`는 저장하지 않는다. CLI response와 구조화 오류는 같은 저장 전용 JSON 정책으로 정규화한다. Sequence tool은 한 invocation row만 만들고 commands/results에 재귀 redaction을 적용하며 내부 command별 행은 만들지 않는다. Response snapshot이 없는 행은 `response=NULL`이고 모든 행은 90일 retention을 따른다. 호출 이력 조회용 MCP/CLI command는 없으며 user browser의 History > MCP 또는 History > CLI에서 자기 소유 범위만 조회한다.
+MCP `response`는 protocol `ErrorData` 또는 `structured_content`에서 만들며 RMCP가 같은 JSON을 복제하는 wire `content[].text`와 `_meta`는 저장하지 않는다. CLI response와 구조화 오류는 같은 저장 전용 JSON 정책으로 정규화한다. Sequence tool은 한 invocation row만 만들고 commands/results에 재귀 redaction을 적용하며 내부 command별 행은 만들지 않는다. Response snapshot이 없는 행은 `response=NULL`이고 모든 행은 90일 retention을 따른다. 호출 이력 조회용 MCP/CLI command는 없으며 user browser의 History > MCP, CLI, API에서 자기 소유 범위만 조회한다.
+
+### Public API v2 summaries
+
+- 인증을 통과해 등록된 v2 route에 도달한 읽기·쓰기 호출을 기록한다. 요청은 HTTP method, route template, 파싱 가능한 `space_id`/`node_id`/`upload_id` UUID만, 응답은 HTTP status만 저장한다. 양쪽 snapshot의 `body_recorded=false`는 본문을 수집하지 않았다는 뜻이다.
+- `tool=http`, `op=METHOD route-template`, 실패 코드는 `http_<status>`다. 요청별 UUID `invocation_id`는 서버가 발급하며 쓰기 Changes에도 전달한다. 클라이언트 request ID는 신뢰하거나 재사용하지 않는다. `purpose`는 현재 v2 계약에 없어 NULL로 둔다.
+- 원문 URL/query, 헤더, 문서 본문, 파일명, 오류 문구, presigned URL은 수집하지 않는다. 요청·응답 body를 버퍼링하지 않는다. 요약은 기존 암호화 envelope·소유자 조회·90일 보관 정책을 따른다.
+- 응답을 만든 후 기록을 기다리되, 기록 실패가 응답 status/body를 변경하지 않는다. 기록 대기는 바깥 HTTP timeout 예산에 포함된다. 호출 이력은 Changes와 별도 트랜잭션이며 강제 종료·취소 시 누락될 수 있다. Changes의 성공 커밋 보장은 그대로 유지한다.
+- 인증 실패, 등록되지 않은 경로, 바깥 rate/body/timeout 제한에서 종료된 요청은 이 소유자 이력 범위 밖이다. HTTP 관측을 사용하며 API v1 브라우저 호출은 이 surface에 포함하지 않는다.
 
 ## Audit event sources
 
@@ -223,7 +231,7 @@ connection.upsert | connection.disconnect
 
 ## File change events
 
-File change event는 space 안의 파일/폴더/문서 변경 이력을 기록한다. Space 내부 mutation sequence는 `id`로 식별하고 REST self-review history는 `created_at desc, id desc` 순서로 표시한다. Transport surface(REST/MCP/Browser), API key id, request id, IP, user agent 같은 request/security context는 기록하지 않는다. 조회는 space scope이며, 특정 node만 보려면 `node_id` query로 필터링한다.
+File change event는 space 안의 파일/폴더/문서 변경 이력을 기록한다. Space 내부 mutation sequence는 `id`로 식별하고 REST self-review history는 `created_at desc, id desc` 순서로 표시한다. 변경 출처와 `invocation_id`는 mutation context에서 전달한다. API key id, 원문 HTTP request id, IP, user agent는 기록하지 않는다. 조회는 space scope이며, 특정 node만 보려면 `node_id` query로 필터링한다.
 
 File change event type:
 
