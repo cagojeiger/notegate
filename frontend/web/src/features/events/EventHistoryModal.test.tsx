@@ -238,6 +238,7 @@ describe("EventHistoryModal", () => {
       "Audit",
       "MCP",
       "CLI",
+      "API",
       "Jobs"
     ]);
 
