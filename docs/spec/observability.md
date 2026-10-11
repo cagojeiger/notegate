@@ -76,6 +76,23 @@ machine JSON surface used by `notegate-cli`.
   CI's ignored `measure_command_completion` tests report isolated adapter/history
   timings in a debug build; they are diagnostic, not a production latency budget.
 
+### CI HTTP concurrency smoke
+
+The Browser E2E job runs `deploy/ci/api-load-smoke.mjs` against its disposable
+localhost app and PostgreSQL using the existing Node runtime and seeded identity.
+It exercises sequential reads, 10 concurrent readers, an 80/20 read/write mix,
+and 10 writes racing with the same expected hash. It verifies final content,
+exactly one winning write, and one invocation record per completed request with
+Changes linked only to committed writes. Generated documents share one owner/Space.
+Workers pause 100ms between operations; no request retries mask failures.
+
+The job summary reports p50/p95 and paced throughput without additional artifacts.
+Unexpected results, missing/duplicate history, HTTP requests exceeding 10 seconds,
+or scenario p95 at/above 2 seconds fail CI; the step is bounded to 2 minutes.
+The loose latency budget catches large slowdowns. Smaller timing differences are
+diagnostic: the shared runner/debug build does not establish production capacity,
+multi-user isolation, or support for 1,000 concurrent users.
+
 ## Resource utilization metrics
 
 | Metric | Labels |

@@ -367,6 +367,13 @@ jobs:
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
             http://127.0.0.1:9191/api/v2/me)" = "401"
 
+      - name: Check API concurrency and latency smoke budgets
+        timeout-minutes: 2
+        env:
+          NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.seed_test_identity.outputs.agent_api_key }}
+          NOTEGATE_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
+        run: node deploy/ci/api-load-smoke.mjs
+
       - name: Test browser workflow
         env:
           NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
