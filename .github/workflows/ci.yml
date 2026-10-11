@@ -369,10 +369,11 @@ jobs:
 
       - name: Check API concurrency and latency smoke budgets
         timeout-minutes: 2
+        shell: bash
         env:
           NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.seed_test_identity.outputs.agent_api_key }}
           NOTEGATE_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
-        run: node deploy/ci/api-load-smoke.mjs
+        run: node deploy/ci/api-load-smoke.mjs | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Test browser workflow
         env:

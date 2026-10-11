@@ -2,7 +2,6 @@
 // These debug-build timings do not establish production capacity or user counts.
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const base = "http://127.0.0.1:9191";
@@ -186,7 +185,6 @@ try {
     "",
   ].join("\n");
   console.log(summary);
-  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
   // The whole database is discarded with the job; hide the fixture from later UI tests.
   if (space) await request(`/api/v1/spaces/${space.id}`, { method: "DELETE", statuses: [204] });
 }
