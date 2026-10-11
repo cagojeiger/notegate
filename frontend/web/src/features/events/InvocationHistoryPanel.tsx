@@ -68,7 +68,7 @@ function CommandInvocationRow({ invocation }: { invocation: CommandInvocation })
           <span title={invocation.surface === "api" ? "Public API v2" : `${surface} transport`}>
             <Badge className="normal-case">{surface}</Badge>
           </span>
-          <span className="font-mono text-text">{operation}</span>
+          <span className="min-w-0 max-w-full break-all font-mono text-text">{operation}</span>
           {invocation.space_name ? (
             <>
               <span aria-hidden="true">·</span>
