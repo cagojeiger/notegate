@@ -35,7 +35,7 @@ Metrics are process-local, enabled only by `NOTEGATE_METRICS_ENABLED=true` (defa
 ## Command invocation metrics
 
 MCP tool dispatch, Command API, and public API v2 requests share one bounded command-invocation
-metric family. The Command API surface is labelled `cli` because it is the
+metric family. Shared completion handling records execution, awaited history persistence and completion; adapters retain protocol-specific validation, result classification and redaction. The Command API surface is labelled `cli` because it is the
 machine JSON surface used by `notegate-cli`.
 
 | Metric | Labels |

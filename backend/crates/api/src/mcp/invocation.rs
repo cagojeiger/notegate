@@ -15,8 +15,8 @@ use crate::invocations::redaction::{
     redaction_marker,
 };
 use crate::invocations::{
-    InvocationRecord, InvocationSurface, canonical_op, canonical_tool, invocation_space_name,
-    record, sequence_error_code,
+    InvocationCompletion, InvocationRecord, InvocationSurface, canonical_op, canonical_tool,
+    invocation_space_name, sequence_error_code,
 };
 use crate::mcp::contract::command_error;
 use crate::observability::CommandInvocationMetrics;
@@ -61,39 +61,35 @@ pub(crate) async fn execute_call(
         Err(error) => Err(error),
     };
     let error_code = call_error_code(tool, &result);
-    let outcome = if error_code.is_some() {
-        "error"
-    } else {
-        "success"
-    };
     let elapsed = started.elapsed();
-    metrics.execution_finished(outcome, elapsed);
+    let completion =
+        InvocationCompletion::new(metrics, completion_started, elapsed, error_code.as_deref());
 
     if let Some(caller) = caller {
-        let history_started = Instant::now();
         let redacted_input = redact_input(tool, input);
         let redacted_response = redact_mcp_response(tool, input, &result);
-        let recorded = record(
-            state,
-            caller,
-            InvocationRecord {
-                id: Some(invocation_id),
-                surface: InvocationSurface::Mcp,
-                tool: canonical_tool(tool),
-                op,
-                purpose,
-                space_name: space_name.as_deref(),
-                input: &redacted_input,
-                response: Some(&redacted_response),
-                error_code: error_code.as_deref(),
-                elapsed_ms: elapsed.as_millis(),
-            },
-        )
-        .await;
-        metrics.history_finished(recorded, history_started.elapsed());
+        completion
+            .record(
+                state,
+                caller,
+                InvocationRecord {
+                    id: Some(invocation_id),
+                    surface: InvocationSurface::Mcp,
+                    tool: canonical_tool(tool),
+                    op,
+                    purpose,
+                    space_name: space_name.as_deref(),
+                    input: &redacted_input,
+                    response: Some(&redacted_response),
+                    error_code: error_code.as_deref(),
+                    elapsed_ms: elapsed.as_millis(),
+                },
+            )
+            .await;
+    } else {
+        completion.finish();
     }
 
-    metrics.finish(outcome, completion_started.elapsed());
     result
 }
 

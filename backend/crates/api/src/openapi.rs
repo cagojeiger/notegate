@@ -2,7 +2,7 @@ use axum::Router;
 use axum::middleware::{from_fn, from_fn_with_state};
 use utoipa::openapi::Ref;
 use utoipa::openapi::content::Content;
-use utoipa::openapi::path::{Operation, PathItem};
+use utoipa::openapi::path::{Operation, ParameterBuilder, ParameterIn, PathItem};
 use utoipa::openapi::response::Response;
 #[cfg(test)]
 use utoipa::openapi::security::{ApiKey, ApiKeyValue};
@@ -185,6 +185,23 @@ impl Modify for ApiKeySecurityAddon {
             ),
         );
 
+        let purpose = ParameterBuilder::new()
+            .name(crate::public_v2::PURPOSE_HEADER)
+            .parameter_in(ParameterIn::Header)
+            .required(utoipa::openapi::Required::False)
+            .schema(Some(<String as utoipa::PartialSchema>::schema()))
+            .description(Some("Optional caller-declared reason, percent-encoded UTF-8 (for example encodeURIComponent(reason)). After decoding: 1..200 Unicode characters, no surrounding whitespace or control characters. Send once. Missing means no recorded reason; invalid values return 400 before execution. Stored encrypted in invocation history and propagated to successful Changes and text revisions. Do not include secrets or document content."))
+            .example(Some(serde_json::json!("review%20design%20notes")))
+            .build();
+        for item in openapi.paths.paths.values_mut() {
+            for operation in operations_mut(item) {
+                operation
+                    .parameters
+                    .get_or_insert_with(Vec::new)
+                    .push(purpose.clone());
+            }
+        }
+
         add_default_error_response(openapi);
     }
 }
@@ -328,6 +345,15 @@ mod tests {
                     serde_json::json!([]),
                     "{method} {path} must require the API-key scheme"
                 );
+                let purpose = operations[*method]["parameters"]
+                    .as_array()
+                    .expect("parameters")
+                    .iter()
+                    .find(|parameter| parameter["name"] == crate::public_v2::PURPOSE_HEADER)
+                    .expect("optional purpose header on every v2 operation");
+                assert_eq!(purpose["in"], "header");
+                assert_eq!(purpose["required"], false);
+                assert_eq!(purpose["schema"]["type"], "string");
             }
         }
 

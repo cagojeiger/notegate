@@ -2,6 +2,7 @@ mod dto;
 mod invocation;
 #[cfg(test)]
 pub(crate) use dto::NodeOut as TestNodeOut;
+pub(crate) use invocation::PURPOSE_HEADER;
 pub(crate) mod files;
 pub(crate) mod nodes;
 pub(crate) mod spaces;

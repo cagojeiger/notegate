@@ -16,12 +16,12 @@ file_change_events
   file-tree/file content change 이력
 
 command_invocations
-  MCP와 Command API의 read·mutation·실패 호출 이력
+  MCP, Command API(CLI), Public API v2의 read·mutation·실패 호출 이력
 ```
 
-외부 command 호출 자체는 domain mutation stream과 다른 `command_invocations`에 기록한다. 이 표는 MCP와 Command API의 read와 실패 호출도 포함하는 실행 이력이며 현재 state나 mutation history의 source of truth가 아니다.
+외부 호출 자체는 domain mutation stream과 다른 `command_invocations`에 기록한다. 이 표는 MCP, Command API(CLI), Public API v2의 read와 실패 호출도 포함하는 실행 이력이며 현재 state나 mutation history의 source of truth가 아니다. 브라우저 V1 요청은 별도 호출 이력에 추가하지 않으며 기존 Changes, Audit, Revision 기록을 유지한다.
 
-`invocation_id`는 서버가 MCP/CLI 호출 경계에서 생성하는 UUID다. 호출 이력과 그 호출로 성공한 Changes에 함께 남기며, 한 sequence의 여러 변경은 같은 호출 ID를 갖는다. 삭제·복원의 작업 범위를 결정하는 `operation_id`는 별개다. Invocation 저장은 best-effort이므로 연결된 호출 행이 없을 수도 있고, legacy 행에는 연결 ID를 추측해 넣지 않는다.
+`invocation_id`는 서버가 MCP/CLI/API v2 호출 경계에서 생성하는 UUID다. 호출 이력과 그 호출로 성공한 Changes에 함께 남기며, 한 sequence의 여러 변경은 같은 호출 ID를 갖는다. 삭제·복원의 작업 범위를 결정하는 `operation_id`는 별개다. Invocation 저장은 best-effort이므로 연결된 호출 행이 없을 수도 있고, legacy 행에는 연결 ID를 추측해 넣지 않는다.
 
 두 mutation stream(`audit_events`, `file_change_events`)은 성공적으로 commit된 domain mutation의 이력이다. 현재 state의 source of truth는 normalized domain table이다. `command_invocations`는 실행 관찰 이력이며 이 mutation 보장에 포함되지 않는다.
 
@@ -87,8 +87,8 @@ MCP `response`는 protocol `ErrorData` 또는 `structured_content`에서 만들�
 ### Public API v2 summaries
 
 - 인증을 통과해 등록된 v2 route에 도달한 읽기·쓰기 호출을 기록한다. 요청은 HTTP method, route template, 파싱 가능한 `space_id`/`node_id`/`upload_id` UUID만, 응답은 HTTP status만 저장한다. 양쪽 snapshot의 `body_recorded=false`는 본문을 수집하지 않았다는 뜻이다.
-- `tool=http`, `op=METHOD route-template`, 실패 코드는 `http_<status>`다. 요청별 UUID `invocation_id`는 서버가 발급하며 쓰기 Changes에도 전달한다. 클라이언트 request ID는 신뢰하거나 재사용하지 않는다. `purpose`는 현재 v2 계약에 없어 NULL로 둔다.
-- 원문 URL/query, 헤더, 문서 본문, 파일명, 오류 문구, presigned URL은 수집하지 않는다. 요청·응답 body를 버퍼링하지 않는다. 요약은 기존 암호화 envelope·소유자 조회·90일 보관 정책을 따른다.
+- `tool=http`, `op=METHOD route-template`, 실패 코드는 `http_<status>`다. 요청별 UUID `invocation_id`는 서버가 발급하며 쓰기 Changes에도 전달한다. 클라이언트 request ID는 신뢰하거나 재사용하지 않는다. 선택적인 `X-Notegate-Purpose` 헤더는 UTF-8 percent encoding으로 전달한다. 생략하면 NULL, 제공하면 디코딩 후 1..200자이며 앞뒤 공백과 제어 문자를 허용하지 않는다. 중복 헤더·잘못된 인코딩·유효하지 않은 목적은 업무 실행 전에 400으로 거부하고, 원문 목적 없이 실패 이력을 남긴다. 검증된 목적은 호출 이력과 성공한 Changes·본문 버전에 같은 값으로 전달한다.
+- 검증된 목적 외에 원문 URL/query, 헤더, 문서 본문, 파일명, 오류 문구, presigned URL은 수집하지 않는다. 요청·응답 body를 버퍼링하지 않는다. 요약은 기존 암호화 envelope·소유자 조회·90일 보관 정책을 따른다.
 - 응답을 만든 후 기록을 기다리되, 기록 실패가 응답 status/body를 변경하지 않는다. 기록 대기는 바깥 HTTP timeout 예산에 포함된다. 호출 이력은 Changes와 별도 트랜잭션이며 강제 종료·취소 시 누락될 수 있다. Changes의 성공 커밋 보장은 그대로 유지한다.
 - 인증 실패, 등록되지 않은 경로, 바깥 rate/body/timeout 제한에서 종료된 요청은 이 소유자 이력 범위 밖이다. HTTP 관측을 사용하며 API v1 브라우저 호출은 이 surface에 포함하지 않는다.
 

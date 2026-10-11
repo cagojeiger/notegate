@@ -20,7 +20,7 @@ use crate::invocations::redaction::{
     bounded_snapshot, redact_input, redact_output_value, redact_structured_response,
 };
 use crate::invocations::{
-    InvocationRecord, InvocationSurface, canonical_op, invocation_space_name, record,
+    InvocationCompletion, InvocationRecord, InvocationSurface, canonical_op, invocation_space_name,
     sequence_error_code,
 };
 use crate::observability::CommandInvocationMetrics;
@@ -263,36 +263,29 @@ async fn finish(
         .err()
         .map(|error| error.error_code().to_owned())
         .or_else(|| result.as_ref().ok().and_then(sequence_error_code));
-    let outcome = if error_code.is_some() {
-        "error"
-    } else {
-        "success"
-    };
-    metrics.execution_finished(outcome, elapsed);
+    let completion = InvocationCompletion::new(metrics, started, elapsed, error_code.as_deref());
 
-    let history_started = Instant::now();
     let metadata = InvocationMetadata::from_input(tool, input);
     let redacted_input = redact_input(tool, input);
     let response = redact_response(tool, &metadata.response_context, &result);
-    let recorded = record(
-        state,
-        context.caller(),
-        InvocationRecord {
-            id: context.invocation_id(),
-            surface: InvocationSurface::Cli,
-            tool,
-            op: metadata.op.as_deref(),
-            purpose: metadata.purpose.as_deref(),
-            space_name: metadata.space_name.as_deref(),
-            input: &redacted_input,
-            response: Some(&response),
-            error_code: error_code.as_deref(),
-            elapsed_ms: elapsed.as_millis(),
-        },
-    )
-    .await;
-    metrics.history_finished(recorded, history_started.elapsed());
-    metrics.finish(outcome, started.elapsed());
+    completion
+        .record(
+            state,
+            context.caller(),
+            InvocationRecord {
+                id: context.invocation_id(),
+                surface: InvocationSurface::Cli,
+                tool,
+                op: metadata.op.as_deref(),
+                purpose: metadata.purpose.as_deref(),
+                space_name: metadata.space_name.as_deref(),
+                input: &redacted_input,
+                response: Some(&response),
+                error_code: error_code.as_deref(),
+                elapsed_ms: elapsed.as_millis(),
+            },
+        )
+        .await;
 
     result.map(Json)
 }

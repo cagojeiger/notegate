@@ -46,6 +46,7 @@ base64.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 url.workspace = true
+percent-encoding.workspace = true
 axum-extra.workspace = true
 axum-governor.workspace = true
 secrecy.workspace = true
