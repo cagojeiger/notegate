@@ -2937,6 +2937,7 @@ dependencies = [
  "notegate-search",
  "notegate-service",
  "openidconnect",
+ "percent-encoding",
  "reqwest 0.13.5",
  "rmcp",
  "schemars 1.2.2",

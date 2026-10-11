@@ -402,7 +402,7 @@ fn rest_api_routes(state: AppState) -> Router<AppState> {
 }
 
 fn public_v2_routes(state: AppState) -> Router<AppState> {
-    crate::public_v2::routes()
+    crate::public_v2::routes(state.clone())
         .fallback(api_not_found)
         .layer(from_fn_with_state(state, require_public_api_key))
 }

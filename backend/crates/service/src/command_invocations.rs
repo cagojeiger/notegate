@@ -74,5 +74,9 @@ mod tests {
             validate_cursor_surface(CommandInvocationSurface::Cli, Some(&cursor)),
             Err(ServiceError::InvalidInput("invalid cursor".to_owned()))
         );
+        assert_eq!(
+            validate_cursor_surface(CommandInvocationSurface::Api, Some(&cursor)),
+            Err(ServiceError::InvalidInput("invalid cursor".to_owned()))
+        );
     }
 }

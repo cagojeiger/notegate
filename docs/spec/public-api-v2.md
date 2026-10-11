@@ -43,6 +43,20 @@ Agent가 보내는 `account_id`나 `user_id`는 없다. 서버가 API key에서 
 - `cursor`는 opaque 값이다. 같은 endpoint와 같은 filter에 `next_cursor`를 그대로 전달한다.
 - `expected_sha256`과 `expected_parent_id`는 선택적인 낙관적 동시성 guard다. 불일치하면 `409 conflict`이며 최신 상태를 다시 읽어야 한다.
 
+### 호출 목적과 이력
+
+등록된 V2 경로의 인증된 읽기·쓰기 요청은 기존 호출 이력에 `surface=api`로 기록된다. 선택적인 `X-Notegate-Purpose` 헤더로 짧은 호출 이유를 전달할 수 있다. 생략하면 목적은 NULL이며 기존 요청 본문은 바뀌지 않는다.
+
+```http
+X-Notegate-Purpose: review%20design%20notes
+```
+
+- 값은 UTF-8 percent encoding이다. JavaScript는 `encodeURIComponent(reason)`, Python은 `urllib.parse.quote(reason, safe="")`로 만든다. `%` 자체는 `%25`, 공백은 `%20`으로 보내며 `+`는 공백으로 변환하지 않는다.
+- 디코딩한 목적은 1..200 Unicode 문자이며 앞뒤 공백과 제어 문자를 허용하지 않는다. 헤더는 한 번만 보낸다. 중복, 잘못된 percent/UTF-8 인코딩, 잘못된 값은 업무 실행 전 `400 invalid_input`이다.
+- 목적은 사용자가 선언한 이유이며 권한이나 검증된 AI 판단을 뜻하지 않는다. secret·본문을 넣지 않는다. 검증된 값은 암호화된 호출 이력과 성공한 Changes·본문 버전에 전달된다.
+- 그 외 요청·응답은 method, route template, 대상 UUID와 HTTP status만 요약하며 body를 읽거나 저장하지 않는다. 기록 오류는 업무 결과를 바꾸지 않지만 기록 대기는 응답 지연과 timeout 예산에 포함된다.
+- 소유자 브라우저의 History → API에서 조회하며 90일간 보관한다. 인증 전 거절·미등록 경로·외부 제한에서 종료된 요청은 이 이력 범위 밖이다. 상세 계약은 [Event logging](event-logging.md)을 따른다.
+
 목록 상한은 다음과 같다. 서버는 생략된 값을 기본값으로 바꾸고 최대값보다 큰 값은 최대값으로 제한한다.
 
 | 작업 | 기본 `limit` | 최대 `limit` |

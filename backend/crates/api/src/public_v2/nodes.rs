@@ -4,7 +4,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use notegate_core::validation::normalize_path;
-use notegate_model::Caller;
+use notegate_model::{Caller, files::FileMutationContext};
 use notegate_service::files::{
     ChildrenRequest, CopyNode, CreateFolder, CreateText, DeleteNode, MoveNode, TreeRequest,
     WriteTarget, WriteText, WriteTextBody,
@@ -258,6 +258,7 @@ pub(crate) enum CreateNodeKind {
 pub(crate) async fn create(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Extension(mutation): Extension<FileMutationContext>,
     Path(space_id): Path<Uuid>,
     Json(body): Json<CreateNodeBody>,
 ) -> Result<(StatusCode, Json<NodeOut>), ApiError> {
@@ -267,6 +268,7 @@ pub(crate) async fn create(
             state
                 .files
                 .for_channel(caller.channel)
+                .with_mutation_context(mutation)
                 .create_folder(
                     account_id,
                     space_id,
@@ -282,6 +284,7 @@ pub(crate) async fn create(
                 state
                     .files
                     .for_channel(caller.channel)
+                    .with_mutation_context(mutation)
                     .write_text(
                         account_id,
                         space_id,
@@ -301,6 +304,7 @@ pub(crate) async fn create(
                 state
                     .files
                     .for_channel(caller.channel)
+                    .with_mutation_context(mutation)
                     .create_text(
                         account_id,
                         space_id,
@@ -354,12 +358,14 @@ pub(crate) struct MoveNodeBody {
 pub(crate) async fn move_node(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Extension(mutation): Extension<FileMutationContext>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<MoveNodeBody>,
 ) -> Result<Json<NodeOut>, ApiError> {
     let view = state
         .files
         .for_channel(caller.channel)
+        .with_mutation_context(mutation)
         .move_node(
             caller.account_id(),
             space_id,
@@ -422,12 +428,14 @@ pub(crate) struct CopyCountsOut {
 pub(crate) async fn copy_node(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Extension(mutation): Extension<FileMutationContext>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<CopyNodeBody>,
 ) -> Result<(StatusCode, Json<CopyNodeResponse>), ApiError> {
     let result = state
         .files
         .for_channel(caller.channel)
+        .with_mutation_context(mutation)
         .copy_node(
             caller.account_id(),
             space_id,
@@ -481,12 +489,14 @@ pub(crate) struct DeleteNodeResponse {
 pub(crate) async fn delete(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Extension(mutation): Extension<FileMutationContext>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
     Query(query): Query<DeleteQuery>,
 ) -> Result<Json<DeleteNodeResponse>, ApiError> {
     let result = state
         .files
         .for_channel(caller.channel)
+        .with_mutation_context(mutation)
         .delete_node(
             caller.account_id(),
             space_id,

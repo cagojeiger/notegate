@@ -1,6 +1,8 @@
 mod dto;
+mod invocation;
 #[cfg(test)]
 pub(crate) use dto::NodeOut as TestNodeOut;
+pub(crate) use invocation::PURPOSE_HEADER;
 pub(crate) mod files;
 pub(crate) mod nodes;
 pub(crate) mod spaces;
@@ -17,13 +19,17 @@ use crate::state::AppState;
 
 use self::dto::MeResponse;
 
-pub fn routes() -> Router<AppState> {
+pub fn routes(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/me", get(get_me))
         .merge(spaces::routes())
         .merge(nodes::routes())
         .merge(text::routes())
         .merge(files::routes())
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            invocation::capture,
+        ))
 }
 
 #[utoipa::path(

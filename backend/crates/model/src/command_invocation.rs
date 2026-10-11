@@ -10,6 +10,7 @@ use uuid::Uuid;
 pub enum CommandInvocationSurface {
     Mcp,
     Cli,
+    Api,
 }
 
 impl CommandInvocationSurface {
@@ -17,6 +18,7 @@ impl CommandInvocationSurface {
         match self {
             Self::Mcp => "mcp",
             Self::Cli => "cli",
+            Self::Api => "api",
         }
     }
 }
@@ -67,7 +69,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn surface_contract_accepts_only_mcp_and_cli() -> Result<(), serde_json::Error> {
+    fn surface_contract_accepts_supported_external_surfaces() -> Result<(), serde_json::Error> {
         assert_eq!(
             serde_json::from_str::<CommandInvocationSurface>("\"mcp\"")?,
             CommandInvocationSurface::Mcp
@@ -77,6 +79,10 @@ mod tests {
             CommandInvocationSurface::Cli
         );
         assert!(serde_json::from_str::<CommandInvocationSurface>("\"command_api\"").is_err());
+        assert_eq!(
+            serde_json::from_str::<CommandInvocationSurface>("\"api\"")?,
+            CommandInvocationSurface::Api
+        );
         Ok(())
     }
 }

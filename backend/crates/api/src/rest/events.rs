@@ -101,7 +101,7 @@ pub(crate) async fn list_audit_events(
     path = "/api/v1/me/command-invocations",
     tag = "events",
     params(
-        ("surface" = String, Query, description = "Invocation surface: mcp or cli"),
+        ("surface" = String, Query, description = "Invocation surface: mcp, cli, or api (public v2)"),
         ("limit" = Option<i64>, Query, description = "Page size"),
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),

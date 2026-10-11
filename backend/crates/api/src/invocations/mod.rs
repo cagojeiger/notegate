@@ -1,5 +1,7 @@
 //! Shared invocation-history capture for external command surfaces.
 
+use std::time::{Duration, Instant};
+
 use notegate_command::CommandTool;
 use notegate_db::NewCommandInvocation;
 use notegate_model::{Caller, CallerIdentity};
@@ -9,12 +11,64 @@ use serde_json::Value;
 pub(crate) mod redaction;
 #[cfg(test)]
 pub(crate) mod test_support;
+use crate::observability::CommandInvocationMetrics;
 use crate::state::AppState;
+
+/// Shared completion boundary; adapters still interpret and redact their own results.
+pub(crate) struct InvocationCompletion {
+    metrics: CommandInvocationMetrics,
+    started: Instant,
+    history_started: Instant,
+    outcome: &'static str,
+}
+
+impl InvocationCompletion {
+    pub(crate) fn new(
+        metrics: CommandInvocationMetrics,
+        started: Instant,
+        elapsed: Duration,
+        error_code: Option<&str>,
+    ) -> Self {
+        let outcome = invocation_outcome(error_code);
+        metrics.execution_finished(outcome, elapsed);
+        Self {
+            metrics,
+            started,
+            history_started: Instant::now(),
+            outcome,
+        }
+    }
+
+    pub(crate) async fn record(
+        self,
+        state: &AppState,
+        caller: &Caller,
+        invocation: InvocationRecord<'_>,
+    ) {
+        let recorded = record(state, caller, invocation).await;
+        self.metrics
+            .history_finished(recorded, self.history_started.elapsed());
+        self.finish();
+    }
+
+    pub(crate) fn finish(self) {
+        self.metrics.finish(self.outcome, self.started.elapsed());
+    }
+}
+
+fn invocation_outcome(error_code: Option<&str>) -> &'static str {
+    if error_code.is_some() {
+        "error"
+    } else {
+        "success"
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InvocationSurface {
     Mcp,
     Cli,
+    Api,
 }
 
 impl InvocationSurface {
@@ -22,6 +76,7 @@ impl InvocationSurface {
         match self {
             Self::Mcp => "mcp",
             Self::Cli => "cli",
+            Self::Api => "api",
         }
     }
 }
@@ -52,11 +107,7 @@ pub(crate) async fn record(
         CallerIdentity::User(_) => (caller.account_id(), "user"),
         CallerIdentity::Agent(agent) => (agent.owner_user_id, "agent"),
     };
-    let outcome = if invocation.error_code.is_some() {
-        "error"
-    } else {
-        "success"
-    };
+    let outcome = invocation_outcome(invocation.error_code);
     let duration_ms = i64::try_from(invocation.elapsed_ms).unwrap_or(i64::MAX);
 
     if let Err(error) = state
