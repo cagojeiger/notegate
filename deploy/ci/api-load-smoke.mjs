@@ -208,7 +208,7 @@ try {
     "",
     "RPS includes response wait and per-worker pacing; this is a closed-loop workload, not a maximum-capacity benchmark. Peak in-flight is measured at the client. Errors count unexpected HTTP statuses or transport/parse failures; expected 409 conflicts are excluded. A failed worker stops without retry; content/history assertions are separate correctness gates.",
     "",
-    `API attempts including setup/readback: ${requests.length}. Successful writes: ${requests.filter((row) => row.ok && row.method !== "GET").length}.`,
+    `API attempts including setup/readback: ${requests.length}. Successful writes: ${requests.filter((row) => row.ok && row.status < 400 && row.method !== "GET").length}.`,
     "",
     `Correctness and latency budget: **${passed ? "PASS" : "FAIL"}**. Gate: expected HTTP statuses, content/hash, one successful racing write, complete invocation/Changes linkage, scenario p95 < 2000ms; each HTTP request times out after 10s.`,
     "Small timing differences are diagnostic. This does not measure production capacity, multi-user isolation or a production SLO.",
