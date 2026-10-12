@@ -80,18 +80,26 @@ machine JSON surface used by `notegate-cli`.
 
 The Browser E2E job runs `deploy/ci/api-load-smoke.mjs` against its disposable
 localhost app and PostgreSQL using the existing Node runtime and seeded identity.
-It exercises sequential reads, 10 concurrent readers, an 80/20 read/write mix,
-and 10 writes racing with the same expected hash. It verifies final content,
-exactly one winning write, and one invocation record per completed request with
+It exercises sequential reads and 10-reader baselines, then 100 virtual workers
+reading and performing an 80/20 read/write mix (20 requests per worker in each
+100-worker scenario), and 10 writes racing with the same expected hash. It verifies
+final content, exactly one winning write, and one invocation record per completed request with
 Changes linked only to committed writes. Generated documents share one owner/Space.
-Workers pause 100ms between operations; no request retries mask failures.
+Baseline workers pause 100ms after each response; 100-worker scenarios pause 1s
+and distribute writes across workers. No request retries mask failures.
 
-The job summary reports p50/p95 and paced throughput without additional artifacts.
+The job summary reports p50/p95/p99, paced throughput, duration, client peak
+in-flight requests, attempted/planned counts, request errors and HTTP 429 counts
+without additional artifacts. Expected 409 conflicts are excluded from request
+errors; content/history assertions remain separate correctness gates. Failed workers
+stop without retry. Measurements use a closed-loop workload (each worker waits for
+its response and pauses before sending again), so they do not measure maximum RPS.
 Unexpected results, missing/duplicate history, HTTP requests exceeding 10 seconds,
 or scenario p95 at/above 2 seconds fail CI; the step is bounded to 2 minutes.
 The loose latency budget catches large slowdowns. Smaller timing differences are
-diagnostic: the shared runner/debug build does not establish production capacity,
-multi-user isolation, or support for 1,000 concurrent users.
+diagnostic: the generator, app and database share a runner, and all virtual workers
+use one account/Space/key. This debug-build test does not establish production
+capacity, multi-user isolation, or support for 100 independent users.
 
 ## Resource utilization metrics
 

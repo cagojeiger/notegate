@@ -6,7 +6,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 const base = "http://127.0.0.1:9191";
 const origin = "http://localhost:9191";
-const workers = 10;
+const workers = 100;
+const raceWorkers = 10;
 const prefix = `ci-load-${randomUUID()}`;
 const payload = "# Synthetic CI document\n" + "Only generated test content belongs here.\n".repeat(128);
 const apiKey = process.env.NOTEGATE_PUBLIC_V2_API_KEY;
@@ -14,6 +15,8 @@ const session = process.env.NOTEGATE_BROWSER_SESSION;
 const requests = [];
 const reports = [];
 let requestId = 0;
+let inFlight = 0;
+let peakInFlight = 0;
 let space;
 let passed = false;
 
@@ -26,23 +29,35 @@ async function request(path, { method = "GET", body, statuses = [200] } = {}) {
   const api = path.startsWith("/api/v2/");
   const purpose = api ? `${prefix} request ${++requestId}` : undefined;
   const started = performance.now();
-  const response = await fetch(`${base}${path}`, {
-    method,
-    redirect: "error",
-    signal: AbortSignal.timeout(10_000),
-    headers: {
-      "Content-Type": "application/json",
-      ...(api
-        ? { Authorization: `Bearer ${apiKey}`, "X-Notegate-Purpose": encodeURIComponent(purpose) }
-        : { Cookie: `notegate_browser_session=${session}`, Origin: origin }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const data = response.status === 204 ? null : await response.json();
-  const result = { data, status: response.status, ms: performance.now() - started, purpose };
-  if (api) requests.push({ ...result, method });
-  assert.ok(statuses.includes(response.status), `${method} ${path}: unexpected HTTP ${response.status}`);
-  return result;
+  let status = 0;
+  let data;
+  let ok = false;
+  let ms;
+  peakInFlight = Math.max(peakInFlight, ++inFlight);
+  try {
+    const response = await fetch(`${base}${path}`, {
+      method,
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        "Content-Type": "application/json",
+        ...(api
+          ? { Authorization: `Bearer ${apiKey}`, "X-Notegate-Purpose": encodeURIComponent(purpose) }
+          : { Cookie: `notegate_browser_session=${session}`, Origin: origin }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    status = response.status;
+    data = status === 204 ? null : await response.json();
+    ok = statuses.includes(status);
+  } finally {
+    ms = performance.now() - started;
+    inFlight--;
+    // Keep measurements on failure without retaining thousands of response bodies.
+    if (api) requests.push({ status, method, purpose, ms, ok });
+  }
+  assert.ok(ok, `${method} ${path}: unexpected HTTP ${status}`);
+  return { data, status, ms, purpose };
 }
 
 async function read(document) {
@@ -52,22 +67,26 @@ async function read(document) {
   return result;
 }
 
-async function scenario(name, concurrency, iterations, operation) {
-  const samples = [];
+async function scenario(name, concurrency, iterations, pauseMs, operation) {
+  const firstRequest = requests.length;
   const started = performance.now();
+  peakInFlight = 0;
   // Join every worker even on failure before cleanup or the next scenario.
   const results = await Promise.allSettled(Array.from({ length: concurrency }, async (_, worker) => {
     for (let iteration = 0; iteration < iterations; iteration++) {
-      const result = await operation(worker, iteration);
-      samples.push(result.ms);
+      await operation(worker, iteration);
       // Bound offered load below the default limiter; never retry errors away.
-      await sleep(100);
+      await sleep(pauseMs);
     }
   }));
-  samples.sort((a, b) => a - b);
+  const measured = requests.slice(firstRequest);
+  const samples = measured.map((row) => row.ms).sort((a, b) => a - b);
   const percentile = (p) => samples[Math.ceil(samples.length * p) - 1] ?? 0;
   const p95 = percentile(0.95);
-  reports.push(`| ${name} | ${concurrency} | ${samples.length} | ${percentile(0.5).toFixed(1)} | ${p95.toFixed(1)} | ${(samples.length / ((performance.now() - started) / 1000)).toFixed(1)} |`);
+  const seconds = (performance.now() - started) / 1000;
+  const errors = measured.filter((row) => !row.ok).length;
+  const rateLimited = measured.filter((row) => row.status === 429).length;
+  reports.push(`| ${name} | ${concurrency} | ${peakInFlight} | ${samples.length}/${concurrency * iterations} | ${seconds.toFixed(1)} | ${percentile(0.5).toFixed(1)} | ${p95.toFixed(1)} | ${percentile(0.99).toFixed(1)} | ${(samples.length / seconds).toFixed(1)} | ${errors} (${(100 * errors / (samples.length || 1)).toFixed(1)}%) | ${rateLimited} |`);
   const failed = results.find((result) => result.status === "rejected");
   if (failed) throw failed.reason;
   // A deliberately loose smoke budget, not a production SLO or a microbenchmark.
@@ -77,7 +96,9 @@ async function scenario(name, concurrency, iterations, operation) {
 async function allPages(path, field) {
   const items = [];
   let cursor;
-  for (let page = 0; page < 20; page++) {
+  // Account for this workload plus the small pre-existing API smoke fixture.
+  const maxPages = Math.ceil(requests.length / 100) + 2;
+  for (let page = 0; page < maxPages; page++) {
     const query = new URLSearchParams({ limit: "100", ...(cursor ? { cursor } : {}) });
     const { data } = await request(`${path}${path.includes("?") ? "&" : "?"}${query}`);
     items.push(...data[field]);
@@ -110,11 +131,13 @@ try {
     documents.push({ id: data.id, content });
   }
   await read(documents[0]); // Warm the route before reporting.
-  await scenario("Sequential reads", 1, 20, () => read(documents[0]));
-  await scenario("Concurrent reads", workers, 20, (worker) => read(documents[worker]));
-  await scenario("Mixed: 80% read / 20% write", workers, 10, async (worker, iteration) => {
+  await scenario("Sequential reads (100ms pause)", 1, 20, 100, () => read(documents[0]));
+  await scenario("10 readers (100ms pause)", 10, 20, 100, (worker) => read(documents[worker]));
+  await scenario("100 readers (1s pause)", workers, 20, 1000, (worker) => read(documents[worker]));
+  await scenario("100 mixed: 80% read / 20% write (1s pause)", workers, 20, 1000, async (worker, iteration) => {
     const document = documents[worker];
-    if (iteration % 5 !== 4) return read(document);
+    // Spread writes across workers instead of synchronizing every fifth round.
+    if ((worker + iteration) % 5 !== 4) return read(document);
     const content = `${payload}worker ${worker} iteration ${iteration}\n`;
     const result = await request(`/api/v2/spaces/${space.id}/text/${document.id}`, {
       method: "PUT", body: { content, expected_sha256: sha256(document.content) },
@@ -128,7 +151,7 @@ try {
   const originalHash = sha256(shared.content);
   let winner;
   let conflicts = 0;
-  await scenario("Same-version write race", workers, 1, async (worker) => {
+  await scenario("Same-version write race", raceWorkers, 1, 0, async (worker) => {
     const content = `${payload}contender ${worker}\n`;
     const result = await request(`/api/v2/spaces/${space.id}/text/${shared.id}`, {
       method: "PUT", statuses: [200, 409],
@@ -143,7 +166,7 @@ try {
     }
     return result;
   });
-  assert.equal(conflicts, workers - 1);
+  assert.equal(conflicts, raceWorkers - 1);
   assert.ok(winner);
   shared.content = winner;
   for (const document of documents) await read(document);
@@ -152,33 +175,40 @@ try {
     .filter((row) => row.purpose?.startsWith(prefix));
   assert.equal(history.length, requests.length, "Every completed API request must have one history row");
   assert.equal(new Set(history.map((row) => row.invocation_id)).size, history.length);
+  const historyByPurpose = new Map(history.map((row) => [row.purpose, row]));
+  assert.equal(historyByPurpose.size, history.length, "History purposes must be unique");
   const changes = (await allPages(`/api/v1/spaces/${space.id}/file-change-events`, "events"))
     .filter((row) => row.metadata.purpose?.startsWith(prefix));
   assert.equal(changes.length, requests.filter((row) => row.method !== "GET" && row.status < 400).length,
     "Every committed write must create one Change without orphan or duplicate events");
+  const changesByInvocation = new Map(changes.map((row) => [row.metadata.invocation_id, row]));
+  assert.equal(changesByInvocation.size, changes.length, "A committed write must not duplicate Changes");
   for (const expected of requests) {
-    const matches = history.filter((row) => row.purpose === expected.purpose);
-    assert.equal(matches.length, 1, "History must not be missing or duplicated");
-    const [row] = matches;
+    const row = historyByPurpose.get(expected.purpose);
+    assert.ok(row, "History must not be missing");
     assert.ok(row.invocation_id);
     assert.equal(row.actor_account_id, me.account.id);
     assert.equal(row.response.status, expected.status);
     assert.equal(row.outcome, expected.status < 400 ? "success" : "error");
-    const linked = changes.filter((change) => change.metadata.invocation_id === row.invocation_id);
+    const linked = changesByInvocation.get(row.invocation_id);
     const committed = expected.method !== "GET" && expected.status < 400;
-    assert.equal(linked.length, committed ? 1 : 0, "Only committed writes may create Changes");
-    if (committed) assert.equal(linked[0].metadata.purpose, expected.purpose);
+    assert.equal(Boolean(linked), committed, "Only committed writes may create Changes");
+    if (committed) assert.equal(linked.metadata.purpose, expected.purpose);
   }
   passed = true;
 } finally {
   const summary = [
     "### API concurrency smoke",
     "",
-    "Disposable GitHub runner, debug build, one owner/Space/API key; 10 workers, not 1,000 users. HTTP timings include response-body consumption. RPS includes 100ms pacing per worker.",
+    "Disposable GitHub runner, debug build, one owner/Space/API key; up to 100 virtual workers, not 100 independent accounts. The load generator, app and PostgreSQL share the runner. HTTP timings include response-body consumption.",
     "",
-    "| Scenario | Workers | Completed | p50 ms | p95 ms | Observed RPS |",
-    "| --- | ---: | ---: | ---: | ---: | ---: |",
+    "| Scenario | Workers | Peak in-flight | Attempted/planned | Seconds | p50 ms | p95 ms | p99 ms | Observed RPS | Request errors | 429 |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ...reports,
+    "",
+    "RPS includes response wait and per-worker pacing; this is a closed-loop workload, not a maximum-capacity benchmark. Peak in-flight is measured at the client. Errors count unexpected HTTP statuses or transport/parse failures; expected 409 conflicts are excluded. A failed worker stops without retry; content/history assertions are separate correctness gates.",
+    "",
+    `API attempts including setup/readback: ${requests.length}. Successful writes: ${requests.filter((row) => row.ok && row.method !== "GET").length}.`,
     "",
     `Correctness and latency budget: **${passed ? "PASS" : "FAIL"}**. Gate: expected HTTP statuses, content/hash, one successful racing write, complete invocation/Changes linkage, scenario p95 < 2000ms; each HTTP request times out after 10s.`,
     "Small timing differences are diagnostic. This does not measure production capacity, multi-user isolation or a production SLO.",
