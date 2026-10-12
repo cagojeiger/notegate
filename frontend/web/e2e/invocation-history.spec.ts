@@ -28,10 +28,11 @@ const invocations: CommandInvocation[] = Array.from({ length: 51 }, (_, index) =
 
 for (const viewport of [
   { name: "desktop", width: 1440, height: 900 },
-  { name: "mobile", width: 390, height: 844 }
+  { name: "mobile", width: 390, height: 844 },
+  { name: "short-desktop", width: 1024, height: 320 }
 ]) {
   for (const theme of ["light", "dark"] as const) {
-    test(`API history stays within the panel and fetches on demand on ${viewport.name} in ${theme} mode`, async ({ page }, testInfo) => {
+    test(`history and settings keep stable frames on ${viewport.name} in ${theme} mode`, async ({ page }, testInfo) => {
       await page.setViewportSize(viewport);
       // Cache freshness must not depend on CI runner speed.
       await page.clock.setFixedTime(new Date("2026-10-11T14:00:00Z"));
@@ -45,6 +46,9 @@ for (const viewport of [
         if (url.pathname.endsWith("/nodes")) return { nodes: [], page: emptyPage };
         if (url.pathname.endsWith("/file-change-sync")) return { changes: [], next_after_id: 0, has_more: false, resync_required: false };
         if (url.pathname.endsWith("/file-change-events")) return { events: [], page: emptyPage };
+        if (url.pathname === "/api/v1/me/audit-events") return { events: [], page: emptyPage };
+        if (url.pathname === "/api/v1/me/jobs") return { jobs: [], page: emptyPage };
+        if (url.pathname === "/api/v1/agents") return { agents: Array.from({ length: 30 }, (_, i) => ({ id: `agent-${i}`, name: `Agent ${i}`, owner_user_id: "user-1" })), page: emptyPage };
         if (url.pathname === "/api/v1/me/command-invocations") {
           historyRequests.push(url);
           if (url.searchParams.get("surface") !== "api") return { command_invocations: [], page: emptyPage };
@@ -61,16 +65,36 @@ for (const viewport of [
       await page.getByRole("button", { name: "History", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "History" });
       await expect(dialog.getByText("No changes yet.")).toBeVisible();
+      const bounds = await dialog.boundingBox();
+      if (!bounds) throw new Error("History dialog missing");
+      expect(bounds.y).toBeGreaterThanOrEqual(16);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height - 16);
+      const tabs = dialog.getByRole("tablist");
+      const tabBounds = await tabs.boundingBox();
       expect(historyRequests).toHaveLength(0);
-      await dialog.getByRole("tab", { name: "API", exact: true }).click();
+      let release!: () => void;
+      const loading = new Promise<void>((resolve) => { release = resolve; });
+      await page.route("**/api/v1/me/command-invocations?surface=api&limit=50", async (route) => {
+        await loading;
+        await route.fallback();
+      });
+      try {
+        await dialog.getByRole("tab", { name: "API", exact: true }).click();
+        await expect(dialog.getByText("Loading…", { exact: true })).toBeVisible();
+        expect(await dialog.boundingBox()).toEqual(bounds);
+      } finally {
+        release();
+      }
       const rows = dialog.locator("ol > li");
       await expect(rows).toHaveCount(50);
+      expect(await dialog.boundingBox()).toEqual(bounds);
       expect(historyRequests.map((url) => url.search)).toEqual(["?surface=api&limit=50"]);
       const panel = dialog.locator("section");
       expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 
       await rows.first().getByText("Response", { exact: true }).click();
       await expect(rows.first().locator("pre")).toContainText('"status": 200');
+      expect(await dialog.boundingBox()).toEqual(bounds);
       expect(historyRequests).toHaveLength(1);
       await testInfo.attach(`invocation-history-${viewport.name}-${theme}`, {
         body: await page.screenshot({ path: `test-results/invocation-history-${viewport.name}-${theme}.png` }),
@@ -79,6 +103,8 @@ for (const viewport of [
 
       await dialog.getByRole("tab", { name: "CLI", exact: true }).click();
       await expect(dialog.getByText("No CLI calls.")).toBeVisible();
+      expect(await dialog.boundingBox()).toEqual(bounds);
+      await page.screenshot({ path: `test-results/invocation-history-empty-${viewport.name}-${theme}.png` });
       await dialog.getByRole("tab", { name: "API", exact: true }).click();
       await expect(rows).toHaveCount(50);
       expect(historyRequests.map((url) => url.searchParams.get("surface"))).toEqual(["api", "cli"]);
@@ -87,6 +113,35 @@ for (const viewport of [
       await expect(rows).toHaveCount(51);
       expect(historyRequests.at(-1)?.search).toBe("?surface=api&limit=50&cursor=api-page-2");
       await expect(dialog.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
+      expect(await dialog.getByRole("tabpanel").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      expect(await tabs.boundingBox()).toEqual(tabBounds);
+      expect(await dialog.boundingBox()).toEqual(bounds);
+      expect(await dialog.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
+      for (const [tab, empty] of [["MCP", "No MCP calls."], ["Audit", "No audit events."], ["Jobs", "No background jobs yet."], ["Changes", "No changes yet."]]) {
+        await dialog.getByRole("tab", { name: tab, exact: true }).click();
+        await expect(dialog.getByText(empty, { exact: true })).toBeVisible();
+        expect(await dialog.boundingBox()).toEqual(bounds);
+        expect(await dialog.getByRole("tabpanel").evaluate((element) => element.scrollTop)).toBe(0);
+      }
+
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
+      const settings = page.getByRole("dialog", { name: "Settings" });
+      const settingsBounds = await settings.boundingBox();
+      for (const tab of ["Account", "Agents", "General"]) {
+        await settings.getByRole("tab", { name: tab, exact: true }).click();
+        if (tab === "Agents") {
+          await expect(settings.getByRole("button", { name: "Toggle Agent 29 details", exact: true })).toBeAttached();
+          await settings.getByRole("button", { name: "Toggle Agent 29 details", exact: true }).scrollIntoViewIfNeeded();
+          expect(await settings.getByRole("tabpanel").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+        } else {
+          expect(await settings.getByRole("tabpanel").evaluate((element) => element.scrollTop)).toBe(0);
+        }
+        expect(await settings.boundingBox()).toEqual(settingsBounds);
+        expect(await settings.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
+        await expect(settings.getByRole("tablist")).toBeInViewport();
+        await expect(settings.getByRole("button", { name: "Close", exact: true })).toBeInViewport();
+      }
     });
   }
 }

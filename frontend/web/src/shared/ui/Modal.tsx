@@ -20,6 +20,7 @@ export function Modal({
   children,
   footer,
   width = "max-w-md",
+  fixedHeight = false,
   placement = "center"
 }: {
   title: ReactNode;
@@ -27,6 +28,7 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   width?: string;
+  fixedHeight?: boolean;
   placement?: "center" | "bottom";
 }) {
   const titleId = useId();
@@ -34,6 +36,9 @@ export function Modal({
   const onCloseRef = useRef(onClose);
   const previousFocusRef = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const bottomSheet = placement === "bottom";
+  const centeredLayout = fixedHeight
+    ? "flex h-[min(48rem,calc(100dvh-2rem))] flex-col overflow-hidden"
+    : "max-h-[calc(100vh-2rem)] overflow-y-auto";
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -100,10 +105,10 @@ export function Modal({
         className={`relative w-full ${width} border border-border bg-panel font-ui text-workbench shadow-[var(--ng-focus-shadow)] ${
           bottomSheet
             ? "flex h-[82dvh] flex-col overflow-hidden rounded-t-2xl border-b-0"
-            : "max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg p-6"
+            : `${centeredLayout} rounded-lg p-6`
         }`}
       >
-        <div className={`flex items-center justify-between ${bottomSheet ? "h-12 shrink-0 border-b border-seam px-3" : "mb-4"}`}>
+        <div className={`flex shrink-0 items-center justify-between ${bottomSheet ? "h-12 border-b border-seam px-3" : "mb-4"}`}>
           <h2 id={titleId} className={bottomSheet ? "text-sm font-medium" : "text-base font-semibold"}>{title}</h2>
           <IconButton label="Close" onClick={onClose}><X size={16} /></IconButton>
         </div>
@@ -112,7 +117,7 @@ export function Modal({
             {children}
           </div>
         ) : children}
-        {footer ? <div className="mt-5 flex justify-end gap-2">{footer}</div> : null}
+        {footer ? <div className="mt-5 flex shrink-0 justify-end gap-2">{footer}</div> : null}
       </div>
     </div>
   );

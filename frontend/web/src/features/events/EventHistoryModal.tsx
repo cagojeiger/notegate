@@ -40,9 +40,9 @@ export function EventHistoryModal({
   }, [canViewAuditEvents, tab]);
 
   return (
-    <Modal title="History" onClose={onClose} width="max-w-5xl">
-      <Tabs items={tabs} value={tab} onChange={setTab} label="History sections" />
-      <div className="min-h-[20rem] max-h-[min(68vh,42rem)] overflow-y-auto pr-1 sm:min-h-[24rem]">
+    <Modal title="History" onClose={onClose} width="max-w-5xl" fixedHeight>
+      <div className="shrink-0"><Tabs items={tabs} value={tab} onChange={setTab} label="History sections" /></div>
+      <div key={tab} role="tabpanel" aria-label={`${tabs.find((item) => item.id === tab)?.label ?? "Changes"} history`} className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
         {canViewAuditEvents && tab === "audit" ? <AuditEventsPanel /> : null}
         {canViewAuditEvents && tab === "mcp" ? <CommandInvocationsPanel surface="mcp" /> : null}
         {canViewAuditEvents && tab === "cli" ? <CommandInvocationsPanel surface="cli" /> : null}

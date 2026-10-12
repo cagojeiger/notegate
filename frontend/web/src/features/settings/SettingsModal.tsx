@@ -28,9 +28,9 @@ export function SettingsModal({ me, onClose, onSignOut, onResetSavedWorkspace = 
   }, [showAgents, tab]);
 
   return (
-    <Modal title="Settings" onClose={onClose} width="max-w-2xl">
-      <Tabs items={tabs} value={tab} onChange={setTab} label="Settings sections" />
-      <div className="min-h-[34rem] max-h-[min(68vh,42rem)] overflow-y-auto pr-1">
+    <Modal title="Settings" onClose={onClose} width="max-w-2xl" fixedHeight>
+      <div className="shrink-0"><Tabs items={tabs} value={tab} onChange={setTab} label="Settings sections" /></div>
+      <div key={tab} role="tabpanel" aria-label={`${tabs.find((item) => item.id === tab)?.label ?? "General"} settings`} className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
         {tab === "general" ? <GeneralTab onResetSavedWorkspace={onResetSavedWorkspace} /> : null}
         {tab === "account" ? <AccountTab me={me} onSignOut={onSignOut} /> : null}
         {tab === "agents" && showAgents ? <AgentsTab canManageAgents={showAgents} /> : null}

@@ -63,7 +63,7 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
           </span>
         ))}
       </div>
-      <Card padding="none" className="mt-3 max-h-64 min-h-[8rem] overflow-y-auto p-1">
+      <Card padding="none" className="mt-3 h-[min(16rem,40dvh)] overflow-y-auto overscroll-contain p-1 [scrollbar-gutter:stable]">
         {childrenQuery.isLoading ? (
           <div className="px-3 py-2 text-sm text-muted">Loading…</div>
         ) : childrenQuery.isLoadingError ? (
