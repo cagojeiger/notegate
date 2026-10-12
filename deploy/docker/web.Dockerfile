@@ -8,7 +8,7 @@
 #
 # We use Debian instead of Alpine to avoid musl-specific surprises and to keep
 # Rust crate builds close to the runtime libc.
-FROM rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e AS chef
+FROM rust:1.99.0-bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6 AS chef
 
 WORKDIR /app
 # Native toolchain for crates with C build scripts, plus certificates for Cargo HTTPS.
@@ -46,7 +46,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 #
 # The final runtime image serves this Vite build from the Rust server, so the
 # deployed `web` container contains both the dashboard and the API/MCP backend.
-FROM node:22.23.2-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9 AS web-builder
+FROM node:22.23.3-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS web-builder
 
 WORKDIR /app
 ENV PNPM_HOME=/pnpm \
