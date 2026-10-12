@@ -89,8 +89,18 @@ Baseline workers pause 100ms after each response; 100-worker scenarios pause 1s
 and distribute writes across workers. No request retries mask failures.
 
 The job summary reports p50/p95/p99, paced throughput, duration, client peak
-in-flight requests, attempted/planned counts, request errors and HTTP 429 counts
-without additional artifacts. Expected 409 conflicts are excluded from request
+in-flight requests, attempted/planned counts, request errors and HTTP 429 counts.
+It also separates GET/PUT tails, maxima and requests over one second, matches each
+request to the handler duration in invocation history, and measures existing
+execution/history/completion and pool-acquisition histogram deltas. HTTP time
+minus handler time includes authentication, history persistence, transport and
+client scheduling; it does not isolate history persistence. Pool observations
+include all queries and background work, not one sample per HTTP request.
+The job enables existing metrics and samples PostgreSQL waits every 200ms without
+exporting SQL, credentials or document contents. Request measurements, histogram
+snapshots and sampled waits are retained for seven days in `api-load-diagnostics`,
+including successful runs. Short waits may fall between samples.
+Expected 409 conflicts are excluded from request
 errors; content/history assertions remain separate correctness gates. Failed workers
 stop without retry. Measurements use a closed-loop workload (each worker waits for
 its response and pauses before sending again), so they do not measure maximum RPS.

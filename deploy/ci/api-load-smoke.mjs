@@ -2,6 +2,7 @@
 // These debug-build timings do not establish production capacity or user counts.
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const base = "http://127.0.0.1:9191";
@@ -14,6 +15,15 @@ const apiKey = process.env.NOTEGATE_PUBLIC_V2_API_KEY;
 const session = process.env.NOTEGATE_BROWSER_SESSION;
 const requests = [];
 const reports = [];
+const diagnostics = [];
+const stageReports = [];
+const metricNames = [
+  "notegate_command_invocation_duration_seconds",
+  "notegate_command_history_duration_seconds",
+  "notegate_command_completion_duration_seconds",
+  "notegate_db_pool_acquire_duration_seconds",
+];
+let activeScenario;
 let requestId = 0;
 let inFlight = 0;
 let peakInFlight = 0;
@@ -28,6 +38,8 @@ const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 async function request(path, { method = "GET", body, statuses = [200] } = {}) {
   const api = path.startsWith("/api/v2/");
   const purpose = api ? `${prefix} request ${++requestId}` : undefined;
+  const sequence = requestId;
+  const startedAt = Date.now();
   const started = performance.now();
   let status = 0;
   let data;
@@ -54,7 +66,7 @@ async function request(path, { method = "GET", body, statuses = [200] } = {}) {
     ms = performance.now() - started;
     inFlight--;
     // Keep measurements on failure without retaining thousands of response bodies.
-    if (api) requests.push({ status, method, purpose, ms, ok });
+    if (api) requests.push({ status, method, purpose, ms, ok, sequence, startedAt, scenario: activeScenario });
   }
   assert.ok(ok, `${method} ${path}: unexpected HTTP ${status}`);
   return { data, status, ms, purpose };
@@ -67,9 +79,29 @@ async function read(document) {
   return result;
 }
 
+function percentile(samples, p) {
+  const sorted = [...samples].sort((a, b) => a - b);
+  return sorted[Math.ceil(sorted.length * p) - 1] ?? 0;
+}
+
+async function metricsSnapshot() {
+  const response = await fetch(`${base}/metrics`, { signal: AbortSignal.timeout(5000), redirect: "error" });
+  assert.equal(response.status, 200, "CI latency diagnosis requires the existing metrics endpoint");
+  return (await response.text()).split("\n").filter((line) =>
+    metricNames.some((name) => line.startsWith(`${name}_`)) &&
+    (!line.startsWith("notegate_command_") || line.includes('surface="api"')));
+}
+
+function metricValue(snapshot, name, label) {
+  return snapshot.filter((line) => (line.startsWith(`${name}{`) || line.startsWith(`${name} `)) &&
+    (!label || line.includes(label))).reduce((sum, line) => sum + Number(line.split(" ").at(-1)), 0);
+}
+
 async function scenario(name, concurrency, iterations, pauseMs, operation) {
+  const before = await metricsSnapshot();
   const firstRequest = requests.length;
   const started = performance.now();
+  activeScenario = name;
   peakInFlight = 0;
   // Join every worker even on failure before cleanup or the next scenario.
   const results = await Promise.allSettled(Array.from({ length: concurrency }, async (_, worker) => {
@@ -81,12 +113,21 @@ async function scenario(name, concurrency, iterations, pauseMs, operation) {
   }));
   const measured = requests.slice(firstRequest);
   const samples = measured.map((row) => row.ms).sort((a, b) => a - b);
-  const percentile = (p) => samples[Math.ceil(samples.length * p) - 1] ?? 0;
-  const p95 = percentile(0.95);
+  activeScenario = undefined;
+  const p95 = percentile(samples, 0.95);
   const seconds = (performance.now() - started) / 1000;
   const errors = measured.filter((row) => !row.ok).length;
   const rateLimited = measured.filter((row) => row.status === 429).length;
-  reports.push(`| ${name} | ${concurrency} | ${peakInFlight} | ${samples.length}/${concurrency * iterations} | ${seconds.toFixed(1)} | ${percentile(0.5).toFixed(1)} | ${p95.toFixed(1)} | ${percentile(0.99).toFixed(1)} | ${(samples.length / seconds).toFixed(1)} | ${errors} (${(100 * errors / (samples.length || 1)).toFixed(1)}%) | ${rateLimited} |`);
+  reports.push(`| ${name} | ${concurrency} | ${peakInFlight} | ${samples.length}/${concurrency * iterations} | ${seconds.toFixed(1)} | ${percentile(samples, 0.5).toFixed(1)} | ${p95.toFixed(1)} | ${percentile(samples, 0.99).toFixed(1)} | ${(samples.length / seconds).toFixed(1)} | ${errors} (${(100 * errors / (samples.length || 1)).toFixed(1)}%) | ${rateLimited} |`);
+  const after = await metricsSnapshot();
+  diagnostics.push({ scenario: name, before, after });
+  for (const metric of metricNames) {
+    const delta = (suffix, label) => metricValue(after, `${metric}_${suffix}`, label) -
+      metricValue(before, `${metric}_${suffix}`, label);
+    const count = delta("count");
+    assert.ok(count > 0, `Missing latency diagnostic metric: ${metric}`);
+    stageReports.push(`| ${name} | ${metric} | ${count} | ${(1000 * delta("sum") / count).toFixed(1)} | ${count - delta("bucket", 'le="1"')} |`);
+  }
   const failed = results.find((result) => result.status === "rejected");
   if (failed) throw failed.reason;
   // A deliberately loose smoke budget, not a production SLO or a microbenchmark.
@@ -190,6 +231,8 @@ try {
     assert.equal(row.actor_account_id, me.account.id);
     assert.equal(row.response.status, expected.status);
     assert.equal(row.outcome, expected.status < 400 ? "success" : "error");
+    assert.ok(Number.isFinite(row.duration_ms) && row.duration_ms >= 0);
+    expected.handlerMs = row.duration_ms;
     const linked = changesByInvocation.get(row.invocation_id);
     const committed = expected.method !== "GET" && expected.status < 400;
     assert.equal(Boolean(linked), committed, "Only committed writes may create Changes");
@@ -197,6 +240,24 @@ try {
   }
   passed = true;
 } finally {
+  const methodReports = [];
+  for (const { scenario: name } of diagnostics) {
+    for (const method of ["GET", "PUT"]) {
+      const measured = requests.filter((row) => row.scenario === name && row.method === method);
+      if (!measured.length) continue;
+      const samples = measured.map((row) => row.ms);
+      const handlerSamples = measured.map((row) => row.handlerMs).filter(Number.isFinite);
+      const handlerP99 = handlerSamples.length === measured.length ? percentile(handlerSamples, 0.99).toFixed(1) : "unavailable";
+      methodReports.push(`| ${name} | ${method} | ${samples.length} | ${percentile(samples, 0.95).toFixed(1)} | ${percentile(samples, 0.99).toFixed(1)} | ${Math.max(...samples).toFixed(1)} | ${samples.filter((ms) => ms > 1000).length} | ${handlerP99} |`);
+    }
+  }
+  const slowest = requests.filter((row) => row.scenario).sort((a, b) => b.ms - a.ms).slice(0, 10);
+  mkdirSync("browser-e2e", { recursive: true });
+  writeFileSync("browser-e2e/api-load-diagnostics.json", JSON.stringify({
+    diagnostics,
+    // Synthetic sequence numbers correlate requests without exporting auth, content or identities.
+    requests: requests.map(({ purpose, ...measurement }) => measurement),
+  }, null, 2));
   const summary = [
     "### API concurrency smoke",
     "",
@@ -205,6 +266,22 @@ try {
     "| Scenario | Workers | Peak in-flight | Attempted/planned | Seconds | p50 ms | p95 ms | p99 ms | Observed RPS | Request errors | 429 |",
     "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ...reports,
+    "",
+    "| Scenario | Method | Requests | HTTP p95 ms | HTTP p99 ms | HTTP max ms | HTTP >1s | Handler p99 ms |",
+    "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ...methodReports,
+    "",
+    "Handler duration comes from the matched invocation history and excludes authentication before capture and history persistence after execution. The HTTP-minus-handler remainder includes those stages, transport and client scheduling/body parsing; it is not history time alone. Percentiles from different populations must not be subtracted.",
+    "",
+    "| Slowest request | Scenario | Method | Status | HTTP ms | Handler ms | Remainder ms |",
+    "| ---: | --- | --- | ---: | ---: | ---: | ---: |",
+    ...slowest.map((row) => `| ${row.sequence} | ${row.scenario} | ${row.method} | ${row.status} | ${row.ms.toFixed(1)} | ${row.handlerMs ?? "unavailable"} | ${row.handlerMs === undefined ? "unavailable" : (row.ms - row.handlerMs).toFixed(1)} |`),
+    "",
+    "| Scenario | Server metric | Observations | Mean ms | >1s observations |",
+    "| --- | --- | ---: | ---: | ---: |",
+    ...stageReports,
+    "",
+    "Server metrics are histogram deltas between scenario boundaries. Pool acquisition includes every query and background work, so it is not a per-request duration. The artifact retains samples and PostgreSQL wait snapshots for correlation; sampling cannot prove the absence of shorter waits.",
     "",
     "RPS includes response wait and per-worker pacing; this is a closed-loop workload, not a maximum-capacity benchmark. Peak in-flight is measured at the client. Errors count unexpected HTTP statuses or transport/parse failures; expected 409 conflicts are excluded. A failed worker stops without retry; content/history assertions are separate correctness gates.",
     "",
