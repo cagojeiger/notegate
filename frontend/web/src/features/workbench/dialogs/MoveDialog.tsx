@@ -1,5 +1,5 @@
 import { ChevronRight, Folder, FolderOpen, LockKeyhole } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, Card, EmptyState, Modal } from "../../../shared/ui";
 import { useNodeChildrenQuery } from "../../nodes/useNodeQueries";
@@ -13,6 +13,11 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
   const [stack, setStack] = useState<Crumb[]>([{ id: space.root_node_id, name: "/" }]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const breadcrumbsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const breadcrumbs = breadcrumbsRef.current;
+    if (breadcrumbs) breadcrumbs.scrollLeft = breadcrumbs.scrollWidth;
+  }, [stack]);
   const current = stack[stack.length - 1];
   const childrenQuery = useNodeChildrenQuery(space.id, current.id, true);
   // Only folders are valid destinations; never let the user descend into the
@@ -49,9 +54,9 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
         </>
       }
     >
-      <div className="flex flex-wrap items-center gap-1 text-xs text-muted">
+      <div ref={breadcrumbsRef} role="navigation" aria-label="Destination path" className="flex h-9 items-center gap-1 overflow-x-auto whitespace-nowrap text-xs text-muted">
         {stack.map((crumb, index) => (
-          <span key={crumb.id} className="flex items-center gap-1">
+          <span key={crumb.id} className="flex shrink-0 items-center gap-1">
             {index > 0 ? <ChevronRight size={12} className="text-faint" /> : null}
             <button
               type="button"
@@ -109,8 +114,8 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
           </>
         )}
       </Card>
-      <p className="mt-3 text-xs text-muted">Destination: <span className="font-mono text-text">{current.name === "/" ? "/" : current.name}</span>{alreadyHere ? " (already here)" : ""}</p>
-      {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
+      <p className="mt-3 truncate text-xs text-muted" title={current.name}>Destination: <span className="font-mono text-text">{current.name === "/" ? "/" : current.name}</span>{alreadyHere ? " (already here)" : ""}</p>
+      <div className="mt-2 h-12 overflow-y-auto overscroll-contain break-words text-xs text-danger">{error ? <p role="alert">{error}</p> : null}</div>
     </Modal>
   );
 }

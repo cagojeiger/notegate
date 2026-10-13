@@ -35,7 +35,7 @@ export function ConfirmDialog({ dialog, onClose }: { dialog: Extract<AppDialog, 
       }
     >
       <p className="text-sm leading-6 text-muted">{dialog.message}</p>
-      {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
+      <div className="mt-2 h-12 overflow-y-auto overscroll-contain break-words text-xs text-danger">{error ? <p role="alert">{error}</p> : null}</div>
     </Modal>
   );
 }

@@ -61,7 +61,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
         : restore.error instanceof Error ? restore.error.message : null;
 
   return createPortal(
-    <Modal title={`Version history · ${node.name}`} width="max-w-6xl" onClose={() => { if (!restore.isPending) onClose(); }} footer={
+    <Modal title={`Version history · ${node.name}`} width="max-w-6xl" fixedHeight onClose={() => { if (!restore.isPending) onClose(); }} footer={
       <div className="flex w-full flex-wrap items-center justify-between gap-3 border-t border-seam pt-4">
         <p className="max-w-xl text-xs text-muted" role="status">{confirming
           ? "Restore this entire version? The current saved content will remain in history."
@@ -72,7 +72,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
         </div>
       </div>
     }>
-      <div className="flex h-[min(62dvh,42rem)] min-h-64 flex-col gap-4 md:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
         <button ref={versionPicker} type="button" aria-label="Choose saved version" aria-controls={versionsId} aria-expanded={versionsOpen} disabled={restore.isPending} onClick={() => setVersionsOpen(!versionsOpen)} className="flex min-h-workbench-control shrink-0 items-center justify-between gap-2 rounded-workbench border border-border-strong bg-surface px-3 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary/45 md:hidden">
           <span>{showingCurrent ? "Current saved version" : selected ? <>{formatTime(selected.written_at)} · {sourceLabel(selected.source)}</> : "Choose saved version"}</span>
           <ChevronDown size={16} aria-hidden="true" className={`shrink-0 ${versionsOpen ? "rotate-180" : ""}`} />
@@ -94,7 +94,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
           ))}
           {list.hasNextPage ? <Button secondary size="sm" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>Load more</Button> : null}
         </nav>
-        <section aria-label="Version content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-visible">
+        <section aria-label="Version content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
           <Tabs items={[{ id: "diff", label: "Compare changes", disabled: showingCurrent }, { id: "full", label: "Full version" }]} value={showingCurrent ? "full" : view} onChange={setView} label="Version view" />
           <details key={showingCurrent ? "current" : selected?.id} className="mb-2 shrink-0 text-sm text-muted">
             <summary aria-label="Change reason" className="cursor-pointer list-inside truncate"><span className="font-medium">Save reason:</span> {purpose ?? "Not recorded"}</summary>

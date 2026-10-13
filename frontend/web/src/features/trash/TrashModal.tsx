@@ -76,15 +76,14 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
   }, [confirmation]);
 
   useEffect(() => {
-    if (notice) noticeRef.current?.focus({ preventScroll: true });
+    if (notice) noticeRef.current?.focus();
   }, [notice]);
 
   return (
-    <Modal title={<span className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-workbench-surface bg-panel-strong text-muted"><Trash2 size={18} aria-hidden="true" /></span>Trash</span>} width="max-w-3xl" onClose={onClose}>
-      <p className="mb-4 border-b border-seam pb-4 text-muted">Deleted items are kept for 30 days.</p>
-      {notice ? <p ref={noticeRef} role="status" tabIndex={-1} className="mb-3 break-words outline-none">{notice}</p> : null}
-      {mutation.error ? <p role="alert" className="mb-3 text-danger">{mutation.error instanceof ApiError && mutation.error.status === 404 ? "This item is no longer available in this trash view." : mutation.error instanceof Error ? mutation.error.message : "Request failed"}</p> : null}
-      <div className="grid gap-4 md:h-[min(56dvh,25rem)] md:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+    <Modal title={<span className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-workbench-surface bg-panel-strong text-muted"><Trash2 size={18} aria-hidden="true" /></span>Trash</span>} width="max-w-3xl" fixedHeight onClose={onClose}>
+      <p className="mb-4 shrink-0 border-b border-seam pb-4 text-muted">Deleted items are kept for 30 days.</p>
+      <div role="region" aria-label="Trash contents" className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] md:overflow-hidden md:[scrollbar-gutter:auto]">
+      <div className="grid gap-4 md:h-full md:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] md:grid-rows-[minmax(0,1fr)]">
         <Card padding="sm" className="flex min-h-0 min-w-0 flex-col" style={{ borderRadius: "var(--ng-workbench-surface-radius)" }}>
           <div className="mb-2 flex items-center justify-between">
             <h3 className="font-medium">Deleted items</h3>
@@ -127,6 +126,8 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
           {query.hasNextPage ? <Button secondary className="mt-2 shrink-0" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void query.fetchNextPage(); }}>{query.isFetchingNextPage ? "Loading…" : "Load more"}</Button> : null}
         </Card>
         <div ref={detailsRef} className="min-h-0 min-w-0 border-t border-seam pt-4 md:overflow-y-auto md:overscroll-contain md:border-l md:border-t-0 md:pl-4 md:pt-0">
+          {notice ? <p ref={noticeRef} role="status" tabIndex={-1} className="mb-3 break-words outline-none">{notice}</p> : null}
+          {mutation.error ? <p role="alert" className="mb-3 break-words text-danger">{mutation.error instanceof ApiError && mutation.error.status === 404 ? "This item is no longer available in this trash view." : mutation.error instanceof Error ? mutation.error.message : "Request failed"}</p> : null}
           {confirmation ? (
             <section aria-label="Confirm permanent deletion" className="flex h-full flex-col gap-3">
               <div id={`${descriptionId}-confirmation`}>
@@ -162,6 +163,7 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
             </section>
           ) : <p className="text-muted">Select an item to restore or permanently delete.</p>}
         </div>
+      </div>
       </div>
     </Modal>
   );
