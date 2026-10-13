@@ -19,6 +19,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
       if (url.pathname === "/api/v1/me") return { account: { id: "user-1", kind: "user", display_name: "User" }, user: { email: "user@example.com" }, capabilities: { can_create_space: true, can_manage_agents: true } };
       if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
       if (url.pathname === "/api/v1/spaces") return { spaces: [space], page: meta };
+      if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${node.id}`) return node;
       if (url.pathname.endsWith("/children")) {
         const parentId = url.pathname.split("/").at(-2)!;
         return { parent: { id: parentId, path: "/" }, children: [...(parentId === space.root_node_id ? [node] : []), ...folders.filter((folder) => folder.parent_id === parentId)], page: meta };
