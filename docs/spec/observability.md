@@ -123,7 +123,8 @@ the default `all` mode, including background work, without induced background lo
 times in fresh 1440×900 Chromium contexts against one warm server/database:
 workspace loading, Files and nested Recent navigation, editor/save, revision diff,
 History tabs/pagination, and trash listing/pagination/details. The fixture has 120
-root documents, three nested folders, an approximately 87KB Markdown document,
+root documents, three nested folders, an approximately 87KB Markdown document
+(about 600 lines, within the diff's 1,500 combined-line limit),
 55 deleted documents and 55 real API invocations. MCP/CLI/Jobs exercise empty states;
 Changes/API exercise populated histories. Each round adds a saved revision, so the
 database is bounded but not reset between rounds.

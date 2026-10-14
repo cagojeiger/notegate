@@ -4,8 +4,9 @@ import type { RestNode, Space, ReadTextResponse } from "../src/api/types";
 import { instrument, writeReport, type Measurement } from "./measure";
 
 const fixture = { rootDocuments: 120, nestedDepth: 3, trashItems: 55, apiCalls: 55, trials: 3 };
-const content = `# Baseline document\n\n${Array.from({ length: 800 }, (_, index) =>
-  `Paragraph ${index}: synthetic Markdown for browser rendering, with **emphasis** and a stable measurement payload.\n`
+// Keep roughly 87KB while fitting the diff contract (1,500 combined lines).
+const content = `# Baseline document\n\n${Array.from({ length: 300 }, (_, index) =>
+  `Paragraph ${index}: ${"synthetic Markdown for browser rendering, with **emphasis** and a stable measurement payload. ".repeat(3)}\n`
 ).join("\n")}`;
 
 test("authenticated workbench performance baseline", async ({ browser, playwright, baseURL }) => {
@@ -78,12 +79,12 @@ test("authenticated workbench performance baseline", async ({ browser, playwrigh
           await page.getByRole("button", { name: "Edit", exact: true }).click();
           await expect(page.getByRole("textbox", { name: "Edit text content" })).toHaveValue(initial);
         });
-        const updated = initial.replace("Paragraph 400:", "Changed paragraph 400:");
+        const updated = initial.replace("Paragraph 150:", "Changed paragraph 150:");
         await page.getByRole("textbox", { name: "Edit text content" }).fill(updated);
         await measure("save-to-preview", async () => {
           await page.getByRole("button", { name: "Save", exact: true }).click();
           await expect(page.getByRole("textbox", { name: "Edit text content" })).toHaveCount(0);
-          await expect(preview).toContainText("Changed paragraph 400:");
+          await expect(preview).toContainText("Changed paragraph 150:");
         });
         const saved = await request<ReadTextResponse>(`${path}/text/${document.id}?max_lines=5000&max_bytes=1048576`);
         expect(saved.text.storage_format).toBe("plain");
