@@ -124,11 +124,29 @@ test("closes the mobile Inspector after an outline navigation", async ({ page })
   await expect(inspector).toHaveCount(0);
 });
 
-async function mockApi(page: import("@playwright/test").Page) {
-  await routeJsonApi(page, (url) => responseFor(url));
+test("renders Mermaid math and sanitizes diagram labels with the security dependency overrides", async ({ page }) => {
+  await mockApi(page, [
+    "```mermaid",
+    "graph LR",
+    '  A["$$x^2$$"] --> B["<b onclick=\'alert(1)\'>Safe</b>"]',
+    "```"
+  ].join("\n"));
+  await page.goto("/");
+  await page.getByRole("button", { name: markdownNode.name }).first().click();
+
+  const diagram = page.locator(".ng-mermaid svg");
+  await expect(diagram).toBeVisible();
+  await expect(diagram.locator("math msup")).toBeVisible();
+  await expect(diagram.getByText("Safe", { exact: true })).toBeVisible();
+  await expect(diagram.locator("[onclick], script")).toHaveCount(0);
+  await expect(page.locator(".ng-mermaid-error")).toHaveCount(0);
+});
+
+async function mockApi(page: import("@playwright/test").Page, content = longMarkdown()) {
+  await routeJsonApi(page, (url) => responseFor(url, content));
 }
 
-function responseFor(url: URL) {
+function responseFor(url: URL, content: string) {
   if (url.pathname === "/api/v1/me") return me;
   if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
   if (url.pathname === "/api/v1/spaces") {
@@ -156,7 +174,7 @@ function responseFor(url: URL) {
       text: {
         node_id: markdownNode.id,
         storage_format: "plain",
-        content: longMarkdown(),
+        content,
         content_sha256: markdownNode.content_sha256,
         byte_len: markdownNode.byte_len,
         line_count: markdownNode.line_count,
