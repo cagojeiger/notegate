@@ -309,6 +309,8 @@ jobs:
           echo "browser_session=$session" >> "$GITHUB_OUTPUT"
 
       - name: Start application
+        env:
+          NOTEGATE_METRICS_ENABLED: "true"
         run: |
           mkdir -p browser-e2e
           cargo build --locked --quiet --package notegate-api --bins
@@ -367,6 +369,51 @@ jobs:
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
             http://127.0.0.1:9191/api/v2/me)" = "401"
 
+      - name: Check API concurrency and latency smoke budgets
+        timeout-minutes: 2
+        shell: bash
+        env:
+          NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.seed_test_identity.outputs.agent_api_key }}
+          NOTEGATE_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
+        run: |
+          # Observe only the disposable local DB; never export SQL text or bind values.
+          psql postgres://notegate:notegate@localhost:5432/notegate \
+            --no-psqlrc --no-align --tuples-only --set=ON_ERROR_STOP=1 \
+            >browser-e2e/api-load-postgres.txt 2>&1 <<'SQL' &
+          SELECT json_build_object(
+            'at', statement_timestamp(),
+            'waits', coalesce(json_agg(w), '[]'::json)
+          ) FROM (
+            SELECT state, wait_event_type, wait_event,
+              CASE
+                WHEN query LIKE '%FOR UPDATE OF acc%' THEN 'owner_lock'
+                WHEN query LIKE '%FROM spaces%FOR UPDATE%' THEN 'space_lock'
+                WHEN query LIKE '%INSERT INTO command_invocations%' THEN 'invocation_insert'
+                ELSE 'other'
+              END AS operation,
+              count(*) AS connections,
+              max(extract(epoch FROM statement_timestamp() - query_start) * 1000) AS max_query_age_ms
+            FROM pg_stat_activity
+            WHERE datname = current_database() AND pid <> pg_backend_pid()
+              AND state <> 'idle'
+            GROUP BY 1, 2, 3, 4
+          ) w;
+          \watch 0.2
+          SQL
+          observer_pid=$!
+          trap 'kill "$observer_pid" 2>/dev/null || true; wait "$observer_pid" 2>/dev/null || true' EXIT
+          node deploy/ci/api-load-smoke.mjs | tee -a "$GITHUB_STEP_SUMMARY"
+          kill -0 "$observer_pid"
+
+      - name: Upload API latency diagnostics
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: api-load-diagnostics
+          if-no-files-found: ignore
+          retention-days: 7
+          path: browser-e2e/api-load-*
+
       - name: Test browser workflow
         env:
           NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
@@ -394,14 +441,16 @@ jobs:
           retention-days: 7
           path: frontend/web/test-results/trash-*.png
 
-      - name: Upload invocation history UI screenshots
+      - name: Upload history and action dialog UI screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: invocation-history-ui
           if-no-files-found: ignore
           retention-days: 7
-          path: frontend/web/test-results/invocation-history-*.png
+          path: |
+            frontend/web/test-results/invocation-history-*.png
+            frontend/web/test-results/dialog-*.png
 
       - name: Test Lighthouse budgets
         run: pnpm --filter web test:lighthouse

@@ -36,7 +36,7 @@ export function PromptDialog({ dialog, onClose }: { dialog: Extract<AppDialog, {
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void submit(); } }}
       />
-      {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
+      <div className="mt-2 h-12 overflow-y-auto overscroll-contain break-words text-xs text-danger">{error ? <p role="alert">{error}</p> : null}</div>
     </Modal>
   );
 }

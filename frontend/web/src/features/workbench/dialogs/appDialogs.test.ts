@@ -24,6 +24,15 @@ function node(overrides: Partial<RestNode> = {}): RestNode {
 }
 
 describe("app dialog builders", () => {
+  it("propagates asynchronous rename failures so the prompt stays open", async () => {
+    const rename = vi.fn().mockRejectedValue(new Error("Rename failed"));
+    for (const dialog of [renameSpaceDialog(space, rename), renameNodeDialog(node(), rename)]) {
+      if (dialog.kind !== "prompt") throw new Error("expected prompt dialog");
+      await expect(dialog.onSubmit("Changed name")).rejects.toThrow("Rename failed");
+    }
+    expect(rename).toHaveBeenCalledTimes(2);
+  });
+
   it("ignores unchanged rename submissions", () => {
     const onRenameSpace = vi.fn();
     const spaceDialog = renameSpaceDialog(space, onRenameSpace);

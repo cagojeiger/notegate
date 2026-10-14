@@ -5,7 +5,7 @@ export function newSpaceDialog(onCreate: (name: string) => void): AppDialog {
   return { kind: "prompt", title: "New space", label: "Space name", initial: "", submitLabel: "Create", onSubmit: onCreate };
 }
 
-export function renameSpaceDialog(space: Space, onRename: (spaceId: string, name: string) => void): AppDialog {
+export function renameSpaceDialog(space: Space, onRename: (spaceId: string, name: string) => void | Promise<void>): AppDialog {
   return {
     kind: "prompt",
     title: "Rename space",
@@ -13,7 +13,7 @@ export function renameSpaceDialog(space: Space, onRename: (spaceId: string, name
     initial: space.name,
     submitLabel: "Rename",
     onSubmit: (name) => {
-      if (name !== space.name) onRename(space.id, name);
+      if (name !== space.name) return onRename(space.id, name);
     }
   };
 }
@@ -51,7 +51,7 @@ export function uploadFileDialog(parentId: string, file: File, onUpload: (input:
   };
 }
 
-export function renameNodeDialog(node: NodeSummary, onRename: (node: NodeSummary, name: string) => void): AppDialog {
+export function renameNodeDialog(node: NodeSummary, onRename: (node: NodeSummary, name: string) => void | Promise<void>): AppDialog {
   return {
     kind: "prompt",
     title: "Rename",
@@ -59,7 +59,7 @@ export function renameNodeDialog(node: NodeSummary, onRename: (node: NodeSummary
     initial: node.name,
     submitLabel: "Rename",
     onSubmit: (name) => {
-      if (name !== node.name) onRename(node, name);
+      if (name !== node.name) return onRename(node, name);
     }
   };
 }
