@@ -16,7 +16,8 @@ test("authenticated workbench performance baseline", async ({ browser, playwrigh
   expect(apiKey).toBeTruthy();
   expect(new URL(baseURL!).hostname).toMatch(/^(localhost|127\.0\.0\.1)$/);
   const api = await playwright.request.newContext({ baseURL, extraHTTPHeaders: {
-    Cookie: `notegate_browser_session=${session}`
+    Cookie: `notegate_browser_session=${session}`,
+    Origin: new URL(baseURL!).origin
   } });
   async function request<T>(path: string, method = "GET", data?: unknown): Promise<T> {
     const response = await api.fetch(path, { method, data });
