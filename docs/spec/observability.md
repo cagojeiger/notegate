@@ -111,6 +111,42 @@ diagnostic: the generator, app and database share a runner, and all virtual work
 use one account/Space/key. This debug-build test does not establish production
 capacity, multi-user isolation, or support for 100 independent users.
 
+### Authenticated browser baseline
+
+`Browser Performance` runs on frontend PR changes and manual dispatch. It serves
+the production frontend from the release Rust API, with disposable PostgreSQL and
+MinIO on the GitHub runner. A locally seeded browser session bypasses OAuth login;
+there are no mocked API responses or production credentials. The server runs in
+the default `all` mode, including background work, without induced background load.
+
+`frontend/web/performance/workbench.spec.ts` repeats the workbench journey three
+times in fresh 1440×900 Chromium contexts against one warm server/database:
+workspace loading, Files and nested Recent navigation, editor/save, revision diff,
+History tabs/pagination, and trash listing/pagination/details. The fixture has 120
+root documents, three nested folders, an approximately 87KB Markdown document,
+55 deleted documents and 55 real API invocations. MCP/CLI/Jobs exercise empty states;
+Changes/API exercise populated histories. Each round adds a saved revision, so the
+database is bounded but not reset between rounds.
+
+The job summary and seven-day `browser-performance` artifact retain every sample,
+median/max ready time, counts over one second, API request counts/durations,
+completed resource transfer sizes, and browser long tasks. Timing includes
+Playwright action/assertion overhead followed by two animation frames; it is a
+repeatable lab journey measurement, **not INP or an exact paint timestamp**.
+Requests are attributed to the journey during which they start, including polling;
+resource bytes include completed resources, lazy JavaScript and cache behavior.
+Individual normalized API routes are retained without query strings, identifiers,
+headers or bodies. Raw traces are disabled because they contain session credentials.
+
+Unexpected HTTP/browser errors, missing identities, wrong rendered results and
+incorrect persisted content fail the job; retries are disabled. Timing is initially
+diagnostic, not a merge latency gate. Three samples do not justify p95/p99 or a
+1,000-user capacity claim. Backend request durations here include transport and
+client scheduling, not isolated database time. Mobile hardware, production network,
+OAuth login, search, uploads/downloads, populated MCP/CLI histories, contention
+and background-job saturation require separate measurements. Existing functional
+Browser E2E, HTTP concurrency smoke and Lighthouse checks remain independent.
+
 ## Resource utilization metrics
 
 | Metric | Labels |
