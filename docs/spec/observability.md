@@ -113,7 +113,7 @@ capacity, multi-user isolation, or support for 100 independent users.
 
 ### Authenticated browser baseline
 
-`Browser Performance` runs on frontend PR changes and manual dispatch. It serves
+`Browser Performance` runs on frontend/backend/Cargo PR changes and manual dispatch. It serves
 the production frontend from the release Rust API, with disposable PostgreSQL and
 MinIO on the GitHub runner. A locally seeded browser session bypasses OAuth login;
 there are no mocked API responses or production credentials. The server runs in

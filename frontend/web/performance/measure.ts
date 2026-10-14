@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import type { Page, Request } from "@playwright/test";
 
 declare global {
@@ -113,7 +113,10 @@ export function writeReport(measurements: Measurement[], fixture: Record<string,
     "", "| Journey | Samples | Ready median / max ms | >1s | API count median | API max ms | Long-task max ms | Transfer median KiB |",
     "|---|---:|---:|---:|---:|---:|---:|---:|"
   ];
-  const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+  const median = (values: number[]) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    return (sorted[Math.floor((sorted.length - 1) / 2)] + sorted[Math.floor(sorted.length / 2)]) / 2;
+  };
   for (const journey of new Set(measurements.map((item) => item.journey))) {
     const rows = measurements.filter((item) => item.journey === journey);
     const times = rows.map((item) => item.readyMs);
@@ -121,5 +124,4 @@ export function writeReport(measurements: Measurement[], fixture: Record<string,
   }
   const summary = `${lines.join("\n")}\n`;
   writeFileSync(`${directory}/summary.md`, summary);
-  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
 }
