@@ -61,14 +61,14 @@ test("authenticated workbench performance baseline", async ({ browser, playwrigh
         await measure("workspace-cold-context", async () => {
           await page.goto("/", { waitUntil: "domcontentloaded" });
           await expect(tree.getByRole("button", { name: "000-entry.md", exact: true })).toBeVisible();
-          await expect(recent.getByRole("button", { name: "baseline.md", exact: true })).toBeVisible();
+          await expect(recent.getByRole("button", { name: /^baseline\.md/ })).toBeVisible();
         }, true);
         await measure("files-document-open", async () => {
           await tree.getByRole("button", { name: "000-entry.md", exact: true }).click();
           await expect(preview.getByRole("heading", { name: "Entry 0", exact: true })).toBeVisible();
         });
         await measure("recent-nested-document-open", async () => {
-          await recent.getByRole("button", { name: "baseline.md", exact: true }).click();
+          await recent.getByRole("button", { name: /^baseline\.md/ }).click();
           await expect(preview.getByRole("heading", { name: "Baseline document", exact: true })).toBeVisible();
           await expect(tree.getByRole("treeitem", { selected: true })).toContainText("baseline.md");
           await expect(tree.getByRole("button", { name: "baseline.md", exact: true })).toBeInViewport();
@@ -84,7 +84,7 @@ test("authenticated workbench performance baseline", async ({ browser, playwrigh
           await expect(page.getByRole("textbox", { name: "Edit text content" })).toHaveCount(0);
           await expect(preview).toContainText("Changed paragraph 400:");
         });
-        const saved = await request<ReadTextResponse>(`${path}/text/${document.id}`);
+        const saved = await request<ReadTextResponse>(`${path}/text/${document.id}?max_lines=5000&max_bytes=1048576`);
         expect(saved.text.storage_format).toBe("plain");
         expect("content" in saved.text && saved.text.content).toBe(updated);
         await measure("version-comparison", async () => {
