@@ -1,12 +1,12 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
 import { getNode, resolveNodePath } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
-import type { RestNode, Space } from "../../api/types";
+import type { NodeRevealResponse, RestNode, Space } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
 import { makeRestNode, makeSpace } from "../../test/fixtures";
 import { createTestQueryClient } from "../../test/queryClient";
@@ -179,7 +179,7 @@ describe("useWorkbenchNodeNavigationActions", () => {
       await result.current.openNode(targetNode);
     });
 
-    expect(loadCanonicalNode).toHaveBeenCalledWith(targetNode, "Could not open item");
+    expect(loadCanonicalNode).toHaveBeenCalledWith(targetNode, null);
     expect(useUiStore.getState().editorGroups[0].node?.id).toBe(targetNode.id);
     expect(useUiStore.getState().toast).toBe("Opened item, but could not reveal it in Files");
   });
@@ -241,6 +241,226 @@ describe("useWorkbenchNodeNavigationActions", () => {
     });
 
     expect(useUiStore.getState().editorGroups[0].node?.id).toBe(second.id);
+  });
+
+  it.each([
+    { action: "active", stage: "reveal", outcome: "success" },
+    { action: "new", stage: "reveal", outcome: "success" },
+    { action: "active", stage: "reveal", outcome: "failure" },
+    { action: "active", stage: "fallback", outcome: "success" },
+    { action: "new", stage: "fallback", outcome: "failure" }
+  ] as const)("ignores a stale $action open $stage $outcome after switching spaces", async ({ action, stage, outcome }) => {
+    const firstSpace = space("space-1");
+    const nextSpace = space("space-2");
+    const sourceNode = node("source", firstSpace.id, "/source.md");
+    const targetNode = node("target", firstSpace.id, "/folder/target.md");
+    const folder = node("folder", firstSpace.id, "/folder", "folder");
+    const nextNode = node("next", nextSpace.id, "/next.md");
+    openSourceGroup(firstSpace, sourceNode);
+    const reveal = deferred<NodeRevealResponse>();
+    const fallback = deferred<RestNode>();
+    mocks.revealNode.mockReturnValue(reveal.promise);
+    vi.mocked(getNode).mockReturnValue(fallback.promise);
+    const { result, rerender, queryClient } = renderNavigationActionsWithCanonicalLoader(firstSpace);
+
+    const opening = action === "new"
+      ? result.current.openNodeInNewGroup(targetNode)
+      : result.current.openNode(targetNode);
+    if (stage === "fallback") {
+      await act(async () => reveal.reject(new ApiError("unavailable", 503)));
+      await waitFor(() => expect(getNode).toHaveBeenCalledWith(expect.anything(), firstSpace.id, targetNode.id));
+    }
+    act(() => {
+      useUiStore.getState().setActiveSpaceId(nextSpace.id);
+      useUiStore.getState().openInActiveGroup(nextNode);
+      useUiStore.getState().setExpanded(["next-folder"]);
+      useUiStore.getState().toggleMobileTree();
+      useUiStore.getState().showToast("Current space notification");
+    });
+    rerender({ activeSpace: nextSpace, inspectedNode: nextNode });
+    const currentUi = navigationUiState();
+
+    await act(async () => {
+      if (stage === "reveal") {
+        if (outcome === "success") reveal.resolve({ ancestors: [folder], target: targetNode });
+        else reveal.reject(new ApiError("unavailable", 503));
+      } else {
+        if (outcome === "success") fallback.resolve(targetNode);
+        else fallback.reject(new ApiError("unavailable", 503));
+      }
+      await opening;
+    });
+
+    expect(navigationUiState()).toEqual(currentUi);
+    if (stage === "reveal") expect(getNode).not.toHaveBeenCalled();
+    if (outcome === "success") {
+      expect(queryClient.getQueryData(queryKeys.node(firstSpace.id, targetNode.id))).toEqual(targetNode);
+    }
+  });
+
+  it("does not revive a pending open after leaving and returning to the same space", async () => {
+    const activeSpace = space("space-1");
+    const otherSpace = space("space-2");
+    const sourceNode = node("source", activeSpace.id, "/source.md");
+    const targetNode = node("target", activeSpace.id, "/folder/target.md");
+    const folder = node("folder", activeSpace.id, "/folder", "folder");
+    openSourceGroup(activeSpace, sourceNode);
+    const pending = deferred<NodeRevealResponse>();
+    mocks.revealNode.mockReturnValue(pending.promise);
+    const { result, rerender } = renderNavigationActionsWithCanonicalLoader(activeSpace);
+
+    const opening = result.current.openNode(targetNode);
+    act(() => useUiStore.getState().setActiveSpaceId(otherSpace.id));
+    rerender({ activeSpace: otherSpace, inspectedNode: null });
+    act(() => useUiStore.getState().setActiveSpaceId(activeSpace.id));
+    rerender({ activeSpace, inspectedNode: currentActiveNode() });
+    const restoredUi = navigationUiState();
+    await act(async () => {
+      pending.resolve({ ancestors: [folder], target: targetNode });
+      expect(await opening).toBeNull();
+    });
+
+    expect(navigationUiState()).toEqual(restoredUi);
+    expect(currentActiveNode()?.id).toBe(sourceNode.id);
+  });
+
+  it("rejects an old-space callback before requesting data or superseding the current open", async () => {
+    const firstSpace = space("space-1");
+    const nextSpace = space("space-2");
+    const oldTarget = node("old-target", firstSpace.id, "/old-target.md");
+    const nextTarget = node("next-target", nextSpace.id, "/next-target.md");
+    const pending = deferred<NodeRevealResponse>();
+    mocks.revealNode.mockReturnValue(pending.promise);
+    const { result, rerender } = renderNavigationActionsWithCanonicalLoader(firstSpace);
+    const openFromPreviousSpace = result.current.openNode;
+
+    act(() => useUiStore.getState().setActiveSpaceId(nextSpace.id));
+    rerender({ activeSpace: nextSpace, inspectedNode: null });
+    const opening = result.current.openNode(nextTarget);
+    const currentUi = navigationUiState();
+    await act(async () => {
+      expect(await openFromPreviousSpace(oldTarget)).toBeNull();
+    });
+
+    expect(navigationUiState()).toEqual(currentUi);
+    expect(mocks.revealNode).toHaveBeenCalledTimes(1);
+    expect(mocks.revealNode).toHaveBeenCalledWith(nextSpace.id, nextTarget.id);
+    expect(getNode).not.toHaveBeenCalled();
+    await act(async () => {
+      pending.resolve({ ancestors: [], target: nextTarget });
+      expect((await opening)?.target).toEqual(nextTarget);
+    });
+    expect(currentActiveNode()).toEqual(nextTarget);
+  });
+
+  it.each([
+    { action: "active", change: "focus" },
+    { action: "active", change: "edit" },
+    { action: "new", change: "close" },
+    { action: "new", change: "replace" }
+  ] as const)("ignores a pending $action open after the source group $change changes", async ({ action, change }) => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/source.md");
+    const otherNode = node("other", activeSpace.id, "/other.md");
+    const targetNode = node("target", activeSpace.id, "/folder/target.md");
+    const folder = node("folder", activeSpace.id, "/folder", "folder");
+    const groupId = openSourceGroup(activeSpace, sourceNode);
+    useUiStore.getState().openInNewGroup(otherNode);
+    useUiStore.getState().focusGroup(0);
+    const pending = deferred<NodeRevealResponse>();
+    mocks.revealNode.mockReturnValue(pending.promise);
+    const { result } = renderNavigationActionsWithCanonicalLoader(activeSpace);
+
+    const opening = action === "new"
+      ? result.current.openNodeInNewGroup(targetNode)
+      : result.current.openNode(targetNode);
+    act(() => {
+      if (change === "focus") useUiStore.getState().focusGroup(1);
+      if (change === "edit") useUiStore.getState().setGroupMode(0, "edit");
+      if (change === "close") useUiStore.getState().closeGroup(0);
+      if (change === "replace") useUiStore.getState().openInGroup(groupId, otherNode);
+      useUiStore.getState().toggleMobileAux();
+    });
+    const currentUi = navigationUiState();
+    await act(async () => {
+      pending.resolve({ ancestors: [folder], target: targetNode });
+      await opening;
+    });
+
+    expect(navigationUiState()).toEqual(currentUi);
+    expect(getNode).not.toHaveBeenCalled();
+  });
+
+  it("allows two explicit new-group opens to complete after the first changes focus", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/source.md");
+    const first = node("first", activeSpace.id, "/first.md");
+    const second = node("second", activeSpace.id, "/second.md");
+    openSourceGroup(activeSpace, sourceNode);
+    const firstReveal = deferred<NodeRevealResponse>();
+    const secondReveal = deferred<NodeRevealResponse>();
+    mocks.revealNode.mockImplementation((_spaceId: string, nodeId: string) =>
+      nodeId === first.id ? firstReveal.promise : secondReveal.promise
+    );
+    const { result } = renderNavigationActionsWithCanonicalLoader(activeSpace);
+
+    const firstOpen = result.current.openNodeInNewGroup(first);
+    const secondOpen = result.current.openNodeInNewGroup(second);
+    await act(async () => {
+      firstReveal.resolve({ ancestors: [], target: first });
+      await firstOpen;
+    });
+    expect(useUiStore.getState().activeGroupIndex).toBe(1);
+    await act(async () => {
+      secondReveal.resolve({ ancestors: [], target: second });
+      await secondOpen;
+    });
+
+    expect(useUiStore.getState().editorGroups.map((group) => group.node?.id)).toEqual([
+      sourceNode.id,
+      first.id,
+      second.id
+    ]);
+    expect(useUiStore.getState().activeGroupIndex).toBe(2);
+    expect(getNode).not.toHaveBeenCalled();
+  });
+
+  it("does not apply a pending open after the navigation hook unmounts", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/source.md");
+    const targetNode = node("target", activeSpace.id, "/folder/target.md");
+    const folder = node("folder", activeSpace.id, "/folder", "folder");
+    openSourceGroup(activeSpace, sourceNode);
+    const pending = deferred<NodeRevealResponse>();
+    mocks.revealNode.mockReturnValue(pending.promise);
+    const { result, unmount } = renderNavigationActionsWithCanonicalLoader(activeSpace);
+
+    const opening = result.current.openNode(targetNode);
+    unmount();
+    const currentUi = navigationUiState();
+    await act(async () => {
+      pending.resolve({ ancestors: [folder], target: targetNode });
+      expect(await opening).toBeNull();
+    });
+
+    expect(navigationUiState()).toEqual(currentUi);
+  });
+
+  it("reports a current open failure when reveal and the canonical fallback both fail", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/source.md");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    openSourceGroup(activeSpace, sourceNode);
+    mocks.revealNode.mockRejectedValue(new ApiError("unavailable", 503));
+    vi.mocked(getNode).mockRejectedValue(new ApiError("unavailable", 503));
+    const { result } = renderNavigationActionsWithCanonicalLoader(activeSpace);
+
+    await act(async () => {
+      expect(await result.current.openNode(targetNode)).toBeNull();
+    });
+
+    expect(currentActiveNode()?.id).toBe(sourceNode.id);
+    expect(useUiStore.getState().toast).toBe("Could not open item");
   });
 
   it("opens an indexed link by node id through normal editor history", async () => {
@@ -307,7 +527,7 @@ describe("useWorkbenchNodeNavigationActions", () => {
     const { result, rerender } = renderNavigationActions(activeSpace);
 
     const opening = result.current.openNodeById(targetNode.id, sourceNode.id);
-    rerender({ inspectedNode: inspectedElsewhere });
+    rerender({ activeSpace, inspectedNode: inspectedElsewhere });
     await act(async () => {
       reveal.resolve({ ancestors: [], target: targetNode });
       await opening;
@@ -346,7 +566,7 @@ describe("useWorkbenchNodeNavigationActions", () => {
     });
 
     expect(mocks.revealNode).not.toHaveBeenCalled();
-    expect(loadCanonicalNode).toHaveBeenCalledWith(rootNode, "Could not open item");
+    expect(loadCanonicalNode).toHaveBeenCalledWith(rootNode, null);
     expect(useUiStore.getState().editorGroups[0].node).toEqual(rootNode);
   });
 
@@ -472,38 +692,53 @@ function renderNavigationActions(
   activeSpace: Space | null,
   loadCanonicalNode: CanonicalNodeLoader = vi.fn()
 ) {
+  useUiStore.getState().setActiveSpaceId(activeSpace?.id ?? null);
   const queryClient = createTestQueryClient();
   const inspectedNode = currentActiveNode();
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
   const rendered = renderHook(
-    ({ inspectedNode }: { inspectedNode: RestNode | null }) => useWorkbenchNodeNavigationActions({
+    ({ activeSpace, inspectedNode }: { activeSpace: Space | null; inspectedNode: RestNode | null }) => useWorkbenchNodeNavigationActions({
       activeSpace,
       inspectedNode,
       loadCanonicalNode
     }),
-    { wrapper, initialProps: { inspectedNode } }
+    { wrapper, initialProps: { activeSpace, inspectedNode } }
   );
   return { ...rendered, queryClient };
 }
 
 function renderNavigationActionsWithCanonicalLoader(activeSpace: Space) {
+  useUiStore.getState().setActiveSpaceId(activeSpace.id);
   const queryClient = createTestQueryClient();
   const inspectedNode = currentActiveNode();
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
-  const rendered = renderHook(({ inspectedNode }: { inspectedNode: RestNode | null }) => {
+  const rendered = renderHook(({ activeSpace, inspectedNode }: { activeSpace: Space; inspectedNode: RestNode | null }) => {
     const loadCanonicalNode = useCanonicalNodeLoader();
     return useWorkbenchNodeNavigationActions({ activeSpace, inspectedNode, loadCanonicalNode });
-  }, { wrapper, initialProps: { inspectedNode } });
+  }, { wrapper, initialProps: { activeSpace, inspectedNode } });
   return { ...rendered, queryClient };
 }
 
 function currentActiveNode(): RestNode | null {
   const state = useUiStore.getState();
   return state.editorGroups[state.activeGroupIndex]?.node ?? null;
+}
+
+function navigationUiState() {
+  const state = useUiStore.getState();
+  return {
+    activeSpaceId: state.activeSpaceId,
+    editorGroups: state.editorGroups,
+    activeGroupIndex: state.activeGroupIndex,
+    expandedFolderIds: state.expandedFolderIds,
+    mobileTreeOpen: state.mobileTreeOpen,
+    mobileAuxOpen: state.mobileAuxOpen,
+    toast: state.toast
+  };
 }
 
 function openSourceGroup(activeSpace: Space, sourceNode: RestNode): number {
@@ -514,10 +749,12 @@ function openSourceGroup(activeSpace: Space, sourceNode: RestNode): number {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function space(id: string): Space {

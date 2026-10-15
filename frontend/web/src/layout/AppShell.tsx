@@ -136,12 +136,9 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
     recentRequestId.current += 1;
     setTreeRevealRequest(null);
   };
-  const openNodeCore = async (node: Parameters<typeof actions.openNode>[0]) => {
-    try {
-      return await actions.openNode(node);
-    } finally {
-      closeMobilePanels();
-    }
+  const openNodeCore = (node: Parameters<typeof actions.openNode>[0]) => {
+    closeMobilePanels();
+    return actions.openNode(node);
   };
   const openNode = (node: Parameters<typeof actions.openNode>[0]) => {
     cancelTreeReveal();
@@ -155,13 +152,10 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
       setTreeRevealRequest({ spaceId: node.space_id, nodeId: reveal.target.id, path: reveal.target.path });
     });
   };
-  const openNodeInNewGroup = async (node: Parameters<typeof actions.openNodeInNewGroup>[0]) => {
+  const openNodeInNewGroup = (node: Parameters<typeof actions.openNodeInNewGroup>[0]) => {
     cancelTreeReveal();
-    try {
-      await actions.openNodeInNewGroup(node);
-    } finally {
-      closeMobilePanels();
-    }
+    closeMobilePanels();
+    return actions.openNodeInNewGroup(node);
   };
   const focusEditorGroup = (index: number) => {
     cancelTreeReveal();
