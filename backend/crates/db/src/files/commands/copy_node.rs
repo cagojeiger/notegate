@@ -7,7 +7,6 @@
 use std::collections::HashMap;
 
 use notegate_core::limits::{self, Limits};
-use notegate_core::security::PiiCrypto;
 use notegate_core::{Error, Result};
 use notegate_model::files::{CopyCounts, StoredContent, WriteTextBody};
 use notegate_model::{Node, TextAtRestEncryption, TextStorageFormat};
@@ -25,7 +24,6 @@ pub struct CopyNodeArgs<'a> {
     pub capture: file_change_events::ChangeCapture<'a>,
     pub pool: &'a PgPool,
     pub external_only: bool,
-    pub crypto: &'a PiiCrypto,
     pub space_id: Uuid,
     pub source_node_id: Uuid,
     pub new_parent_id: Uuid,
@@ -40,7 +38,6 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         capture,
         pool,
         external_only,
-        crypto,
         space_id,
         source_node_id,
         new_parent_id,
@@ -135,7 +132,7 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         id_map.insert(source.id, node.id);
         copy_content(
             &mut tx,
-            crypto,
+            capture,
             locked.owner_tier,
             space_id,
             source.id,
@@ -258,7 +255,7 @@ async fn insert_copied_node(
 
 async fn copy_content(
     tx: &mut PgConnection,
-    crypto: &PiiCrypto,
+    capture: file_change_events::ChangeCapture<'_>,
     owner_tier: notegate_core::tier::UserTier,
     space_id: Uuid,
     source_node_id: Uuid,
@@ -270,7 +267,7 @@ async fn copy_content(
         "text" => {
             copy_text(
                 tx,
-                crypto,
+                capture,
                 owner_tier,
                 space_id,
                 source_node_id,
@@ -286,7 +283,7 @@ async fn copy_content(
 
 async fn copy_text(
     tx: &mut PgConnection,
-    crypto: &PiiCrypto,
+    capture: file_change_events::ChangeCapture<'_>,
     owner_tier: notegate_core::tier::UserTier,
     space_id: Uuid,
     source_node_id: Uuid,
@@ -302,7 +299,7 @@ async fn copy_text(
     .await
     .map_err(map_sqlx_error)?;
 
-    let source = source.into_text(crypto)?;
+    let source = source.into_text(capture.crypto)?;
     let content = StoredContent {
         body: match source.storage_format {
             TextStorageFormat::Plain => WriteTextBody::Plain(
@@ -326,17 +323,26 @@ async fn copy_text(
         &content,
         source.at_rest_encryption == TextAtRestEncryption::Server,
         owner_tier,
-        crypto,
+        capture.crypto,
         space_id,
         new_node_id,
+    )?;
+    let revision_id = Uuid::new_v4();
+    let private_purpose = super::super::revisions::protect_purpose(
+        capture.crypto,
+        space_id,
+        new_node_id,
+        revision_id,
+        capture.purpose,
     )?;
 
     sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO text_objects \
              (node_id, space_id, storage_format, content_text, encrypted_payload, content_sha256, byte_len, line_count, \
               media_type, encoding, at_rest_encryption, content_ciphertext, content_nonce, \
-              content_enc_key_id, content_enc_version, created_by_account_id, updated_by_account_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16) \
+              content_enc_key_id, content_enc_version, created_by_account_id, updated_by_account_id, \
+              revision_id, revision_source, revision_private_purpose) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16, $17, $18, $19) \
              RETURNING {TEXT_COLUMNS}"
         )))
         .bind(new_node_id)
@@ -355,6 +361,9 @@ async fn copy_text(
         .bind(stored.content_enc_key_id)
         .bind(stored.content_enc_version)
         .bind(created_by)
+        .bind(revision_id)
+        .bind(capture.source)
+        .bind(private_purpose)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;

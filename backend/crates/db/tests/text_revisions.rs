@@ -11,7 +11,7 @@ use common::{TestDb, legacy_space_with_root, space_with_root};
 use notegate_core::{Error, security::PiiCrypto};
 use notegate_db::{FilesRepo, SpaceRepo, TextMutationKind, files::revisions};
 use notegate_model::files::FileMutationContext;
-use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
+use notegate_model::files::{CopyNode, CreateFolder, StoredContent, WriteTextBody};
 use uuid::Uuid;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -435,6 +435,217 @@ async fn purpose_follows_the_resulting_body_and_ignores_failed_or_unchanged_writ
         page.revisions[0].purpose.as_deref(),
         Some("Correct the configuration")
     );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn copied_text_archives_the_copy_request_attribution_on_its_first_edit() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (actor, space, root) = space_with_root(&db.pool, "revision-copy-purpose").await?;
+    let source = FilesRepo::new(db.pool.clone()).with_mutation_context(FileMutationContext {
+        source: "mcp",
+        purpose: Some("Write the original note".into()),
+        ..FileMutationContext::default()
+    });
+    let (node, _) = source
+        .insert_text(space, root, "original.md", &body("a"), actor)
+        .await?;
+    save(&source, space, node.id, actor, "b").await?;
+    let original_head = revision_head(&db.pool, node.id).await?;
+    let original_page = source.list_text_revisions(space, node.id, 10, None).await?;
+    assert_eq!(original_page.revisions.len(), 1);
+    assert_eq!(original_page.revisions[0].source, "mcp");
+
+    let copying = source.clone().with_mutation_context(FileMutationContext {
+        source: "cli",
+        purpose: Some("Make a working copy".into()),
+        ..FileMutationContext::default()
+    });
+    let (copied, _) = copying
+        .copy_node(
+            space,
+            &CopyNode {
+                node_id: node.id,
+                new_parent_node_id: root,
+                new_name: "copy.md".into(),
+                recursive: false,
+            },
+            actor,
+        )
+        .await?;
+    let copied_head = revision_head(&db.pool, copied.id).await?;
+    assert_ne!(copied_head.0, original_head.0);
+    assert_ne!(copied_head.2, original_head.2);
+    let stored: (String, bool, bool) = sqlx::query_as(
+        "SELECT revision_source, revision_purpose IS NULL, revision_private_purpose IS NOT NULL \
+         FROM text_objects WHERE node_id=$1",
+    )
+    .bind(copied.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(stored, ("cli".into(), true, true));
+    let page = copying
+        .list_text_revisions(space, copied.id, 10, None)
+        .await?;
+    assert!(
+        page.revisions.is_empty(),
+        "copy must not import source history"
+    );
+    assert_eq!(
+        page.current.unwrap().purpose.as_deref(),
+        Some("Make a working copy")
+    );
+
+    let editing = source
+        .clone()
+        .with_revision_time(copied_head.1 + Duration::seconds(1))
+        .with_mutation_context(FileMutationContext {
+            source: "api",
+            purpose: Some("Edit the working copy".into()),
+            ..FileMutationContext::default()
+        });
+    save(&editing, space, copied.id, actor, "c").await?;
+    let page = editing
+        .list_text_revisions(space, copied.id, 10, None)
+        .await?;
+    assert_eq!(page.revisions.len(), 1);
+    assert_eq!(page.revisions[0].id, copied_head.0);
+    assert_eq!(page.revisions[0].source, "cli");
+    assert_eq!(
+        page.revisions[0].purpose.as_deref(),
+        Some("Make a working copy")
+    );
+    assert_eq!(
+        page.current.unwrap().purpose.as_deref(),
+        Some("Edit the working copy")
+    );
+    let archived = editing
+        .read_text_revision(space, copied.id, copied_head.0)
+        .await?;
+    assert_eq!(archived.content, "b");
+    assert_eq!(archived.revision.source, "cli");
+    assert_eq!(
+        archived.revision.purpose.as_deref(),
+        Some("Make a working copy")
+    );
+    let archived_storage: (bool, bool) = sqlx::query_as(
+        "SELECT purpose IS NULL, private_purpose IS NOT NULL FROM text_revisions WHERE id=$1",
+    )
+    .bind(copied_head.0)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(archived_storage, (true, true));
+    let current_source: String =
+        sqlx::query_scalar("SELECT revision_source FROM text_objects WHERE node_id=$1")
+            .bind(copied.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(current_source, "api");
+
+    assert_eq!(revision_head(&db.pool, node.id).await?, original_head);
+    let original_text = source.find_text_object(space, node.id).await?.unwrap();
+    assert_eq!(original_text.content.as_deref(), Some("b"));
+    let unchanged = source.list_text_revisions(space, node.id, 10, None).await?;
+    assert_eq!(unchanged.revisions.len(), original_page.revisions.len());
+    assert_eq!(unchanged.revisions[0].id, original_page.revisions[0].id);
+    assert_eq!(
+        unchanged.current.unwrap().purpose.as_deref(),
+        Some("Write the original note")
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn recursive_copy_uses_request_purpose_including_none_for_every_text() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (actor, space, root) = space_with_root(&db.pool, "revision-recursive-copy-purpose").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let folder = repo
+        .insert_folder(
+            space,
+            &CreateFolder {
+                parent_node_id: root,
+                name: "notes".into(),
+            },
+            actor,
+        )
+        .await?;
+    let nested = repo
+        .insert_folder(
+            space,
+            &CreateFolder {
+                parent_node_id: folder.id,
+                name: "nested".into(),
+            },
+            actor,
+        )
+        .await?;
+    let mut originals = Vec::new();
+    for (parent, path, source, purpose) in [
+        (folder.id, "note.md", "mcp", "Write the top-level note"),
+        (nested.id, "nested/note.md", "cli", "Write the nested note"),
+    ] {
+        let (node, _) = repo
+            .clone()
+            .with_mutation_context(FileMutationContext {
+                source,
+                purpose: Some(purpose.into()),
+                ..FileMutationContext::default()
+            })
+            .insert_text(space, parent, "note.md", &body(path), actor)
+            .await?;
+        originals.push((path, revision_head(&db.pool, node.id).await?.0));
+    }
+    let mut copied_revision_ids = std::collections::HashSet::new();
+    for (name, source, purpose) in [
+        ("copy-with-reason", "mcp", Some("Copy the notes")),
+        ("copy-without-reason", "api", None),
+    ] {
+        let copying = repo.clone().with_mutation_context(FileMutationContext {
+            source,
+            purpose: purpose.map(str::to_owned),
+            ..FileMutationContext::default()
+        });
+        let (_, counts) = copying
+            .copy_node(
+                space,
+                &CopyNode {
+                    node_id: folder.id,
+                    new_parent_node_id: root,
+                    new_name: name.into(),
+                    recursive: true,
+                },
+                actor,
+            )
+            .await?;
+        assert_eq!((counts.nodes, counts.texts), (4, 2));
+        for (path, original_revision_id) in &originals {
+            let copied = copying
+                .resolve_path(space, &format!("/{name}/{path}"))
+                .await?
+                .unwrap();
+            let head = revision_head(&db.pool, copied).await?;
+            assert_ne!(head.0, *original_revision_id);
+            assert!(copied_revision_ids.insert(head.0));
+            let stored: (String, bool, bool) = sqlx::query_as(
+                "SELECT revision_source, revision_purpose IS NULL, revision_private_purpose IS NOT NULL \
+                 FROM text_objects WHERE node_id=$1",
+            )
+            .bind(copied)
+            .fetch_one(&db.pool)
+            .await?;
+            assert_eq!(stored, (source.to_owned(), true, true));
+            let page = copying.list_text_revisions(space, copied, 10, None).await?;
+            assert!(page.revisions.is_empty());
+            assert_eq!(page.current.unwrap().purpose.as_deref(), purpose);
+        }
+    }
     db.cleanup().await;
     Ok(())
 }
