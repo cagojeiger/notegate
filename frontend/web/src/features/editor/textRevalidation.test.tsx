@@ -9,7 +9,7 @@ import type { ReadTextResponse, TextResponse } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
 import { makeRestNode } from "../../test/fixtures";
 import { createTestQueryClient } from "../../test/queryClient";
-import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+import { useNodeFreshness, useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 import { useTextEditorSession } from "./useTextEditorSession";
 
 const client = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
@@ -144,14 +144,18 @@ describe("conditional editor text revalidation", () => {
   });
 
   it("keeps a dirty draft and its save baseline after a same-body metadata refresh", async () => {
-    const { wrapper } = harness();
+    const { queryClient, wrapper } = harness();
+    queryClient.setQueryData(queryKeys.node(node.space_id, node.id), node);
     client.get.mockResolvedValue(unchanged());
     const draft = `${original} local edit`;
     client.put.mockResolvedValue(writeResponse(draft));
     const { result } = renderHook(() => {
       const [mode, setMode] = useState<"edit" | "preview">("edit");
-      const session = useTextEditorSession({ node, latestNode: node, mode, canWrite: true, onSetMode: setMode });
-      return { session, mode };
+      // Match OpenedNodeGuard: saves also advance the canonical node observed by the editor.
+      const freshness = useNodeFreshness(node);
+      const currentNode = freshness.data ?? node;
+      const session = useTextEditorSession({ node: currentNode, latestNode: currentNode, mode, canWrite: true, onSetMode: setMode });
+      return { session, mode, latestNode: currentNode };
     }, { wrapper });
     await waitFor(() => expect(result.current.session.draft).toBe(original));
     act(() => result.current.session.setDraft(draft));
@@ -165,11 +169,15 @@ describe("conditional editor text revalidation", () => {
     expect(result.current.mode).toBe("edit");
 
     act(() => result.current.session.saveDraft());
-    await waitFor(() => expect(result.current.mode).toBe("preview"));
+    await waitFor(() => {
+      expect(result.current.mode).toBe("preview");
+      expect(result.current.latestNode.content_sha256).toBe(savedSha);
+    });
     expect(client.put).toHaveBeenCalledWith(textPath, expect.objectContaining({
       content: draft, expected_sha256: originalSha
     }));
     expect(client.get).toHaveBeenCalledOnce();
+    expect(client.get.mock.calls.map(([path]) => new URL(path as string, "http://localhost").pathname)).toEqual([textPath]);
   });
 });
 
