@@ -1,7 +1,8 @@
 use openidconnect::core::{CoreErrorResponseType, CoreUserInfoClaims};
 use openidconnect::{
-    AccessTokenHash, AuthorizationCode, Nonce, OAuth2TokenResponse, PkceCodeVerifier, RefreshToken,
-    RequestTokenError, StandardErrorResponse, TokenResponse as OidcTokenResponse,
+    AccessTokenHash, AuthorizationCode, ClaimsVerificationError, Nonce, OAuth2TokenResponse,
+    PkceCodeVerifier, RefreshToken, RequestTokenError, SignatureVerificationError,
+    StandardErrorResponse, TokenResponse as OidcTokenResponse,
 };
 use serde::{Deserialize, Serialize};
 
@@ -65,7 +66,8 @@ pub(super) async fn exchange_code_for_userinfo(
     verifier: &str,
     nonce: &str,
 ) -> notegate_core::Result<LoginUserInfo> {
-    let client = oidc.client().await?;
+    let snapshot = oidc.client_snapshot().await?;
+    let client = snapshot.client;
     let http_client = http.clone();
     let http = move |request| {
         let http_client = http_client.clone();
@@ -87,11 +89,30 @@ pub(super) async fn exchange_code_for_userinfo(
         .id_token()
         .ok_or_else(|| notegate_core::Error::internal("openid token response missing id_token"))?;
     let id_token_verifier = client.id_token_verifier();
-    let claims = id_token
-        .claims(&id_token_verifier, &Nonce::new(nonce.to_owned()))
-        .map_err(|error| {
-            notegate_core::Error::internal(format!("id_token verification failed: {error}"))
-        })?;
+    let expected_nonce = Nonce::new(nonce.to_owned());
+    let refreshed_client;
+    let refreshed_verifier;
+    let (client, id_token_verifier, claims) =
+        match id_token.claims(&id_token_verifier, &expected_nonce) {
+            Ok(claims) => (&client, &id_token_verifier, claims),
+            Err(error) if can_refresh_jwks(&error) => {
+                refreshed_client = oidc.refresh_jwks_after(snapshot.attempt_epoch).await?;
+                refreshed_verifier = refreshed_client.id_token_verifier();
+                let claims = id_token
+                    .claims(&refreshed_verifier, &expected_nonce)
+                    .map_err(|error| {
+                        notegate_core::Error::internal(format!(
+                            "id_token verification failed after JWKS refresh: {error}"
+                        ))
+                    })?;
+                (&refreshed_client, &refreshed_verifier, claims)
+            }
+            Err(error) => {
+                return Err(notegate_core::Error::internal(format!(
+                    "id_token verification failed: {error}"
+                )));
+            }
+        };
 
     if let Some(expected_access_token_hash) = claims.access_token_hash() {
         let actual_access_token_hash = AccessTokenHash::from_token(
@@ -99,7 +120,7 @@ pub(super) async fn exchange_code_for_userinfo(
             id_token.signing_alg().map_err(|error| {
                 notegate_core::Error::internal(format!("id_token signing alg failed: {error}"))
             })?,
-            id_token.signing_key(&id_token_verifier).map_err(|error| {
+            id_token.signing_key(id_token_verifier).map_err(|error| {
                 notegate_core::Error::internal(format!("id_token signing key failed: {error}"))
             })?,
         )
@@ -136,6 +157,15 @@ pub(super) async fn exchange_code_for_userinfo(
         userinfo: into_userinfo(userinfo),
         refresh_token,
     })
+}
+
+fn can_refresh_jwks(error: &ClaimsVerificationError) -> bool {
+    matches!(
+        error,
+        ClaimsVerificationError::SignatureVerification(
+            SignatureVerificationError::NoMatchingKey | SignatureVerificationError::CryptoError(_)
+        )
+    )
 }
 
 pub(super) async fn refresh_userinfo(

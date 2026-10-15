@@ -1,0 +1,614 @@
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::indexing_slicing)]
+
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
+
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use openidconnect::core::CoreRsaPrivateSigningKey;
+use openidconnect::{JsonWebKeyId, PrivateSigningKey};
+use secrecy::SecretString;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use tokio::sync::{RwLock, Semaphore};
+use tokio::task::JoinHandle;
+
+use super::{METADATA_CACHE_TTL, OidcProvider};
+use crate::auth::oauth_exchange::exchange_code_for_userinfo;
+
+const CLIENT_ID: &str = "notegate-web";
+const NONCE: &str = "browser-login-nonce";
+const SUBJECT: &str = "test-user";
+const ACCESS_TOKEN: &str = "test-access-token";
+
+struct MockProvider {
+    issuer: String,
+    state: Arc<MockState>,
+    server: JoinHandle<()>,
+}
+
+struct MockState {
+    issuer: String,
+    keys: RwLock<Value>,
+    id_token: RwLock<String>,
+    userinfo_subject: RwLock<String>,
+    discovery_requests: AtomicUsize,
+    jwks_requests: AtomicUsize,
+    token_requests: AtomicUsize,
+    userinfo_requests: AtomicUsize,
+    fail_jwks: AtomicBool,
+    pause_tokens: AtomicBool,
+    tokens_started: Semaphore,
+    tokens_released: Semaphore,
+}
+
+impl MockProvider {
+    async fn start() -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock OIDC server");
+        let issuer = format!("http://{}", listener.local_addr().expect("mock address"));
+        let state = Arc::new(MockState {
+            issuer: issuer.clone(),
+            keys: RwLock::new(jwks(KEY_A, "key-a")),
+            id_token: RwLock::new(sign_token(
+                KEY_A,
+                "key-a",
+                &issuer,
+                json!({}),
+                Algorithm::RS256,
+            )),
+            userinfo_subject: RwLock::new(SUBJECT.to_owned()),
+            discovery_requests: AtomicUsize::new(0),
+            jwks_requests: AtomicUsize::new(0),
+            token_requests: AtomicUsize::new(0),
+            userinfo_requests: AtomicUsize::new(0),
+            fail_jwks: AtomicBool::new(false),
+            pause_tokens: AtomicBool::new(false),
+            tokens_started: Semaphore::new(0),
+            tokens_released: Semaphore::new(0),
+        });
+        let router = Router::new()
+            .route("/.well-known/openid-configuration", get(discovery))
+            .route("/keys", get(keys))
+            .route("/token", post(token))
+            .route("/userinfo", get(userinfo))
+            .with_state(state.clone());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router)
+                .await
+                .expect("mock OIDC server");
+        });
+        Self {
+            issuer,
+            state,
+            server,
+        }
+    }
+
+    fn oidc(&self) -> (Arc<OidcProvider>, reqwest::Client) {
+        let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("OIDC HTTP client");
+        let oidc = OidcProvider::new(&config(&self.issuer), http.clone());
+        (Arc::new(oidc), http)
+    }
+
+    async fn rotate(&self, kid: &str) {
+        *self.state.keys.write().await = jwks(KEY_B, kid);
+        self.set_token(KEY_B, kid, json!({}), Algorithm::RS256)
+            .await;
+    }
+
+    async fn set_token(&self, key: &str, kid: &str, overrides: Value, alg: Algorithm) {
+        *self.state.id_token.write().await = sign_token(key, kid, &self.issuer, overrides, alg);
+    }
+
+    async fn wait_for_tokens(&self, count: u32) {
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            self.state.tokens_started.acquire_many(count),
+        )
+        .await
+        .expect("callbacks reached token endpoint")
+        .expect("token request semaphore")
+        .forget();
+    }
+
+    fn release_tokens(&self, count: usize) {
+        self.state.tokens_released.add_permits(count);
+    }
+
+    fn counts(&self) -> (usize, usize, usize, usize) {
+        (
+            self.state.discovery_requests.load(Ordering::SeqCst),
+            self.state.jwks_requests.load(Ordering::SeqCst),
+            self.state.token_requests.load(Ordering::SeqCst),
+            self.state.userinfo_requests.load(Ordering::SeqCst),
+        )
+    }
+}
+
+impl Drop for MockProvider {
+    fn drop(&mut self) {
+        self.server.abort();
+    }
+}
+
+async fn discovery(State(state): State<Arc<MockState>>) -> Json<Value> {
+    state.discovery_requests.fetch_add(1, Ordering::SeqCst);
+    Json(json!({
+        "issuer": state.issuer,
+        "authorization_endpoint": format!("{}/authorize", state.issuer),
+        "token_endpoint": format!("{}/token", state.issuer),
+        "userinfo_endpoint": format!("{}/userinfo", state.issuer),
+        "jwks_uri": format!("{}/keys", state.issuer),
+        "response_types_supported": ["code"],
+        "subject_types_supported": ["public"],
+        "id_token_signing_alg_values_supported": ["RS256"],
+        "token_endpoint_auth_methods_supported": ["none"],
+    }))
+}
+
+async fn keys(State(state): State<Arc<MockState>>) -> Response {
+    state.jwks_requests.fetch_add(1, Ordering::SeqCst);
+    if state.fail_jwks.load(Ordering::SeqCst) {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    Json(state.keys.read().await.clone()).into_response()
+}
+
+async fn token(State(state): State<Arc<MockState>>) -> Json<Value> {
+    state.token_requests.fetch_add(1, Ordering::SeqCst);
+    if state.pause_tokens.load(Ordering::SeqCst) {
+        state.tokens_started.add_permits(1);
+        state
+            .tokens_released
+            .acquire()
+            .await
+            .expect("release mock token response")
+            .forget();
+    }
+    Json(json!({
+        "access_token": ACCESS_TOKEN,
+        "token_type": "Bearer",
+        "expires_in": 300,
+        "refresh_token": "test-refresh-token",
+        "id_token": state.id_token.read().await.clone(),
+    }))
+}
+
+async fn userinfo(State(state): State<Arc<MockState>>) -> Json<Value> {
+    state.userinfo_requests.fetch_add(1, Ordering::SeqCst);
+    Json(json!({
+        "sub": state.userinfo_subject.read().await.clone(),
+        "email": "test@example.test",
+        "name": "Test User",
+    }))
+}
+
+fn jwks(key: &str, kid: &str) -> Value {
+    let signing_key =
+        CoreRsaPrivateSigningKey::from_pem(key, Some(JsonWebKeyId::new(kid.to_owned())))
+            .expect("test RSA key");
+    json!({ "keys": [signing_key.as_verification_key()] })
+}
+
+fn sign_token(
+    key: &str,
+    kid: &str,
+    issuer: &str,
+    overrides: Value,
+    algorithm: Algorithm,
+) -> String {
+    let now = chrono::Utc::now().timestamp();
+    let digest = Sha256::digest(ACCESS_TOKEN.as_bytes());
+    let mut claims = json!({
+        "iss": issuer,
+        "aud": CLIENT_ID,
+        "sub": SUBJECT,
+        "iat": now,
+        "exp": now + 300,
+        "nonce": NONCE,
+        "at_hash": URL_SAFE_NO_PAD.encode(&digest[..16]),
+    });
+    claims.as_object_mut().expect("claims object").extend(
+        overrides
+            .as_object()
+            .expect("claim overrides object")
+            .clone(),
+    );
+    let mut header = Header::new(algorithm);
+    header.kid = Some(kid.to_owned());
+    encode(
+        &header,
+        &claims,
+        &EncodingKey::from_rsa_pem(key.as_bytes()).expect("test signing key"),
+    )
+    .expect("sign test ID token")
+}
+
+async fn login(
+    oidc: &OidcProvider,
+    http: &reqwest::Client,
+) -> notegate_core::Result<crate::auth::oauth_exchange::LoginUserInfo> {
+    exchange_code_for_userinfo(oidc, http, "single-use-code", "test-pkce-verifier", NONCE).await
+}
+
+#[tokio::test]
+async fn valid_cached_callback_does_not_fetch_metadata_or_jwks() {
+    let mock = MockProvider::start().await;
+    let (oidc, http) = mock.oidc();
+    oidc.client().await.expect("warm discovery cache");
+
+    let result = login(&oidc, &http).await.expect("cached ID token verifies");
+
+    assert_eq!(result.userinfo.sub, SUBJECT);
+    assert_eq!(result.refresh_token, "test-refresh-token");
+    assert_eq!(mock.counts(), (1, 1, 1, 1));
+}
+
+#[tokio::test]
+async fn callback_refreshes_new_kid_and_same_kid_replacement_without_redeeming_code_twice() {
+    for kid in ["key-b", "key-a"] {
+        let mock = MockProvider::start().await;
+        let (oidc, http) = mock.oidc();
+        oidc.client().await.expect("warm old signing key");
+        let fetched_at = oidc
+            .cache
+            .read()
+            .await
+            .metadata
+            .as_ref()
+            .expect("cached metadata")
+            .fetched_at;
+        mock.rotate(kid).await;
+
+        let result = login(&oidc, &http).await.expect("rotated key verifies");
+
+        assert_eq!(result.userinfo.sub, SUBJECT, "kid {kid}");
+        assert_eq!(mock.counts(), (1, 2, 1, 1), "kid {kid}");
+        assert_eq!(
+            oidc.cache
+                .read()
+                .await
+                .metadata
+                .as_ref()
+                .expect("cached metadata")
+                .fetched_at,
+            fetched_at
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_successful_jwks_fetch_that_cannot_verify_the_token_is_not_retried_again() {
+    let mock = MockProvider::start().await;
+    let (oidc, http) = mock.oidc();
+    oidc.client().await.expect("warm old signing key");
+    // The issuer still publishes A, so refreshing cannot validate B.
+    mock.set_token(KEY_B, "key-b", json!({}), Algorithm::RS256)
+        .await;
+
+    let error = login(&oidc, &http)
+        .await
+        .expect_err("unpublished key must fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("id_token verification failed after JWKS refresh")
+    );
+    assert_eq!(mock.counts(), (1, 2, 1, 0));
+}
+
+#[tokio::test]
+async fn failed_key_refresh_keeps_old_keys_and_allows_a_later_attempt_to_recover() {
+    let mock = MockProvider::start().await;
+    let (oidc, http) = mock.oidc();
+    oidc.client().await.expect("warm old signing key");
+    mock.rotate("key-b").await;
+    mock.state.fail_jwks.store(true, Ordering::SeqCst);
+
+    assert!(login(&oidc, &http).await.is_err());
+    assert_eq!(mock.counts(), (1, 2, 1, 0));
+
+    mock.set_token(KEY_A, "key-a", json!({}), Algorithm::RS256)
+        .await;
+    login(&oidc, &http)
+        .await
+        .expect("old cache survives failed JWKS refresh");
+    assert_eq!(mock.counts(), (1, 2, 2, 1));
+
+    mock.state.fail_jwks.store(false, Ordering::SeqCst);
+    mock.rotate("key-b").await;
+    login(&oidc, &http)
+        .await
+        .expect("later callback can refresh again");
+    assert_eq!(mock.counts(), (1, 3, 3, 2));
+}
+
+#[tokio::test]
+async fn concurrent_callbacks_share_one_successful_key_refresh() {
+    concurrent_callbacks_share_refresh(false).await;
+}
+
+#[tokio::test]
+async fn concurrent_callbacks_share_one_failed_key_refresh() {
+    concurrent_callbacks_share_refresh(true).await;
+}
+
+async fn concurrent_callbacks_share_refresh(fail: bool) {
+    const CALLBACKS: usize = 8;
+    let mock = MockProvider::start().await;
+    let (oidc, http) = mock.oidc();
+    oidc.client().await.expect("warm old signing key");
+    mock.rotate("key-b").await;
+    mock.state.fail_jwks.store(fail, Ordering::SeqCst);
+    mock.state.pause_tokens.store(true, Ordering::SeqCst);
+    let mut callbacks = Vec::new();
+    for _ in 0..CALLBACKS {
+        let oidc = oidc.clone();
+        let http = http.clone();
+        callbacks.push(tokio::spawn(async move { login(&oidc, &http).await }));
+    }
+    // All snapshots predate the refresh, even when the mock replies very quickly.
+    mock.wait_for_tokens(CALLBACKS as u32).await;
+    mock.release_tokens(CALLBACKS);
+    for callback in callbacks {
+        let result = tokio::time::timeout(Duration::from_secs(5), callback)
+            .await
+            .expect("callback completed")
+            .expect("callback task");
+        assert_eq!(result.is_err(), fail);
+    }
+    assert_eq!(
+        mock.counts(),
+        (1, 2, CALLBACKS, if fail { 0 } else { CALLBACKS })
+    );
+}
+
+#[tokio::test]
+async fn claim_and_userinfo_failures_never_trigger_an_unrelated_key_refresh() {
+    for failure in Failure::ALL {
+        let mock = MockProvider::start().await;
+        let (oidc, http) = mock.oidc();
+        oidc.client().await.expect("warm matching signing key");
+        failure.install(&mock, KEY_A, "key-a").await;
+
+        failure.assert_error(login(&oidc, &http).await);
+        assert_eq!(
+            mock.counts(),
+            (1, 1, 1, failure.userinfo_requests()),
+            "{failure:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn rotated_key_retry_preserves_all_claim_hash_and_subject_checks() {
+    for failure in Failure::ALL {
+        let mock = MockProvider::start().await;
+        let (oidc, http) = mock.oidc();
+        oidc.client().await.expect("warm old signing key");
+        mock.rotate("key-b").await;
+        failure.install(&mock, KEY_B, "key-b").await;
+
+        failure.assert_error(login(&oidc, &http).await);
+        // Issuer, audience and allowed algorithms are checked before key lookup.
+        let jwks_requests = if matches!(
+            failure,
+            Failure::Issuer | Failure::Audience | Failure::Algorithm
+        ) {
+            1
+        } else {
+            2
+        };
+        assert_eq!(
+            mock.counts(),
+            (1, jwks_requests, 1, failure.userinfo_requests()),
+            "{failure:?}"
+        );
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Failure {
+    Nonce,
+    Issuer,
+    Audience,
+    Expiry,
+    Algorithm,
+    AccessTokenHash,
+    UserinfoSubject,
+}
+
+impl Failure {
+    const ALL: [Self; 7] = [
+        Self::Nonce,
+        Self::Issuer,
+        Self::Audience,
+        Self::Expiry,
+        Self::Algorithm,
+        Self::AccessTokenHash,
+        Self::UserinfoSubject,
+    ];
+
+    async fn install(self, mock: &MockProvider, key: &str, kid: &str) {
+        let overrides = match self {
+            Self::Nonce => json!({"nonce": "another-login-nonce"}),
+            Self::Issuer => json!({"iss": "https://unexpected-issuer.example.test"}),
+            Self::Audience => json!({"aud": "another-client"}),
+            Self::Expiry => json!({"exp": chrono::Utc::now().timestamp() - 3600}),
+            Self::AccessTokenHash => json!({"at_hash": "not-the-access-token-hash"}),
+            Self::Algorithm | Self::UserinfoSubject => json!({}),
+        };
+        let algorithm = if matches!(self, Self::Algorithm) {
+            Algorithm::RS384
+        } else {
+            Algorithm::RS256
+        };
+        mock.set_token(key, kid, overrides, algorithm).await;
+        if matches!(self, Self::UserinfoSubject) {
+            *mock.state.userinfo_subject.write().await = "another-user".to_owned();
+        }
+    }
+
+    fn userinfo_requests(self) -> usize {
+        usize::from(matches!(self, Self::UserinfoSubject))
+    }
+
+    fn assert_error(
+        self,
+        result: notegate_core::Result<crate::auth::oauth_exchange::LoginUserInfo>,
+    ) {
+        let error = result.expect_err("invalid claims must fail").to_string();
+        let expected = match self {
+            Self::Nonce => "Invalid nonce",
+            Self::Issuer => "Invalid issuer",
+            Self::Audience => "Invalid audiences",
+            Self::Expiry => "Expired",
+            Self::Algorithm => "Signature verification failed",
+            Self::AccessTokenHash => "access token hash mismatch",
+            Self::UserinfoSubject => "userinfo request failed: Failed to verify claims",
+        };
+        assert!(error.contains(expected), "{self:?}: {error}");
+    }
+}
+
+#[tokio::test]
+async fn callback_uses_a_concurrent_ttl_refresh_without_refetching_or_redeeming_code_twice() {
+    let mock = MockProvider::start().await;
+    let (oidc, http) = mock.oidc();
+    oidc.client().await.expect("warm old signing key");
+    mock.rotate("key-b").await;
+    mock.state.pause_tokens.store(true, Ordering::SeqCst);
+    let callback_oidc = oidc.clone();
+    let callback = tokio::spawn(async move { login(&callback_oidc, &http).await });
+    mock.wait_for_tokens(1).await;
+    {
+        let mut cache = oidc.cache.write().await;
+        cache.metadata.as_mut().expect("warm metadata").fetched_at =
+            std::time::Instant::now() - METADATA_CACHE_TTL - Duration::from_secs(1);
+    }
+    oidc.client()
+        .await
+        .expect("concurrent TTL discovery refresh");
+    assert_eq!(mock.counts(), (2, 2, 1, 0));
+    mock.release_tokens(1);
+
+    let result = tokio::time::timeout(Duration::from_secs(5), callback)
+        .await
+        .expect("callback completed")
+        .expect("callback task")
+        .expect("fresh concurrent keys verify");
+
+    assert_eq!(result.userinfo.sub, SUBJECT);
+    assert_eq!(mock.counts(), (2, 2, 1, 1));
+}
+
+fn config(issuer: &str) -> notegate_core::Config {
+    notegate_core::Config {
+        bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9191),
+        search_bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9192),
+        search_service_url: None,
+        process_mode: notegate_core::ProcessMode::All,
+        database_url: "postgres://unused".to_owned(),
+        db_max_connections: 1,
+        read_database_url: None,
+        read_db_max_connections: 1,
+        background_jobs: notegate_core::BackgroundJobsConfig::default(),
+        authgate_url: issuer.to_owned(),
+        notegate_public_url: "http://localhost:9191".to_owned(),
+        oauth_client_id: CLIENT_ID.to_owned(),
+        mcp_oauth_client_id: "notegate-mcp".to_owned(),
+        cli_oauth_client_id: "notegate-cli-local".to_owned(),
+        oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
+        resource_url: "http://localhost:9191/mcp".to_owned(),
+        jwks_cache_ttl: Duration::from_secs(300),
+        enc_root_key_id: "test-enc".to_owned(),
+        enc_root_secret: SecretString::from("test-enc-root-secret-32-bytes-long".to_owned()),
+        lookup_root_key_id: "test-lookup".to_owned(),
+        lookup_root_secret: SecretString::from("test-lookup-root-secret-32-bytes-long".to_owned()),
+        lookup_verify_0_key_id: None,
+        lookup_verify_0_secret: None,
+        browser_session_ttl: Duration::from_secs(3600),
+        browser_session_max_ttl: Duration::from_secs(30 * 86_400),
+        openapi_enabled: false,
+        metrics_enabled: false,
+        web_dist_dir: None,
+        s3: crate::state::test_s3_config(),
+        default_user_tier: notegate_core::tier::UserTier::DEFAULT,
+        limits: notegate_core::limits::Limits::default(),
+        http_rate_limits: notegate_core::HttpRateLimitsConfig::default(),
+        search_body_cache: notegate_core::SearchBodyCacheConfig::default(),
+        secure_cookies: false,
+    }
+}
+
+// Public test fixture; never used outside the local mock issuer.
+const KEY_A: &str = r#"-----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEAn4EPtAOCc9AlkeQHPzHStgAbgs7bTZLwUBZdR8/KuKPEHLd4
+rHVTeT+O+XV2jRojdNhxJWTDvNd7nqQ0VEiZQHz/AJmSCpMaJMRBSFKrKb2wqVwG
+U/NsYOYL+QtiWN2lbzcEe6XC0dApr5ydQLrHqkHHig3RBordaZ6Aj+oBHqFEHYpP
+e7Tpe+OfVfHd1E6cS6M1FZcD1NNLYD5lFHpPI9bTwJlsde3uhGqC0ZCuEHg8lhzw
+OHrtIQbS0FVbb9k3+tVTU4fg/3L/vniUFAKwuCLqKnS2BYwdq/mzSnbLY7h/qixo
+R7jig3//kRhuaxwUkRz5iaiQkqgc5gHdrNP5zwIDAQABAoIBAG1lAvQfhBUSKPJK
+Rn4dGbshj7zDSr2FjbQf4pIh/ZNtHk/jtavyO/HomZKV8V0NFExLNi7DUUvvLiW7
+0PgNYq5MDEjJCtSd10xoHa4QpLvYEZXWO7DQPwCmRofkOutf+NqyDS0QnvFvp2d+
+Lov6jn5C5yvUFgw6qWiLAPmzMFlkgxbtjFAWMJB0zBMy2BqjntOJ6KnqtYRMQUxw
+TgXZDF4rhYVKtQVOpfg6hIlsaoPNrF7dofizJ099OOgDmCaEYqM++bUlEHxgrIVk
+wZz+bg43dfJCocr9O5YX0iXaz3TOT5cpdtYbBX+C/5hwrqBWru4HbD3xz8cY1TnD
+qQa0M8ECgYEA3Slxg/DwTXJcb6095RoXygQCAZ5RnAvZlno1yhHtnUex/fp7AZ/9
+nRaO7HX/+SFfGQeutao2TDjDAWU4Vupk8rw9JR0AzZ0N2fvuIAmr/WCsmGpeNqQn
+ev1T7IyEsnh8UMt+n5CafhkikzhEsrmndH6LxOrvRJlsPp6Zv8bUq0kCgYEAuKE2
+dh+cTf6ERF4k4e/jy78GfPYUIaUyoSSJuBzp3Cubk3OCqs6grT8bR/cu0Dm1MZwW
+mtdqDyI95HrUeq3MP15vMMON8lHTeZu2lmKvwqW7anV5UzhM1iZ7z4yMkuUwFWoB
+vyY898EXvRD+hdqRxHlSqAZ192zB3pVFJ0s7pFcCgYAHw9W9eS8muPYv4ZhDu/fL
+2vorDmD1JqFcHCxZTOnX1NWWAj5hXzmrU0hvWvFC0P4ixddHf5Nqd6+5E9G3k4E5
+2IwZCnylu3bqCWNh8pT8T3Gf5FQsfPT5530T2BcsoPhUaeCnP499D+rb2mTnFYeg
+mnTT1B/Ue8KGLFFfn16GKQKBgAiw5gxnbocpXPaO6/OKxFFZ+6c0OjxfN2PogWce
+TU/k6ZzmShdaRKwDFXisxRJeNQ5Rx6qgS0jNFtbDhW8E8WFmQ5urCOqIOYk28EBi
+At4JySm4v+5P7yYBh8B8YD2l9j57z/s8hJAxEbn/q8uHP2ddQqvQKgtsni+pHSk9
+XGBfAoGBANz4qr10DdM8DHhPrAb2YItvPVz/VwkBd1Vqj8zCpyIEKe/07oKOvjWQ
+SgkLDH9x2hBgY01SbP43CvPk0V72invu2TGkI/FXwXWJLLG7tDSgw4YyfhrYrHmg
+1Vre3XB9HH8MYBVB6UIexaAq4xSeoemRKTBesZro7OKjKT8/GmiO
+-----END RSA PRIVATE KEY-----"#;
+
+// Public test fixture; never used outside the local mock issuer.
+const KEY_B: &str = r#"-----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEAsRMj0YYjy7du6v1gWyKSTJx3YjBzZTG0XotRP0IaObw0k+68
+30dXadjL5jVhSWNdcg9OyMyTGWfdNqfdrS6ppBqlQNgjZJdloIqL9zOLBZrDm7G4
++qN4KeZ4/5TyEilq2zOHHGFEzXpOq/UxqVnm3J4fhjqCNaS2nKd7HVVXGBQQ+4+F
+dVT+MyJXemw5maz2F/h324TQi6XoUPEwUddxBwLQFSOlzWnHYMc4/lcyZJ8MpTXC
+MPe/YJFNtb9CaikKUdf8x4mzwH7usSf8s2d6R4dQITzKrjrEJ0u3w3eGkBBapoMV
+FBGPjP3Haz5FsVtHc5VEN3FZVIDF6HrbJH1C4QIDAQABAoIBAHSS3izM+3nc7Bel
+8S5uRxRKmcm5je6b11u6qiVUFkHWJmMRc6QmqmSThkCq+b4/vUAe1cYZ7+l02Exo
+HOcrZiEULaDP6hUKGqyjKVv3wdlRtt8kFFxlC/HBufzAiNDuFVvzw0oquwnvMCXC
+yQvtlK+/JY/PqvM32cSt+b4o9apySsHqAtdsoHHohK82jsQqIfCi1v8XYV/xRBJB
+cQMCaA0Ls3tFpmJv3JdikyyQxio4kZ5tswghC63znCp1iL+qDq1wjjKzjick9MDb
+Qzb95X09QQP201l1FPWN7Kbhj4ybg6PJGz/VHQcvILcBCoYIc0UY/OMSBt9VN9yD
+wr1WlbECgYEA37difsTMcLmUEN57sicFe1q4lxH6eqnUBjmoKBflx4oMIIyRnfjF
+Jwsu9yIiBkJfBCP85nl2tZdcV0wfZLf6amxB/KMtdfW6r8eoTDzE472OYxSIg1F5
+dI4qn2nBI0Dou0g58xj+Kv0iLaym0pxtyJkSg/rxZGwKb9a+x5WAs50CgYEAyqC0
+NcZs2BRIiT5kEOF6+MeUvarbKh1mangKHKcTdXRrvoJ+Z5izm7FifBixo/79MYpt
+0VofW0IzYKtAI9KZDq2JcozEbZ+lt/ZPH5QEXO4T39QbDoAG8BbOmEP7l+6m+7QO
+PiQ0WSNjDnwk3W7Zihgg31DH7hyxsxQCapKLcxUCgYAwERXPiPcoDSd8DGFlYK7z
+1wUsKEe6DT0p7T9tBd1v5wA+ChXLbETn46Y+oQ3QbHg/yn+vAU/5KkFD3G4uVL0w
+Gnx/DIxa+OYYmHxXjQL8r6ClNycxl9LRsS4FPFKsAWk/u///dFI/6E1spNjfDY8k
+94ab5tHwsqn3Z5tsBHo3nQKBgFUmxbSXh2Qi2fy6+GhTqU7k6G/wXhvLsR9rBKzX
+1YiVfTXZNu+oL0ptd/q4keZeIN7x0oaY/fZm0pp8PP8Q4HtXmBxIZb+/yG+Pld6q
+YE8BSd7VDu3ABapdm0JHx3Iou4mpOBcLNeiDw3vx1bgsfkTXMPFHzE0XR+H+tak9
+nlalAoGBALAmAF7WBGdOt43Rj8hPaKOM/ahj+6z3CNwVreToNsVBHoyNmiO8q7MC
++tRo4jgdrzk1pzs66OIHfbx5P1mXKPtgPZhvI5omAY8WqXEgeNqSL1Ksp6LZ2ql/
+ouZns5xwKc9+aRL+GWoAGNzwzcjE8cP52sBy/r0rYXTs/sZo5kgV
+-----END RSA PRIVATE KEY-----"#;
