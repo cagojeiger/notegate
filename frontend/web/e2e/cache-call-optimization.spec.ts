@@ -108,13 +108,13 @@ test("schedules the next idle interval after a delayed sync finishes", async ({ 
     await page.clock.runFor(30_001);
     await expect.poll(() => requests).toBe(2);
     await page.clock.runFor(120_001);
-    expect(requests).toBe(2);
+    expect(await page.evaluate(() => window.__startedPollingRequests)).toBe(2);
     await waitForSync(1);
 
     releaseResponse();
     await waitForSync(2);
     await page.clock.runFor(59_999);
-    expect(requests).toBe(2);
+    expect(await page.evaluate(() => window.__startedPollingRequests)).toBe(2);
     await page.clock.runFor(2);
     await waitForSync(3);
     expect(requests).toBe(3);
@@ -283,6 +283,7 @@ test("backs off idle usage polling with one owner while the desktop Space Librar
 declare global {
   interface Window {
     __completedPollingResponses: number;
+    __startedPollingRequests: number;
   }
 }
 
@@ -290,6 +291,14 @@ async function observeCompletedPolling(page: Page, path: string) {
   await page.addInitScript((pollPath) => {
     const state = window;
     state.__completedPollingResponses = 0;
+    state.__startedPollingRequests = 0;
+    const originalFetch = window.fetch;
+    window.fetch = function (input, init) {
+      if (typeof input === "string" && new URL(input, location.href).pathname === pollPath) {
+        state.__startedPollingRequests += 1;
+      }
+      return originalFetch.call(window, input, init);
+    };
     const channel = new MessageChannel();
     channel.port1.onmessage = () => { state.__completedPollingResponses += 1; };
     const originalJson = Response.prototype.json;
