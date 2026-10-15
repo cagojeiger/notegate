@@ -18,9 +18,11 @@ export function useFolderChildrenStat(node: RestNode) {
 
 export function useTextDocument(node: RestNode) {
   const client = useApiClient();
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: queryKeys.text(node.space_id, node.id),
-    queryFn: () => readText(client, node.space_id, node.id),
+    queryFn: () => readText(client, node.space_id, node.id,
+      queryClient.getQueryData<ReadTextResponse>(queryKeys.text(node.space_id, node.id))),
     // Active-Space change sync owns focus refresh; reconnect remains a direct fallback.
     refetchOnWindowFocus: false
   });

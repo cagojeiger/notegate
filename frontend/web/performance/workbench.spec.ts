@@ -44,6 +44,10 @@ test("authenticated workbench performance baseline", async ({ browser, playwrigh
   const measurements: Measurement[] = [];
   const textRevalidations: TextRevalidation[] = [];
   let conditionalProbe: (ReturnType<typeof textResponseShape> & { jsonBodyBytes: number }) | null = null;
+  const smallBodyProbes: Array<{
+    contentBytes: number; fullJsonBytes: number; conditionalJsonBytes: number;
+    extraQueryBytes: number; responsePlusQuerySavedBytes: number;
+  }> = [];
   let completed = false;
   try {
     const space = await request<Space>("/api/v1/spaces", "POST", { name: "Browser baseline" });
@@ -222,11 +226,32 @@ test("authenticated workbench performance baseline", async ({ browser, playwrigh
         await context.close();
       }
     }
+    // After closing every measured browser context, check the fixed query cost
+    // against small bodies without changing the preceding UI measurements.
+    for (const contentBytes of [0, 64, 1_024]) {
+      const body = "x".repeat(contentBytes);
+      const written = await request<TextResponse>(`${path}/text/${document.id}`, "PUT", { storage_format: "plain", content: body });
+      const fullPath = `${path}/text/${document.id}?max_lines=5000&max_bytes=1048576`;
+      const conditionalPath = `${fullPath}&if_none_match_sha256=${encodeURIComponent(written.text.content_sha256)}`;
+      const full = await api.get(fullPath);
+      const conditional = await api.get(conditionalPath);
+      expect(full.status()).toBe(200);
+      expect(conditional.status()).toBe(200);
+      const fullBody = await full.body();
+      const conditionalBody = await conditional.body();
+      const fullValue = JSON.parse(fullBody.toString()) as ReadTextResponse;
+      expect("content" in fullValue.text && fullValue.text.content).toBe(body);
+      const shape = textResponseShape(JSON.parse(conditionalBody.toString()) as ReadTextResponse);
+      expect(shape.unchanged && !shape.fullBody && shape.contentReturned === false).toBe(true);
+      const extraQueryBytes = Buffer.byteLength(conditionalPath) - Buffer.byteLength(fullPath);
+      smallBodyProbes.push({ contentBytes, fullJsonBytes: fullBody.byteLength, conditionalJsonBytes: conditionalBody.byteLength,
+        extraQueryBytes, responsePlusQuerySavedBytes: fullBody.byteLength - conditionalBody.byteLength - extraQueryBytes });
+    }
     completed = true;
   } finally {
     writeReport(measurements, { ...fixture, documentBytes: Buffer.byteLength(content) }, completed);
     const directory = "test-results/browser-performance";
-    writeFileSync(`${directory}/text-revalidation.json`, JSON.stringify({ completed, measurements: textRevalidations, conditionalProbe }, null, 2));
+    writeFileSync(`${directory}/text-revalidation.json`, JSON.stringify({ completed, measurements: textRevalidations, conditionalProbe, smallBodyProbes }, null, 2));
     appendFileSync(`${directory}/summary.md`, [
       "", "## Unchanged text revalidation", "",
       "Stale reopen after 5,500ms outside the measured journey. Exact text GET only; no mocked network. Revalidation ends at responseEnd, not paint.",
@@ -237,7 +262,11 @@ test("authenticated workbench performance baseline", async ({ browser, playwrigh
       "", "Separate APIRequestContext probe: JSON response bytes, not browser wire bytes.", "",
       "| JSON bytes | Unchanged | Full body | Content returned | Updated at/by present |",
       "|---:|---|---|---|---|",
-      ...(conditionalProbe ? [`| ${conditionalProbe.jsonBodyBytes} | ${conditionalProbe.unchanged} | ${conditionalProbe.fullBody} | ${conditionalProbe.contentReturned} | ${conditionalProbe.updatedAtPresent}/${conditionalProbe.updatedByPresent} |`] : []), ""
+      ...(conditionalProbe ? [`| ${conditionalProbe.jsonBodyBytes} | ${conditionalProbe.unchanged} | ${conditionalProbe.fullBody} | ${conditionalProbe.contentReturned} | ${conditionalProbe.updatedAtPresent}/${conditionalProbe.updatedByPresent} |`] : []), "",
+      "Small-body API probes run after all UI journeys. JSON body plus query-string comparison only; excludes headers, compression, TLS, and packet overhead.", "",
+      "| Content B | Full JSON B | Conditional JSON B | Extra query B | Response plus query saved B |",
+      "|---:|---:|---:|---:|---:|",
+      ...smallBodyProbes.map((row) => `| ${row.contentBytes} | ${row.fullJsonBytes} | ${row.conditionalJsonBytes} | ${row.extraQueryBytes} | ${row.responsePlusQuerySavedBytes} |`), ""
     ].join("\n"));
     await api.dispose();
   }

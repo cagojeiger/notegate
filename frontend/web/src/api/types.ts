@@ -170,6 +170,8 @@ export type ReadTextResponse = {
         content_sha256: string;
         byte_len: number;
         line_count: number;
+        updated_by?: AccountRef;
+        updated_at?: string;
       };
 };
 
