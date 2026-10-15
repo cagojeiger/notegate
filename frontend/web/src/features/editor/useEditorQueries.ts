@@ -73,10 +73,16 @@ export function useSaveTextDocument(
         queryKey: queryKeys.text(node.space_id, node.id),
         exact: true
       });
+      return { textDataUpdateCount: queryClient.getQueryState(queryKeys.text(node.space_id, node.id))?.dataUpdateCount };
     },
-    onSuccess: async ({ response, request }) => {
+    onSuccess: async ({ response, request }, _variables, context) => {
       const { node, content } = request;
-      // A refresh can start while the PUT is pending; do not let it replace this save.
+      const textState = queryClient.getQueryState(queryKeys.text(node.space_id, node.id));
+      const needsRevalidation = !!textState && (
+        textState.fetchStatus !== "idle" || textState.isInvalidated
+        || textState.dataUpdateCount !== context?.textDataUpdateCount
+      );
+      // Discard reads that may predate this save, then revalidate any observed refresh.
       await queryClient.cancelQueries({ queryKey: queryKeys.text(node.space_id, node.id), exact: true });
       const cachedNode = queryClient.getQueryData<RestNode>(queryKeys.node(node.space_id, node.id));
       const currentNode = cachedNode ?? node;
@@ -114,6 +120,12 @@ export function useSaveTextDocument(
       onSaved({ response, request });
       invalidateRecentNodes(queryClient, node.space_id);
       invalidateSpaceLinks(queryClient, node.space_id);
+      if (needsRevalidation) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.text(node.space_id, node.id), exact: true }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.node(node.space_id, node.id), exact: true })
+        ]);
+      }
     },
     onError: (error, request) => {
       const { node } = request;

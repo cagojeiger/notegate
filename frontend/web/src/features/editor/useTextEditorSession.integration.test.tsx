@@ -128,6 +128,8 @@ describe("text editing with the shared server cache", () => {
       content: "submitted draft",
       expected_sha256: "sha-1"
     }));
+    const firstSessionId = server.save.mock.calls[0][0].edit_session_id;
+    expect(firstSessionId).toEqual(expect.any(String));
 
     act(() => result.current.session.setDraft(laterDraft));
     await act(async () => {
@@ -153,6 +155,100 @@ describe("text editing with the shared server cache", () => {
       content: laterDraft,
       expected_sha256: "sha-2"
     }));
+    expect(server.save.mock.lastCall?.[0].edit_session_id).toEqual(expect.any(String));
+    expect(server.save.mock.lastCall?.[0].edit_session_id).not.toBe(firstSessionId);
+  });
+
+  it.each([
+    { refresh: "pending", continuedTyping: false, delayedNode: false },
+    { refresh: "completed", continuedTyping: false, delayedNode: false },
+    { refresh: "pending", continuedTyping: true, delayedNode: false },
+    { refresh: "completed", continuedTyping: true, delayedNode: false },
+    { refresh: "completed", continuedTyping: false, delayedNode: true }
+  ] as const)("keeps the newer external revision after an older save response ($refresh refresh, continued typing: $continuedTyping, delayed node: $delayedNode)", async ({ refresh, continuedTyping, delayedNode }) => {
+    const server = mockTextServer();
+    const savedResponse = deferred<Response>();
+    server.save.mockImplementationOnce(() => savedResponse.promise);
+    const { result } = renderHook(useEditor, { wrapper: ApiWrapper });
+    await waitFor(() => expect(result.current.session.draft).toBe("original"));
+    act(() => result.current.session.setDraft("submitted draft"));
+    act(() => result.current.session.saveDraft());
+    await waitFor(() => expect(server.save).toHaveBeenCalledOnce());
+
+    // The PUT committed first, but its response reaches the browser after a newer write.
+    const olderSaveResponse = server.commit("submitted draft");
+    if (continuedTyping) act(() => result.current.session.setDraft("continued local input"));
+    server.change("newer remote content");
+    const externalRead = deferred<Response>();
+    const externalReadResponse = server.readResponse();
+    server.read.mockImplementationOnce(() => externalRead.promise);
+    await act(async () => {
+      await applyExternalFileChanges(result.current.queryClient, node.space_id, [change]);
+    });
+    await waitFor(() => {
+      expect(result.current.session.textQuery.isFetching).toBe(true);
+      expect(result.current.queryClient.getQueryData(queryKeys.node(node.space_id, node.id))).toMatchObject({ content_sha256: "sha-3" });
+    });
+    if (refresh === "completed") {
+      await act(async () => {
+        externalRead.resolve(externalReadResponse);
+        await externalRead.promise;
+      });
+      await waitFor(() => {
+        expect(result.current.session.content).toBe("newer remote content");
+        expect(result.current.session.textQuery.isFetching).toBe(false);
+      });
+    }
+
+    const nodeRefresh = delayedNode ? deferred<Response>() : null;
+    if (nodeRefresh) server.nodeRead.mockImplementationOnce(() => nodeRefresh.promise);
+    await act(async () => {
+      savedResponse.resolve(olderSaveResponse);
+      await savedResponse.promise;
+    });
+    if (nodeRefresh) {
+      // Exercise text C arriving while the canonical node still describes saved version B.
+      await waitFor(() => {
+        expect(result.current.mode).toBe("preview");
+        expect(result.current.session.content).toBe("newer remote content");
+        expect(result.current.session.saving).toBe(true);
+        expect(result.current.queryClient.getQueryData(queryKeys.node(node.space_id, node.id))).toMatchObject({ content_sha256: "sha-2" });
+      });
+      await act(async () => {
+        nodeRefresh.resolve(server.nodeResponse());
+        await nodeRefresh.promise;
+      });
+    }
+    await waitFor(() => {
+      expect(result.current.session.saving).toBe(false);
+      expect(result.current.session.content).toBe("newer remote content");
+      expect(result.current.queryClient.getQueryData(queryKeys.node(node.space_id, node.id))).toMatchObject({ content_sha256: "sha-3" });
+    });
+    if (refresh === "pending") {
+      // Complete the canceled transport as well; it must not change the visible result.
+      await act(async () => {
+        externalRead.resolve(externalReadResponse);
+        await externalRead.promise;
+      });
+      expect(result.current.session.content).toBe("newer remote content");
+    }
+    if (continuedTyping) {
+      expect(result.current.mode).toBe("edit");
+      expect(result.current.session.draft).toBe("continued local input");
+      expect(result.current.session.dirty).toBe(true);
+      act(() => result.current.session.saveDraft());
+      await waitFor(() => expect(result.current.session.conflict).toBe(true));
+      expect(server.save).toHaveBeenLastCalledWith(expect.objectContaining({
+        content: "continued local input",
+        expected_sha256: "sha-2"
+      }));
+      expect(result.current.session.draft).toBe("continued local input");
+      expect(result.current.session.content).toBe("newer remote content");
+    } else {
+      expect(result.current.mode).toBe("preview");
+      expect(result.current.session.dirty).toBe(false);
+      await waitFor(() => expect(result.current.session.externalUpdate).toBeNull());
+    }
   });
 
   it("returns to preview after saving an unchanged submitted draft", async () => {
@@ -169,6 +265,7 @@ describe("text editing with the shared server cache", () => {
       expect(result.current.session.conflict).toBe(false);
     });
     expect(server.save).toHaveBeenCalledOnce();
+    expect(server.read).toHaveBeenCalledOnce();
   });
 
   it.each(["success", "conflict"] as const)("keeps a new edit session intact when the canceled session's save returns %s", async (outcome) => {
@@ -255,6 +352,7 @@ function useEditor() {
 type SaveRequest = {
   content: string;
   expected_sha256?: string;
+  edit_session_id: string;
 };
 
 function mockTextServer() {
@@ -294,6 +392,8 @@ function mockTextServer() {
     }
   } satisfies ReadTextResponse);
   const read = vi.fn(async () => readResponse());
+  const nodeResponse = () => jsonResponse(currentNode());
+  const nodeRead = vi.fn(async () => nodeResponse());
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === textPath && init?.method === "PUT") {
@@ -303,11 +403,11 @@ function mockTextServer() {
       return read();
     }
     if (path === `/api/v1/spaces/${node.space_id}/nodes/${node.id}` && init?.method === "GET") {
-      return jsonResponse(currentNode());
+      return nodeRead();
     }
     throw new Error(`Unexpected request: ${init?.method} ${path}`);
   }));
-  return { save, read, change, commit, readResponse };
+  return { save, read, nodeRead, change, commit, readResponse, nodeResponse };
 }
 
 function jsonResponse(body: unknown, status = 200) {

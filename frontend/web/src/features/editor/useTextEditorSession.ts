@@ -57,8 +57,8 @@ export function useTextEditorSession({
       setConflict(false);
       setExternalUpdate(null);
       dismissedExternalSha.current = null;
+      setEditSessionId(crypto.randomUUID());
       if (active.draft === request.content) {
-        setEditSessionId(crypto.randomUUID());
         onSetMode("preview");
       }
     },
@@ -127,7 +127,7 @@ export function useTextEditorSession({
     if (!observedNode || !latestSha || !comparisonSha) return;
 
     if (latestSha === comparisonSha) {
-      if (externalUpdate?.content_sha256 === latestSha) setExternalUpdate(null);
+      if (externalUpdate?.content_sha256) setExternalUpdate(null);
       lastAutoReloadSha.current = null;
       return;
     }
