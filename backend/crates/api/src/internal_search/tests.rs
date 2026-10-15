@@ -13,7 +13,8 @@ use serde_json::Value;
 use tower::ServiceExt as _;
 
 use super::auth::{
-    InternalSearchAuth, REQUEST_SIGNATURE_HEADER, RESPONSE_SIGNATURE_HEADER, TIMESTAMP_HEADER,
+    BOUND_RESPONSE_SIGNATURE_HEADER, InternalSearchAuth, REQUEST_SIGNATURE_HEADER,
+    RESPONSE_SIGNATURE_HEADER, RequestBinding, TIMESTAMP_HEADER,
 };
 use super::loopback_base_url;
 use super::{FIND_PATH, RequestDeadline, SearchClient, SearchServerState};
@@ -136,37 +137,69 @@ async fn search_app_rejects_unauthorized_search_and_exposes_only_control_plane()
     }))?;
     let timestamp = InternalSearchAuth::now_timestamp()?;
     let auth = InternalSearchAuth::new(signing_key);
-    let signature = auth.sign_request(timestamp, "POST", FIND_PATH, &expired_body)?;
-    let expired = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(FIND_PATH)
-                .header(TIMESTAMP_HEADER, timestamp.to_string())
-                .header(REQUEST_SIGNATURE_HEADER, signature)
-                .body(Body::from(expired_body))?,
-        )
-        .await?;
-    assert_eq!(expired.status(), StatusCode::GATEWAY_TIMEOUT);
-    let response_signature = expired
-        .headers()
-        .get(RESPONSE_SIGNATURE_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| std::io::Error::other("expected signed deadline response"))?
-        .to_owned();
-    let expired_body = axum::body::to_bytes(expired.into_body(), usize::MAX).await?;
-    assert!(auth.verify_response(
-        timestamp,
-        StatusCode::GATEWAY_TIMEOUT.as_u16(),
-        FIND_PATH,
-        &expired_body,
-        &response_signature,
-    ));
-    let expired_json: Value = serde_json::from_slice(&expired_body)?;
-    assert_eq!(
-        expired_json.pointer("/error/kind"),
-        Some(&serde_json::json!("deadline_exceeded"))
-    );
+    for (request_body, status, error_kind) in [
+        (
+            expired_body,
+            StatusCode::GATEWAY_TIMEOUT,
+            "deadline_exceeded",
+        ),
+        (b"{".to_vec(), StatusCode::BAD_REQUEST, "invalid_input"),
+    ] {
+        let binding = RequestBinding::new(timestamp, "POST", FIND_PATH, &request_body);
+        let other_binding = RequestBinding::new(timestamp, "POST", FIND_PATH, b"{}");
+        let signature = auth.sign_request(timestamp, "POST", FIND_PATH, &request_body)?;
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(FIND_PATH)
+                    .header(TIMESTAMP_HEADER, timestamp.to_string())
+                    .header(REQUEST_SIGNATURE_HEADER, signature)
+                    .body(Body::from(request_body))?,
+            )
+            .await?;
+        assert_eq!(response.status(), status);
+        let legacy_signature = response
+            .headers()
+            .get(RESPONSE_SIGNATURE_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| std::io::Error::other("expected legacy signed error response"))?
+            .to_owned();
+        let bound_signature = response
+            .headers()
+            .get(BOUND_RESPONSE_SIGNATURE_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| std::io::Error::other("expected request-bound error response"))?
+            .to_owned();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+        assert!(auth.verify_response(
+            timestamp,
+            status.as_u16(),
+            FIND_PATH,
+            &body,
+            &legacy_signature,
+        ));
+        assert!(auth.verify_bound_response(
+            &binding,
+            status.as_u16(),
+            FIND_PATH,
+            &body,
+            &bound_signature,
+        ));
+        assert!(!auth.verify_bound_response(
+            &other_binding,
+            status.as_u16(),
+            FIND_PATH,
+            &body,
+            &bound_signature,
+        ));
+        let error: Value = serde_json::from_slice(&body)?;
+        assert_eq!(
+            error.pointer("/error/kind"),
+            Some(&serde_json::json!(error_kind))
+        );
+    }
     Ok(())
 }
 

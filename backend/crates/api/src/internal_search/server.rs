@@ -17,7 +17,8 @@ use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
 
 use super::auth::{
-    InternalSearchAuth, REQUEST_SIGNATURE_HEADER, RESPONSE_SIGNATURE_HEADER, TIMESTAMP_HEADER,
+    BOUND_RESPONSE_SIGNATURE_HEADER, InternalSearchAuth, REQUEST_SIGNATURE_HEADER,
+    RESPONSE_SIGNATURE_HEADER, RequestBinding, TIMESTAMP_HEADER,
 };
 use super::context::SEARCH_RESPONSE_HEADROOM;
 use super::contract::{
@@ -126,7 +127,7 @@ async fn scrape(State(state): State<SearchServerState>) -> Response {
 }
 
 async fn find(State(state): State<SearchServerState>, request: Request<Body>) -> Response {
-    let (timestamp, input) =
+    let (binding, input) =
         match verified_json::<InternalSearchRequest<FindCommand>>(&state, request).await {
             Ok(value) => value,
             Err(error) => return request_error_response(&state, FIND_PATH, error),
@@ -142,13 +143,13 @@ async fn find(State(state): State<SearchServerState>, request: Request<Body>) ->
     )
     .await
     {
-        Ok(result) => search_response(&state, FIND_PATH, timestamp, result.map(FindOutput::from)),
-        Err(deadline) => deadline_response(&state, FIND_PATH, timestamp, "find", deadline),
+        Ok(result) => search_response(&state, FIND_PATH, binding, result.map(FindOutput::from)),
+        Err(deadline) => deadline_response(&state, FIND_PATH, binding, "find", deadline),
     }
 }
 
 async fn grep(State(state): State<SearchServerState>, request: Request<Body>) -> Response {
-    let (timestamp, input) =
+    let (binding, input) =
         match verified_json::<InternalSearchRequest<GrepCommand>>(&state, request).await {
             Ok(value) => value,
             Err(error) => return request_error_response(&state, GREP_PATH, error),
@@ -164,8 +165,8 @@ async fn grep(State(state): State<SearchServerState>, request: Request<Body>) ->
     )
     .await
     {
-        Ok(result) => search_response(&state, GREP_PATH, timestamp, result.map(GrepOutput::from)),
-        Err(deadline) => deadline_response(&state, GREP_PATH, timestamp, "grep", deadline),
+        Ok(result) => search_response(&state, GREP_PATH, binding, result.map(GrepOutput::from)),
+        Err(deadline) => deadline_response(&state, GREP_PATH, binding, "grep", deadline),
     }
 }
 
@@ -206,7 +207,7 @@ fn execution_timeout(timeout_ms: u64) -> Option<Duration> {
 fn deadline_response(
     state: &SearchServerState,
     path: &str,
-    timestamp: i64,
+    binding: RequestBinding,
     operation: &'static str,
     deadline: DeadlineExceeded,
 ) -> Response {
@@ -218,25 +219,19 @@ fn deadline_response(
         phase
     );
     let error = InternalSearchError::DeadlineExceeded;
-    signed_json(
-        state,
-        path,
-        timestamp,
-        error.status(),
-        &ErrorOutput { error },
-    )
+    signed_json(state, path, binding, error.status(), &ErrorOutput { error })
 }
 
 enum VerifiedRequestError {
     Unauthorized,
-    InvalidJson { timestamp: i64 },
+    InvalidJson { binding: RequestBinding },
     TooLarge,
 }
 
 async fn verified_json<T>(
     state: &SearchServerState,
     request: Request<Body>,
-) -> Result<(i64, T), VerifiedRequestError>
+) -> Result<(RequestBinding, T), VerifiedRequestError>
 where
     T: DeserializeOwned,
 {
@@ -267,9 +262,10 @@ where
     ) {
         return Err(VerifiedRequestError::Unauthorized);
     }
+    let binding = RequestBinding::new(timestamp, parts.method.as_str(), parts.uri.path(), &body);
     let input = serde_json::from_slice(&body)
-        .map_err(|_error| VerifiedRequestError::InvalidJson { timestamp })?;
-    Ok((timestamp, input))
+        .map_err(|_error| VerifiedRequestError::InvalidJson { binding })?;
+    Ok((binding, input))
 }
 
 fn request_error_response(
@@ -280,10 +276,10 @@ fn request_error_response(
     match error {
         VerifiedRequestError::Unauthorized => StatusCode::NOT_FOUND.into_response(),
         VerifiedRequestError::TooLarge => StatusCode::PAYLOAD_TOO_LARGE.into_response(),
-        VerifiedRequestError::InvalidJson { timestamp } => signed_json(
+        VerifiedRequestError::InvalidJson { binding } => signed_json(
             state,
             path,
-            timestamp,
+            binding,
             StatusCode::BAD_REQUEST,
             &ErrorOutput {
                 error: InternalSearchError::InvalidInput {
@@ -297,23 +293,17 @@ fn request_error_response(
 fn search_response<T>(
     state: &SearchServerState,
     path: &str,
-    timestamp: i64,
+    binding: RequestBinding,
     result: Result<T, SearchRunError>,
 ) -> Response
 where
     T: Serialize,
 {
     match result {
-        Ok(output) => signed_json(state, path, timestamp, StatusCode::OK, &output),
+        Ok(output) => signed_json(state, path, binding, StatusCode::OK, &output),
         Err(SearchRunError::Capacity(capacity)) => {
             let error = InternalSearchError::busy(capacity);
-            signed_json(
-                state,
-                path,
-                timestamp,
-                error.status(),
-                &ErrorOutput { error },
-            )
+            signed_json(state, path, binding, error.status(), &ErrorOutput { error })
         }
         Err(SearchRunError::Search(error)) => {
             if let notegate_search::SearchError::Internal(detail) = &error {
@@ -321,7 +311,7 @@ where
             }
             let error = InternalSearchError::from_search(error);
             let status = error.status();
-            signed_json(state, path, timestamp, status, &ErrorOutput { error })
+            signed_json(state, path, binding, status, &ErrorOutput { error })
         }
     }
 }
@@ -329,7 +319,7 @@ where
 fn signed_json<T>(
     state: &SearchServerState,
     path: &str,
-    timestamp: i64,
+    binding: RequestBinding,
     status: StatusCode,
     output: &T,
 ) -> Response
@@ -341,14 +331,24 @@ where
     };
     let Ok(signature) = state
         .auth
-        .sign_response(timestamp, status.as_u16(), path, &body)
+        .sign_response(binding.timestamp, status.as_u16(), path, &body)
     else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    let Ok(timestamp) = HeaderValue::from_str(&timestamp.to_string()) else {
+    let Ok(bound_signature) =
+        state
+            .auth
+            .sign_bound_response(&binding, status.as_u16(), path, &body)
+    else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let Ok(timestamp) = HeaderValue::from_str(&binding.timestamp.to_string()) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let Ok(signature) = HeaderValue::from_str(&signature) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let Ok(bound_signature) = HeaderValue::from_str(&bound_signature) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let mut response = (status, body).into_response();
@@ -360,6 +360,9 @@ where
     response
         .headers_mut()
         .insert(RESPONSE_SIGNATURE_HEADER, signature);
+    response
+        .headers_mut()
+        .insert(BOUND_RESPONSE_SIGNATURE_HEADER, bound_signature);
     response
 }
 
