@@ -22,6 +22,15 @@ GET /auth/callback?code=...&state=...
 
 AuthGate는 refresh token의 canonical state, rotation, revoke 여부를 관리한다. NoteGate는 해당 refresh token 값을 브라우저 세션 갱신에 다시 제출할 수 있도록 저장할 뿐이며, browser client에는 refresh token을 노출하지 않는다.
 
+Browser ID token 검증용 discovery metadata와 JWKS는 프로세스에서 캐시하며, discovery
+갱신 주기는 1시간이다. Discovery 실패 시 기존 snapshot을 유지한다.
+콜백에서 일치하는 서명 키가 없거나 캐시된 키로 서명 검증이 실패하면, 앞서 discovery한
+`jwks_uri`에서 공개 키를 한 번 다시 조회하고 같은 ID token을 재검증한다. Authorization
+code를 다시 교환하지 않으며 issuer·audience·nonce·만료·알고리즘·`at_hash` 및 UserInfo
+subject 검증은 그대로 적용한다. 다른 claims 오류는 키 재조회로 재시도하지 않는다.
+동시에 같은 캐시를 사용하는 콜백은 재조회 시도를 공유한다. 재조회 실패 시 해당 콜백을
+거부하고 기존 캐시를 유지하며, 성공한 키 재조회도 discovery의 1시간 TTL을 연장하지 않는다.
+
 ## Login success
 
 ```http
