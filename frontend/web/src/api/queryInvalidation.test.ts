@@ -1,6 +1,7 @@
-import { InfiniteQueryObserver, QueryObserver } from "@tanstack/react-query";
+import { InfiniteQueryObserver, QueryObserver, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 
+import { makeRestNode } from "../test/fixtures";
 import { createTestQueryClient } from "../test/queryClient";
 import {
   applyExternalFileChanges,
@@ -18,6 +19,7 @@ import {
   removeDeletedSpaceQueries
 } from "./queryInvalidation";
 import { queryKeys } from "./queryKeys";
+import type { FileChangeDelta } from "./types";
 
 describe("query invalidation", () => {
   it("refetches the spaces list without refetching active space descendants", async () => {
@@ -308,6 +310,96 @@ describe("query invalidation", () => {
     ).toBe(1);
   });
 
+  it.each([
+    {
+      scenario: "lock", initiallyLocked: false, finallyLocked: true, active: true,
+      changes: [folderLockDelta(11)], expected: [1, 1, 1, 0, 0]
+    },
+    {
+      scenario: "unlock", initiallyLocked: true, finallyLocked: false, active: true,
+      changes: [folderLockDelta(11)], expected: [1, 1, 1, 0, 0]
+    },
+    {
+      scenario: "lock-and-repeated-text-changes", initiallyLocked: false, finallyLocked: true, active: true,
+      changes: [folderLockDelta(11), delta(12, "child-1", ["folder-1"]), delta(13, "child-1", ["folder-1"])],
+      expected: [1, 1, 1, 0, 1]
+    },
+    {
+      scenario: "text-change-only", initiallyLocked: false, finallyLocked: false, active: true,
+      changes: [delta(11, "child-1", ["folder-1"])], expected: [0, 1, 0, 0, 1]
+    },
+    {
+      scenario: "subtree-and-lock-change", initiallyLocked: false, finallyLocked: true, active: true,
+      changes: [
+        { ...folderLockDelta(11), write_lock_changed: false, subtree_changed: true, path_changed: true },
+        folderLockDelta(12)
+      ],
+      expected: [1, 1, 1, 0, 0]
+    },
+    {
+      scenario: "inactive-cache", initiallyLocked: false, finallyLocked: true, active: false,
+      changes: [folderLockDelta(11)], expected: [0, 0, 0, 0, 0]
+    }
+  ])("refetches each affected query once for $scenario", async ({
+    scenario, initiallyLocked, finallyLocked, active, changes, expected
+  }) => {
+    const queryClient = createTestQueryClient();
+    const sources = [{ node_id: "folder-1", name: "Folder", path: "/Folder" }];
+    const folder = (locked: boolean) => makeRestNode({
+      id: "folder-1", space_id: "space-1", kind: "folder", name: "Folder", path: "/Folder",
+      write_locked: locked, effective_write_locked: locked, write_lock_sources: locked ? sources : []
+    });
+    const child = (locked: boolean) => makeRestNode({
+      id: "child-1", space_id: "space-1", parent_id: "folder-1", path: "/Folder/note.md",
+      effective_write_locked: locked, write_lock_sources: locked ? sources : []
+    });
+    const unrelated = makeRestNode({ id: "unrelated-1", space_id: "space-1" });
+    const otherSpace = makeRestNode({ id: "other-1", space_id: "space-2" });
+    const textBefore = { content: "Before", content_sha256: "before-sha" };
+    const textAfter = { content: "After", content_sha256: "after-sha" };
+    const queries = [
+      delayedObservedQuery(queryClient, "folder", queryKeys.node("space-1", "folder-1"), folder(initiallyLocked), folder(finallyLocked), active),
+      delayedObservedQuery(queryClient, "child", queryKeys.node("space-1", "child-1"), child(initiallyLocked), child(finallyLocked), active),
+      delayedObservedQuery(queryClient, "unrelated", queryKeys.node("space-1", "unrelated-1"), unrelated, unrelated, active),
+      delayedObservedQuery(queryClient, "otherSpace", queryKeys.node("space-2", "other-1"), otherSpace, otherSpace, true),
+      delayedObservedQuery(queryClient, "text", queryKeys.text("space-1", "child-1"), textBefore, textAfter, active)
+    ];
+    const calls = () => queries.map((query) => query.request.mock.calls.length);
+    const report = (phase: string) => console.info("[folder-lock-experiment]", JSON.stringify({
+      scenario, phase, counts: Object.fromEntries(queries.map((query) => [query.label, query.request.mock.calls.length]))
+    }));
+
+    try {
+      expect(calls()).toEqual([0, 0, 0, 0, 0]);
+
+      await applyExternalFileChanges(queryClient, "space-1", changes);
+
+      report("after-changes");
+      expect(calls()).toEqual(expected);
+      expect(queryClient.getQueryState(queryKeys.node("space-2", "other-1"))?.isInvalidated).toBe(false);
+
+      if (!active) {
+        for (const query of queries.slice(0, 3)) {
+          expect(queryClient.getQueryState(query.key)?.isInvalidated).toBe(true);
+          query.activate();
+        }
+        report("after-subscribe");
+        expect(calls()).toEqual([1, 1, 1, 0, 0]);
+      }
+
+      await Promise.all(queries.map((query) => query.complete()));
+
+      expect(queryClient.getQueryData(queryKeys.node("space-1", "folder-1"))).toEqual(folder(finallyLocked));
+      expect(queryClient.getQueryData(queryKeys.node("space-1", "child-1"))).toEqual(child(finallyLocked));
+      expect(queryClient.getQueryData(queryKeys.node("space-1", "unrelated-1"))).toEqual(unrelated);
+      expect(queryClient.getQueryData(queryKeys.node("space-2", "other-1"))).toEqual(otherSpace);
+      expect(queryClient.getQueryData(queryKeys.text("space-1", "child-1"))).toEqual(expected[4] ? textAfter : textBefore);
+    } finally {
+      queries.forEach((query) => query.dispose());
+      queryClient.clear();
+    }
+  });
+
   it("keeps link caches valid for an item update that does not change paths", async () => {
     const queryClient = createTestQueryClient();
     const statusKey = queryKeys.nodeLinkStatus("space-1", "folder-1");
@@ -489,5 +581,51 @@ function delta(id: number, nodeId: string, parentIds: string[]) {
     parent_scope_known: parentIds.length > 0,
     path_changed: false,
     subtree_changed: false
+  };
+}
+
+function folderLockDelta(id: number): FileChangeDelta {
+  return {
+    ...delta(id, "folder-1", ["root-1"]),
+    op_type: "item.update",
+    item_kind: "folder",
+    write_lock_changed: true
+  };
+}
+
+function delayedObservedQuery<T>(
+  queryClient: QueryClient,
+  label: string,
+  key: QueryKey,
+  initial: T,
+  response: T,
+  active: boolean
+) {
+  const pending: Array<(value: T) => void> = [];
+  const subscriptions: Array<() => void> = [];
+  const request = vi.fn(() => new Promise<T>((resolve) => pending.push(resolve)));
+  queryClient.setQueryData(key, initial);
+  const observer = new QueryObserver(queryClient, { queryKey: key, queryFn: request, staleTime: Infinity });
+  const activate = () => subscriptions.push(observer.subscribe(() => undefined));
+  const resolveRequests = () => pending.splice(0).forEach((resolve) => resolve(response));
+  if (active) activate();
+
+  return {
+    label, key, request, activate,
+    async complete() {
+      if (pending.length === 0) return;
+      const settled = new Promise<void>((resolve) => {
+        subscriptions.push(observer.subscribe((result) => {
+          if (result.fetchStatus === "idle") resolve();
+        }));
+      });
+      resolveRequests();
+      await settled;
+    },
+    dispose() {
+      resolveRequests();
+      subscriptions.forEach((unsubscribe) => unsubscribe());
+      observer.destroy();
+    }
   };
 }

@@ -250,6 +250,141 @@ test("refreshes restored editors through one focus-owned Space sync", async ({ p
   expect(totalRequests(requests) - changedBaseline).toBe(8);
 });
 
+test("refreshes a folder lock once while updating its open descendant", async ({ page }) => {
+  const basePath = `/api/v1/spaces/${space.id}`;
+  const syncPath = `${basePath}/file-change-sync`;
+  const folderPath = `${basePath}/nodes/folder-1`;
+  const childPath = `${basePath}/nodes/text-1`;
+  const textPath = `${basePath}/text/text-1`;
+  const folder: RestNode = {
+    ...textNode(), id: "folder-1", name: "parent", path: "/parent",
+    kind: "folder", has_children: true, content_sha256: undefined
+  };
+  let locked = false;
+  let pendingChange = false;
+  let changeId = 10;
+  let parentResponse = Promise.resolve();
+  let releaseParent = () => {};
+  const sources = () => locked ? [{ node_id: folder.id, name: folder.name, path: folder.path }] : [];
+  const currentFolder = (): RestNode => ({
+    ...folder, write_locked: locked, effective_write_locked: locked, write_lock_sources: sources()
+  });
+  const currentChild = (): RestNode => ({
+    ...textNode(), parent_id: folder.id, path: "/parent/note.md",
+    effective_write_locked: locked, write_lock_sources: sources()
+  });
+
+  await page.clock.install();
+  const waitForSync = await observeCompletedPolling(page, syncPath);
+  await page.addInitScript((paths) => {
+    Math.random = () => 0.5;
+    window.__lockFetchStarts = {};
+    const originalFetch = window.fetch;
+    window.fetch = function (input, init) {
+      const path = new URL(input instanceof Request ? input.url : String(input), location.href).pathname;
+      if (paths.includes(path)) {
+        window.__lockFetchStarts[path] = (window.__lockFetchStarts[path] ?? 0) + 1;
+      }
+      return originalFetch.call(window, input, init);
+    };
+  }, [folderPath, childPath, textPath]);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await routeJsonApi(page, (url) => {
+    if (url.pathname === syncPath) {
+      const changes = pendingChange ? [{
+        id: ++changeId, node_id: folder.id, op_type: "item.update", item_kind: "folder",
+        affected_parent_ids: [space.root_node_id], parent_scope_known: true,
+        path_changed: false, subtree_changed: false, write_lock_changed: true
+      }] : [];
+      pendingChange = false;
+      return { changes, next_after_id: changeId, has_more: false, resync_required: false };
+    }
+    if (url.pathname === `${basePath}/nodes/${space.root_node_id}/children`
+      || url.pathname === `${folderPath}/children`) {
+      const isRoot = url.pathname.includes(`/${space.root_node_id}/`);
+      return {
+        parent: { id: isRoot ? space.root_node_id : folder.id, path: isRoot ? "/" : folder.path },
+        children: [isRoot ? currentFolder() : currentChild()],
+        page: { limit: 100, returned: 1, has_more: false, next_cursor: null }
+      };
+    }
+    if (url.pathname === `${basePath}/nodes`) {
+      return {
+        nodes: [currentChild()],
+        page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
+      };
+    }
+    if (url.pathname === `${childPath}/reveal`) {
+      return { ancestors: [currentFolder()], target: currentChild() };
+    }
+    if (url.pathname === childPath) return currentChild();
+    if (url.pathname === textPath) {
+      return { ...responseFor(url), node: { id: "text-1", path: currentChild().path } };
+    }
+    return responseFor(url);
+  });
+  // Keep the original and any replacement fetch in flight together. Counting
+  // window.fetch also observes a request canceled before it reaches the route.
+  await page.route((url) => url.pathname === folderPath, async (route) => {
+    const response = currentFolder();
+    await parentResponse;
+    await route.fulfill({ json: response });
+  });
+
+  await page.goto("/");
+  const recent = page.locator("[data-recent-list]");
+  await recent.getByRole("button", { name: /^note\.md/ }).click();
+  const editor = page.locator('[data-editor-group][data-active="true"]');
+  await expect(editor).toContainText("Request budget");
+  await expect(editor.getByRole("button", { name: "Edit", exact: true })).toBeEnabled();
+  const tree = page.getByRole("tree", { name: "Files" });
+  await expect(tree.getByRole("button", { name: "note.md", exact: true })).toBeVisible();
+  await tree.getByRole("button", { name: "Collapse parent", exact: true }).click();
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await expect(inspector.getByText(folder.name, { exact: true })).toBeVisible();
+  await expect(inspector).toContainText("Changes allowed");
+  await waitForSync(1);
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+
+  for (const [index, nextLocked] of [true, false].entries()) {
+    const before = await page.evaluate(() => ({ ...window.__lockFetchStarts }));
+    locked = nextLocked;
+    pendingChange = true;
+    parentResponse = new Promise<void>((resolve) => { releaseParent = resolve; });
+    try {
+      await page.clock.runFor(30_001);
+      await waitForSync(index + 2);
+      await expect.poll(async () => {
+        await page.clock.runFor(100);
+        return editor.getByRole("button", { name: "Edit", exact: true }).isDisabled();
+      }).toBe(nextLocked);
+      const after = await page.evaluate(() => ({ ...window.__lockFetchStarts }));
+      const delta = {
+        parent: (after[folderPath] ?? 0) - (before[folderPath] ?? 0),
+        child: (after[childPath] ?? 0) - (before[childPath] ?? 0),
+        text: (after[textPath] ?? 0) - (before[textPath] ?? 0)
+      };
+      await test.info().attach(`folder-${nextLocked ? "lock" : "unlock"}-fetches`, {
+        body: JSON.stringify({ before, after, delta, source: "window.fetch starts" }, null, 2),
+        contentType: "application/json"
+      });
+      expect.soft(delta).toEqual({ parent: 1, child: 1, text: 0 });
+      await expect.poll(async () => {
+        await page.clock.runFor(100);
+        return recent.getByRole("button", { name: /^note\.md/ })
+          .locator("[data-node-lock-indicator]").count();
+      }).toBe(nextLocked ? 1 : 0);
+    } finally {
+      releaseParent();
+    }
+    await expect.poll(async () => {
+      await page.clock.runFor(100);
+      return inspector.getByRole("switch", { name: "Lock changes" }).isChecked();
+    }).toBe(nextLocked);
+    await expect(inspector).toContainText(nextLocked ? "Locked here" : "Changes allowed");
+  }
+});
+
 test("backs off idle usage polling with one owner while the desktop Space Library is open", async ({ page }) => {
   const requests = new Map<string, number>();
   await page.clock.install();
@@ -284,6 +419,7 @@ declare global {
   interface Window {
     __completedPollingResponses: number;
     __startedPollingRequests: number;
+    __lockFetchStarts: Record<string, number>;
   }
 }
 
