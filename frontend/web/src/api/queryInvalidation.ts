@@ -100,7 +100,7 @@ export async function applyExternalFileChanges(
     if (change.op_type.startsWith("text.")) textIds.add(change.node_id);
   }
 
-  if (!subtreeChanged) {
+  if (!subtreeChanged && !descendantWriteLockChanged) {
     for (const nodeId of nodeIds) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.node(spaceId, nodeId),

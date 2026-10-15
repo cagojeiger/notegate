@@ -313,16 +313,16 @@ describe("query invalidation", () => {
   it.each([
     {
       scenario: "lock", initiallyLocked: false, finallyLocked: true, active: true,
-      changes: [folderLockDelta(11)], expected: [2, 1, 1, 0, 0]
+      changes: [folderLockDelta(11)], expected: [1, 1, 1, 0, 0]
     },
     {
       scenario: "unlock", initiallyLocked: true, finallyLocked: false, active: true,
-      changes: [folderLockDelta(11)], expected: [2, 1, 1, 0, 0]
+      changes: [folderLockDelta(11)], expected: [1, 1, 1, 0, 0]
     },
     {
       scenario: "lock-and-repeated-text-changes", initiallyLocked: false, finallyLocked: true, active: true,
       changes: [folderLockDelta(11), delta(12, "child-1", ["folder-1"]), delta(13, "child-1", ["folder-1"])],
-      expected: [2, 2, 1, 0, 1]
+      expected: [1, 1, 1, 0, 1]
     },
     {
       scenario: "text-change-only", initiallyLocked: false, finallyLocked: false, active: true,
