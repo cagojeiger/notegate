@@ -8,7 +8,7 @@ import { useUiStore } from "../../stores/uiStore";
 
 export type CanonicalNodeLoader = (
   summary: NodeSummary,
-  failureMessage: string
+  failureMessage: string | null
 ) => Promise<RestNode | null>;
 
 export function useCanonicalNodeLoader(): CanonicalNodeLoader {
@@ -24,7 +24,7 @@ export function useCanonicalNodeLoader(): CanonicalNodeLoader {
         staleTime: Number.POSITIVE_INFINITY
       });
     } catch {
-      showToast(failureMessage);
+      if (failureMessage !== null) showToast(failureMessage);
       return null;
     }
   };
