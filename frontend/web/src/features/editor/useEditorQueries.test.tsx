@@ -13,6 +13,7 @@ import { makeRestNode } from "../../test/fixtures";
 import { createTestQueryClient } from "../../test/queryClient";
 import { useNodeChildrenQuery } from "../nodes/useNodeQueries";
 import {
+  type TextSaveRequest,
   useFolderChildrenStat,
   useSaveTextDocument,
   useTextDocument
@@ -35,6 +36,10 @@ vi.mock("../../api/nodes", () => ({
 }));
 
 const node = makeRestNode({ content_sha256: "sha-1" });
+
+function saveRequest(content: string): TextSaveRequest {
+  return { node, content, expectedSha256: "sha-1", editSessionId: "session-1", force: false };
+}
 
 describe("editor queries", () => {
   beforeEach(() => {
@@ -148,7 +153,7 @@ describe("editor queries", () => {
     const { result } = renderHook(
       () => ({
         text: useTextDocument(node),
-        save: useSaveTextDocument(node, draft, "sha-1", onSaved, onConflict)
+        save: useSaveTextDocument(onSaved, onConflict)
       }),
       { wrapper }
     );
@@ -156,7 +161,7 @@ describe("editor queries", () => {
     expect(result.current.text.data).toEqual(oldText);
     expect(readText).not.toHaveBeenCalled();
 
-    act(() => result.current.save.mutate(false));
+    act(() => result.current.save.mutate(saveRequest(draft)));
 
     await waitFor(() => expect(result.current.save.isSuccess).toBe(true));
     expect(readText).not.toHaveBeenCalled();
@@ -166,7 +171,7 @@ describe("editor queries", () => {
       node.id,
       draft,
       "sha-1",
-      undefined
+      "session-1"
     );
     expect(queryClient.getQueryData(queryKeys.text(node.space_id, node.id))).toEqual({
       node: { id: node.id, path: node.path },
@@ -223,11 +228,11 @@ describe("editor queries", () => {
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     );
     const { result } = renderHook(
-      () => useSaveTextDocument(node, "changed", "sha-1", onSaved, onConflict),
+      () => useSaveTextDocument(onSaved, onConflict),
       { wrapper }
     );
 
-    act(() => result.current.mutate(false));
+    act(() => result.current.mutate(saveRequest("changed")));
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(useUiStore.getState().saveState).toBe("error");
@@ -248,8 +253,8 @@ describe("editor queries", () => {
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     );
-    const { result } = renderHook(() => useSaveTextDocument(node, "draft", "sha", onSaved, onConflict), { wrapper });
-    act(() => result.current.mutate(false));
+    const { result } = renderHook(() => useSaveTextDocument(onSaved, onConflict), { wrapper });
+    act(() => result.current.mutate(saveRequest("draft")));
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(onConflict).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();

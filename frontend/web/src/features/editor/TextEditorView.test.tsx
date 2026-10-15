@@ -359,7 +359,9 @@ describe("TextEditorView", () => {
     await user.type(screen.getByRole("textbox", { name: /edit text content/i }), " changed");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(save).toHaveBeenCalledWith(false);
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({
+      node, content: "original changed", expectedSha256: "sha", force: false
+    }));
 
     await user.click(screen.getByRole("button", { name: "Cancel edit" }));
     expect(onSetMode).toHaveBeenLastCalledWith("preview");
@@ -381,7 +383,9 @@ describe("TextEditorView", () => {
     await user.type(textarea, " changed");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(save).toHaveBeenCalledWith(false);
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({
+      node, content: "restored content changed", expectedSha256: "sha", force: false
+    }));
   });
 
   it("does not reparse markdown when only the link callback changes", async () => {
@@ -502,7 +506,9 @@ describe("TextEditorView", () => {
 
     fireEvent.contextMenu(textarea.parentElement ?? textarea);
     await user.click(within(screen.getByRole("menu")).getByRole("button", { name: "Save" }));
-    expect(save).toHaveBeenCalledWith(false);
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({
+      node, content: "original changed", expectedSha256: "sha", force: false
+    }));
 
     fireEvent.contextMenu(textarea.parentElement ?? textarea);
     await user.click(within(screen.getByRole("menu")).getByRole("button", { name: "Cancel edit" }));

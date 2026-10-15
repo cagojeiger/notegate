@@ -7,6 +7,7 @@ import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 
 type TextContent = ReadTextResponse["text"];
 type EditorMode = "preview" | "edit";
+type EditBaseline = { nodeId: string; content: string; sha: string };
 
 export function useTextEditorSession({
   node,
@@ -23,15 +24,16 @@ export function useTextEditorSession({
 }) {
   const textQuery = useTextDocument(node);
   const [draft, setDraft] = useState("");
+  const [baseline, setBaseline] = useState<EditBaseline | null>(null);
   const [editSessionId, setEditSessionId] = useState(() => crypto.randomUUID());
   const [conflict, setConflict] = useState(false);
   const [externalUpdate, setExternalUpdate] = useState<RestNode | null>(null);
   const previousMode = useRef<EditorMode>(mode);
-  const draftNodeId = useRef<string | null>(null);
   const lastAutoReloadSha = useRef<string | null>(null);
   const dismissedExternalSha = useRef<string | null>(null);
-  const activeNodeId = useRef(node.id);
-  activeNodeId.current = node.id;
+  const mounted = useRef(true);
+  const activeEditor = useRef({ nodeId: node.id, editSessionId, draft, mode });
+  activeEditor.current = { nodeId: node.id, editSessionId, draft, mode };
   const showToast = useUiStore((state) => state.showToast);
 
   const text = textQuery.data?.text;
@@ -43,7 +45,33 @@ export function useTextEditorSession({
   const partialText = plainText?.truncated ? plainText : null;
   const canEdit = canWriteNode(node, canWrite) && !!plainText && !partialText;
   const canCopy = !!plainText && !partialText;
-  const dirty = mode === "edit" && draftNodeId.current === node.id && draft !== content;
+  const editBaseline = baseline?.nodeId === node.id ? baseline : null;
+  const dirty = mode === "edit" && !!editBaseline && draft !== editBaseline.content;
+  const comparisonSha = mode === "edit" ? editBaseline?.sha ?? sha : sha;
+
+  const saveMutation = useSaveTextDocument(
+    ({ request, response }) => {
+      const active = activeEditor.current;
+      if (!mounted.current || active.nodeId !== request.node.id || active.editSessionId !== request.editSessionId || active.mode !== "edit") return;
+      setBaseline({ nodeId: request.node.id, content: request.content, sha: response.text.content_sha256 });
+      setConflict(false);
+      setExternalUpdate(null);
+      dismissedExternalSha.current = null;
+      if (active.draft === request.content) {
+        setEditSessionId(crypto.randomUUID());
+        onSetMode("preview");
+      }
+    },
+    (request) => {
+      const active = activeEditor.current;
+      if (mounted.current && active.nodeId === request.node.id && active.editSessionId === request.editSessionId && active.mode === "edit") setConflict(true);
+    }
+  );
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
     setEditSessionId(crypto.randomUUID());
@@ -54,12 +82,15 @@ export function useTextEditorSession({
   }, [node.id]);
 
   useEffect(() => {
-    if (mode === "edit" && canEdit && (previousMode.current !== "edit" || draftNodeId.current !== node.id)) {
+    if (mode === "edit" && canEdit && sha && (
+      previousMode.current !== "edit" || !editBaseline
+      || (!dirty && !saveMutation.isPending && editBaseline.sha !== sha)
+    )) {
       setDraft(content);
-      draftNodeId.current = node.id;
+      setBaseline({ nodeId: node.id, content, sha });
     }
     previousMode.current = mode;
-  }, [mode, content, canEdit, node.id]);
+  }, [mode, content, sha, canEdit, node.id, editBaseline, dirty, saveMutation.isPending]);
 
   useEffect(() => {
     const preserveLockedDraft = node.effective_write_locked && dirty;
@@ -69,9 +100,10 @@ export function useTextEditorSession({
   }, [canEdit, dirty, mode, node.effective_write_locked, onSetMode, textQuery.isSuccess]);
 
   const reloadLatestText = useCallback(async (showFailure: boolean) => {
-    const requestedNodeId = node.id;
+    const requested = activeEditor.current;
     const result = await refetchText();
-    if (activeNodeId.current !== requestedNodeId) return false;
+    const active = activeEditor.current;
+    if (!mounted.current || active.nodeId !== requested.nodeId || active.editSessionId !== requested.editSessionId || active.mode !== requested.mode || active.draft !== requested.draft) return false;
 
     const nextText = result.data?.text;
     if (result.isError || !nextText) {
@@ -79,48 +111,46 @@ export function useTextEditorSession({
       return false;
     }
 
-    if (isPlainTextContent(nextText)) setDraft(nextText.content);
+    if (isPlainTextContent(nextText)) {
+      setDraft(nextText.content);
+      setBaseline({ nodeId: requested.nodeId, content: nextText.content, sha: nextText.content_sha256 });
+    }
     setExternalUpdate(null);
     dismissedExternalSha.current = null;
     return true;
-  }, [node.id, refetchText, showToast]);
+  }, [refetchText, showToast]);
 
   useEffect(() => {
-    const latestSha = latestNode?.content_sha256;
-    if (!latestNode || !latestSha || !sha) return;
+    // Body refreshes (including saves in another pane) must not advance a dirty draft's baseline.
+    const observedNode = sha && sha !== comparisonSha ? { ...node, content_sha256: sha } : latestNode;
+    const latestSha = observedNode?.content_sha256;
+    if (!observedNode || !latestSha || !comparisonSha) return;
 
-    if (latestSha === sha) {
+    if (latestSha === comparisonSha) {
       if (externalUpdate?.content_sha256 === latestSha) setExternalUpdate(null);
       lastAutoReloadSha.current = null;
       return;
     }
 
-    if (dirty) {
-      if (dismissedExternalSha.current !== latestSha) setExternalUpdate(latestNode);
+    if (dirty || saveMutation.isPending) {
+      if (dismissedExternalSha.current !== latestSha) setExternalUpdate(observedNode);
       return;
     }
 
+    if (sha === latestSha) return;
     if (lastAutoReloadSha.current === latestSha) return;
     lastAutoReloadSha.current = latestSha;
     void reloadLatestText(false).then((reloaded) => {
-      if (!reloaded && activeNodeId.current === node.id && lastAutoReloadSha.current === latestSha) {
+      if (!reloaded && activeEditor.current.nodeId === node.id && lastAutoReloadSha.current === latestSha) {
         lastAutoReloadSha.current = null;
       }
     });
-  }, [dirty, externalUpdate?.content_sha256, latestNode, node.id, reloadLatestText, sha]);
+  }, [dirty, externalUpdate?.content_sha256, latestNode, node, reloadLatestText, sha, comparisonSha, saveMutation.isPending]);
 
-  const saveMutation = useSaveTextDocument(
-    node,
-    draft,
-    sha,
-    () => {
-      setEditSessionId(crypto.randomUUID());
-      setConflict(false);
-      onSetMode("preview");
-    },
-    () => setConflict(true),
-    editSessionId
-  );
+  function saveDraft(force: boolean) {
+    if (!canEdit || !editBaseline || saveMutation.isPending) return;
+    saveMutation.mutate({ node, content: draft, expectedSha256: editBaseline.sha, editSessionId, force });
+  }
 
   function cancelEdit() {
     setEditSessionId(crypto.randomUUID());
@@ -148,8 +178,8 @@ export function useTextEditorSession({
     saving: saveMutation.isPending,
     resetRevisionSession: () => setEditSessionId(crypto.randomUUID()),
     canSave: canEdit && dirty && !saveMutation.isPending,
-    saveDraft: () => saveMutation.mutate(false),
-    overwriteDraft: () => saveMutation.mutate(true),
+    saveDraft: () => saveDraft(false),
+    overwriteDraft: () => saveDraft(true),
     cancelEdit,
     reloadConflict: () => {
       void reloadLatestText(true).then((reloaded) => {
