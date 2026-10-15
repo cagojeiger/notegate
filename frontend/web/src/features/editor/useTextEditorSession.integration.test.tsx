@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiProvider } from "../../api/ApiProvider";
 import { applyExternalFileChanges } from "../../api/queryInvalidation";
+import { queryKeys } from "../../api/queryKeys";
 import type { FileChangeDelta, ReadTextResponse, TextResponse } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
 import { makeRestNode } from "../../test/fixtures";
@@ -170,6 +171,40 @@ describe("text editing with the shared server cache", () => {
     expect(server.save).toHaveBeenCalledOnce();
   });
 
+  it.each(["success", "conflict"] as const)("keeps a new edit session intact when the canceled session's save returns %s", async (outcome) => {
+    const server = mockTextServer();
+    const pending = deferred<Response>();
+    server.save.mockImplementationOnce(() => pending.promise);
+    const { result } = renderHook(useEditor, { wrapper: ApiWrapper });
+    await waitFor(() => expect(result.current.session.draft).toBe("original"));
+    act(() => result.current.session.setDraft("submitted in old session"));
+    act(() => result.current.session.saveDraft());
+    await waitFor(() => expect(server.save).toHaveBeenCalledOnce());
+
+    act(() => result.current.session.cancelEdit());
+    await waitFor(() => expect(result.current.mode).toBe("preview"));
+    act(() => result.current.setMode("edit"));
+    await waitFor(() => expect(result.current.session.draft).toBe("original"));
+    act(() => result.current.session.setDraft("new session draft"));
+
+    await act(async () => {
+      pending.resolve(outcome === "success"
+        ? server.commit("submitted in old session")
+        : jsonResponse({ error: { kind: "conflict", message: "The document changed" } }, 409));
+      await pending.promise;
+    });
+    await waitFor(() => expect(result.current.session.saving).toBe(false));
+    expect(result.current.mode).toBe("edit");
+    expect(result.current.session.draft).toBe("new session draft");
+    expect(result.current.session.dirty).toBe(true);
+    expect(result.current.session.conflict).toBe(false);
+    expect(result.current.session.canSave).toBe(true);
+    expect(result.current.queryClient.getQueryData<ReadTextResponse>(queryKeys.text(node.space_id, node.id))?.text).toMatchObject({
+      content: outcome === "success" ? "submitted in old session" : "original",
+      content_sha256: outcome === "success" ? "sha-2" : "sha-1"
+    });
+  });
+
   it("does not advance a dirty pane's baseline when another pane saves the same document", async () => {
     const server = mockTextServer();
     const { result } = renderHook(() => ({ first: useEditor(), second: useEditor() }), { wrapper: ApiWrapper });
@@ -214,7 +249,7 @@ function useEditor() {
     canWrite: true,
     onSetMode: setMode
   });
-  return { session, mode, queryClient };
+  return { session, mode, setMode, queryClient };
 }
 
 type SaveRequest = {
