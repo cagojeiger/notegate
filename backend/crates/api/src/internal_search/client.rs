@@ -9,7 +9,8 @@ use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 use super::auth::{
-    InternalSearchAuth, REQUEST_SIGNATURE_HEADER, RESPONSE_SIGNATURE_HEADER, TIMESTAMP_HEADER,
+    BOUND_RESPONSE_SIGNATURE_HEADER, InternalSearchAuth, REQUEST_SIGNATURE_HEADER, RequestBinding,
+    TIMESTAMP_HEADER,
 };
 use super::context::{REQUEST_ID_HEADER, RequestContext};
 use super::contract::{
@@ -170,6 +171,7 @@ impl InternalSearchHttpClient {
         .map_err(|_error| SearchClientError::Unavailable)?;
         let timestamp =
             InternalSearchAuth::now_timestamp().map_err(|_error| SearchClientError::Unavailable)?;
+        let request_binding = RequestBinding::new(timestamp, "POST", path, &body);
         let signature = self
             .auth
             .sign_request(timestamp, "POST", path, &body)
@@ -193,7 +195,7 @@ impl InternalSearchHttpClient {
             .await
             .map_err(map_transport_error)?;
         let status = response.status();
-        let response_timestamp = response
+        response
             .headers()
             .get(TIMESTAMP_HEADER)
             .and_then(|value| value.to_str().ok())
@@ -202,7 +204,7 @@ impl InternalSearchHttpClient {
             .ok_or(SearchClientError::Unavailable)?;
         let response_signature = response
             .headers()
-            .get(RESPONSE_SIGNATURE_HEADER)
+            .get(BOUND_RESPONSE_SIGNATURE_HEADER)
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned)
             .ok_or(SearchClientError::Unavailable)?;
@@ -219,8 +221,8 @@ impl InternalSearchHttpClient {
             }
             body.extend_from_slice(&chunk);
         }
-        if !self.auth.verify_response(
-            response_timestamp,
+        if !self.auth.verify_bound_response(
+            &request_binding,
             status.as_u16(),
             path,
             &body,
@@ -304,6 +306,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
+    use crate::internal_search::auth::RESPONSE_SIGNATURE_HEADER;
     use crate::internal_search::contract::{ErrorOutput, WriteLockScopeWire};
 
     const SIGNING_KEY: [u8; 32] = [7; 32];
@@ -315,6 +318,8 @@ mod tests {
         timestamp_offset: Option<i64>,
         signing_key: [u8; 32],
         signed_body: Option<Vec<u8>>,
+        bound_request_body: Option<Vec<u8>>,
+        include_bound_signature: bool,
         stream_body: bool,
         expected_request_id: Option<HeaderValue>,
         expected_command: Option<Value>,
@@ -328,6 +333,8 @@ mod tests {
                 timestamp_offset: Some(0),
                 signing_key: SIGNING_KEY,
                 signed_body: None,
+                bound_request_body: None,
+                include_bound_signature: true,
                 stream_body: false,
                 expected_request_id: None,
                 expected_command: None,
@@ -380,6 +387,18 @@ mod tests {
             assert_eq!(request_json.get("command"), Some(expected_command));
         }
         let signed_body = response.signed_body.as_deref().unwrap_or(&response.body);
+        let binding = RequestBinding::new(
+            request_timestamp,
+            "POST",
+            FIND_PATH,
+            response
+                .bound_request_body
+                .as_deref()
+                .unwrap_or(&request_body),
+        );
+        let bound_signature = InternalSearchAuth::new(response.signing_key)
+            .sign_bound_response(&binding, response.status.as_u16(), FIND_PATH, signed_body)
+            .expect("fixed-size signing key is valid");
         let signature = InternalSearchAuth::new(response.signing_key)
             .sign_response(
                 request_timestamp,
@@ -398,6 +417,14 @@ mod tests {
             .header(RESPONSE_SIGNATURE_HEADER, signature)
             .body(body)
             .expect("stub response is valid");
+        if response.include_bound_signature {
+            output.headers_mut().insert(
+                BOUND_RESPONSE_SIGNATURE_HEADER,
+                bound_signature
+                    .parse()
+                    .expect("signature is a valid header value"),
+            );
+        }
         if let Some(offset) = response.timestamp_offset {
             let value = (request_timestamp + offset)
                 .to_string()
@@ -665,6 +692,39 @@ mod tests {
             send(tampered_body).await?,
             SearchClientError::Unavailable
         ));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn other_request_and_legacy_only_responses_are_unavailable()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (status, body) in [
+            (StatusCode::OK, br#"{"ok":true}"#.to_vec()),
+            (
+                StatusCode::FORBIDDEN,
+                serde_json::to_vec(&ErrorOutput {
+                    error: InternalSearchError::Forbidden {
+                        message: "denied".to_owned(),
+                    },
+                })?,
+            ),
+        ] {
+            let mut other_request = StubResponse::signed(status, body.clone());
+            other_request.bound_request_body = Some(
+                br#"{"timeout_ms":29000,"command":{"q":"another request"}}"#.to_vec(),
+            );
+            assert!(matches!(
+                send(other_request).await?,
+                SearchClientError::Unavailable
+            ));
+
+            let mut legacy_only = StubResponse::signed(status, body);
+            legacy_only.include_bound_signature = false;
+            assert!(matches!(
+                send(legacy_only).await?,
+                SearchClientError::Unavailable
+            ));
+        }
         Ok(())
     }
 

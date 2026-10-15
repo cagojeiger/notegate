@@ -3,14 +3,30 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, Mac};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 type HmacSha256 = Hmac<Sha256>;
 
 pub(super) const TIMESTAMP_HEADER: &str = "x-notegate-internal-timestamp";
 pub(super) const REQUEST_SIGNATURE_HEADER: &str = "x-notegate-internal-signature";
 pub(super) const RESPONSE_SIGNATURE_HEADER: &str = "x-notegate-internal-response-signature";
+pub(super) const BOUND_RESPONSE_SIGNATURE_HEADER: &str = "x-notegate-internal-bound-response-signature";
 const MAX_CLOCK_SKEW_SECONDS: u64 = 60;
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RequestBinding {
+    pub(super) timestamp: i64,
+    digest: [u8; 32],
+}
+
+impl RequestBinding {
+    pub(super) fn new(timestamp: i64, method: &str, path: &str, body: &[u8]) -> Self {
+        Self {
+            timestamp,
+            digest: Sha256::digest(request_canonical(timestamp, method, path, body)).into(),
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum InternalAuthError {
@@ -73,6 +89,7 @@ impl InternalSearchAuth {
         self.sign(&response_canonical(request_timestamp, status, path, body))
     }
 
+    #[cfg(test)]
     pub(super) fn verify_response(
         &self,
         request_timestamp: i64,
@@ -83,6 +100,30 @@ impl InternalSearchAuth {
     ) -> bool {
         self.verify(
             &response_canonical(request_timestamp, status, path, body),
+            signature,
+        )
+    }
+
+    pub(super) fn sign_bound_response(
+        &self,
+        request: &RequestBinding,
+        status: u16,
+        path: &str,
+        body: &[u8],
+    ) -> Result<String, InternalAuthError> {
+        self.sign(&bound_response_canonical(request, status, path, body))
+    }
+
+    pub(super) fn verify_bound_response(
+        &self,
+        request: &RequestBinding,
+        status: u16,
+        path: &str,
+        body: &[u8],
+        signature: &str,
+    ) -> bool {
+        self.verify(
+            &bound_response_canonical(request, status, path, body),
             signature,
         )
     }
@@ -117,6 +158,22 @@ fn response_canonical(request_timestamp: i64, status: u16, path: &str, body: &[u
     let mut value =
         format!("notegate-internal-search-response:v1\n{request_timestamp}\n{status}\n{path}\n")
             .into_bytes();
+    value.extend_from_slice(body);
+    value
+}
+
+fn bound_response_canonical(
+    request: &RequestBinding,
+    status: u16,
+    path: &str,
+    body: &[u8],
+) -> Vec<u8> {
+    let digest = URL_SAFE_NO_PAD.encode(request.digest);
+    let mut value = format!(
+        "notegate-internal-search-response:v2\n{}\n{status}\n{path}\n{digest}\n",
+        request.timestamp,
+    )
+    .into_bytes();
     value.extend_from_slice(body);
     value
 }
@@ -181,6 +238,50 @@ mod tests {
             br#"{"items":[{}]}"#,
             &signature,
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn bound_response_rejects_other_requests_in_the_same_second() -> Result<(), InternalAuthError> {
+        let auth = InternalSearchAuth::new([9; 32]);
+        let path = super::super::FIND_PATH;
+        let request = br#"{"caller":"alice","space":"one","q":"needle"}"#;
+        let binding = RequestBinding::new(1_000, "POST", path, request);
+        let other_requests: &[&[u8]] = &[
+            br#"{"caller":"bob","space":"one","q":"needle"}"#,
+            br#"{"caller":"alice","space":"two","q":"needle"}"#,
+            br#"{"caller":"alice","space":"one","q":"other"}"#,
+        ];
+        let body = br#"{"items":[]}"#;
+
+        for status in [200, 403, 504] {
+            let signature = auth.sign_bound_response(&binding, status, path, body)?;
+            assert!(auth.verify_bound_response(&binding, status, path, body, &signature));
+            for request in other_requests {
+                let other = RequestBinding::new(1_000, "POST", path, request);
+                assert!(!auth.verify_bound_response(&other, status, path, body, &signature));
+            }
+            for other in [
+                RequestBinding::new(1_001, "POST", path, request),
+                RequestBinding::new(1_000, "GET", path, request),
+                RequestBinding::new(1_000, "POST", super::super::GREP_PATH, request),
+            ] {
+                assert!(!auth.verify_bound_response(&other, status, path, body, &signature));
+            }
+            assert!(!auth.verify_bound_response(&binding, 500, path, body, &signature));
+            assert!(!auth.verify_bound_response(
+                &binding,
+                status,
+                super::super::GREP_PATH,
+                body,
+                &signature,
+            ));
+            assert!(!auth.verify_bound_response(&binding, status, path, b"{}", &signature));
+
+            let legacy = auth.sign_response(1_000, status, path, body)?;
+            assert!(!auth.verify_bound_response(&binding, status, path, body, &legacy));
+            assert!(!auth.verify_response(1_000, status, path, body, &signature));
+        }
         Ok(())
     }
 }
