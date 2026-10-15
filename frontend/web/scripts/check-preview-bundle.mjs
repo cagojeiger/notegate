@@ -3,6 +3,9 @@ import { gzipSync } from "node:zlib";
 
 const manifestUrl = new URL("../dist/.vite/manifest.json", import.meta.url);
 const manifest = JSON.parse(await readFile(manifestUrl, "utf8"));
+const workspaceKey = Object.keys(manifest).find((key) =>
+  key === "src/app/AuthenticatedWorkspace.tsx" || manifest[key].name === "AuthenticatedWorkspace"
+);
 const structuredPreviewKey = Object.keys(manifest).find((key) =>
   key === "src/features/editor/StructuredPreview.tsx" || manifest[key].name === "StructuredPreview"
 );
@@ -13,6 +16,9 @@ const docxPreviewKey = Object.keys(manifest).find((key) =>
   key === "src/features/editor/DocxPreview.tsx" || manifest[key].name === "DocxPreview"
 );
 
+if (!manifest[workspaceKey]?.file) {
+  throw new Error("Missing Vite manifest entry: AuthenticatedWorkspace");
+}
 if (!manifest[structuredPreviewKey]?.file) {
   throw new Error("Missing Vite manifest entry: StructuredPreview");
 }
@@ -29,31 +35,39 @@ if (!initialKey) {
 }
 
 const initialFiles = collectStaticJavaScript(initialKey);
-const structuredPreviewFiles = [...collectStaticJavaScript(structuredPreviewKey)].filter((file) => !initialFiles.has(file));
-const markdownPreviewFiles = [...collectStaticJavaScript(markdownPreviewKey)].filter((file) => !initialFiles.has(file));
-const docxPreviewFiles = [...collectStaticJavaScript(docxPreviewKey)].filter((file) => !initialFiles.has(file));
-const [initialAssets, structuredPreviewAssets, markdownPreviewAssets, docxPreviewAssets] = await Promise.all([
+// Previews are opened inside the already loaded authenticated workspace. Keep its
+// full cost separately bounded so moving preview code into the shell is visible.
+const workspaceFiles = new Set([...initialFiles, ...collectStaticJavaScript(workspaceKey)]);
+const structuredPreviewFiles = [...collectStaticJavaScript(structuredPreviewKey)].filter((file) => !workspaceFiles.has(file));
+const markdownPreviewFiles = [...collectStaticJavaScript(markdownPreviewKey)].filter((file) => !workspaceFiles.has(file));
+const docxPreviewFiles = [...collectStaticJavaScript(docxPreviewKey)].filter((file) => !workspaceFiles.has(file));
+const [initialAssets, workspaceAssets, structuredPreviewAssets, markdownPreviewAssets, docxPreviewAssets] = await Promise.all([
   measureAssets(initialFiles),
+  measureAssets(workspaceFiles),
   measureAssets(structuredPreviewFiles),
   measureAssets(markdownPreviewFiles),
   measureAssets(docxPreviewFiles)
 ]);
 const initialGzipBytes = totalGzipBytes(initialAssets);
+const workspaceGzipBytes = totalGzipBytes(workspaceAssets);
 const structuredPreviewGzipBytes = totalGzipBytes(structuredPreviewAssets);
 const markdownPreviewGzipBytes = totalGzipBytes(markdownPreviewAssets);
 const docxPreviewGzipBytes = totalGzipBytes(docxPreviewAssets);
 const maxInitialGzipBytes = 120_000;
+const maxWorkspaceGzipBytes = 180_000;
 const maxStructuredPreviewGzipBytes = 15_000;
 const maxMarkdownPreviewGzipBytes = 60_000;
 const maxDocxPreviewGzipBytes = 60_000;
 
 printMeasurement("Initial JavaScript", initialGzipBytes, maxInitialGzipBytes, initialAssets);
+printMeasurement("Authenticated workspace total JavaScript (including initial)", workspaceGzipBytes, maxWorkspaceGzipBytes, workspaceAssets);
 printMeasurement("JSON/JSONL preview incremental JavaScript", structuredPreviewGzipBytes, maxStructuredPreviewGzipBytes, structuredPreviewAssets);
 printMeasurement("Frontmatter-free Markdown preview incremental JavaScript", markdownPreviewGzipBytes, maxMarkdownPreviewGzipBytes, markdownPreviewAssets);
 printMeasurement("DOCX preview incremental JavaScript", docxPreviewGzipBytes, maxDocxPreviewGzipBytes, docxPreviewAssets);
 
 if (
   initialGzipBytes > maxInitialGzipBytes ||
+  workspaceGzipBytes > maxWorkspaceGzipBytes ||
   structuredPreviewGzipBytes > maxStructuredPreviewGzipBytes ||
   markdownPreviewGzipBytes > maxMarkdownPreviewGzipBytes ||
   docxPreviewGzipBytes > maxDocxPreviewGzipBytes
