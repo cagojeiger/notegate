@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
 import { routeJsonApi } from "./support/api";
@@ -32,7 +32,9 @@ for (const viewport of [
 ]) {
   test(`backs off idle active-space refreshes on ${viewport.name}`, async ({ page }) => {
     const requests = new Map<string, number>();
+    const syncPath = `/api/v1/spaces/${space.id}/file-change-sync`;
     await page.clock.install();
+    const waitForSync = await observeCompletedPolling(page, syncPath);
     await page.addInitScript(() => {
       Math.random = () => 0.5;
     });
@@ -50,9 +52,10 @@ for (const viewport of [
     const tree = page.getByRole("tree", { name: "Files" });
     await expect(tree).toBeVisible();
     await expect(tree.getByRole("button", { name: "note.md", exact: true })).toBeVisible();
-    await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/file-change-sync`)).toBe(1);
+    await waitForSync(1);
     await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`)).toBe(1);
     await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/nodes`)).toBe(1);
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
 
     for (const [elapsedMs, expectedRequests] of [
       [30_001, 2],
@@ -62,10 +65,8 @@ for (const viewport of [
       [300_001, 6]
     ] as const) {
       await page.clock.runFor(elapsedMs);
-      await expect.poll(() => count(
-        requests,
-        `/api/v1/spaces/${space.id}/file-change-sync`
-      )).toBe(expectedRequests);
+      await waitForSync(expectedRequests);
+      expect(count(requests, syncPath)).toBe(expectedRequests);
     }
 
     expect(count(requests, `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`)).toBe(1);
@@ -77,13 +78,50 @@ for (const viewport of [
       expect(count(requests, `/api/v1/spaces/${space.id}/file-change-sync`)).toBe(6);
 
       await page.clock.runFor(30_001);
-      await expect.poll(() => count(
-        requests,
-        `/api/v1/spaces/${space.id}/file-change-sync`
-      )).toBe(7);
+      await waitForSync(7);
+      expect(count(requests, syncPath)).toBe(7);
     }
   });
 }
+
+test("schedules the next idle interval after a delayed sync finishes", async ({ page }) => {
+  const syncPath = `/api/v1/spaces/${space.id}/file-change-sync`;
+  let requests = 0;
+  let releaseResponse!: () => void;
+  const delayedResponse = new Promise<void>((resolve) => { releaseResponse = resolve; });
+  await page.clock.install();
+  const waitForSync = await observeCompletedPolling(page, syncPath);
+  await page.addInitScript(() => { Math.random = () => 0.5; });
+  await routeJsonApi(page, responseFor);
+  await page.route((url) => url.pathname === syncPath, async (route) => {
+    requests += 1;
+    if (requests === 2) await delayedResponse;
+    await route.fulfill({ json: responseFor(new URL(route.request().url())) });
+  });
+
+  try {
+    await page.goto("/");
+    await expect(page.getByRole("tree", { name: "Files" })).toBeVisible();
+    await waitForSync(1);
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+
+    await page.clock.runFor(30_001);
+    await expect.poll(() => requests).toBe(2);
+    await page.clock.runFor(120_001);
+    expect(requests).toBe(2);
+    await waitForSync(1);
+
+    releaseResponse();
+    await waitForSync(2);
+    await page.clock.runFor(59_999);
+    expect(requests).toBe(2);
+    await page.clock.runFor(2);
+    await waitForSync(3);
+    expect(requests).toBe(3);
+  } finally {
+    releaseResponse();
+  }
+});
 
 test("opens a recent node with one reveal request and no canonical node request", async ({ page }) => {
   const requests = new Map<string, number>();
@@ -215,6 +253,7 @@ test("refreshes restored editors through one focus-owned Space sync", async ({ p
 test("backs off idle usage polling with one owner while the desktop Space Library is open", async ({ page }) => {
   const requests = new Map<string, number>();
   await page.clock.install();
+  const waitForUsage = await observeCompletedPolling(page, "/api/v1/me/usage");
   await page.setViewportSize({ width: 1440, height: 900 });
   await routeJsonApi(page, (url) => {
     requests.set(url.pathname, (requests.get(url.pathname) ?? 0) + 1);
@@ -222,11 +261,12 @@ test("backs off idle usage polling with one owner while the desktop Space Librar
   });
 
   await page.goto("/");
-  await expect.poll(() => count(requests, "/api/v1/me/usage")).toBe(1);
+  await waitForUsage(1);
 
   await page.clock.runFor(10_000);
   await page.getByRole("button", { name: "Open space library" }).click();
   await expect(page.getByRole("heading", { name: /Spaces 1/ })).toBeVisible();
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
 
   for (const [elapsedMs, expectedRequests] of [
     [60_001, 2],
@@ -235,10 +275,34 @@ test("backs off idle usage polling with one owner while the desktop Space Librar
     [300_001, 5]
   ] as const) {
     await page.clock.runFor(elapsedMs);
-    await expect.poll(() => count(requests, "/api/v1/me/usage"))
-      .toBe(expectedRequests);
+    await waitForUsage(expectedRequests);
+    expect(count(requests, "/api/v1/me/usage")).toBe(expectedRequests);
   }
 });
+
+type PollingWindow = Window & { __completedPollingResponses: number };
+
+async function observeCompletedPolling(page: Page, path: string) {
+  await page.addInitScript((pollPath) => {
+    const state = window as PollingWindow;
+    state.__completedPollingResponses = 0;
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => { state.__completedPollingResponses += 1; };
+    const originalJson = Response.prototype.json;
+    Response.prototype.json = async function () {
+      const body = await originalJson.call(this);
+      if (new URL(this.url, location.href).pathname === pollPath) {
+        // The following task runs after the consumer's promise chain updates
+        // the query backoff and its interval. Request arrival is too early.
+        channel.port2.postMessage(null);
+      }
+      return body;
+    };
+  }, path);
+  return (expected: number) => expect.poll(() => page.evaluate(
+    () => (window as PollingWindow).__completedPollingResponses
+  )).toBe(expected);
+}
 
 function responseFor(url: URL) {
   if (url.pathname === "/api/v1/me") return me;
