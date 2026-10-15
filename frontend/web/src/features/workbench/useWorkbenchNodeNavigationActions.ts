@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
@@ -34,18 +34,23 @@ export function useWorkbenchNodeNavigationActions({
   const showToast = useUiStore((state) => state.showToast);
   const revealNodeInSpace = useRevealNode();
   const inspectedNodeIdRef = useRef(inspectedNode?.id ?? null);
+  const mountedRef = useRef(true);
   const openNodeRequestRef = useRef(0);
   const navigatingGroupsRef = useRef(new Set<number>());
   const [navigatingGroupIds, setNavigatingGroupIds] = useState<ReadonlySet<number>>(new Set());
   inspectedNodeIdRef.current = inspectedNode?.id ?? null;
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
   async function openNode(summary: NodeSummary) {
-    const requestId = ++openNodeRequestRef.current;
-    return openNodeFromSummary(summary, openInActiveGroup, () => openNodeRequestRef.current === requestId);
+    return openNodeFromSummary(summary, "active");
   }
 
   async function openNodeInNewGroup(summary: NodeSummary) {
-    await openNodeFromSummary(summary, openInNewGroup);
+    await openNodeFromSummary(summary, "new");
   }
 
   async function openNodeById(nodeId: string, sourceNodeId: string) {
@@ -191,9 +196,31 @@ export function useWorkbenchNodeNavigationActions({
 
   async function openNodeFromSummary(
     summary: NodeSummary,
-    open: (node: RestNode) => void,
-    isCurrent: () => boolean = () => true
+    target: "active" | "new"
   ): Promise<NodeRevealResponse | null> {
+    const initialState = useUiStore.getState();
+    const initialGroup = initialState.editorGroups[initialState.activeGroupIndex];
+    if (
+      !mountedRef.current
+      || activeSpace?.id !== summary.space_id
+      || initialState.activeSpaceId !== summary.space_id
+      || !initialGroup
+    ) return null;
+    const requestId = target === "active" ? ++openNodeRequestRef.current : null;
+    const isCurrent = () => {
+      const state = useUiStore.getState();
+      const group = target === "active"
+        ? state.editorGroups[state.activeGroupIndex]
+        : state.editorGroups.find((candidate) => candidate.id === initialGroup.id);
+      return mountedRef.current
+        && (requestId === null || openNodeRequestRef.current === requestId)
+        && state.activeSpaceId === summary.space_id
+        && group?.id === initialGroup.id
+        && group.node?.id === initialGroup.node?.id
+        && group.mode === initialGroup.mode;
+    };
+    const open = target === "active" ? openInActiveGroup : openInNewGroup;
+
     let revealFailed = false;
     if (activeSpace?.id === summary.space_id && summary.parent_id !== null) {
       let reveal: NodeRevealResponse | null = null;
@@ -206,15 +233,17 @@ export function useWorkbenchNodeNavigationActions({
       if (reveal) {
         applyReveal(reveal);
         open(reveal.target);
-        closeMobile();
         return reveal;
       }
     }
 
-    const node = await loadCanonicalNode(summary, "Could not open item");
-    if (!node || !isCurrent()) return null;
+    const node = await loadCanonicalNode(summary, null);
+    if (!isCurrent()) return null;
+    if (!node) {
+      showToast("Could not open item");
+      return null;
+    }
     open(node);
-    closeMobile();
     if (revealFailed) {
       showToast("Opened item, but could not reveal it in Files");
     }

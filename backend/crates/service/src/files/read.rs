@@ -86,14 +86,7 @@ impl FilesService {
         let items = super::view::hydrate_node_summary_views(&self.store, space_id, rows).await?;
 
         Ok(ChildrenPage {
-            parent: NodeView {
-                node: parent.node,
-                path: parent.path,
-                has_children: parent.has_children,
-                text: None,
-                file: None,
-                write_lock_sources: Vec::new(),
-            },
+            parent,
             items,
             limit,
             has_more,
@@ -132,14 +125,7 @@ impl FilesService {
         let items = super::view::hydrate_node_views(&self.store, space_id, rows).await?;
 
         Ok(CanonicalChildrenPage {
-            parent: NodeView {
-                node: parent.node,
-                path: parent.path,
-                has_children: parent.has_children,
-                text: None,
-                file: None,
-                write_lock_sources: Vec::new(),
-            },
+            parent,
             items,
             limit,
             has_more,
@@ -178,6 +164,8 @@ impl FilesService {
             .copied()
             .collect::<Vec<_>>();
         let paths = self.store.node_paths_many(space_id, &folder_ids).await?;
+        let mut parent_write_lock_sources =
+            super::view::write_lock_sources_many(&self.store, space_id, &folder_ids).await?;
         let (mut child_rows, parents_with_more) = self
             .store
             .first_children_pages(space_id, &folder_ids, limit)
@@ -234,7 +222,9 @@ impl FilesService {
                         has_children: has_more || !items.is_empty(),
                         text: None,
                         file: None,
-                        write_lock_sources: Vec::new(),
+                        write_lock_sources: parent_write_lock_sources
+                            .remove(&parent_node_id)
+                            .unwrap_or_default(),
                     },
                     items,
                     limit,
@@ -400,14 +390,7 @@ impl FilesService {
                 "cannot list children of a non-folder".to_owned(),
             ));
         }
-        Ok(NodeView {
-            node,
-            path: self.path_of(space_id, parent_node_id).await?,
-            has_children: self.store.has_children(space_id, parent_node_id).await?,
-            text: None,
-            file: None,
-            write_lock_sources: Vec::new(),
-        })
+        self.node_view(space_id, node).await
     }
 
     async fn node_views(&self, space_id: Uuid, rows: Vec<Node>) -> ServiceResult<Vec<NodeView>> {

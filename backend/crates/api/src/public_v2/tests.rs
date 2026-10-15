@@ -69,6 +69,199 @@ async fn agent_caller(
 }
 
 #[tokio::test]
+async fn empty_children_parent_tracks_direct_and_inherited_write_locks()
+-> Result<(), Box<dyn std::error::Error>> {
+    use notegate_service::files::{CreateFolder, UpdateNodeWriteLock};
+
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state(&db);
+    let (owner, space_id, root_id) = caller_and_space(&state).await?;
+    sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
+        .bind(owner.account_id())
+        .execute(&db.pool)
+        .await?;
+    let caller = agent_caller(&state, owner.account_id(), space_id, Permission::Read).await?;
+    let outer = state
+        .files
+        .create_folder(
+            owner.account_id(),
+            space_id,
+            CreateFolder {
+                parent_node_id: root_id,
+                name: "outer".to_owned(),
+            },
+        )
+        .await?;
+    let inner = state
+        .files
+        .create_folder(
+            owner.account_id(),
+            space_id,
+            CreateFolder {
+                parent_node_id: outer.node.id,
+                name: "inner".to_owned(),
+            },
+        )
+        .await?;
+    let outer_id = outer.node.id;
+    let inner_id = inner.node.id;
+
+    for (target, enabled, direct, sources) in [
+        (None, false, false, vec![]),
+        (Some(inner_id), true, true, vec![inner_id]),
+        (Some(outer_id), true, true, vec![outer_id, inner_id]),
+        (Some(inner_id), false, false, vec![outer_id]),
+        (Some(outer_id), false, false, vec![]),
+    ] {
+        if let Some(node_id) = target {
+            state
+                .files
+                .update_node_write_lock(&owner, space_id, UpdateNodeWriteLock { node_id, enabled })
+                .await?;
+        }
+        let (status, response) = get_json(
+            app(state.clone(), caller.clone()),
+            format!("/spaces/{space_id}/nodes/{inner_id}/children"),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK, "{response}");
+        assert_eq!(response["children"], json!([]));
+        assert_eq!(response["parent"]["has_children"], false);
+        assert_eq!(response["parent"]["write_locked"], direct);
+        assert_eq!(
+            response["parent"]["effective_write_locked"],
+            !sources.is_empty()
+        );
+        let actual_sources = response["parent"]["write_lock_sources"]
+            .as_array()
+            .expect("parent lock sources")
+            .iter()
+            .map(|source| source["node_id"].clone())
+            .collect::<Vec<_>>();
+        assert_eq!(json!(actual_sources), json!(sources));
+        assert_eq!(response["page"]["returned"], 0);
+        assert_eq!(response["page"]["has_more"], false);
+        assert!(response["page"]["next_cursor"].is_null());
+
+        let (status, detail) = get_json(
+            app(state.clone(), caller.clone()),
+            format!("/spaces/{space_id}/nodes/{inner_id}"),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK, "{detail}");
+        assert_eq!(response["parent"], detail);
+    }
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn paged_children_keep_parent_and_child_write_locks_independent()
+-> Result<(), Box<dyn std::error::Error>> {
+    use notegate_service::files::{CreateFolder, CreateText, UpdateNodeWriteLock};
+
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state(&db);
+    let (owner, space_id, root_id) = caller_and_space(&state).await?;
+    sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
+        .bind(owner.account_id())
+        .execute(&db.pool)
+        .await?;
+    let caller = agent_caller(&state, owner.account_id(), space_id, Permission::Read).await?;
+    let parent = state
+        .files
+        .create_folder(
+            owner.account_id(),
+            space_id,
+            CreateFolder {
+                parent_node_id: root_id,
+                name: "notes".to_owned(),
+            },
+        )
+        .await?;
+    let parent_id = parent.node.id;
+    let mut children = Vec::new();
+    for name in ["a.md", "b.md"] {
+        let child = state
+            .files
+            .create_text(
+                owner.account_id(),
+                space_id,
+                CreateText {
+                    parent_node_id: parent_id,
+                    name: name.to_owned(),
+                },
+            )
+            .await?;
+        children.push(child.node.node.id);
+    }
+    state
+        .files
+        .update_node_write_lock(
+            &owner,
+            space_id,
+            UpdateNodeWriteLock {
+                node_id: children[0],
+                enabled: true,
+            },
+        )
+        .await?;
+
+    for parent_locked in [false, true] {
+        state
+            .files
+            .update_node_write_lock(
+                &owner,
+                space_id,
+                UpdateNodeWriteLock {
+                    node_id: parent_id,
+                    enabled: parent_locked,
+                },
+            )
+            .await?;
+        let mut cursor: Option<String> = None;
+        for (index, child_id) in children.iter().enumerate() {
+            let mut uri = format!("/spaces/{space_id}/nodes/{parent_id}/children?limit=1");
+            if let Some(cursor) = cursor.as_deref() {
+                uri.push_str(&format!("&cursor={cursor}"));
+            }
+            let (status, response) = get_json(app(state.clone(), caller.clone()), uri).await?;
+            assert_eq!(status, StatusCode::OK, "{response}");
+            assert_eq!(response["parent"]["id"], parent_id.to_string());
+            assert_eq!(response["parent"]["has_children"], true);
+            assert_eq!(response["parent"]["write_locked"], parent_locked);
+            assert_eq!(response["parent"]["effective_write_locked"], parent_locked);
+            let sources = response["parent"]["write_lock_sources"]
+                .as_array()
+                .expect("parent lock sources");
+            assert_eq!(sources.len(), usize::from(parent_locked));
+            if parent_locked {
+                assert_eq!(sources[0]["node_id"], parent_id.to_string());
+            }
+            assert_eq!(response["children"].as_array().map(Vec::len), Some(1));
+            assert_eq!(response["children"][0]["id"], child_id.to_string());
+            assert_eq!(
+                response["children"][0]["effective_write_locked"],
+                parent_locked || index == 0
+            );
+            assert_eq!(response["page"]["limit"], 1);
+            assert_eq!(response["page"]["returned"], 1);
+            assert_eq!(response["page"]["has_more"], index == 0);
+            cursor = response["page"]["next_cursor"].as_str().map(str::to_owned);
+            assert_eq!(cursor.is_some(), index == 0);
+        }
+    }
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn private_text_replace_checks_access_before_hash() -> Result<(), Box<dyn std::error::Error>>
 {
     use notegate_model::AccountKind;

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -40,8 +40,17 @@ vi.mock("../features/editor/EditorArea", () => ({
   )
 }));
 vi.mock("../features/nodes/PrimarySidebar", () => ({
-  PrimarySidebar: ({ canWriteActiveSpace }: { canWriteActiveSpace: boolean }) => (
-    <div data-testid="primary-sidebar" data-can-write={String(canWriteActiveSpace)} />
+  PrimarySidebar: ({ canWriteActiveSpace, onOpenNode, onOpenRecentNode, onOpenNodeInNewGroup }: {
+    canWriteActiveSpace: boolean;
+    onOpenNode: (node: typeof activeNode) => unknown;
+    onOpenRecentNode: (node: typeof activeNode) => unknown;
+    onOpenNodeInNewGroup: (node: typeof activeNode) => unknown;
+  }) => (
+    <div data-testid="primary-sidebar" data-can-write={String(canWriteActiveSpace)}>
+      <button onClick={() => onOpenNode(activeNode)}>Open test node</button>
+      <button onClick={() => onOpenRecentNode(activeNode)}>Open test recent</button>
+      <button onClick={() => onOpenNodeInNewGroup(activeNode)}>Open test new group</button>
+    </div>
   )
 }));
 vi.mock("../features/spaces/MobileSpaceBar", () => ({ MobileSpaceBar: () => null }));
@@ -243,6 +252,37 @@ describe("AppShell", () => {
 
     expect(view.container.firstElementChild).toHaveClass("font-ui");
     expect(view.container.querySelector("main")).not.toHaveClass("border-y", "border-seam");
+  });
+
+  it.each(["node", "recent", "new group"])("does not close newly opened mobile panels when an earlier %s open finishes", async (target) => {
+    const user = userEvent.setup();
+    let finishOpen!: (value: null) => void;
+    const pendingOpen = new Promise<null>((resolve) => { finishOpen = resolve; });
+    const closeMobile = vi.fn();
+    const actions = {
+      closeMobile,
+      openNode: vi.fn(() => pendingOpen),
+      openNodeInNewGroup: vi.fn(() => pendingOpen)
+    };
+    mocks.useWorkbenchController.mockReturnValue({
+      ...workbench(), isMobile: true, mobileTreeOpen: true, actions
+    });
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+    const view = render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: `Open test ${target}` }));
+    expect(closeMobile).toHaveBeenCalledOnce();
+
+    mocks.useWorkbenchController.mockReturnValue({
+      ...workbench(), activeSpace: privateSpace, isMobile: true, mobileAuxOpen: true, actions
+    });
+    view.rerender(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+    await act(async () => {
+      finishOpen(null);
+      await pendingOpen;
+    });
+
+    expect(closeMobile).toHaveBeenCalledOnce();
   });
 
   it("reads the docked Inspector width at the local frame boundary", () => {

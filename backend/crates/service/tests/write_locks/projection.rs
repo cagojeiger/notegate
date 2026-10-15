@@ -1,7 +1,8 @@
 use notegate_db::FilesRepo;
 use notegate_search::{GrepLineMode, GrepMatchMode, GrepRequest, SearchService};
 use notegate_service::files::{
-    ChildrenRequest, CopyNode, ReadText, WriteTarget, WriteText, WriteTextBody,
+    BatchChildrenRequest, BatchChildrenResult, ChildrenRequest, CopyNode, ReadText, WriteTarget,
+    WriteText, WriteTextBody,
 };
 
 use crate::write_lock_support::{Fixture, TestResult, assert_write_locked};
@@ -147,6 +148,13 @@ async fn inherited_lock_is_reported_without_blocking_reads() -> TestResult {
             },
         )
         .await?;
+    assert_eq!(children.parent.node.id, folder_id);
+    assert!(children.parent.node.write_locked);
+    assert_eq!(children.parent.path, "/Policies");
+    assert_eq!(
+        children.parent.write_lock_sources,
+        detail.write_lock_sources
+    );
     assert!(
         children
             .items
@@ -197,6 +205,75 @@ async fn inherited_lock_is_reported_without_blocking_reads() -> TestResult {
         )
         .await?;
     assert_eq!(read.node.node.id, text_id);
+
+    fixture.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn canonical_and_batch_children_project_parent_locks_after_unlocking() -> TestResult {
+    let Some(fixture) = Fixture::setup("children-parent-projection").await? else {
+        return Ok(());
+    };
+    let folder_id = fixture.folder(fixture.root_id, "Policies").await?;
+    let nested_id = fixture.folder(folder_id, "nested").await?;
+    let unlocked_id = fixture.folder(fixture.root_id, "unlocked").await?;
+    let parent_ids = [nested_id, unlocked_id, folder_id];
+
+    for enabled in [true, false] {
+        fixture.set_lock(folder_id, enabled).await?;
+        let batch = fixture
+            .files
+            .batch_children(
+                fixture.owner,
+                fixture.space_id,
+                BatchChildrenRequest {
+                    parent_node_ids: parent_ids.to_vec(),
+                    limit: None,
+                },
+            )
+            .await?;
+        assert_eq!(batch.len(), parent_ids.len());
+
+        for (result, parent_id) in batch.iter().zip(parent_ids) {
+            let BatchChildrenResult::Ready(page) = result else {
+                panic!("existing folder page should be ready");
+            };
+            assert_eq!(page.parent.node.id, parent_id);
+            assert_eq!(
+                page.parent.node.write_locked,
+                enabled && parent_id == folder_id
+            );
+            assert_eq!(page.parent.has_children, parent_id == folder_id);
+            let expected_sources = if enabled && parent_id != unlocked_id {
+                vec![(folder_id, "/Policies")]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(
+                page.parent
+                    .write_lock_sources
+                    .iter()
+                    .map(|source| (source.node_id, source.path.as_str()))
+                    .collect::<Vec<_>>(),
+                expected_sources
+            );
+
+            let canonical = fixture
+                .files
+                .canonical_children(
+                    fixture.owner,
+                    fixture.space_id,
+                    parent_id,
+                    ChildrenRequest {
+                        limit: None,
+                        cursor: None,
+                    },
+                )
+                .await?;
+            assert_eq!(canonical.parent, page.parent);
+        }
+    }
 
     fixture.cleanup().await;
     Ok(())
