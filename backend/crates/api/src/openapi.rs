@@ -1,12 +1,12 @@
 use axum::Router;
 use axum::middleware::{from_fn, from_fn_with_state};
-use utoipa::openapi::Ref;
 use utoipa::openapi::content::Content;
 use utoipa::openapi::path::{Operation, ParameterBuilder, ParameterIn, PathItem};
 use utoipa::openapi::response::Response;
 #[cfg(test)]
 use utoipa::openapi::security::{ApiKey, ApiKeyValue};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+use utoipa::openapi::{Ref, RefOr};
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -198,7 +198,7 @@ impl Modify for ApiKeySecurityAddon {
                 operation
                     .parameters
                     .get_or_insert_with(Vec::new)
-                    .push(purpose.clone());
+                    .push(RefOr::T(purpose.clone()));
             }
         }
 
@@ -239,7 +239,7 @@ fn error_response() -> Response {
     );
     response.content.insert(
         "application/json".to_owned(),
-        Content::new(Some(Ref::from_schema_name("ErrorResponse"))),
+        RefOr::T(Content::new(Some(Ref::from_schema_name("ErrorResponse")))),
     );
     response
 }
@@ -274,6 +274,7 @@ mod tests {
     fn public_openapi_contains_exact_agent_resource_contract() {
         let value =
             serde_json::to_value(PublicApiDoc::openapi()).expect("serializes public openapi");
+        assert_eq!(value["openapi"], "3.1.0");
         let paths = value["paths"].as_object().expect("paths object");
         let expected = [
             ("/api/v2/me", &["get"][..]),
