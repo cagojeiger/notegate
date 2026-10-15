@@ -7,7 +7,7 @@ import { getNode } from "../../api/nodes";
 import { invalidateRecentNodes, invalidateSpaceLinks } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import { readText, replaceText } from "../../api/text";
-import type { ReadTextResponse, RestNode } from "../../api/types";
+import type { ReadTextResponse, RestNode, TextResponse } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
 import { useNodeChildrenQuery } from "../nodes/useNodeQueries";
 
@@ -37,7 +37,18 @@ export function useNodeFreshness(node: RestNode) {
   });
 }
 
-export function useSaveTextDocument(node: RestNode, draft: string, sha: string | undefined, onSaved: () => void, onConflict: () => void, editSessionId?: string) {
+export type TextSaveRequest = {
+  node: RestNode;
+  content: string;
+  expectedSha256?: string;
+  editSessionId: string;
+  force: boolean;
+};
+
+export function useSaveTextDocument(
+  onSaved: (saved: { request: TextSaveRequest; response: TextResponse }) => void,
+  onConflict: (request: TextSaveRequest) => void
+) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const showToast = useUiStore((state) => state.showToast);
@@ -45,34 +56,54 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
   const updateGroupsNode = useUiStore((state) => state.updateGroupsNode);
   return useMutation({
     meta: { silentError: true },
-    mutationFn: async (force: boolean) => {
-      const submittedDraft = draft;
+    mutationFn: async (request: TextSaveRequest) => {
       const response = await replaceText(
         client,
-        node.space_id,
-        node.id,
-        submittedDraft,
-        force ? undefined : sha,
-        editSessionId
+        request.node.space_id,
+        request.node.id,
+        request.content,
+        request.force ? undefined : request.expectedSha256,
+        request.editSessionId
       );
-      return { response, submittedDraft };
+      return { response, request };
     },
-    onMutate: async () => {
+    onMutate: async ({ node }) => {
       setSaveState("saving");
       await queryClient.cancelQueries({
         queryKey: queryKeys.text(node.space_id, node.id),
         exact: true
       });
+      return { textDataUpdateCount: queryClient.getQueryState(queryKeys.text(node.space_id, node.id))?.dataUpdateCount };
     },
-    onSuccess: ({ response, submittedDraft }) => {
+    onSuccess: async ({ response, request }, _variables, context) => {
+      const { node, content } = request;
+      const textState = queryClient.getQueryState(queryKeys.text(node.space_id, node.id));
+      const needsRevalidation = !!textState && (
+        textState.fetchStatus !== "idle" || textState.isInvalidated
+        || textState.dataUpdateCount !== context?.textDataUpdateCount
+      );
+      // Discard reads that may predate this save, then revalidate any observed refresh.
+      await queryClient.cancelQueries({ queryKey: queryKeys.text(node.space_id, node.id), exact: true });
+      const cachedNode = queryClient.getQueryData<RestNode>(queryKeys.node(node.space_id, node.id));
+      const currentNode = cachedNode ?? node;
+      // Saving text must not roll back a concurrent rename, move, or policy change.
+      const textUpdate = {
+        content_sha256: response.text.content_sha256,
+        byte_len: response.text.byte_len,
+        line_count: response.text.line_count,
+        ...(Date.parse(currentNode.updated_at) > Date.parse(response.text.updated_at) ? {} : {
+          updated_by: response.text.updated_by,
+          updated_at: response.text.updated_at
+        })
+      };
       queryClient.setQueryData<ReadTextResponse>(
         queryKeys.text(node.space_id, node.id),
         {
-          node: response.node,
+          node: { ...response.node, path: cachedNode?.path ?? response.node.path },
           text: {
             ...response.text,
             storage_format: "plain",
-            content: submittedDraft,
+            content,
             start_line: 1,
             end_line: response.text.line_count,
             returned_lines: response.text.line_count,
@@ -81,25 +112,25 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
           }
         }
       );
-      const updatedNode = {
-        ...node,
-        content_sha256: response.text.content_sha256,
-        byte_len: response.text.byte_len,
-        line_count: response.text.line_count,
-        updated_by: response.text.updated_by,
-        updated_at: response.text.updated_at
-      };
+      const updatedNode = { ...currentNode, ...textUpdate };
       updateGroupsNode(updatedNode);
-      updateNodeCaches(queryClient, updatedNode, () => updatedNode);
+      updateNodeCaches(queryClient, updatedNode, (current) => ({ ...current, ...textUpdate }));
       setSaveState("saved");
       showToast("Saved");
-      onSaved();
+      onSaved({ response, request });
       invalidateRecentNodes(queryClient, node.space_id);
       invalidateSpaceLinks(queryClient, node.space_id);
+      if (needsRevalidation) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.text(node.space_id, node.id), exact: true }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.node(node.space_id, node.id), exact: true })
+        ]);
+      }
     },
-    onError: (error) => {
+    onError: (error, request) => {
+      const { node } = request;
       if (error instanceof ApiError && error.status === 409) {
-        onConflict();
+        onConflict(request);
         setSaveState("conflict");
         return;
       }
