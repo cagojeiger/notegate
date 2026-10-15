@@ -233,7 +233,6 @@ export function useWorkbenchNodeNavigationActions({
       if (reveal) {
         applyReveal(reveal);
         open(reveal.target);
-        closeMobile();
         return reveal;
       }
     }
@@ -245,7 +244,6 @@ export function useWorkbenchNodeNavigationActions({
       return null;
     }
     open(node);
-    closeMobile();
     if (revealFailed) {
       showToast("Opened item, but could not reveal it in Files");
     }

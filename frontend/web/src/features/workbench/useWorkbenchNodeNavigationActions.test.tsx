@@ -391,6 +391,47 @@ describe("useWorkbenchNodeNavigationActions", () => {
     expect(getNode).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { action: "active", stage: "reveal" },
+    { action: "new", stage: "fallback" }
+  ] as const)("keeps reopened mobile panels open after a pending $action open completes through $stage", async ({ action, stage }) => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/source.md");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    openSourceGroup(activeSpace, sourceNode);
+    const reveal = deferred<NodeRevealResponse>();
+    const fallback = deferred<RestNode>();
+    mocks.revealNode.mockReturnValue(reveal.promise);
+    vi.mocked(getNode).mockReturnValue(fallback.promise);
+    const { result } = renderNavigationActionsWithCanonicalLoader(activeSpace);
+
+    const opening = action === "new"
+      ? result.current.openNodeInNewGroup(targetNode)
+      : result.current.openNode(targetNode);
+    if (stage === "fallback") {
+      await act(async () => reveal.reject(new ApiError("unavailable", 503)));
+      await waitFor(() => expect(getNode).toHaveBeenCalledWith(expect.anything(), activeSpace.id, targetNode.id));
+    }
+    act(() => {
+      useUiStore.getState().toggleMobileTree();
+      useUiStore.getState().toggleMobileAux();
+    });
+    await act(async () => {
+      if (stage === "reveal") reveal.resolve({ ancestors: [], target: targetNode });
+      else fallback.resolve(targetNode);
+      await opening;
+    });
+
+    const state = useUiStore.getState();
+    expect(state.editorGroups.map((group) => group.node?.id)).toEqual(
+      action === "new" ? [sourceNode.id, targetNode.id] : [targetNode.id]
+    );
+    expect(currentActiveNode()).toEqual(targetNode);
+    expect(state.mobileTreeOpen).toBe(true);
+    expect(state.mobileAuxOpen).toBe(true);
+    if (stage === "reveal") expect(getNode).not.toHaveBeenCalled();
+  });
+
   it("allows two explicit new-group opens to complete after the first changes focus", async () => {
     const activeSpace = space("space-1");
     const sourceNode = node("source", activeSpace.id, "/source.md");
