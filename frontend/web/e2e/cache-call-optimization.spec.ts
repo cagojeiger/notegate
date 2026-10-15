@@ -280,11 +280,15 @@ test("backs off idle usage polling with one owner while the desktop Space Librar
   }
 });
 
-type PollingWindow = Window & { __completedPollingResponses: number };
+declare global {
+  interface Window {
+    __completedPollingResponses: number;
+  }
+}
 
 async function observeCompletedPolling(page: Page, path: string) {
   await page.addInitScript((pollPath) => {
-    const state = window as PollingWindow;
+    const state = window;
     state.__completedPollingResponses = 0;
     const channel = new MessageChannel();
     channel.port1.onmessage = () => { state.__completedPollingResponses += 1; };
@@ -300,7 +304,7 @@ async function observeCompletedPolling(page: Page, path: string) {
     };
   }, path);
   return (expected: number) => expect.poll(() => page.evaluate(
-    () => (window as PollingWindow).__completedPollingResponses
+    () => window.__completedPollingResponses
   )).toBe(expected);
 }
 
