@@ -10,7 +10,8 @@ type HmacSha256 = Hmac<Sha256>;
 pub(super) const TIMESTAMP_HEADER: &str = "x-notegate-internal-timestamp";
 pub(super) const REQUEST_SIGNATURE_HEADER: &str = "x-notegate-internal-signature";
 pub(super) const RESPONSE_SIGNATURE_HEADER: &str = "x-notegate-internal-response-signature";
-pub(super) const BOUND_RESPONSE_SIGNATURE_HEADER: &str = "x-notegate-internal-bound-response-signature";
+pub(super) const BOUND_RESPONSE_SIGNATURE_HEADER: &str =
+    "x-notegate-internal-bound-response-signature";
 const MAX_CLOCK_SKEW_SECONDS: u64 = 60;
 
 #[derive(Debug, Clone, Copy)]

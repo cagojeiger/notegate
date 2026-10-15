@@ -138,7 +138,11 @@ async fn search_app_rejects_unauthorized_search_and_exposes_only_control_plane()
     let timestamp = InternalSearchAuth::now_timestamp()?;
     let auth = InternalSearchAuth::new(signing_key);
     for (request_body, status, error_kind) in [
-        (expired_body, StatusCode::GATEWAY_TIMEOUT, "deadline_exceeded"),
+        (
+            expired_body,
+            StatusCode::GATEWAY_TIMEOUT,
+            "deadline_exceeded",
+        ),
         (b"{".to_vec(), StatusCode::BAD_REQUEST, "invalid_input"),
     ] {
         let binding = RequestBinding::new(timestamp, "POST", FIND_PATH, &request_body);

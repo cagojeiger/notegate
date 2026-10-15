@@ -219,13 +219,7 @@ fn deadline_response(
         phase
     );
     let error = InternalSearchError::DeadlineExceeded;
-    signed_json(
-        state,
-        path,
-        binding,
-        error.status(),
-        &ErrorOutput { error },
-    )
+    signed_json(state, path, binding, error.status(), &ErrorOutput { error })
 }
 
 enum VerifiedRequestError {
@@ -309,13 +303,7 @@ where
         Ok(output) => signed_json(state, path, binding, StatusCode::OK, &output),
         Err(SearchRunError::Capacity(capacity)) => {
             let error = InternalSearchError::busy(capacity);
-            signed_json(
-                state,
-                path,
-                binding,
-                error.status(),
-                &ErrorOutput { error },
-            )
+            signed_json(state, path, binding, error.status(), &ErrorOutput { error })
         }
         Err(SearchRunError::Search(error)) => {
             if let notegate_search::SearchError::Internal(detail) = &error {
@@ -347,9 +335,10 @@ where
     else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    let Ok(bound_signature) = state
-        .auth
-        .sign_bound_response(&binding, status.as_u16(), path, &body)
+    let Ok(bound_signature) =
+        state
+            .auth
+            .sign_bound_response(&binding, status.as_u16(), path, &body)
     else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };

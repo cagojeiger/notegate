@@ -710,9 +710,8 @@ mod tests {
             ),
         ] {
             let mut other_request = StubResponse::signed(status, body.clone());
-            other_request.bound_request_body = Some(
-                br#"{"timeout_ms":29000,"command":{"q":"another request"}}"#.to_vec(),
-            );
+            other_request.bound_request_body =
+                Some(br#"{"timeout_ms":29000,"command":{"q":"another request"}}"#.to_vec());
             assert!(matches!(
                 send(other_request).await?,
                 SearchClientError::Unavailable
