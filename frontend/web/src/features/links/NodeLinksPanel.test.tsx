@@ -108,10 +108,11 @@ describe("NodeLinksPanel", () => {
     renderPanel();
 
     expect(intersectionObservers).toHaveLength(1);
-    expect(intersectionObservers[0]!.options).toMatchObject({
-      root: screen.getByRole("region", { name: "Links from this document" }),
-      rootMargin: "160px 0px"
-    });
+    // Compare the DOM root by identity rather than recursively matching it.
+    expect(intersectionObservers[0]!.options?.root).toBe(
+      screen.getByRole("region", { name: "Links from this document" })
+    );
+    expect(intersectionObservers[0]!.options?.rootMargin).toBe("160px 0px");
     act(() => {
       intersectionObservers[0]!.callback(
         [{ isIntersecting: true } as IntersectionObserverEntry],
