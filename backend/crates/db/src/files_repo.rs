@@ -785,7 +785,6 @@ impl FilesRepo {
             pool: &self.pool,
             capture: self.change_capture(),
             external_only: self.external_only,
-            crypto: &self.crypto,
             space_id,
             source_node_id: command.node_id,
             new_parent_id: command.new_parent_node_id,
