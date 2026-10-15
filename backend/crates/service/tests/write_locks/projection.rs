@@ -151,7 +151,10 @@ async fn inherited_lock_is_reported_without_blocking_reads() -> TestResult {
     assert_eq!(children.parent.node.id, folder_id);
     assert!(children.parent.node.write_locked);
     assert_eq!(children.parent.path, "/Policies");
-    assert_eq!(children.parent.write_lock_sources, detail.write_lock_sources);
+    assert_eq!(
+        children.parent.write_lock_sources,
+        detail.write_lock_sources
+    );
     assert!(
         children
             .items
@@ -237,7 +240,10 @@ async fn canonical_and_batch_children_project_parent_locks_after_unlocking() -> 
                 panic!("existing folder page should be ready");
             };
             assert_eq!(page.parent.node.id, parent_id);
-            assert_eq!(page.parent.node.write_locked, enabled && parent_id == folder_id);
+            assert_eq!(
+                page.parent.node.write_locked,
+                enabled && parent_id == folder_id
+            );
             assert_eq!(page.parent.has_children, parent_id == folder_id);
             let expected_sources = if enabled && parent_id != unlocked_id {
                 vec![(folder_id, "/Policies")]

@@ -118,11 +118,7 @@ async fn empty_children_parent_tracks_direct_and_inherited_write_locks()
         if let Some(node_id) = target {
             state
                 .files
-                .update_node_write_lock(
-                    &owner,
-                    space_id,
-                    UpdateNodeWriteLock { node_id, enabled },
-                )
+                .update_node_write_lock(&owner, space_id, UpdateNodeWriteLock { node_id, enabled })
                 .await?;
         }
         let (status, response) = get_json(
