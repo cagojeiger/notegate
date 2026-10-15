@@ -1,6 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { appendFileSync, writeFileSync } from "node:fs";
+import { expect, test, type Request } from "@playwright/test";
 
-import type { RestNode, Space, ReadTextResponse } from "../src/api/types";
+import type { RestNode, Space, ReadTextResponse, TextResponse } from "../src/api/types";
 import { instrument, writeReport, type Measurement } from "./measure";
 
 const fixture = { rootDocuments: 120, nestedDepth: 3, trashItems: 55, apiCalls: 55, trials: 3 };
@@ -8,6 +9,21 @@ const fixture = { rootDocuments: 120, nestedDepth: 3, trashItems: 55, apiCalls: 
 const content = `# Baseline document\n\n${Array.from({ length: 300 }, (_, index) =>
   `Paragraph ${index}: ${"synthetic Markdown for browser rendering, with **emphasis** and a stable measurement payload. ".repeat(3)}\n`
 ).join("\n")}`;
+
+function textResponseShape({ text }: ReadTextResponse) {
+  return {
+    unchanged: "unchanged" in text && text.unchanged === true,
+    contentReturned: "content_returned" in text ? text.content_returned : null,
+    fullBody: "content" in text && typeof text.content === "string",
+    updatedAtPresent: "updated_at" in text,
+    updatedByPresent: "updated_by" in text
+  };
+}
+
+type TextRevalidation = ReturnType<typeof textResponseShape> & {
+  trial: number; getStarts: number; conditional: boolean; cacheBodyCorrect: boolean;
+  revalidationMs: number; encodedBodyBytes: number; decodedBodyBytes: number; transferBytes: number;
+};
 
 test("authenticated workbench performance baseline", async ({ browser, playwright, baseURL }) => {
   // A missing identity is a configuration failure, never a silently skipped benchmark.
@@ -26,6 +42,12 @@ test("authenticated workbench performance baseline", async ({ browser, playwrigh
     return response.status() === 204 ? undefined as T : await response.json() as T;
   }
   const measurements: Measurement[] = [];
+  const textRevalidations: TextRevalidation[] = [];
+  let conditionalProbe: (ReturnType<typeof textResponseShape> & { jsonBodyBytes: number }) | null = null;
+  const smallBodyProbes: Array<{
+    contentBytes: number; fullJsonBytes: number; conditionalJsonBytes: number;
+    extraQueryBytes: number; responsePlusQuerySavedBytes: number;
+  }> = [];
   let completed = false;
   try {
     const space = await request<Space>("/api/v1/spaces", "POST", { name: "Browser baseline" });
@@ -51,7 +73,7 @@ test("authenticated workbench performance baseline", async ({ browser, playwrigh
     }
     for (let trial = 1; trial <= fixture.trials; trial++) {
       const initial = `${content}\nTrial ${trial} initial state.\n`;
-      await request(`${path}/text/${document.id}`, "PUT", { storage_format: "plain", content: initial });
+      const written = await request<TextResponse>(`${path}/text/${document.id}`, "PUT", { storage_format: "plain", content: initial });
       const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 900 } });
       await context.addCookies([{ name: "notegate_browser_session", value: session!, url: baseURL!, httpOnly: true, sameSite: "Lax" }]);
       const page = await context.newPage();
@@ -75,10 +97,74 @@ test("authenticated workbench performance baseline", async ({ browser, playwrigh
           await expect(tree.getByRole("treeitem", { selected: true })).toContainText("baseline.md");
           await expect(tree.getByRole("button", { name: "baseline.md", exact: true })).toBeInViewport();
         });
+        // Recent reveal virtualizes the first Files row away; use the real editor history.
+        await page.getByRole("button", { name: "Back to 000-entry.md", exact: true }).click();
+        await expect(preview.getByRole("heading", { name: "Entry 0", exact: true })).toBeVisible();
+        // Real time makes the inactive text cache stale (5s); exclude it from the journey.
+        await page.waitForTimeout(5_500);
+        const textPath = `${path}/text/${document.id}`;
+        let textGetStarts = 0;
+        const trackText = (request: Request) => {
+          if (request.method() === "GET" && new URL(request.url()).pathname === textPath) textGetStarts += 1;
+        };
+        page.on("request", trackText);
+        try {
+          await measure("unchanged-text-reopen", async () => {
+            const since = await page.evaluate(() => performance.now());
+            const [response] = await Promise.all([
+              page.waitForResponse((response) => response.request().method() === "GET"
+                && new URL(response.url()).pathname === textPath),
+              recent.getByRole("button", { name: /^baseline\.md/ }).click()
+            ]);
+            expect(response.status()).toBe(200);
+            expect(await response.finished()).toBeNull();
+            const body = await response.json() as ReadTextResponse;
+            const shape = textResponseShape(body);
+            if ("content" in body.text) expect(body.text.content).toBe(initial);
+            else expect(shape.unchanged && shape.contentReturned === false).toBe(true);
+            const resource = () => page.evaluate(({ url, since }) => {
+              const entries = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
+              const entry = entries.find((entry) => entry.name === url && entry.startTime >= since && entry.responseEnd > 0);
+              return entry ? {
+                revalidationMs: entry.responseEnd - since,
+                encodedBodyBytes: entry.encodedBodySize,
+                decodedBodyBytes: entry.decodedBodySize,
+                transferBytes: entry.transferSize
+              } : null;
+            }, { url: response.url(), since });
+            await expect.poll(resource).not.toBeNull();
+            const bytes = await resource();
+            if (!bytes) throw new Error("Missing completed text resource timing");
+            expect(bytes.encodedBodyBytes).toBeGreaterThan(0);
+            expect(bytes.decodedBodyBytes).toBeGreaterThan(0);
+            expect(bytes.transferBytes).toBeGreaterThan(0);
+            await expect(preview.getByRole("heading", { name: "Baseline document", exact: true })).toBeVisible();
+            await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeEnabled();
+            textRevalidations.push({ trial, ...shape, ...bytes, getStarts: 0, cacheBodyCorrect: false,
+              conditional: new URL(response.request().url()).searchParams.has("if_none_match_sha256") });
+          });
+        } finally {
+          page.off("request", trackText);
+          const sample = textRevalidations.find((sample) => sample.trial === trial);
+          if (sample) sample.getStarts = textGetStarts;
+        }
+        expect(textGetStarts, "text GET starts during stale reopen").toBe(1);
         await measure("editor-open", async () => {
           await page.getByRole("button", { name: "Edit", exact: true }).click();
           await expect(page.getByRole("textbox", { name: "Edit text content" })).toHaveValue(initial);
         });
+        expect(measurements.at(-1)?.api.filter((sample) => sample.route.startsWith("GET ") && sample.route.includes("/text/"))).toHaveLength(0);
+        textRevalidations[textRevalidations.length - 1].cacheBodyCorrect = true;
+        if (trial === 1) {
+          // APIRequestContext is separate from the page: JSON bytes are not browser wire bytes.
+          const probe = await api.get(`${textPath}?max_lines=5000&max_bytes=1048576&if_none_match_sha256=${encodeURIComponent(written.text.content_sha256)}`);
+          expect(probe.status()).toBe(200);
+          const body = await probe.body();
+          conditionalProbe = { ...textResponseShape(JSON.parse(body.toString()) as ReadTextResponse), jsonBodyBytes: body.byteLength };
+          expect(conditionalProbe.unchanged).toBe(true);
+          expect(conditionalProbe.contentReturned).toBe(false);
+          expect(conditionalProbe.fullBody).toBe(false);
+        }
         const updated = initial.replace("Paragraph 150:", "Changed paragraph 150:");
         await page.getByRole("textbox", { name: "Edit text content" }).fill(updated);
         await measure("save-to-preview", async () => {
@@ -140,9 +226,48 @@ test("authenticated workbench performance baseline", async ({ browser, playwrigh
         await context.close();
       }
     }
+    // After closing every measured browser context, check the fixed query cost
+    // against small bodies without changing the preceding UI measurements.
+    for (const contentBytes of [0, 64, 1_024]) {
+      const body = "x".repeat(contentBytes);
+      const written = await request<TextResponse>(`${path}/text/${document.id}`, "PUT", { storage_format: "plain", content: body });
+      const fullPath = `${path}/text/${document.id}?max_lines=5000&max_bytes=1048576`;
+      const conditionalPath = `${fullPath}&if_none_match_sha256=${encodeURIComponent(written.text.content_sha256)}`;
+      const full = await api.get(fullPath);
+      const conditional = await api.get(conditionalPath);
+      expect(full.status()).toBe(200);
+      expect(conditional.status()).toBe(200);
+      const fullBody = await full.body();
+      const conditionalBody = await conditional.body();
+      const fullValue = JSON.parse(fullBody.toString()) as ReadTextResponse;
+      expect("content" in fullValue.text && fullValue.text.content).toBe(body);
+      const shape = textResponseShape(JSON.parse(conditionalBody.toString()) as ReadTextResponse);
+      expect(shape.unchanged && !shape.fullBody && shape.contentReturned === false).toBe(true);
+      const extraQueryBytes = Buffer.byteLength(conditionalPath) - Buffer.byteLength(fullPath);
+      smallBodyProbes.push({ contentBytes, fullJsonBytes: fullBody.byteLength, conditionalJsonBytes: conditionalBody.byteLength,
+        extraQueryBytes, responsePlusQuerySavedBytes: fullBody.byteLength - conditionalBody.byteLength - extraQueryBytes });
+    }
     completed = true;
   } finally {
     writeReport(measurements, { ...fixture, documentBytes: Buffer.byteLength(content) }, completed);
+    const directory = "test-results/browser-performance";
+    writeFileSync(`${directory}/text-revalidation.json`, JSON.stringify({ completed, measurements: textRevalidations, conditionalProbe, smallBodyProbes }, null, 2));
+    appendFileSync(`${directory}/summary.md`, [
+      "", "## Unchanged text revalidation", "",
+      "Stale reopen after 5,500ms outside the measured journey. Exact text GET only; no mocked network. Revalidation ends at responseEnd, not paint.",
+      "Encoded/decoded sizes are response-body bytes; transfer includes browser-reported overhead. No URLs, identifiers, content hashes, bodies, or headers are exported.", "",
+      "| Trial | GET starts | Conditional | Unchanged | Full body | Content returned | Updated at/by present | Cache body correct | Revalidation ms | Encoded B | Decoded B | Transfer B |",
+      "|---|---:|---|---|---|---|---|---|---:|---:|---:|---:|",
+      ...textRevalidations.map((row) => `| ${row.trial} | ${row.getStarts} | ${row.conditional} | ${row.unchanged} | ${row.fullBody} | ${row.contentReturned ?? "absent"} | ${row.updatedAtPresent}/${row.updatedByPresent} | ${row.cacheBodyCorrect} | ${row.revalidationMs.toFixed(1)} | ${row.encodedBodyBytes} | ${row.decodedBodyBytes} | ${row.transferBytes} |`),
+      "", "Separate APIRequestContext probe: JSON response bytes, not browser wire bytes.", "",
+      "| JSON bytes | Unchanged | Full body | Content returned | Updated at/by present |",
+      "|---:|---|---|---|---|",
+      ...(conditionalProbe ? [`| ${conditionalProbe.jsonBodyBytes} | ${conditionalProbe.unchanged} | ${conditionalProbe.fullBody} | ${conditionalProbe.contentReturned} | ${conditionalProbe.updatedAtPresent}/${conditionalProbe.updatedByPresent} |`] : []), "",
+      "Small-body API probes run after all UI journeys. JSON body plus query-string comparison only; excludes headers, compression, TLS, and packet overhead.", "",
+      "| Content B | Full JSON B | Conditional JSON B | Extra query B | Response plus query saved B |",
+      "|---:|---:|---:|---:|---:|",
+      ...smallBodyProbes.map((row) => `| ${row.contentBytes} | ${row.fullJsonBytes} | ${row.conditionalJsonBytes} | ${row.extraQueryBytes} | ${row.responsePlusQuerySavedBytes} |`), ""
+    ].join("\n"));
     await api.dispose();
   }
 });

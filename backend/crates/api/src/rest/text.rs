@@ -102,6 +102,8 @@ pub(crate) struct ReadUnchangedOut {
     content_sha256: String,
     byte_len: i64,
     line_count: i32,
+    updated_by: AccountRef,
+    updated_at: DateTime<Utc>,
 }
 
 #[utoipa::path(
@@ -370,6 +372,8 @@ fn read_text_out(result: &ReadResult, updated_by: AccountRef) -> ReadTextOut {
             content_sha256: result.content_sha256.clone(),
             byte_len: result.byte_len,
             line_count: result.line_count,
+            updated_by,
+            updated_at: result.node.node.updated_at,
         }),
         ReadTextBody::Encrypted(payload) => ReadTextOut::Encrypted(ReadEncryptedOut {
             node_id: result.node.node.id,
@@ -456,5 +460,94 @@ fn patch_response(result: &PatchResult, updated_by: AccountRef) -> PatchResponse
             updated_by,
             updated_at: result.text.updated_at,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing)]
+
+    use axum::http::StatusCode;
+    use notegate_db::test_support::TestDb;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use crate::rest::test_support::{caller_and_space, get_json, json_request, rest_app, state};
+
+    #[tokio::test]
+    async fn conditional_read_preserves_metadata() -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = state(&db);
+        let (caller, space, root) = caller_and_space(&state).await?;
+        let app = rest_app(state, caller.clone());
+        let (status, created) = json_request(
+            app.clone(),
+            "POST",
+            format!("/v1/spaces/{space}/nodes"),
+            json!({
+                "parent_id": root,
+                "kind": "text",
+                "name": "before.md",
+                "content": "unchanged content\n"
+            }),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+        let node: Uuid = serde_json::from_value(created["id"].clone())?;
+        let uri = format!("/v1/spaces/{space}/text/{node}");
+        let (status, before) = get_json(app.clone(), uri.clone()).await?;
+        assert_eq!(status, StatusCode::OK, "{before}");
+        let hash = before["text"]["content_sha256"]
+            .as_str()
+            .ok_or("full read omitted its content hash")?;
+
+        let (status, renamed) = json_request(
+            app.clone(),
+            "PATCH",
+            format!("/v1/spaces/{space}/nodes/{node}"),
+            json!({"name": "after.md"}),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK, "{renamed}");
+        let (status, full) = get_json(app.clone(), uri.clone()).await?;
+        assert_eq!(status, StatusCode::OK, "{full}");
+        assert_eq!(full["text"]["content_sha256"], hash);
+        assert_eq!(full["node"]["path"], "/after.md");
+        assert_eq!(full["text"]["updated_by"]["id"], json!(caller.account_id()));
+        assert!(full["text"]["updated_at"].is_string());
+        assert_eq!(full["text"]["updated_at"], renamed["updated_at"]);
+
+        let (status, unchanged) =
+            get_json(app.clone(), format!("{uri}?if_none_match_sha256={hash}")).await?;
+        assert_eq!(status, StatusCode::OK, "{unchanged}");
+        assert_eq!(unchanged["node"], full["node"]);
+        assert_eq!(unchanged["text"]["unchanged"], true);
+        assert_eq!(unchanged["text"]["content_returned"], false);
+        assert!(unchanged["text"].get("content").is_none());
+        assert!(unchanged["text"].get("encrypted_payload").is_none());
+        for field in [
+            "node_id",
+            "storage_format",
+            "content_sha256",
+            "byte_len",
+            "line_count",
+            "updated_by",
+            "updated_at",
+        ] {
+            assert_eq!(unchanged["text"][field], full["text"][field], "{field}");
+        }
+
+        let (status, stale) = get_json(
+            app,
+            format!("{uri}?if_none_match_sha256={}", "0".repeat(64)),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::OK, "{stale}");
+        assert_eq!(stale, full);
+        assert_eq!(stale["text"]["content"], "unchanged content\n");
+        db.cleanup().await;
+        Ok(())
     }
 }
