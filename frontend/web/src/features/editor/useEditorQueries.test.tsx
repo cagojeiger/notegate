@@ -1,4 +1,4 @@
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, type InfiniteData } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,9 +7,9 @@ import { ApiError } from "../../api/errors";
 import { listChildren } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import { readText, replaceText } from "../../api/text";
-import type { ReadTextResponse } from "../../api/types";
+import type { ChildrenResponse, ReadTextResponse, TextResponse } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
-import { makeRestNode } from "../../test/fixtures";
+import { makeNodeSummary, makeRestNode } from "../../test/fixtures";
 import { createTestQueryClient } from "../../test/queryClient";
 import { useNodeChildrenQuery } from "../nodes/useNodeQueries";
 import {
@@ -215,6 +215,117 @@ describe("editor queries", () => {
     expect(onConflict).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      label: "rename and move",
+      changes: { name: "renamed.md", path: "/destination/renamed.md", parent_id: "destination-folder" }
+    },
+    {
+      label: "write lock",
+      changes: {
+        write_locked: true,
+        effective_write_locked: true,
+        write_lock_sources: [{ node_id: node.id, name: node.name, path: node.path }]
+      }
+    }
+  ])("preserves a later $label when a delayed text save completes", async ({ changes }) => {
+    const queryClient = createTestQueryClient({
+      defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY } }
+    });
+    const oldText: ReadTextResponse = {
+      node: { id: node.id, path: node.path },
+      text: {
+        node_id: node.id,
+        storage_format: "plain",
+        content: "before",
+        content_sha256: "sha-1",
+        byte_len: 6,
+        line_count: 1,
+        start_line: 1,
+        end_line: 1,
+        returned_lines: 1,
+        truncated: false,
+        next_start_line: null,
+        updated_by: node.updated_by,
+        updated_at: node.updated_at
+      }
+    };
+    queryClient.setQueryData(queryKeys.text(node.space_id, node.id), oldText);
+    queryClient.setQueryData(queryKeys.node(node.space_id, node.id), node);
+    useUiStore.getState().openInActiveGroup(node);
+    vi.mocked(readText).mockResolvedValue(oldText);
+    const pending = deferred<TextResponse>();
+    vi.mocked(replaceText).mockReturnValue(pending.promise);
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => ({
+      text: useTextDocument(node),
+      save: useSaveTextDocument(vi.fn(), vi.fn())
+    }), { wrapper });
+    const draft = "changed\nagain\n";
+    act(() => result.current.save.mutate(saveRequest(draft)));
+    await waitFor(() => expect(replaceText).toHaveBeenCalledOnce());
+
+    // A later node operation has already published its result before this PUT returns.
+    const latestNode = makeRestNode({
+      ...node,
+      ...changes,
+      updated_at: "2026-07-29T12:00:01Z",
+      updated_by: { id: "user-2", kind: "user", display_name: "Other editor" }
+    });
+    const childrenKey = queryKeys.children(node.space_id, latestNode.parent_id!);
+    const sibling = makeNodeSummary({ id: "sibling", name: "unrelated.md", parent_id: latestNode.parent_id });
+    act(() => {
+      queryClient.setQueryData(queryKeys.node(node.space_id, node.id), latestNode);
+      useUiStore.getState().updateGroupsNode(latestNode);
+      queryClient.setQueryData<InfiniteData<ChildrenResponse>>(childrenKey, {
+        pages: [{
+          parent: { id: latestNode.parent_id!, path: latestNode.parent_id === node.parent_id ? "/" : "/destination" },
+          children: [makeNodeSummary(latestNode), sibling],
+          page: { limit: 100, returned: 2, has_more: false, next_cursor: null }
+        }],
+        pageParams: [null]
+      });
+    });
+    const saved: TextResponse = {
+      node: { id: node.id, path: node.path },
+      text: {
+        node_id: node.id,
+        storage_format: "plain",
+        content_sha256: "sha-2",
+        byte_len: 14,
+        line_count: 2,
+        updated_by: node.updated_by,
+        updated_at: "2026-07-29T12:00:00Z"
+      }
+    };
+    await act(async () => {
+      pending.resolve(saved);
+      await pending.promise;
+    });
+    await waitFor(() => expect(result.current.save.isSuccess).toBe(true));
+
+    const expectedNode = { ...latestNode, content_sha256: "sha-2", byte_len: 14, line_count: 2 };
+    expect(queryClient.getQueryData(queryKeys.node(node.space_id, node.id))).toEqual(expectedNode);
+    expect(useUiStore.getState().editorGroups[0].node).toEqual(expectedNode);
+    const children = queryClient.getQueryData<InfiniteData<ChildrenResponse>>(childrenKey)?.pages[0].children;
+    expect(children?.[0]).toMatchObject({
+      name: latestNode.name,
+      path: latestNode.path,
+      parent_id: latestNode.parent_id,
+      effective_write_locked: latestNode.effective_write_locked,
+      byte_len: 14,
+      line_count: 2,
+      updated_at: latestNode.updated_at
+    });
+    expect(children?.[1]).toEqual(sibling);
+    expect(result.current.text.data?.node).toEqual({ id: node.id, path: latestNode.path });
+    expect(result.current.text.data?.text).toMatchObject({ ...saved.text, content: draft });
+    expect(replaceText).toHaveBeenCalledWith(mockClient, node.space_id, node.id, draft, "sha-1", "session-1");
+    expect(readText).not.toHaveBeenCalled();
+  });
+
   it("surfaces a write-lock rejection and refreshes the node lock state", async () => {
     const message = "changes are blocked because the node or an ancestor is write-locked";
     vi.mocked(replaceText).mockRejectedValue(
@@ -263,3 +374,9 @@ describe("editor queries", () => {
   });
 
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}

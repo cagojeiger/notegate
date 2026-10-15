@@ -78,10 +78,22 @@ export function useSaveTextDocument(
       const { node, content } = request;
       // A refresh can start while the PUT is pending; do not let it replace this save.
       await queryClient.cancelQueries({ queryKey: queryKeys.text(node.space_id, node.id), exact: true });
+      const cachedNode = queryClient.getQueryData<RestNode>(queryKeys.node(node.space_id, node.id));
+      const currentNode = cachedNode ?? node;
+      // Saving text must not roll back a concurrent rename, move, or policy change.
+      const textUpdate = {
+        content_sha256: response.text.content_sha256,
+        byte_len: response.text.byte_len,
+        line_count: response.text.line_count,
+        ...(Date.parse(currentNode.updated_at) > Date.parse(response.text.updated_at) ? {} : {
+          updated_by: response.text.updated_by,
+          updated_at: response.text.updated_at
+        })
+      };
       queryClient.setQueryData<ReadTextResponse>(
         queryKeys.text(node.space_id, node.id),
         {
-          node: response.node,
+          node: { ...response.node, path: cachedNode?.path ?? response.node.path },
           text: {
             ...response.text,
             storage_format: "plain",
@@ -94,16 +106,9 @@ export function useSaveTextDocument(
           }
         }
       );
-      const updatedNode = {
-        ...node,
-        content_sha256: response.text.content_sha256,
-        byte_len: response.text.byte_len,
-        line_count: response.text.line_count,
-        updated_by: response.text.updated_by,
-        updated_at: response.text.updated_at
-      };
+      const updatedNode = { ...currentNode, ...textUpdate };
       updateGroupsNode(updatedNode);
-      updateNodeCaches(queryClient, updatedNode, () => updatedNode);
+      updateNodeCaches(queryClient, updatedNode, (current) => ({ ...current, ...textUpdate }));
       setSaveState("saved");
       showToast("Saved");
       onSaved({ response, request });
