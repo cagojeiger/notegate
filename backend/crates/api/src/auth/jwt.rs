@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::identity::ResolveAttrs;
 use aliri::jwt::{Audiences, BasicClaims, CoreClaims, IssuerRef, SubjectRef};
@@ -8,6 +8,10 @@ use aliri_oauth2::{Authority, AuthorityError, HasScope, Scope, ScopePolicy};
 use serde::Deserialize;
 
 use crate::auth::bearer::AuthError;
+
+// Initial fetches and unknown key IDs share this budget, even on failure or
+// cancellation. A new key may need a retry after 5 seconds plus fetch latency.
+const ON_DEMAND_REFRESH_COOLDOWN: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub struct JwtAuthority {
@@ -19,6 +23,7 @@ struct JwtAuthorityInner {
     validator: jwt::CoreValidator,
     refresh_interval: Duration,
     authority: tokio::sync::OnceCell<Authority>,
+    last_refresh_attempt: tokio::sync::Mutex<Option<Instant>>,
 }
 
 impl JwtAuthority {
@@ -29,6 +34,7 @@ impl JwtAuthority {
                 validator: jwt_validator(config),
                 refresh_interval: config.jwks_cache_ttl,
                 authority: tokio::sync::OnceCell::new(),
+                last_refresh_attempt: tokio::sync::Mutex::new(None),
             }),
         }
     }
@@ -44,6 +50,7 @@ impl JwtAuthority {
                 validator: jwt_validator(config),
                 refresh_interval: config.jwks_cache_ttl,
                 authority: cell,
+                last_refresh_attempt: tokio::sync::Mutex::new(None),
             }),
         }
     }
@@ -66,36 +73,66 @@ impl JwtAuthority {
         attrs_from_claims(claims)
     }
 
-    async fn authority(&self) -> Result<&Authority, AuthError> {
+    async fn authority(&self, now: &impl Fn() -> Instant) -> Result<&Authority, AuthError> {
+        if let Some(authority) = self.inner.authority.get() {
+            return Ok(authority);
+        }
+        let mut last_attempt = self.inner.last_refresh_attempt.lock().await;
+        if let Some(authority) = self.inner.authority.get() {
+            return Ok(authority);
+        }
+        if refresh_is_cooling_down(*last_attempt, now()) {
+            return Err(AuthError::Unavailable);
+        }
+        let jwks_url = self.inner.jwks_url.clone().ok_or(AuthError::Internal)?;
+        *last_attempt = Some(now());
+        tracing::info!(event = "jwks.initial_fetch.start");
+        let result = Authority::new_from_url(jwks_url, self.inner.validator.clone()).await;
+        *last_attempt = Some(now());
+        let authority = result.map_err(|error| {
+            tracing::error!(event = "jwks.initial_fetch.failed", %error);
+            AuthError::Internal
+        })?;
+        tracing::info!(
+            event = "jwks.initial_fetch.ok",
+            refresh_interval_secs = self.inner.refresh_interval.as_secs(),
+        );
+        authority.spawn_refresh(self.inner.refresh_interval);
         self.inner
             .authority
-            .get_or_try_init(|| async {
-                let jwks_url = self.inner.jwks_url.clone().ok_or(AuthError::Internal)?;
-                tracing::info!(event = "jwks.initial_fetch.start");
-                let authority = Authority::new_from_url(jwks_url, self.inner.validator.clone())
-                    .await
-                    .map_err(|error| {
-                        tracing::error!(event = "jwks.initial_fetch.failed", %error);
-                        AuthError::Internal
-                    })?;
-                tracing::info!(
-                    event = "jwks.initial_fetch.ok",
-                    refresh_interval_secs = self.inner.refresh_interval.as_secs(),
-                );
-                authority.spawn_refresh(self.inner.refresh_interval);
-                Ok(authority)
-            })
-            .await
+            .set(authority)
+            .map_err(|_error| AuthError::Internal)?;
+        self.inner.authority.get().ok_or(AuthError::Internal)
     }
 
     async fn verify_claims(&self, token: &str) -> Result<JwtClaims, AuthError> {
-        let authority = self.authority().await?;
+        self.verify_claims_with_clock(token, Instant::now).await
+    }
+
+    async fn verify_claims_with_clock(
+        &self,
+        token: &str,
+        now: impl Fn() -> Instant,
+    ) -> Result<JwtClaims, AuthError> {
+        let authority = self.authority(&now).await?;
         let jwt = Jwt::from(token.trim());
         match authority.verify_token::<JwtClaims>(&jwt, &ScopePolicy::allow_any()) {
             Ok(claims) => Ok(claims),
             Err(AuthorityError::UnknownKeyId) => {
+                let mut last_attempt = self.inner.last_refresh_attempt.lock().await;
+                // A concurrent refresh may already have supplied the requested key.
+                match authority.verify_token::<JwtClaims>(&jwt, &ScopePolicy::allow_any()) {
+                    Err(AuthorityError::UnknownKeyId) => {}
+                    result => return result.map_err(map_authority_error),
+                }
+                if refresh_is_cooling_down(*last_attempt, now()) {
+                    return Err(AuthError::InvalidToken);
+                }
+                *last_attempt = Some(now());
                 tracing::info!(event = "jwks.refresh.start", reason = "unknown_key_id");
-                authority.refresh().await.map_err(|error| {
+                let result = authority.refresh().await;
+                *last_attempt = Some(now());
+                result.map_err(|error| {
                     tracing::warn!(event = "jwks.refresh.failed", reason = "unknown_key_id", %error);
                     AuthError::InvalidToken
                 })?;
@@ -107,6 +144,11 @@ impl JwtAuthority {
             Err(error) => Err(map_authority_error(error)),
         }
     }
+}
+
+fn refresh_is_cooling_down(last_attempt: Option<Instant>, now: Instant) -> bool {
+    last_attempt
+        .is_some_and(|last| now.saturating_duration_since(last) < ON_DEMAND_REFRESH_COOLDOWN)
 }
 
 fn jwt_validator(config: &notegate_core::Config) -> jwt::CoreValidator {
@@ -176,3 +218,7 @@ fn map_authority_error(error: AuthorityError) -> AuthError {
         AuthorityError::PolicyDenial(_error) => AuthError::InvalidToken,
     }
 }
+
+#[cfg(test)]
+#[path = "jwt_tests.rs"]
+mod tests;

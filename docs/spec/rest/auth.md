@@ -96,3 +96,5 @@ MCP `401` 응답은 `WWW-Authenticate` header에 resource metadata와 scope를 �
 - `/mcp`는 user MCP OAuth bearer만 허용한다.
 - `/mcp/v2`는 Agent 소유 `ngk_v2_` API key만 허용한다.
 - Device flow는 authgate flow이며 user account로 resolve한다.
+
+`/mcp`와 `/cli`의 OAuth bearer JWKS는 프로세스에서 공유한다. 요청이 일으키는 초기 조회와 unknown-kid 재조회는 한 번에 하나만 실행하고 성공·실패 후 5초 동안 추가 조회를 억제한다. 캐시된 키로 검증되는 토큰은 재조회를 기다리지 않는다. 키 교체 직후에는 재시도가 필요할 수 있으며, 주기 갱신은 기존 JWKS TTL을 따른다.
