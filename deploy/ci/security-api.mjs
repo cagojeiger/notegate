@@ -89,12 +89,13 @@ async function command(surface, actor, tool, input, deniedKind) {
     actor,
     method: "POST",
     headers: mcp
-      ? { Accept: "application/json, text/event-stream", "MCP-Protocol-Version": "2026-07-28" }
+      ? { Accept: "application/json, text/event-stream", "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": "tools/call", "Mcp-Name": tool }
       : { "X-Notegate-Cli-Version": version, "X-Notegate-Command-Protocol": "1" },
     body: mcp
-      ? { jsonrpc: "2.0", id: ++rpcId, method: "tools/call", params: { name: tool, arguments: input } }
+      ? { jsonrpc: "2.0", id: ++rpcId, method: "tools/call", params: { name: tool, arguments: input,
+        _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {} } } }
       : { tool, input },
-    statuses: deniedKind && !mcp ? [deniedKind === "not_found" ? 404 : 403] : [200],
+    statuses: deniedKind ? [mcp ? deniedKind === "not_found" ? 400 : 200 : deniedKind === "not_found" ? 404 : 403] : [200],
   });
   if (deniedKind) {
     const failure = mcp ? result.data?.error : result.data;
