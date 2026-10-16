@@ -252,6 +252,9 @@ cargo test -p notegate-media
 
 ## 보안과 의존성 관리
 
+- Swagger UI는 정확히 고정한 `utoipa-swagger-ui-vendored`의 공식 자산을 사용한다.
+  API의 `build.rs`가 workspace `zip`으로 필요한 고정 파일만 읽어 바이너리에 내장한다.
+  자산 버전을 변경할 때는 빌드의 archive 경로와 문서 인증·실제 브라우저 검사를 함께 확인한다.
 - PR의 `Hygiene`는 `make version-check`로 `VERSION`, workspace package version,
   각 crate의 `version.workspace`, `Cargo.lock`의 로컬 package version을 비교한다.
   이 검사는 Python 3.11 이상이 필요하며 의존성을 다운로드하지 않는다.

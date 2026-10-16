@@ -417,6 +417,7 @@ jobs:
       - name: Test browser workflow
         env:
           NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
+          NOTEGATE_WEB_E2E_API_KEY: ${{ steps.seed_test_identity.outputs.agent_api_key }}
         run: |
           api_pid=$(cat browser-e2e/api.pid)
           kill -0 "$api_pid"
@@ -464,4 +465,5 @@ jobs:
           path: |
             browser-e2e/*.log
             frontend/web/test-results
+            !frontend/web/test-results/openapi-docs-*/**
             frontend/web/lighthouse-reports

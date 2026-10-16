@@ -581,7 +581,14 @@ async fn openapi_docs_redirect_unauthenticated_browser_to_login()
 -> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
 
-    for path in ["/swagger-ui/v2/", "/openapi/v2.json"] {
+    for path in [
+        "/swagger-ui/v2",
+        "/swagger-ui/v2/",
+        "/swagger-ui/v2/swagger-ui-bundle.js",
+        "/swagger-ui/v2/swagger-ui.css",
+        "/swagger-ui/v2/swagger-initializer.js",
+        "/openapi/v2.json",
+    ] {
         let response = app
             .clone()
             .oneshot(Request::builder().uri(path).body(Body::empty())?)
@@ -614,6 +621,29 @@ async fn openapi_docs_redirect_unauthenticated_browser_to_login()
 }
 
 #[tokio::test]
+async fn openapi_docs_do_not_accept_agent_api_keys() -> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    for path in ["/swagger-ui/v2/swagger-ui-bundle.js", "/openapi/v2.json"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header("authorization", format!("Bearer {TEST_API_KEY}"))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT, "{path}");
+        assert_eq!(
+            response.headers().get(CACHE_CONTROL),
+            Some(&"private, no-store".parse()?),
+            "{path}"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn openapi_docs_accept_valid_browser_session() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -623,10 +653,30 @@ async fn openapi_docs_accept_valid_browser_session() -> Result<(), Box<dyn std::
         "https://api.example.test",
         db.pool.clone(),
     )?;
+    assert!(state.config.web_dist_dir.is_none());
     let session = valid_browser_session(&db, &state).await?;
     let app = crate::routes::app(state);
 
-    for path in ["/swagger-ui/v2/", "/openapi/v2.json"] {
+    for (path, content_type, expected_body) in [
+        ("/swagger-ui/v2/", "text/html", "swagger-ui-bundle.js"),
+        ("/swagger-ui/v2/index.html", "text/html", "swagger-ui-bundle.js"),
+        (
+            "/swagger-ui/v2/swagger-ui-bundle.js",
+            "text/javascript",
+            "SwaggerUIBundle",
+        ),
+        (
+            "/swagger-ui/v2/swagger-ui-standalone-preset.js",
+            "text/javascript",
+            "SwaggerUIStandalonePreset",
+        ),
+        ("/swagger-ui/v2/swagger-ui.css", "text/css", ".swagger-ui"),
+        (
+            "/swagger-ui/v2/swagger-initializer.js",
+            "text/javascript",
+            "/openapi/v2.json",
+        ),
+    ] {
         let response = app
             .clone()
             .oneshot(
@@ -643,7 +693,78 @@ async fn openapi_docs_accept_valid_browser_session() -> Result<(), Box<dyn std::
             Some(&"private, no-store".parse()?),
             "{path}"
         );
+        assert!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .ok_or("missing docs content type")?
+                .to_str()?
+                .starts_with(content_type),
+            "{path}"
+        );
+        let body = to_bytes(response.into_body(), 8 * 1024 * 1024).await?;
+        assert!(std::str::from_utf8(&body)?.contains(expected_body), "{path}");
     }
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/swagger-ui/v2")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response.headers().get(LOCATION),
+        Some(&"/swagger-ui/v2/".parse()?)
+    );
+    assert_eq!(
+        response.headers().get(CACHE_CONTROL),
+        Some(&"private, no-store".parse()?)
+    );
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/openapi/v2.json")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(CONTENT_TYPE),
+        Some(&"application/json".parse()?)
+    );
+    assert_eq!(
+        response.headers().get(CACHE_CONTROL),
+        Some(&"private, no-store".parse()?)
+    );
+    let body = to_bytes(response.into_body(), 1024 * 1024).await?;
+    let schema: Value = serde_json::from_slice(&body)?;
+    assert_eq!(schema["openapi"], "3.1.0");
+    assert_eq!(schema["paths"]["/api/v2/me"]["get"]["operationId"], "get_me");
+    assert_eq!(
+        schema["components"]["securitySchemes"]["api_key"]["scheme"],
+        "bearer"
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/swagger-ui/v2/missing.css")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        response.headers().get(CACHE_CONTROL),
+        Some(&"private, no-store".parse()?)
+    );
     db.cleanup().await;
     Ok(())
 }

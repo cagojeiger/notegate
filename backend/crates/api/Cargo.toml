@@ -59,7 +59,10 @@ schemars.workspace = true
 time.workspace = true
 futures-util.workspace = true
 utoipa = { version = "6.0.0", features = ["axum_extras", "chrono", "uuid", "url"] }
-utoipa-swagger-ui = { version = "10.0.1", features = ["axum"] }
+
+[build-dependencies]
+utoipa-swagger-ui-vendored = "=0.2.0"
+zip.workspace = true
 
 [dev-dependencies]
 zip.workspace = true
