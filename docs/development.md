@@ -212,6 +212,18 @@ deploy/ci/test-rust.sh -p notegate-api rest::file_upload_tests
 
 `make frontend-check`는 dependency audit, theme contrast, typecheck, lint, unit test와 production build를 실행한다.
 
+### 동적 보안 테스트 파일럿
+
+GitHub Actions의 `Security DAST Pilot`은 관련 테스트 파일의 PR과 수동 실행에서만 동작한다.
+격리된 CI DB·스토리지, 두 소유자와 임시 Agent로 실제 HTTP 권한 검증과 악성 문서의 Chromium 렌더링을 검사한다.
+고정된 CI 대상만 허용하며 운영 데이터·인증 서버·credential을 사용하지 않는다.
+ZAP은 별도 internal Docker network에서 합성 Space의 명시적 요청만 검사한다.
+Active 규칙은 path traversal·reflected XSS·SQL injection이며 단일 thread, 500ms 간격, 5분 제한을 둔다.
+Scanner의 인터넷 접근은 차단하지만 internal bridge gateway의 host 서비스 접근까지 차단하는 네트워크 정책은 아니다.
+권한·렌더링 불변식 위반과 설정·인증·검사 미실행은 실패로 남긴다. ZAP alert는 자동 차단 없이 재현·분류한다.
+정제된 JSON·HTML·요약·실패 스크린샷을 `security-dast-pilot` artifact에 14일 보관하며 credential plan과 원본 ZAP 보고서는 업로드하지 않는다.
+이 파일럿은 운영 ingress/WAF, 전체 OAuth 로그인, 부하 한계 또는 전체 침투 테스트를 검증하지 않는다.
+
 ```sh
 pnpm --filter web exec playwright install chromium
 pnpm --filter web test:e2e
