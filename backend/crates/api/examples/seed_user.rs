@@ -46,7 +46,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
             {
-                return Err("seed suffix must contain 1-64 ASCII letters, digits, or hyphens".into());
+                return Err(
+                    "seed suffix must contain 1-64 ASCII letters, digits, or hyphens".into(),
+                );
             }
             (
                 format!("dev|seed-user-1-{suffix}"),

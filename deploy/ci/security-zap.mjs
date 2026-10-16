@@ -58,9 +58,8 @@ try {
       { type: "activeScan-policy", parameters: { name: "notegate-pilot" }, policyDefinition: {
         defaultStrength: "Low", defaultThreshold: "Off",
         rules: [6, 40012, 40018].map((id) => ({ id, strength: "Low", threshold: "Medium" })) } },
-      { type: "activeScan-config", parameters: { threadPerHost: 1 } },
       { type: "activeScan", parameters: { context: "notegate", policy: "notegate-pilot", maxRuleDurationInMins: 1,
-        maxScanDurationInMins: 5, delayInMs: 500, addQueryParam: false }, tests: [{ name: "Active attack requests generated",
+        maxScanDurationInMins: 5, threadPerHost: 1, delayInMs: 500, addQueryParam: false }, tests: [{ name: "Active attack requests generated",
         type: "stats", statistic: "stats.ascan.urls", operator: ">", value: 0, onFail: "error" }] },
       { type: "passiveScan-wait", parameters: { maxDuration: 1 }, alwaysRun: true },
       { type: "report", parameters: { template: "traditional-json", reportDir: "/zap/wrk/reports", reportFile: "zap-report" }, alwaysRun: true }

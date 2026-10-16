@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
-import type { Me, ReadTextResponse, RestNode, Space } from "../src/api/types";
+import type { Me, ReadTextResponse, RestNode, Space, SpacesListResponse } from "../src/api/types";
 
 const origin = "http://127.0.0.1:9191";
 const resultsDir = resolve(process.env.SECURITY_RESULTS_DIR ?? "../../security-results");
@@ -111,7 +111,9 @@ for (const probe of probes) {
       result.phase = "authenticated-fixture";
       const me = await request<Me>("/api/v1/me");
       if (!me.account.id || me.account.kind !== "user") throw new SetupError("Expected an authenticated test user.");
-      const space = await request<Space>("/api/v1/spaces", "POST", { name: `synthetic-dast-${probe.id}` });
+      const owned = await request<SpacesListResponse>("/api/v1/spaces");
+      const space = owned.spaces.find((space) => space.permission === "write")
+        ?? await request<Space>("/api/v1/spaces", "POST", { name: "synthetic-dast-browser" });
       const prefix = `/api/v1/spaces/${space.id}`;
       async function create(name: string, content: string) {
         const node = await request<RestNode>(`${prefix}/nodes`, "POST", {

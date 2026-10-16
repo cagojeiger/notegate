@@ -234,6 +234,50 @@ async function readOnly(owner, fixture) {
   }
   await request(`/api/v1/agents/${agent.id}/keys/${key.id}`, { actor: owner, browser: true, method: "DELETE", statuses: [204] });
   await request("/api/v2/me", { actor: reader, statuses: [401] });
+  await request("/cli", { actor: reader, method: "POST", statuses: [401], body: { tool: "me", input: {} }, headers: { "X-Notegate-Cli-Version": version, "X-Notegate-Command-Protocol": "1" } });
+  await request("/mcp/v2", { actor: reader, method: "POST", statuses: [401], body: { jsonrpc: "2.0", id: ++rpcId, method: "tools/call", params: { name: "me", arguments: {} } }, headers: { Accept: "application/json, text/event-stream", "MCP-Protocol-Version": "2026-07-28" } });
+}
+
+async function trashOwnership(owner, attacker, fixture) {
+  const canary = `SYNTHETIC-TRASH-PRIVATE-${randomUUID()}`;
+  const content = `${canary}\n`;
+  const name = `trash-${randomUUID()}.md`;
+  const { data: node } = await request(`/api/v2/spaces/${fixture.space.id}/nodes`, {
+    actor: owner, method: "POST", statuses: [201],
+    body: { parent_id: fixture.space.root_node_id, name, kind: "text", content },
+  });
+  const path = `/api/v1/spaces/${fixture.space.id}/nodes/${node.id}`;
+  const textPath = `/api/v1/spaces/${fixture.space.id}/text/${node.id}`;
+  const { data: before } = await request(textPath, { actor: owner, browser: true });
+  check(before?.text?.content === content, "Trash positive control must contain the synthetic body before deletion");
+  await request(path, { actor: owner, browser: true, method: "DELETE", statuses: [204] });
+  const list = async (actor) => {
+    const { data } = await request("/api/v1/me/trash?limit=100", { actor, browser: true });
+    check(Array.isArray(data.items) && !data.page?.has_more, "Synthetic trash entries must fit one complete page");
+    return data.items;
+  };
+  // There is no trash-detail GET route: the owner-scoped list supplies detail metadata.
+  const entry = (await list(owner)).find((item) => item.id === node.id);
+  check(entry?.space_id === fixture.space.id && entry.name === name && entry.recoverable && !entry.deletion_pending && entry.deletion_operation_id, "Owner trash metadata must identify the recoverable deletion instance");
+  const privateFields = [node.id, name, entry.path, entry.deletion_operation_id];
+  const otherItems = await list(attacker);
+  check(!privateFields.some((value) => JSON.stringify(otherItems).includes(value)), "Other owner's trash list exposed private item metadata");
+  for (const actor of [owner, attacker]) {
+    await request(textPath, { actor, browser: true, statuses: [404] });
+  }
+  const query = new URLSearchParams({ deleted_at: entry.deleted_at, deletion_operation_id: entry.deletion_operation_id });
+  const trashPath = `/api/v1/me/trash/spaces/${fixture.space.id}/nodes/${node.id}`;
+  for (const [method, suffix] of [["POST", "/restore"], ["DELETE", ""]]) {
+    const denied = await request(`${trashPath}${suffix}?${query}`, { actor: attacker, browser: true, method, statuses: [404] });
+    check(!denied.text.includes(canary) && !denied.text.includes(entry.deletion_operation_id), "Denied trash mutation exposed private content or deletion metadata");
+    const current = (await list(owner)).find((item) => item.id === node.id);
+    check(JSON.stringify(current) === JSON.stringify(entry), "Denied trash mutation changed the owner's deletion state");
+    await request(textPath, { actor: owner, browser: true, statuses: [404] });
+  }
+  await request(`${trashPath}/restore?${query}`, { actor: owner, browser: true, method: "POST", statuses: [204] });
+  const { data: restored } = await request(textPath, { actor: owner, browser: true });
+  check(restored?.text?.content === content && restored.text.content_sha256 === sha256(content), "Owner must retain the ability to restore the unchanged private body");
+  check(!(await list(owner)).some((item) => item.id === node.id), "Successful owner restore must remove the item from trash");
 }
 
 try {
@@ -254,6 +298,8 @@ try {
   await scenario("Owner A cannot read or mutate owner B's data", () => crossOwner(a, b, second));
   await scenario("Owner B cannot read or mutate owner A's data", () => crossOwner(b, a, first));
   await scenario("Read-only Agent cannot gain write permission through V2, CLI or MCP", () => readOnly(a, first));
+  await scenario("Owner B cannot discover, restore or purge owner A's trash", () => trashOwnership(a, b, first));
+  await scenario("Owner A cannot discover, restore or purge owner B's trash", () => trashOwnership(b, a, second));
   // ZAP receives synthetic identifiers and request bodies only; credentials stay in env.
   const textUrl = `${base}/api/v2/spaces/${first.space.id}/text/${first.node.id}`;
   mkdirSync("security-results", { recursive: true });
