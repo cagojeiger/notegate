@@ -26,6 +26,25 @@ struct JwtAuthorityInner {
     last_refresh_attempt: tokio::sync::Mutex<Option<Instant>>,
 }
 
+struct RefreshAttempt<'a, F: Fn() -> Instant> {
+    last_attempt: &'a mut Option<Instant>,
+    now: &'a F,
+}
+
+impl<'a, F: Fn() -> Instant> RefreshAttempt<'a, F> {
+    fn new(last_attempt: &'a mut Option<Instant>, now: &'a F) -> Self {
+        *last_attempt = Some(now());
+        Self { last_attempt, now }
+    }
+}
+
+impl<F: Fn() -> Instant> Drop for RefreshAttempt<'_, F> {
+    fn drop(&mut self) {
+        // Record completion before the fetch gate unlocks, including cancellation.
+        *self.last_attempt = Some((self.now)());
+    }
+}
+
 impl JwtAuthority {
     pub fn from_url(config: &notegate_core::Config, jwks_url: String) -> Self {
         Self {
@@ -85,10 +104,9 @@ impl JwtAuthority {
             return Err(AuthError::Unavailable);
         }
         let jwks_url = self.inner.jwks_url.clone().ok_or(AuthError::Internal)?;
-        *last_attempt = Some(now());
+        let _attempt = RefreshAttempt::new(&mut last_attempt, now);
         tracing::info!(event = "jwks.initial_fetch.start");
         let result = Authority::new_from_url(jwks_url, self.inner.validator.clone()).await;
-        *last_attempt = Some(now());
         let authority = result.map_err(|error| {
             tracing::error!(event = "jwks.initial_fetch.failed", %error);
             AuthError::Internal
@@ -128,10 +146,9 @@ impl JwtAuthority {
                 if refresh_is_cooling_down(*last_attempt, now()) {
                     return Err(AuthError::InvalidToken);
                 }
-                *last_attempt = Some(now());
+                let _attempt = RefreshAttempt::new(&mut last_attempt, &now);
                 tracing::info!(event = "jwks.refresh.start", reason = "unknown_key_id");
                 let result = authority.refresh().await;
-                *last_attempt = Some(now());
                 result.map_err(|error| {
                     tracing::warn!(event = "jwks.refresh.failed", reason = "unknown_key_id", %error);
                     AuthError::InvalidToken

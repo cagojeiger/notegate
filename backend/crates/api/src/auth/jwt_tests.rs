@@ -321,36 +321,85 @@ async fn cooldown_starts_again_when_a_slow_refresh_finishes() {
 
 #[tokio::test]
 async fn cancelled_initial_fetch_keeps_its_cooldown() {
-    let mock = MockJwks::start().await;
-    let authority = mock.authority();
-    let clock = TestClock::new();
-    mock.state.pause.store(true, Ordering::SeqCst);
-    let initial = tokio::spawn({
-        let authority = authority.clone();
-        let clock = clock.clone();
-        async move { verify(&authority, &token(KEY_A, "key-a"), &clock).await }
-    });
-    mock.wait_for_blocked_fetch().await;
-    initial.abort();
-    assert!(
-        initial
-            .await
-            .expect_err("initial fetch cancelled")
-            .is_cancelled()
-    );
-    mock.release_fetch();
-    assert!(matches!(
-        verify(&authority, &token(KEY_A, "key-a"), &clock).await,
-        Err(AuthError::Unavailable)
-    ));
-    assert_eq!(mock.count(), 1);
-    clock.advance(ON_DEMAND_REFRESH_COOLDOWN);
-    warm(&authority, &clock).await;
-    assert_eq!(mock.count(), 2);
+    for fetch_duration in [Duration::ZERO, ON_DEMAND_REFRESH_COOLDOWN * 2] {
+        let mock = MockJwks::start().await;
+        let authority = mock.authority();
+        let clock = TestClock::new();
+        mock.state.pause.store(true, Ordering::SeqCst);
+        let initial = tokio::spawn({
+            let authority = authority.clone();
+            let clock = clock.clone();
+            async move { verify(&authority, &token(KEY_A, "key-a"), &clock).await }
+        });
+        mock.wait_for_blocked_fetch().await;
+        clock.advance(fetch_duration);
+        initial.abort();
+        assert!(
+            initial
+                .await
+                .expect_err("initial fetch cancelled")
+                .is_cancelled()
+        );
+        mock.release_fetch();
+        for elapsed in [
+            Duration::ZERO,
+            ON_DEMAND_REFRESH_COOLDOWN - Duration::from_nanos(1),
+        ] {
+            clock.advance(elapsed);
+            assert!(matches!(
+                verify(&authority, &token(KEY_A, "key-a"), &clock).await,
+                Err(AuthError::Unavailable)
+            ));
+            assert_eq!(mock.count(), 1);
+        }
+        clock.advance(Duration::from_nanos(1));
+        warm(&authority, &clock).await;
+        assert_eq!(mock.count(), 2);
+    }
 }
 
 #[tokio::test]
 async fn cancelled_unknown_key_refresh_keeps_its_cooldown() {
+    for fetch_duration in [Duration::ZERO, ON_DEMAND_REFRESH_COOLDOWN * 2] {
+        let mock = MockJwks::start().await;
+        let authority = mock.authority();
+        let clock = TestClock::new();
+        warm(&authority, &clock).await;
+        clock.advance(ON_DEMAND_REFRESH_COOLDOWN);
+        mock.state.pause.store(true, Ordering::SeqCst);
+        let refresh = tokio::spawn({
+            let authority = authority.clone();
+            let clock = clock.clone();
+            async move { verify(&authority, &token(KEY_A, "unknown"), &clock).await }
+        });
+        mock.wait_for_blocked_fetch().await;
+        clock.advance(fetch_duration);
+        refresh.abort();
+        assert!(refresh.await.expect_err("refresh cancelled").is_cancelled());
+        mock.release_fetch();
+        warm(&authority, &clock).await;
+        for elapsed in [
+            Duration::ZERO,
+            ON_DEMAND_REFRESH_COOLDOWN - Duration::from_nanos(1),
+        ] {
+            clock.advance(elapsed);
+            assert!(matches!(
+                verify(&authority, &token(KEY_A, "other"), &clock).await,
+                Err(AuthError::InvalidToken)
+            ));
+            assert_eq!(mock.count(), 2);
+        }
+        clock.advance(Duration::from_nanos(1));
+        assert!(matches!(
+            verify(&authority, &token(KEY_A, "other"), &clock).await,
+            Err(AuthError::InvalidToken)
+        ));
+        assert_eq!(mock.count(), 3);
+    }
+}
+
+#[tokio::test]
+async fn cancelled_waiter_does_not_extend_the_completed_fetch_cooldown() {
     let mock = MockJwks::start().await;
     let authority = mock.authority();
     let clock = TestClock::new();
@@ -363,18 +412,27 @@ async fn cancelled_unknown_key_refresh_keeps_its_cooldown() {
         async move { verify(&authority, &token(KEY_A, "unknown"), &clock).await }
     });
     mock.wait_for_blocked_fetch().await;
-    refresh.abort();
-    assert!(refresh.await.expect_err("refresh cancelled").is_cancelled());
-    mock.release_fetch();
-    warm(&authority, &clock).await;
+    let waiting_token = token(KEY_A, "waiting");
+    {
+        let waiter = verify(&authority, &waiting_token, &clock);
+        tokio::pin!(waiter);
+        assert!(futures_util::poll!(&mut waiter).is_pending());
+        clock.advance(ON_DEMAND_REFRESH_COOLDOWN * 2);
+        mock.release_fetch();
+        assert!(matches!(
+            refresh.await.expect("refresh task"),
+            Err(AuthError::InvalidToken)
+        ));
+        clock.advance(ON_DEMAND_REFRESH_COOLDOWN - Duration::from_nanos(1));
+    }
     assert!(matches!(
-        verify(&authority, &token(KEY_A, "other"), &clock).await,
+        verify(&authority, &waiting_token, &clock).await,
         Err(AuthError::InvalidToken)
     ));
     assert_eq!(mock.count(), 2);
-    clock.advance(ON_DEMAND_REFRESH_COOLDOWN);
+    clock.advance(Duration::from_nanos(1));
     assert!(matches!(
-        verify(&authority, &token(KEY_A, "other"), &clock).await,
+        verify(&authority, &waiting_token, &clock).await,
         Err(AuthError::InvalidToken)
     ));
     assert_eq!(mock.count(), 3);
