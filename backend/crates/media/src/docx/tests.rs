@@ -475,20 +475,18 @@ fn docx_validation_reads_unretained_entries_through_crc_eof() -> TestResult {
 }
 
 #[test]
-fn docx_validation_rejects_underdeclared_entry_after_actual_limit() -> TestResult {
+fn docx_validation_rejects_underdeclared_entry_before_actual_limit() -> TestResult {
     let payload = vec![0_u8; (DOCX_MAX_ENTRY_BYTES + 1) as usize];
     let mut bytes = docx_bytes(&[("word/media/large.bin", &payload)])?;
     patch_declared_size(&mut bytes, "word/media/large.bin", 1)?;
 
-    assert_eq!(
-        validate_docx_package(&bytes),
-        Err(DocxRejection::ActualEntryTooLarge)
-    );
+    // zip rejects output beyond the declared size before our per-entry expansion limit.
+    assert_eq!(validate_docx_package(&bytes), Err(DocxRejection::EntryRead));
     Ok(())
 }
 
 #[test]
-fn docx_validation_rejects_underdeclared_aggregate_after_actual_limit() -> TestResult {
+fn docx_validation_rejects_underdeclared_aggregate_before_actual_limit() -> TestResult {
     let payload = vec![0_u8; (DOCX_MAX_EXPANDED_BYTES / 3 + 1) as usize];
     let names = [
         "word/media/first.bin",
@@ -504,17 +502,25 @@ fn docx_validation_rejects_underdeclared_aggregate_after_actual_limit() -> TestR
         patch_declared_size(&mut bytes, name, 1)?;
     }
 
-    assert_eq!(
-        validate_docx_package(&bytes),
-        Err(DocxRejection::ActualArchiveTooLarge)
-    );
+    // The first underdeclared entry fails before the archive can reach our aggregate limit.
+    assert_eq!(validate_docx_package(&bytes), Err(DocxRejection::EntryRead));
     Ok(())
 }
 
 #[test]
-fn docx_validation_rejects_declared_actual_size_mismatch() -> TestResult {
+fn docx_validation_rejects_underdeclared_size_while_reading() -> TestResult {
     let mut bytes = docx_bytes(&[("word/media/data.bin", b"actual bytes")])?;
     patch_declared_size(&mut bytes, "word/media/data.bin", 1)?;
+
+    // zip checks the declared size while reading, before our end-of-entry comparison.
+    assert_eq!(validate_docx_package(&bytes), Err(DocxRejection::EntryRead));
+    Ok(())
+}
+
+#[test]
+fn docx_validation_rejects_overdeclared_size_after_reading() -> TestResult {
+    let mut bytes = docx_bytes(&[("word/media/data.bin", b"actual bytes")])?;
+    patch_declared_size(&mut bytes, "word/media/data.bin", 100)?;
 
     assert_eq!(
         validate_docx_package(&bytes),

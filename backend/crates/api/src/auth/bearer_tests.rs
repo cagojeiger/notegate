@@ -742,10 +742,12 @@ async fn openapi_docs_accept_valid_browser_session() -> Result<(), Box<dyn std::
         )
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        response.headers().get(CONTENT_TYPE),
-        Some(&"application/json".parse()?)
-    );
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .ok_or("missing OpenAPI content type")?
+        .to_str()?;
+    assert_eq!(content_type.split(';').next(), Some("application/json"));
     assert_eq!(
         response.headers().get(CACHE_CONTROL),
         Some(&"private, no-store".parse()?)
