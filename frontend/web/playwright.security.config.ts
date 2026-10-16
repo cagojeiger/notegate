@@ -7,7 +7,7 @@ if (process.env.GITHUB_ACTIONS !== "true") {
 
 export default defineConfig({
   testDir: "./security",
-  outputDir: resolve(process.env.SECURITY_RESULTS_DIR ?? "../../security-results", "browser-output"),
+  outputDir: resolve(import.meta.dirname, "../../security-results/browser-output"),
   timeout: 45_000,
   globalTimeout: 240_000,
   expect: { timeout: 10_000 },

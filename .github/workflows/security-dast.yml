@@ -56,7 +56,6 @@ jobs:
       NOTEGATE_S3__SECRET_KEY: notegate-app-secret
       NOTEGATE_S3__FORCE_PATH_STYLE: "true"
       NOTEGATE_WEB_DIST_DIR: ${{ github.workspace }}/frontend/web/dist
-      SECURITY_RESULTS_DIR: ${{ github.workspace }}/security-results
 
     steps:
       - name: Checkout
@@ -68,6 +67,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: browser-performance-release
+          cache-on-failure: true
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -97,7 +97,7 @@ jobs:
         id: identity
         run: |
           for identity in A B; do
-            output=$(NOTEGATE_SEED_USER_SUFFIX="dast-$identity" target/release/examples/seed_user)
+            output=$(target/release/examples/seed_user "dast-$identity")
             key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
             session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
             account=$(printf '%s\n' "$output" | sed -n 's/^ACCOUNT_ID=//p')

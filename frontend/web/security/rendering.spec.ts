@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
@@ -6,7 +6,7 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import type { Me, ReadTextResponse, RestNode, Space, SpacesListResponse } from "../src/api/types";
 
 const origin = "http://127.0.0.1:9191";
-const resultsDir = resolve(process.env.SECURITY_RESULTS_DIR ?? "../../security-results");
+const resultsDir = resolve(import.meta.dirname, "../../../security-results");
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 type ProbeResult = {
   id: string;
@@ -23,8 +23,12 @@ function writeResults(result: ProbeResult) {
   mkdirSync(resultsDir, { recursive: true });
   const jsonPath = resolve(resultsDir, "browser-results.json");
   // Playwright replaces a worker after a failed test. Keep earlier findings on disk.
-  const previous = existsSync(jsonPath)
-    ? (JSON.parse(readFileSync(jsonPath, "utf8")) as { results: ProbeResult[] }).results : [];
+  let previous: ProbeResult[] = [];
+  try {
+    previous = (JSON.parse(readFileSync(jsonPath, "utf8")) as { results: ProbeResult[] }).results;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   const results = [...previous.filter((entry) => entry.id !== result.id), result];
   writeFileSync(jsonPath, JSON.stringify({
     target: origin,

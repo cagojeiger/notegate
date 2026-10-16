@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.default_user_tier,
     );
     // Optional CI suffix creates independent identities without changing existing seeds.
-    let suffix = std::env::var("NOTEGATE_SEED_USER_SUFFIX").ok();
+    let suffix = std::env::args().nth(1);
     let (sub, email, name) = match suffix {
         Some(suffix) => {
             if suffix.is_empty()

@@ -1,17 +1,18 @@
 // CI-only pilot: explicit synthetic API requests, three active rules, no crawler.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isIPv4 } from "node:net";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 assert.equal(process.env.GITHUB_ACTIONS, "true", "Run this workload in GitHub CI only");
 const image = "ghcr.io/zaproxy/zaproxy@sha256:7aaa659b0d43078febd82e29bad112285c370727e86ab8340444220e17d9f0d2"; // 2.17.0, stable manifest verified 2026-10-16
-const results = resolve(process.env.SECURITY_RESULTS_DIR ?? "security-results");
+const results = resolve(import.meta.dirname, "../../security-results");
 const key = process.env.NOTEGATE_DAST_API_KEY_A;
-assert.ok(key && process.env.RUNNER_TEMP, "Disposable CI key and runner temp are required");
+assert.ok(key, "Disposable CI key is required");
 mkdirSync(results, { recursive: true });
-const work = mkdtempSync(join(process.env.RUNNER_TEMP, "notegate-zap-"));
+const work = mkdtempSync(join(tmpdir(), "notegate-zap-"));
 const redact = (value) => String(value).replaceAll(key, "[REDACTED]").replaceAll(encodeURIComponent(key), "[REDACTED]");
 const docker = (args) => {
   const result = spawnSync("docker", args, { encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
@@ -25,12 +26,8 @@ const evidence = { commit: process.env.GITHUB_SHA, image, rulesRequested: [6, 40
 try {
   const fixture = JSON.parse(readFileSync(join(results, "fixture.json"), "utf8"));
   assert.ok(fixture.space?.id && fixture.document?.id && fixture.requests?.length > 0, "Missing successful API fixture");
-  const preflight = await fetch(`http://127.0.0.1:9191/api/v2/spaces/${fixture.space.id}/text/${fixture.document.id}`, {
-    headers: { Authorization: `Bearer ${key}` }, redirect: "error", signal: AbortSignal.timeout(10_000)
-  });
-  assert.equal(preflight.status, 200, "ZAP preflight must read the authenticated synthetic document");
-  assert.equal((await preflight.json()).text.content_sha256, fixture.document.sha256);
-  evidence.authenticatedFixture = true;
+  for (const id of [fixture.space.id, fixture.document.id]) assert.match(id, /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i);
+  assert.match(fixture.document.sha256, /^[a-f0-9]{64}$/);
 
   docker(["pull", image]);
   docker(["network", "create", "--internal", "notegate-dast"]);
@@ -38,6 +35,13 @@ try {
   assert.ok(isIPv4(gateway), "Expected a Docker internal bridge gateway");
   const target = `http://${gateway}:9191`;
   const apiPrefix = `/api/v2/spaces/${fixture.space.id}/`;
+  const documentUrl = `${target}${apiPrefix}text/${fixture.document.id}`;
+  const documentTests = (url, hash) => [
+    { name: "Scanner read the synthetic document", type: "url", url, operator: "or",
+      responseBodyRegex: `(?s).*"id"\\s*:\\s*"${fixture.document.id}".*`, onFail: "error" },
+    ...(hash ? [{ name: "Scanner read the expected document hash", type: "url", url, operator: "or",
+      responseBodyRegex: `(?s).*"content_sha256"\\s*:\\s*"${fixture.document.sha256}".*`, onFail: "error" }] : [])
+  ];
   const requests = fixture.requests.map(({ method, url, body }) => {
     const parsed = new URL(url);
     assert.equal(parsed.origin, "http://127.0.0.1:9191", "Refuse non-loopback fixture targets");
@@ -54,13 +58,17 @@ try {
         url: `^http://${gateway.replaceAll(".", "\\.")}:9191/api/v2/.*$`, matchType: "req_header",
         matchString: "Authorization", matchRegex: false, replacementString: `Bearer ${key}`, tokenProcessing: false }] },
       { type: "passiveScan-config", parameters: { scanOnlyInScope: true } },
-      { type: "requestor", requests },
+      { type: "requestor", requests, tests: documentTests(documentUrl, true) },
       { type: "activeScan-policy", parameters: { name: "notegate-pilot" }, policyDefinition: {
         defaultStrength: "Low", defaultThreshold: "Off",
         rules: [6, 40012, 40018].map((id) => ({ id, strength: "Low", threshold: "Medium" })) } },
       { type: "activeScan", parameters: { context: "notegate", policy: "notegate-pilot", maxRuleDurationInMins: 1,
         maxScanDurationInMins: 5, threadPerHost: 1, delayInMs: 500, addQueryParam: false }, tests: [{ name: "Active attack requests generated",
         type: "stats", statistic: "stats.ascan.urls", operator: ">", value: 0, onFail: "error" }] },
+      // Supported read parameters give this post-scan check a new Sites Tree node.
+      { type: "requestor", requests: [{ name: "Post-scan authenticated read", method: "GET", responseCode: 200,
+        url: `${documentUrl}?max_lines=5000&max_bytes=1048576` }],
+        tests: documentTests(`${documentUrl}?max_lines=5000&max_bytes=1048576`, false) },
       { type: "passiveScan-wait", parameters: { maxDuration: 1 }, alwaysRun: true },
       { type: "report", parameters: { template: "traditional-json", reportDir: "/zap/wrk/reports", reportFile: "zap-report" }, alwaysRun: true }
     ]
@@ -78,22 +86,15 @@ try {
     "-autorun", "/zap/wrk/plan.yaml"], { encoding: "utf8", timeout: 600_000, maxBuffer: 16 * 1024 * 1024 });
   writeFileSync(join(results, "zap-execution.log"), redact(`${scan.stdout ?? ""}\n${scan.stderr ?? ""}`));
   const rawReport = join(work, "reports", "zap-report.json");
-  if (existsSync(rawReport)) {
-    const report = JSON.parse(readFileSync(rawReport, "utf8"));
-    evidence.alerts = (report.site ?? []).flatMap((site) => (site.alerts ?? []).map((alert) => ({
-      id: alert.pluginid, name: alert.name, risk: alert.riskdesc, confidence: alert.confidence, cwe: alert.cweid,
-      description: alert.desc, solution: alert.solution,
-      instances: (alert.instances ?? []).map(({ uri, method, param, attack, evidence: detail }) => ({ uri, method, param, attack, evidence: detail }))
-    })));
-  }
+  const report = JSON.parse(readFileSync(rawReport, "utf8"));
+  evidence.alerts = (report.site ?? []).flatMap((site) => (site.alerts ?? []).map((alert) => ({
+    id: alert.pluginid, name: alert.name, risk: alert.riskdesc, confidence: alert.confidence, cwe: alert.cweid,
+    description: alert.desc, solution: alert.solution,
+    instances: (alert.instances ?? []).map(({ uri, method, param, attack, evidence: detail }) => ({ uri, method, param, attack, evidence: detail }))
+  })));
   assert.equal(scan.status, 0, "ZAP execution/authentication/coverage failed; inspect sanitized zap-execution.log");
-  assert.ok(existsSync(rawReport), "ZAP did not produce a report");
+  evidence.authenticatedFixture = true; // ZAP itself checked the document ID/hash, not a separate HTTP client.
   evidence.activeRequestsGenerated = true; // The AF stats test above is a required execution check.
-  const after = await fetch(`http://127.0.0.1:9191/api/v2/spaces/${fixture.space.id}/text/${fixture.document.id}`, {
-    headers: { Authorization: `Bearer ${key}` }, redirect: "error", signal: AbortSignal.timeout(10_000)
-  });
-  assert.equal(after.status, 200, "Authenticated owner access must survive the scan");
-  assert.equal((await after.json()).node.id, fixture.document.id);
   evidence.completed = true;
 } catch (error) {
   evidence.error = redact(error.message);
