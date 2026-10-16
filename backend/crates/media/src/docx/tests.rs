@@ -140,6 +140,29 @@ fn central_local_header_offset(bytes: &[u8], target_name: &str) -> Option<u32> {
         .map(u32::from_le_bytes)
 }
 
+fn patch_entry_name(bytes: &mut [u8], target_name: &str, replacement: &[u8]) -> TestResult {
+    if target_name.len() != replacement.len() {
+        return Err(std::io::Error::other("replacement name length differs").into());
+    }
+    let central_offset = central_header_offset(bytes, target_name)
+        .ok_or_else(|| std::io::Error::other("central entry not found"))?;
+    let local_offset = central_local_header_offset(bytes, target_name)
+        .ok_or_else(|| std::io::Error::other("local entry not found"))?;
+    for (offset, header_size) in [(central_offset, 46), (usize::try_from(local_offset)?, 30)] {
+        let name_start = offset
+            .checked_add(header_size)
+            .ok_or_else(|| std::io::Error::other("entry name offset overflow"))?;
+        let name_end = name_start
+            .checked_add(replacement.len())
+            .ok_or_else(|| std::io::Error::other("entry name size overflow"))?;
+        bytes
+            .get_mut(name_start..name_end)
+            .ok_or_else(|| std::io::Error::other("entry name is truncated"))?
+            .copy_from_slice(replacement);
+    }
+    Ok(())
+}
+
 fn patch_local_header_offset(
     bytes: &mut [u8],
     target_name: &str,
@@ -341,6 +364,29 @@ fn docx_detection_rejects_dtds_duplicate_paths_and_traversal() -> TestResult {
 
     let traversal = docx_bytes(&[("word/../escape.bin", b"escape")])?;
     assert!(!is_docx_package(&traversal));
+    Ok(())
+}
+
+#[test]
+fn docx_validation_preserves_utf8_and_cp437_entry_names() -> TestResult {
+    let utf8 = docx_bytes(&[("word/media/회의록.bin", b"image")])?;
+    assert_eq!(validate_docx_package(&utf8), Ok(()));
+
+    let mut cp437 = docx_bytes(&[("word/media/cafe.bin", b"image")])?;
+    patch_entry_name(&mut cp437, "word/media/cafe.bin", b"word/media/caf\x82.bin")?;
+    assert_eq!(validate_docx_package(&cp437), Ok(()));
+    Ok(())
+}
+
+#[test]
+fn docx_validation_checks_canonical_paths_after_cp437_decoding() -> TestResult {
+    let original = "word/cafe/../escape.bin";
+    let mut cp437 = docx_bytes(&[(original, b"image")])?;
+    patch_entry_name(&mut cp437, original, b"word/caf\x82/../escape.bin")?;
+    assert_eq!(
+        validate_docx_package(&cp437),
+        Err(DocxRejection::NoncanonicalPath)
+    );
     Ok(())
 }
 
