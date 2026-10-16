@@ -214,7 +214,7 @@ deploy/ci/test-rust.sh -p notegate-api rest::file_upload_tests
 
 ### 동적 보안 테스트 파일럿
 
-GitHub Actions의 `Security DAST Pilot`은 관련 테스트 파일의 PR과 수동 실행에서만 동작한다.
+GitHub Actions의 `Security DAST Pilot`은 관련 렌더링 코드·테스트 파일의 PR과 수동 실행에서 동작한다.
 격리된 CI DB·스토리지, 두 소유자와 임시 Agent로 실제 HTTP 권한 검증과 악성 문서의 Chromium 렌더링을 검사한다.
 고정된 CI 대상만 허용하며 운영 데이터·인증 서버·credential을 사용하지 않는다.
 ZAP은 별도 internal Docker network에서 합성 Space의 명시적 요청만 검사한다.

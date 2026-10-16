@@ -8,6 +8,10 @@ on:
       - backend/crates/api/examples/seed_user.rs
       - frontend/web/security/**
       - frontend/web/playwright.security.config.ts
+      - frontend/web/src/features/editor/MermaidBlock.tsx
+      - frontend/web/src/features/editor/Markdown.tsx
+      - frontend/web/src/features/editor/MarkdownImage.tsx
+      - frontend/web/src/shared/lib/markdown*.ts
   workflow_dispatch:
 
 permissions:

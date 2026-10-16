@@ -160,7 +160,11 @@ for (const probe of probes) {
       await expect(preview.getByRole("heading", { name: controlHeading, exact: true })).toBeVisible();
       await expect(tree).toBeVisible();
       expect(result.pageErrors).toBe(0);
-      if (probe.id === "mermaid-image-consent") await expect(preview.locator(".ng-mermaid svg")).toBeVisible();
+      if (probe.id === "mermaid-image-consent") {
+        await expect(preview.locator(".ng-mermaid svg")).toHaveCount(0);
+        await preview.getByRole("button", { name: "Load diagram", exact: true }).click();
+        await expect(preview.locator(".ng-mermaid svg")).toBeVisible();
+      }
 
       result.phase = "payload-http-read";
       await open(target, content);
@@ -187,15 +191,18 @@ for (const probe of probes) {
         }
       }
       if (probe.id === "mermaid-image-consent") {
+        await expect(preview.getByRole("button", { name: "Load diagram", exact: true })).toBeVisible();
+        await expect(preview.locator(".ng-mermaid svg")).toHaveCount(0);
+        await page.waitForTimeout(300);
+        expect(result.collectorRequests, "Mermaid loaded an image before consent").toBe(0);
+        await preview.getByRole("button", { name: "Load diagram", exact: true }).click();
         // A parsing failure is incomplete coverage, not proof that image consent works.
         try {
           await expect(preview.locator(".ng-mermaid svg")).toBeVisible();
+          await expect.poll(() => result.collectorRequests, { timeout: 5_000 }).toBeGreaterThan(0);
         } catch {
-          expect(result.collectorRequests, "Mermaid requested an image without consent, even though rendering failed").toBe(0);
-          throw new SetupError("Synthetic Mermaid payload did not finish rendering.");
+          throw new SetupError("Approved Mermaid image positive control did not finish loading.");
         }
-        await page.waitForTimeout(300);
-        expect(result.collectorRequests, "Mermaid loaded an image without consent").toBe(0);
       }
       expect(result.pageErrors, "Unexpected browser exception").toBe(0);
       result.outcome = "pass";
