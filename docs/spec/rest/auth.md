@@ -12,6 +12,8 @@ GET /auth/login
 
 authgate OAuth/OIDC authorization-code + PKCE login으로 redirect한다. Browser session 갱신을 위해 `offline_access` scope를 요청한다.
 
+선택적인 `next`는 `/`로 시작하는 내부 경로만 허용한다. `//`, 역슬래시와 제어 문자는 거부하며, query와 callback cookie를 디코딩한 값에 같은 검증을 적용한다.
+
 ## OAuth callback
 
 ```http
