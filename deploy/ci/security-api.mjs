@@ -95,7 +95,7 @@ async function command(surface, actor, tool, input, deniedKind) {
       ? { jsonrpc: "2.0", id: ++rpcId, method: "tools/call", params: { name: tool, arguments: input,
         _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {} } } }
       : { tool, input },
-    statuses: deniedKind ? [mcp ? deniedKind === "not_found" ? 400 : 200 : deniedKind === "not_found" ? 404 : 403] : [200],
+    statuses: deniedKind && !mcp ? [deniedKind === "not_found" ? 404 : 403] : [200],
   });
   if (deniedKind) {
     const failure = mcp ? result.data?.error : result.data;
