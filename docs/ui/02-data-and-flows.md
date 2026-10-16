@@ -201,6 +201,8 @@ Header 왼쪽에 이름·pane별 Back/Forward와 `<space>:/path` 복사 아이�
 
 Text는 preview가 기본이며 plain text는 메모처럼 표시한다. Markdown은 GFM/code highlight/Mermaid, leading YAML object는 Obsidian-style Properties로 표시하고 raw YAML prose는 렌더링하지 않는다. Frontmatter는 content이며 Inspector metadata와 동기화하지 않는다. JSON/JSONL/YAML/TOML은 기본 expanded Tree/Source, edit mode는 line number를 제공한다.
 
+순환 참조가 있는 frontmatter 값은 `[Circular reference]`, 깊이 32 또는 값 1,000개를 초과하는 속성은 `[Value too complex to display]`로 표시한다. 저장된 content와 나머지 문서 본문은 유지한다. Mermaid는 외부 이미지·CSS 자원을 요청할 수 있어 `Load diagram`을 누른 뒤 렌더링한다. 승인 전 소스를 확인할 수 있으며 코드가 바뀌면 다시 동의하고, 같은 코드의 테마 변경은 승인을 유지한다.
+
 ### Open
 
 현재 reference를 active group back history에 추가 → forward 비우기 → 열린 snapshot 설정 → kind별 detail/content 조회 → active Node Inspector 표시. 같은 Node를 다시 열면 history에 추가하지 않는다.

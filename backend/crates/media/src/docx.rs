@@ -106,7 +106,10 @@ pub(crate) fn validate_docx_package(bytes: &[u8]) -> Result<(), DocxRejection> {
         let entry = archive
             .by_index_raw(index)
             .map_err(|_| DocxRejection::InvalidEntryMetadata)?;
-        let name = entry.name();
+        let name = entry
+            .name()
+            .map_err(|_| DocxRejection::InvalidEntryMetadata)?;
+        let name = name.as_ref();
         let normalized_path = name.strip_suffix('/').unwrap_or(name).to_ascii_lowercase();
         validate_supported_docx_entry(
             entry.encrypted(),
@@ -179,7 +182,11 @@ pub(crate) fn validate_docx_package(bytes: &[u8]) -> Result<(), DocxRejection> {
             continue;
         }
         let declared_size = entry.size();
-        let retained_xml = match entry.name() {
+        let retained_xml = match entry
+            .name()
+            .map_err(|_| DocxRejection::InvalidEntryMetadata)?
+            .as_ref()
+        {
             "[Content_Types].xml" => Some(RetainedXml::ContentTypes),
             "_rels/.rels" => Some(RetainedXml::PackageRelationships),
             _ => None,

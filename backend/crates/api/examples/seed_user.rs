@@ -36,12 +36,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         crypto.clone(),
         config.default_user_tier,
     );
+    // Optional CI suffix creates independent identities without changing existing seeds.
+    let suffix = std::env::args().nth(1);
+    let (sub, email, name) = match suffix {
+        Some(suffix) => {
+            if suffix.is_empty()
+                || suffix.len() > 64
+                || !suffix
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            {
+                return Err(
+                    "seed suffix must contain 1-64 ASCII letters, digits, or hyphens".into(),
+                );
+            }
+            (
+                format!("dev|seed-user-1-{suffix}"),
+                format!("tester+{suffix}@example.com"),
+                format!("Seed Tester {suffix}"),
+            )
+        }
+        None => (
+            "dev|seed-user-1".to_owned(),
+            "tester@example.com".to_owned(),
+            "Seed Tester".to_owned(),
+        ),
+    };
     let (account, _user) = account_repo
-        .upsert_user_by_sub(&ResolveAttrs {
-            sub: "dev|seed-user-1".to_owned(),
-            email: "tester@example.com".to_owned(),
-            name: "Seed Tester".to_owned(),
-        })
+        .upsert_user_by_sub(&ResolveAttrs { sub, email, name })
         .await?;
 
     let browser_session = create_browser_session(&config, &pool, &crypto, account.id).await?;

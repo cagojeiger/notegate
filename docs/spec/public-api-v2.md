@@ -222,3 +222,5 @@ V2는 Agent가 연결된 Space 안에서 수행하는 resource 작업만 제공�
 Browser V1, Public V2, User MCP, Agent MCP V2는 독립된 in-process rate-limit bucket을 사용하고 전체 ingress hard limit을 공유한다. 이 제한은 tier quota가 아니라 process-wide 안전 상한이다. V2를 별도 프로세스로 분리하더라도 path와 DTO 계약은 유지하고 domain authorization과 invariant는 같은 service layer를 사용한다.
 
 OpenAPI JSON은 `/openapi/v2.json`, Swagger UI는 `/swagger-ui/v2`에서 제공한다. 문서 경로는 browser session을 요구하고 미로그인 브라우저는 로그인 후 요청했던 문서 경로로 복귀한다. Swagger에서 API를 실행할 때는 별도의 Agent API key를 `Authorize`에 입력한다.
+
+Swagger UI 자산은 API 바이너리에 내장하므로 웹 정적 디렉터리 없이도 제공한다. 문서 스키마와 초기 화면 자산은 같은 서버에서 읽으며 온라인 validator는 사용하지 않는다.
