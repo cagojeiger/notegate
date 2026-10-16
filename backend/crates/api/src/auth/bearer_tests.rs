@@ -659,7 +659,11 @@ async fn openapi_docs_accept_valid_browser_session() -> Result<(), Box<dyn std::
 
     for (path, content_type, expected_body) in [
         ("/swagger-ui/v2/", "text/html", "swagger-ui-bundle.js"),
-        ("/swagger-ui/v2/index.html", "text/html", "swagger-ui-bundle.js"),
+        (
+            "/swagger-ui/v2/index.html",
+            "text/html",
+            "swagger-ui-bundle.js",
+        ),
         (
             "/swagger-ui/v2/swagger-ui-bundle.js",
             "text/javascript",
@@ -703,7 +707,10 @@ async fn openapi_docs_accept_valid_browser_session() -> Result<(), Box<dyn std::
             "{path}"
         );
         let body = to_bytes(response.into_body(), 8 * 1024 * 1024).await?;
-        assert!(std::str::from_utf8(&body)?.contains(expected_body), "{path}");
+        assert!(
+            std::str::from_utf8(&body)?.contains(expected_body),
+            "{path}"
+        );
     }
 
     let response = app
@@ -746,7 +753,10 @@ async fn openapi_docs_accept_valid_browser_session() -> Result<(), Box<dyn std::
     let body = to_bytes(response.into_body(), 1024 * 1024).await?;
     let schema: Value = serde_json::from_slice(&body)?;
     assert_eq!(schema["openapi"], "3.1.0");
-    assert_eq!(schema["paths"]["/api/v2/me"]["get"]["operationId"], "get_me");
+    assert_eq!(
+        schema["paths"]["/api/v2/me"]["get"]["operationId"],
+        "get_me"
+    );
     assert_eq!(
         schema["components"]["securitySchemes"]["api_key"]["scheme"],
         "bearer"
