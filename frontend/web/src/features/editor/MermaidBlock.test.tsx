@@ -26,7 +26,7 @@ describe("MermaidBlock", () => {
   ])("waits for consent before invoking the renderer for %s", async (code) => {
     render(<MermaidBlock code={code} />);
     await act(async () => {});
-    expect(screen.getByRole("button", { name: "Load diagram", exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Load diagram" })).toBeVisible();
     expect(screen.getByText("Diagrams may load images and other resources from external sites.")).toBeVisible();
     expect(mermaid.initialize).not.toHaveBeenCalled();
     expect(mermaid.render).not.toHaveBeenCalled();
@@ -34,7 +34,7 @@ describe("MermaidBlock", () => {
 
   it("renders approved diagrams with the active light or dark theme", async () => {
     render(<MermaidBlock code="graph TD; A-->B" />);
-    fireEvent.click(screen.getByRole("button", { name: "Load diagram", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Load diagram" }));
 
     await waitFor(() => {
       expect(mermaid.initialize).toHaveBeenLastCalledWith(
@@ -51,7 +51,7 @@ describe("MermaidBlock", () => {
         expect.objectContaining({ securityLevel: "strict", theme: "dark" })
       );
     });
-    expect(screen.queryByRole("button", { name: "Load diagram", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load diagram" })).not.toBeInTheDocument();
   });
 
   it("requires new consent when code changes, even while an approved render is pending", async () => {
@@ -59,17 +59,17 @@ describe("MermaidBlock", () => {
     const pending = new Promise<{ svg: string }>((resolve) => { complete = resolve; });
     mermaid.render.mockImplementationOnce(() => pending);
     const { rerender, container } = render(<MermaidBlock code="graph TD; A-->B" />);
-    fireEvent.click(screen.getByRole("button", { name: "Load diagram", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Load diagram" }));
     await waitFor(() => expect(mermaid.render).toHaveBeenCalledOnce());
 
     const changed = 'flowchart LR; C@{ img: "https://example.invalid/changed.png" }';
     rerender(<MermaidBlock code={changed} />);
     await act(async () => { complete({ svg: "<svg><text>Old diagram</text></svg>" }); });
-    expect(screen.getByRole("button", { name: "Load diagram", exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Load diagram" })).toBeVisible();
     expect(container.querySelector("svg")).toBeNull();
     expect(mermaid.render).toHaveBeenCalledOnce();
 
-    fireEvent.click(screen.getByRole("button", { name: "Load diagram", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Load diagram" }));
     await waitFor(() => expect(mermaid.render).toHaveBeenLastCalledWith(expect.any(String), changed));
   });
 });
