@@ -318,6 +318,9 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar, headers: Head
 
 fn sanitize_next(value: Option<&str>) -> Option<String> {
     let value = value?;
+    if value.chars().any(char::is_control) {
+        return None;
+    }
     if value.starts_with('/') && !value.starts_with("//") && !value.contains('\\') {
         Some(value.to_owned())
     } else {
@@ -360,7 +363,14 @@ async fn revoke_authgate_refresh_token(state: &AppState, refresh_token: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{login_complete_html, login_complete_script, sanitize_next};
+    use axum::extract::Query;
+    use axum::http::header::{COOKIE, SET_COOKIE};
+    use axum::http::{HeaderMap, HeaderValue, Uri};
+    use axum::response::IntoResponse;
+    use axum_extra::extract::CookieJar;
+
+    use super::{LoginQuery, login_complete_html, login_complete_script, sanitize_next};
+    use crate::auth::oauth_flow::{LOGIN_NEXT_COOKIE, flow_cookie};
 
     #[test]
     fn login_complete_page_uses_same_origin_external_script() {
@@ -382,14 +392,70 @@ mod tests {
 
     #[test]
     fn sanitize_next_allows_relative_paths_only() {
-        assert_eq!(sanitize_next(Some("/")).as_deref(), Some("/"));
-        assert_eq!(
-            sanitize_next(Some("/dashboard?x=1")).as_deref(),
-            Some("/dashboard?x=1")
-        );
+        for path in [
+            "/",
+            "/dashboard?x=1",
+            "/notes/meeting%20notes.md?tab=preview#section",
+            "/notes/%ED%9A%8C%EC%9D%98.md",
+        ] {
+            assert_eq!(sanitize_next(Some(path)).as_deref(), Some(path));
+        }
         assert_eq!(sanitize_next(Some("https://evil.test")), None);
         assert_eq!(sanitize_next(Some("//evil.test")), None);
         assert_eq!(sanitize_next(Some("/bad\\path")), None);
         assert_eq!(sanitize_next(None), None);
+    }
+
+    #[test]
+    fn sanitize_next_rejects_control_characters_before_url_normalization() {
+        for byte in (0_u8..=0x1f).chain(std::iter::once(0x7f)) {
+            let control = char::from(byte);
+            for path in [
+                format!("{control}/notes"),
+                format!("/{control}/evil.test"),
+                format!("/note{control}s"),
+                format!("/notes{control}"),
+            ] {
+                assert_eq!(sanitize_next(Some(&path)), None, "{path:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn sanitize_next_checks_decoded_login_query_and_callback_cookie()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (encoded, expected) in [
+            ("%2F%09%2Fevil.test", None),
+            ("%2F%0A%2Fevil.test", None),
+            ("%2F%0D%2Fevil.test", None),
+            ("%2Fnotes%7F", None),
+            (
+                "%2Fnotes%2Fmeeting%2520notes.md%3Ftab%3Dpreview%23section",
+                Some("/notes/meeting%20notes.md?tab=preview#section"),
+            ),
+        ] {
+            let uri: Uri = format!("/auth/login?next={encoded}").parse()?;
+            let Query(query) = Query::<LoginQuery>::try_from_uri(&uri)?;
+            let next = query.next.ok_or("missing decoded next query")?;
+            assert_eq!(sanitize_next(Some(&next)).as_deref(), expected);
+
+            // Also reject cookies issued before this validation was added.
+            let response = CookieJar::new()
+                .add(flow_cookie(LOGIN_NEXT_COOKIE, next.clone(), true))
+                .into_response();
+            let set_cookie = response
+                .headers()
+                .get(SET_COOKIE)
+                .ok_or("missing next cookie")?
+                .to_str()?;
+            let cookie_header = set_cookie.split(';').next().ok_or("missing cookie pair")?;
+            let mut headers = HeaderMap::new();
+            headers.insert(COOKIE, HeaderValue::from_str(cookie_header)?);
+            let jar = CookieJar::from_headers(&headers);
+            let cookie = jar.get(LOGIN_NEXT_COOKIE).ok_or("missing decoded cookie")?;
+            assert_eq!(cookie.value(), next);
+            assert_eq!(sanitize_next(Some(cookie.value())).as_deref(), expected);
+        }
+        Ok(())
     }
 }

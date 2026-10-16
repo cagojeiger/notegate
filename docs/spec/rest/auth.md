@@ -12,6 +12,8 @@ GET /auth/login
 
 authgate OAuth/OIDC authorization-code + PKCE login으로 redirect한다. Browser session 갱신을 위해 `offline_access` scope를 요청한다.
 
+선택적인 `next`는 `/`로 시작하는 내부 경로만 허용한다. `//`, 역슬래시와 제어 문자는 거부하며, query와 callback cookie를 디코딩한 값에 같은 검증을 적용한다.
+
 ## OAuth callback
 
 ```http
@@ -94,3 +96,5 @@ MCP `401` 응답은 `WWW-Authenticate` header에 resource metadata와 scope를 �
 - `/mcp`는 user MCP OAuth bearer만 허용한다.
 - `/mcp/v2`는 Agent 소유 `ngk_v2_` API key만 허용한다.
 - Device flow는 authgate flow이며 user account로 resolve한다.
+
+`/mcp`와 `/cli`의 OAuth bearer JWKS는 프로세스에서 공유한다. 요청이 일으키는 초기 조회와 unknown-kid 재조회는 한 번에 하나만 실행하고 성공·실패·요청 취소가 끝난 시점부터 5초 동안 추가 조회를 억제한다. 조회 차례를 기다리다 취소된 요청은 이 시간을 연장하지 않는다. 캐시된 키로 검증되는 토큰은 재조회를 기다리지 않는다. 키 교체 직후에는 재시도가 필요할 수 있으며, 주기 갱신은 기존 JWKS TTL을 따른다.
