@@ -1,9 +1,29 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 import { useUiStore } from "../../stores/uiStore";
+import { Button } from "../../shared/ui/Button";
 import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
 
 export function MermaidBlock({ code }: { code: string }) {
+  const [approvedCode, setApprovedCode] = useState<string | null>(null);
+
+  if (approvedCode !== code) {
+    return (
+      <div className="ng-mermaid-loading">
+        <Button variant="secondary" onClick={() => setApprovedCode(code)}>Load diagram</Button>
+        <p className="mt-2">Diagrams may load images and other resources from external sites.</p>
+        <details className="mt-2">
+          <summary className="cursor-pointer">View diagram source</summary>
+          <pre className="max-h-64 overflow-auto"><code>{code}</code></pre>
+        </details>
+      </div>
+    );
+  }
+
+  return <RenderedMermaid key={code} code={code} />;
+}
+
+function RenderedMermaid({ code }: { code: string }) {
   const reactId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const theme = useUiStore((state) => state.theme);
   const [svg, setSvg] = useState<string | null>(null);

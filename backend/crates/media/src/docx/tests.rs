@@ -140,6 +140,29 @@ fn central_local_header_offset(bytes: &[u8], target_name: &str) -> Option<u32> {
         .map(u32::from_le_bytes)
 }
 
+fn patch_entry_name(bytes: &mut [u8], target_name: &str, replacement: &[u8]) -> TestResult {
+    if target_name.len() != replacement.len() {
+        return Err(std::io::Error::other("replacement name length differs").into());
+    }
+    let central_offset = central_header_offset(bytes, target_name)
+        .ok_or_else(|| std::io::Error::other("central entry not found"))?;
+    let local_offset = central_local_header_offset(bytes, target_name)
+        .ok_or_else(|| std::io::Error::other("local entry not found"))?;
+    for (offset, header_size) in [(central_offset, 46), (usize::try_from(local_offset)?, 30)] {
+        let name_start = offset
+            .checked_add(header_size)
+            .ok_or_else(|| std::io::Error::other("entry name offset overflow"))?;
+        let name_end = name_start
+            .checked_add(replacement.len())
+            .ok_or_else(|| std::io::Error::other("entry name size overflow"))?;
+        bytes
+            .get_mut(name_start..name_end)
+            .ok_or_else(|| std::io::Error::other("entry name is truncated"))?
+            .copy_from_slice(replacement);
+    }
+    Ok(())
+}
+
 fn patch_local_header_offset(
     bytes: &mut [u8],
     target_name: &str,
@@ -345,6 +368,29 @@ fn docx_detection_rejects_dtds_duplicate_paths_and_traversal() -> TestResult {
 }
 
 #[test]
+fn docx_validation_preserves_utf8_and_cp437_entry_names() -> TestResult {
+    let utf8 = docx_bytes(&[("word/media/회의록.bin", b"image")])?;
+    assert_eq!(validate_docx_package(&utf8), Ok(()));
+
+    let mut cp437 = docx_bytes(&[("word/media/cafe.bin", b"image")])?;
+    patch_entry_name(&mut cp437, "word/media/cafe.bin", b"word/media/caf\x82.bin")?;
+    assert_eq!(validate_docx_package(&cp437), Ok(()));
+    Ok(())
+}
+
+#[test]
+fn docx_validation_checks_canonical_paths_after_cp437_decoding() -> TestResult {
+    let original = "word/cafe/../escape.bin";
+    let mut cp437 = docx_bytes(&[(original, b"image")])?;
+    patch_entry_name(&mut cp437, original, b"word/caf\x82/../escape.bin")?;
+    assert_eq!(
+        validate_docx_package(&cp437),
+        Err(DocxRejection::NoncanonicalPath)
+    );
+    Ok(())
+}
+
+#[test]
 fn docx_entry_validation_rejects_prohibited_features_and_size() {
     assert!(
         validate_supported_docx_entry(
@@ -429,20 +475,18 @@ fn docx_validation_reads_unretained_entries_through_crc_eof() -> TestResult {
 }
 
 #[test]
-fn docx_validation_rejects_underdeclared_entry_after_actual_limit() -> TestResult {
+fn docx_validation_rejects_underdeclared_entry_before_actual_limit() -> TestResult {
     let payload = vec![0_u8; (DOCX_MAX_ENTRY_BYTES + 1) as usize];
     let mut bytes = docx_bytes(&[("word/media/large.bin", &payload)])?;
     patch_declared_size(&mut bytes, "word/media/large.bin", 1)?;
 
-    assert_eq!(
-        validate_docx_package(&bytes),
-        Err(DocxRejection::ActualEntryTooLarge)
-    );
+    // zip rejects output beyond the declared size before our per-entry expansion limit.
+    assert_eq!(validate_docx_package(&bytes), Err(DocxRejection::EntryRead));
     Ok(())
 }
 
 #[test]
-fn docx_validation_rejects_underdeclared_aggregate_after_actual_limit() -> TestResult {
+fn docx_validation_rejects_underdeclared_aggregate_before_actual_limit() -> TestResult {
     let payload = vec![0_u8; (DOCX_MAX_EXPANDED_BYTES / 3 + 1) as usize];
     let names = [
         "word/media/first.bin",
@@ -458,17 +502,25 @@ fn docx_validation_rejects_underdeclared_aggregate_after_actual_limit() -> TestR
         patch_declared_size(&mut bytes, name, 1)?;
     }
 
-    assert_eq!(
-        validate_docx_package(&bytes),
-        Err(DocxRejection::ActualArchiveTooLarge)
-    );
+    // The first underdeclared entry fails before the archive can reach our aggregate limit.
+    assert_eq!(validate_docx_package(&bytes), Err(DocxRejection::EntryRead));
     Ok(())
 }
 
 #[test]
-fn docx_validation_rejects_declared_actual_size_mismatch() -> TestResult {
+fn docx_validation_rejects_underdeclared_size_while_reading() -> TestResult {
     let mut bytes = docx_bytes(&[("word/media/data.bin", b"actual bytes")])?;
     patch_declared_size(&mut bytes, "word/media/data.bin", 1)?;
+
+    // zip checks the declared size while reading, before our end-of-entry comparison.
+    assert_eq!(validate_docx_package(&bytes), Err(DocxRejection::EntryRead));
+    Ok(())
+}
+
+#[test]
+fn docx_validation_rejects_overdeclared_size_after_reading() -> TestResult {
+    let mut bytes = docx_bytes(&[("word/media/data.bin", b"actual bytes")])?;
+    patch_declared_size(&mut bytes, "word/media/data.bin", 100)?;
 
     assert_eq!(
         validate_docx_package(&bytes),

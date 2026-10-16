@@ -1,0 +1,182 @@
+name: Security DAST Pilot
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/security-dast.yml
+      - deploy/ci/security-*
+      - backend/crates/api/examples/seed_user.rs
+      - frontend/web/security/**
+      - frontend/web/playwright.security.config.ts
+      - frontend/web/src/features/editor/MermaidBlock.tsx
+      - frontend/web/src/features/editor/Markdown.tsx
+      - frontend/web/src/features/editor/MarkdownImage.tsx
+      - frontend/web/src/shared/lib/markdown*.ts
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-dast-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pilot:
+    name: Isolated adversarial scenarios
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: notegate
+          POSTGRES_PASSWORD: notegate
+          POSTGRES_DB: notegate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notegate -d notegate"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NOTEGATE_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
+      NOTEGATE_AUTHGATE_URL: http://127.0.0.1:9192
+      NOTEGATE_PUBLIC_URL: http://127.0.0.1:9191
+      NOTEGATE_BIND_ADDR: 0.0.0.0:9191
+      NOTEGATE_OAUTH_CLIENT_ID: notegate-web
+      NOTEGATE_MCP_OAUTH_CLIENT_ID: notegate-mcp
+      NOTEGATE_CLI_OAUTH_CLIENT_ID: notegate-cli-local
+      NOTEGATE_ENC_ROOT_KEY_ID: e2e-enc
+      NOTEGATE_ENC_ROOT_SECRET: e2e-distinct-enc-root-secret-32-bytes
+      NOTEGATE_LOOKUP_ROOT_KEY_ID: e2e-lookup
+      NOTEGATE_LOOKUP_ROOT_SECRET: e2e-distinct-lookup-root-secret-32b
+      NOTEGATE_S3__ENDPOINT: http://127.0.0.1:9000
+      NOTEGATE_S3__PUBLIC_ENDPOINT: http://127.0.0.1:9000
+      NOTEGATE_S3__REGION: us-east-1
+      NOTEGATE_S3__BUCKET: notegate-e2e
+      NOTEGATE_S3__ACCESS_KEY: notegate-app
+      NOTEGATE_S3__SECRET_KEY: notegate-app-secret
+      NOTEGATE_S3__FORCE_PATH_STYLE: "true"
+      NOTEGATE_WEB_DIST_DIR: ${{ github.workspace }}/frontend/web/dist
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Cache release build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: browser-performance-release
+          cache-on-failure: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Build application and browser probes
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter web exec playwright install --with-deps chromium
+          pnpm --filter web exec tsc -p tsconfig.e2e.json --noEmit
+          pnpm --filter web build
+          cargo build --locked --release --package notegate-api --bin notegate-api --example seed_user
+
+      - name: Start disposable object storage
+        env:
+          NOTEGATE_S3_BUCKET: ${{ env.NOTEGATE_S3__BUCKET }}
+          NOTEGATE_S3_ACCESS_KEY: ${{ env.NOTEGATE_S3__ACCESS_KEY }}
+          NOTEGATE_S3_SECRET_KEY: ${{ env.NOTEGATE_S3__SECRET_KEY }}
+        run: bash deploy/ci/start-minio.sh
+
+      - name: Seed two disposable owners
+        id: identity
+        run: |
+          for identity in A B; do
+            output=$(target/release/examples/seed_user "dast-$identity")
+            key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
+            session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
+            account=$(printf '%s\n' "$output" | sed -n 's/^ACCOUNT_ID=//p')
+            test -n "$key" && test -n "$session" && test -n "$account"
+            echo "::add-mask::$key"
+            echo "::add-mask::$session"
+            printf 'key_%s=%s\nsession_%s=%s\naccount_%s=%s\n' \
+              "$identity" "$key" "$identity" "$session" "$identity" "$account" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Start disposable application
+        id: app
+        run: |
+          target/release/notegate-api >"$RUNNER_TEMP/security-api.log" 2>&1 &
+          api_pid=$!
+          echo "$api_pid" >"$RUNNER_TEMP/security-api.pid"
+          for _ in $(seq 1 60); do
+            kill -0 "$api_pid" || { cat "$RUNNER_TEMP/security-api.log"; exit 1; }
+            if curl --fail --silent http://127.0.0.1:9191/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/security-api.log"
+          exit 1
+
+      - name: Probe ownership and read-only permissions over HTTP
+        id: api
+        timeout-minutes: 5
+        env:
+          NOTEGATE_DAST_BROWSER_SESSION_A: ${{ steps.identity.outputs.session_A }}
+          NOTEGATE_DAST_BROWSER_SESSION_B: ${{ steps.identity.outputs.session_B }}
+          NOTEGATE_DAST_API_KEY_A: ${{ steps.identity.outputs.key_A }}
+          NOTEGATE_DAST_API_KEY_B: ${{ steps.identity.outputs.key_B }}
+          NOTEGATE_DAST_ACCOUNT_ID_A: ${{ steps.identity.outputs.account_A }}
+          NOTEGATE_DAST_ACCOUNT_ID_B: ${{ steps.identity.outputs.account_B }}
+        run: node deploy/ci/security-api.mjs
+
+      - name: Probe malicious document rendering in a real browser
+        if: ${{ !cancelled() && steps.app.outcome == 'success' }}
+        timeout-minutes: 6
+        env:
+          NOTEGATE_DAST_BROWSER_SESSION_A: ${{ steps.identity.outputs.session_A }}
+        run: pnpm --filter web exec playwright test --config playwright.security.config.ts
+
+      - name: Run bounded authenticated ZAP active scan
+        if: ${{ !cancelled() && steps.app.outcome == 'success' && steps.api.outcome != 'skipped' }}
+        timeout-minutes: 12
+        env:
+          NOTEGATE_DAST_API_KEY_A: ${{ steps.identity.outputs.key_A }}
+        run: node deploy/ci/security-zap.mjs
+
+      - name: Publish sanitized findings
+        if: always()
+        run: |
+          for report in security-results/summary-*.md; do
+            if [ -f "$report" ]; then
+              cat "$report" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Retain sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: security-dast-pilot
+          path: security-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stop scanner and application
+        if: always()
+        run: |
+          docker rm -f notegate-zap-pilot >/dev/null 2>&1 || true
+          docker network rm notegate-dast >/dev/null 2>&1 || true
+          if [ -f "$RUNNER_TEMP/security-api.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/security-api.pid")" 2>/dev/null || true
+          fi

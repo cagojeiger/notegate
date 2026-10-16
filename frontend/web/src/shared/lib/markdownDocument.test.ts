@@ -37,4 +37,34 @@ describe("markdownDocument", () => {
     expect(formatFrontmatterValue(["one", 2, null])).toBe("one, 2, null");
     expect(formatFrontmatterValue({ enabled: true })).toBe('{"enabled":true}');
   });
+
+  it.each([
+    "value: &cycle { self: *cycle }",
+    "value: &cycle [*cycle]",
+    "value: &cycle { children: [*cycle] }"
+  ])("keeps the document readable when frontmatter contains %s", (source) => {
+    const document = parseMarkdownDocument(`---\n${source}\n---\n# Body`);
+    expect(formatFrontmatterValue(document.frontmatter!.value)).toBe("[Circular reference]");
+    expect(document.body).toBe("# Body");
+  });
+
+  it("keeps shared aliases distinct from circular references", () => {
+    const document = parseMarkdownDocument("---\nvalue: { first: &shared { label: normal }, second: *shared }\n---\n# Body");
+    expect(formatFrontmatterValue(document.frontmatter!.value))
+      .toBe('{"first":{"label":"normal"},"second":{"label":"normal"}}');
+    expect(formatFrontmatterValue(["one", [2, null], { enabled: true }]))
+      .toBe('one, 2, null, {"enabled":true}');
+  });
+
+  it("limits deeply nested properties before recursive formatting", () => {
+    let value: unknown = "leaf";
+    for (let index = 0; index < 5_000; index++) value = { child: value };
+    expect(formatFrontmatterValue(value)).toBe("[Value too complex to display]");
+  });
+
+  it("limits repeated alias expansion without traversing the entire graph", () => {
+    let value: unknown = ["leaf"];
+    for (let index = 0; index < 24; index++) value = [value, value];
+    expect(formatFrontmatterValue(value)).toBe("[Value too complex to display]");
+  });
 });

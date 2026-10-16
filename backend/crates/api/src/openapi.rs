@@ -8,7 +8,8 @@ use utoipa::openapi::security::{ApiKey, ApiKeyValue};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::openapi::{Ref, RefOr};
 use utoipa::{Modify, OpenApi};
-use utoipa_swagger_ui::SwaggerUi;
+
+mod swagger_ui;
 
 use crate::auth::{mark_private_no_store, require_browser_session_for_docs};
 #[cfg(test)]
@@ -245,10 +246,7 @@ fn error_response() -> Response {
 }
 
 pub fn routes(state: AppState) -> Router<AppState> {
-    let router: Router<AppState> = SwaggerUi::new("/swagger-ui/v2")
-        .url("/openapi/v2.json", PublicApiDoc::openapi())
-        .into();
-    router
+    swagger_ui::routes()
         .layer(from_fn_with_state(state, require_browser_session_for_docs))
         .layer(from_fn(mark_private_no_store))
 }

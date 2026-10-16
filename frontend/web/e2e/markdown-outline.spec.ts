@@ -135,6 +135,8 @@ test("renders Mermaid math and sanitizes diagram labels with the security depend
   await page.getByRole("button", { name: markdownNode.name }).first().click();
 
   const diagram = page.locator(".ng-mermaid svg");
+  await expect(diagram).toHaveCount(0);
+  await page.getByRole("button", { name: "Load diagram", exact: true }).click();
   await expect(diagram).toBeVisible();
   await expect(diagram.locator("math msup")).toBeVisible();
   await expect(diagram.getByText("Safe", { exact: true })).toBeVisible();
