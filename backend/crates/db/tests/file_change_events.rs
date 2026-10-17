@@ -476,10 +476,12 @@ async fn legacy_snapshot_migration_preserves_only_provable_ownership_and_encrypt
     let Some(db) = TestDb::setup_before(48).await? else {
         return Ok(());
     };
-    let (owner, space, _) = space_with_root(&db.pool, "legacy-change-snapshots").await?;
+    let (owner, space, _) =
+        common::legacy_space_with_root(&db.pool, "legacy-change-snapshots").await?;
     sqlx::query("INSERT INTO file_change_events(space_id, op_type, metadata) SELECT $1, 'text.write', '{\"item_name\":\"legacy private.md\",\"name_changed\":false}'::jsonb FROM generate_series(1,101)")
         .bind(space).execute(&db.pool).await?;
-    let (_, missing_space, _) = space_with_root(&db.pool, "removed-legacy-space").await?;
+    let (_, missing_space, _) =
+        common::legacy_space_with_root(&db.pool, "removed-legacy-space").await?;
     sqlx::query("INSERT INTO file_change_events(space_id, op_type, metadata) VALUES($1,'item.delete','{\"item_name\":\"orphan.md\"}')")
         .bind(missing_space).execute(&db.pool).await?;
     sqlx::query("DELETE FROM spaces WHERE id=$1")
