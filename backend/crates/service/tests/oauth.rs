@@ -651,7 +651,7 @@ async fn concurrent_approvals_respect_the_connection_limit()
     let user = insert_user_account(&db.pool, "limit", "user@test").await?;
     let svc = service(&db);
     let t = now();
-    sqlx::query("INSERT INTO oauth_grants (id,user_id,client_id,client_name,resource,scope,created_at,expires_at,idle_expires_at) SELECT gen_random_uuid(),$1,'seed','Seed',$2,'mcp offline_access',$3,$3+interval '30 days',$3+interval '7 days' FROM generate_series(1,99)")
+    sqlx::query("INSERT INTO oauth_grants (id,user_id,client_id,client_name,resource,scope,created_at,expires_at,idle_expires_at) SELECT gen_random_uuid(),$1,'seed','Seed',$2,'mcp offline_access',$3,$3::timestamptz+interval '30 days',$3::timestamptz+interval '7 days' FROM generate_series(1,99)")
         .bind(user).bind(RESOURCE).bind(t).execute(&db.pool).await?;
     approved(&db, user, "one", "mcp offline_access", t).await?;
     approved(&db, user, "two", "mcp offline_access", t).await?;
@@ -667,6 +667,54 @@ async fn concurrent_approvals_respect_the_connection_limit()
     }
     assert_eq!(success, 1);
     assert_eq!(svc.store.list_grants(user, t).await?.len(), 100);
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn cleanup_removes_expired_access_but_preserves_refresh_reuse_detection()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "cleanup", "user@test").await?;
+    let svc = service(&db);
+    let t = Utc::now() - Duration::minutes(11);
+    approved(&db, user, "code", "mcp offline_access", t).await?;
+    let tokens = issued(exchange(&svc, "code", t).await?);
+    let refresh = tokens.refresh_token.unwrap();
+    let current = issued(
+        svc.refresh(
+            &refresh,
+            CLIENT,
+            RESOURCE,
+            Utc::now() - Duration::minutes(10) - Duration::seconds(1),
+        )
+        .await?,
+    );
+    notegate_db::PurgeRepo::new(db.pool.clone())
+        .run_once()
+        .await?;
+    let counts: (i64, i64) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE kind='access'),count(*) FILTER (WHERE kind='refresh') FROM oauth_credentials",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(counts, (0, 2));
+    rejected(
+        svc.refresh(&refresh, CLIENT, RESOURCE, Utc::now()).await?,
+        "invalid_grant",
+    );
+    rejected(
+        svc.refresh(
+            &current.refresh_token.unwrap(),
+            CLIENT,
+            RESOURCE,
+            Utc::now(),
+        )
+        .await?,
+        "invalid_grant",
+    );
     db.cleanup().await;
     Ok(())
 }

@@ -598,25 +598,59 @@ pub(crate) enum OAuthGrantEvent<'a> {
     Revoked(&'a str),
 }
 
-fn oauth_grant_payload(change: OAuthGrantEvent<'_>) -> (&'static str,Value) {
+fn oauth_grant_payload(change: OAuthGrantEvent<'_>) -> (&'static str, Value) {
     match change {
-        OAuthGrantEvent::Approved => ("oauth.approve",json!({})),
-        OAuthGrantEvent::Revoked(reason) => ("oauth.revoke",json!({"reason":reason})),
+        OAuthGrantEvent::Approved => ("oauth.approve", json!({})),
+        OAuthGrantEvent::Revoked(reason) => ("oauth.revoke", json!({"reason":reason})),
     }
 }
 
-pub(crate) async fn oauth_grant_changed(tx: &mut PgConnection, user: Uuid, grant: Uuid, change: OAuthGrantEvent<'_>) -> Result<()> {
-    let (op_type,metadata)=oauth_grant_payload(change);
-    event(tx,AuditContext::rest(user),user,op_type,"oauth_grant",Some(grant),metadata).await
+pub(crate) async fn oauth_grant_changed(
+    tx: &mut PgConnection,
+    user: Uuid,
+    grant: Uuid,
+    change: OAuthGrantEvent<'_>,
+) -> Result<()> {
+    let (op_type, metadata) = oauth_grant_payload(change);
+    event(
+        tx,
+        AuditContext::rest(user),
+        user,
+        op_type,
+        "oauth_grant",
+        Some(grant),
+        metadata,
+    )
+    .await
 }
 
-fn identity_linked_payload(issuer: &str) -> (&'static str,Value) {
-    ("identity.link",json!({"issuer":issuer,"reason":"operator_import"}))
+fn identity_linked_payload(issuer: &str) -> (&'static str, Value) {
+    (
+        "identity.link",
+        json!({"issuer":issuer,"reason":"operator_import"}),
+    )
 }
 
-pub(crate) async fn external_identity_linked(tx: &mut PgConnection, user: Uuid, issuer: &str) -> Result<()> {
-    let (op_type,metadata)=identity_linked_payload(issuer);
-    insert_audit_event(tx,NewAuditEvent {operation_id:None,owner_user_id:Some(user),actor_account_id:None,source:"system",op_type,resource_type:"account",resource_id:Some(user),metadata}).await
+pub(crate) async fn external_identity_linked(
+    tx: &mut PgConnection,
+    user: Uuid,
+    issuer: &str,
+) -> Result<()> {
+    let (op_type, metadata) = identity_linked_payload(issuer);
+    insert_audit_event(
+        tx,
+        NewAuditEvent {
+            operation_id: None,
+            owner_user_id: Some(user),
+            actor_account_id: None,
+            source: "system",
+            op_type,
+            resource_type: "account",
+            resource_id: Some(user),
+            metadata,
+        },
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -625,9 +659,21 @@ mod tests {
 
     #[test]
     fn oauth_audit_payloads_contain_only_structural_allowlisted_fields() {
-        assert_eq!(oauth_grant_payload(OAuthGrantEvent::Approved),("oauth.approve",json!({})));
-        assert_eq!(oauth_grant_payload(OAuthGrantEvent::Revoked("refresh_reuse")),("oauth.revoke",json!({"reason":"refresh_reuse"})));
-        assert_eq!(identity_linked_payload("https://issuer.example.test"),("identity.link",json!({"issuer":"https://issuer.example.test","reason":"operator_import"})));
+        assert_eq!(
+            oauth_grant_payload(OAuthGrantEvent::Approved),
+            ("oauth.approve", json!({}))
+        );
+        assert_eq!(
+            oauth_grant_payload(OAuthGrantEvent::Revoked("refresh_reuse")),
+            ("oauth.revoke", json!({"reason":"refresh_reuse"}))
+        );
+        assert_eq!(
+            identity_linked_payload("https://issuer.example.test"),
+            (
+                "identity.link",
+                json!({"issuer":"https://issuer.example.test","reason":"operator_import"})
+            )
+        );
     }
 
     #[test]

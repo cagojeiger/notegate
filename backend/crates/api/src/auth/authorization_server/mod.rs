@@ -296,8 +296,13 @@ async fn token(
     headers: HeaderMap,
     form: Result<Form<TokenForm>, axum::extract::rejection::FormRejection>,
 ) -> Response {
-    let Form(form)=match form { Ok(form)=>form,Err(_)=>return oauth_error("invalid_request") };
-    if let Some(response)=invalid_client_auth(&headers,form.client_secret.is_some()) { return response; }
+    let Form(form) = match form {
+        Ok(form) => form,
+        Err(_) => return oauth_error("invalid_request"),
+    };
+    if let Some(response) = invalid_client_auth(&headers, form.client_secret.is_some()) {
+        return response;
+    }
     let resource = match token_resource(&state, &form.client_id, form.resource.as_deref()) {
         Ok(resource) => resource,
         Err(error) => return oauth_error(error),
@@ -403,8 +408,13 @@ async fn revoke(
     headers: HeaderMap,
     form: Result<Form<RevokeForm>, axum::extract::rejection::FormRejection>,
 ) -> Response {
-    let Form(form)=match form { Ok(form)=>form,Err(_)=>return oauth_error("invalid_request") };
-    if let Some(response)=invalid_client_auth(&headers,form.client_secret.is_some()) { return response; }
+    let Form(form) = match form {
+        Ok(form) => form,
+        Err(_) => return oauth_error("invalid_request"),
+    };
+    if let Some(response) = invalid_client_auth(&headers, form.client_secret.is_some()) {
+        return response;
+    }
     match state
         .oauth
         .revoke(&form.token, &form.client_id, Utc::now())
@@ -421,8 +431,14 @@ struct DeviceForm {
     scope: String,
     resource: Option<String>,
 }
-async fn device_authorize(State(state): State<AppState>, form: Result<Form<DeviceForm>, axum::extract::rejection::FormRejection>) -> Response {
-    let Form(form)=match form { Ok(form)=>form,Err(_)=>return oauth_error("invalid_request") };
+async fn device_authorize(
+    State(state): State<AppState>,
+    form: Result<Form<DeviceForm>, axum::extract::rejection::FormRejection>,
+) -> Response {
+    let Form(form) = match form {
+        Ok(form) => form,
+        Err(_) => return oauth_error("invalid_request"),
+    };
     if form.client_id != state.config.cli_oauth_client_id {
         return oauth_error("invalid_client");
     }
@@ -644,7 +660,7 @@ fn page(title: &str, body: &str) -> Response {
     );
     response.headers_mut().insert(
         header::REFERRER_POLICY,
-        header::HeaderValue::from_static("no-referrer"),
+        header::HeaderValue::from_static("same-origin"),
     );
     response
 }
@@ -656,7 +672,7 @@ async fn private_response(
     let mut response = no_store(next.run(request).await);
     response.headers_mut().insert(
         header::REFERRER_POLICY,
-        header::HeaderValue::from_static("no-referrer"),
+        header::HeaderValue::from_static("same-origin"),
     );
     response.headers_mut().insert(
         header::X_FRAME_OPTIONS,
@@ -665,11 +681,21 @@ async fn private_response(
     response
 }
 
-
 fn invalid_client_auth(headers: &HeaderMap, secret: bool) -> Option<Response> {
-    if let Some(value)=headers.get(header::AUTHORIZATION) {
-        let challenge=if value.to_str().is_ok_and(|v|v.starts_with("Basic ")) {"Basic realm=\"oauth\""} else {"Bearer realm=\"oauth\""};
-        return Some(no_store((StatusCode::UNAUTHORIZED,[(header::WWW_AUTHENTICATE,challenge)],Json(json!({"error":"invalid_client"}))).into_response()));
+    if let Some(value) = headers.get(header::AUTHORIZATION) {
+        let challenge = if value.to_str().is_ok_and(|v| v.starts_with("Basic ")) {
+            "Basic realm=\"oauth\""
+        } else {
+            "Bearer realm=\"oauth\""
+        };
+        return Some(no_store(
+            (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, challenge)],
+                Json(json!({"error":"invalid_client"})),
+            )
+                .into_response(),
+        ));
     }
-    secret.then(||oauth_error("invalid_client"))
+    secret.then(|| oauth_error("invalid_client"))
 }

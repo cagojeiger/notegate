@@ -54,6 +54,7 @@ CREATE TABLE oauth_credentials (
     consumed_at TIMESTAMPTZ
 );
 CREATE INDEX oauth_credentials_grant_idx ON oauth_credentials(grant_id);
+CREATE INDEX oauth_access_expiry_idx ON oauth_credentials(expires_at) WHERE kind = 'access';
 
 CREATE TABLE oauth_device_codes (
     device_hash TEXT PRIMARY KEY,

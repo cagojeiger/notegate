@@ -1438,12 +1438,24 @@ mod tests {
     }
     #[test]
     fn standalone_config_can_use_authgate_without_legacy_bearer_settings() {
-        let mut config=valid_config();
-        config.oidc=Some(super::OidcLoginConfig {issuer:config.authgate_url.clone(),client_id:config.oauth_client_id.clone(),client_secret:None,allow_signup:false});
-        config.authgate_url.clear();config.oauth_client_id.clear();config.mcp_oauth_client_id.clear();
-        config.normalize();assert!(config.validate().is_ok());
-        for bad in ["http://public.example.test", "https://user:password@example.test", "https://example.test#fragment"] {
-            config.oidc.as_mut().unwrap().issuer=bad.to_owned();
+        let mut config = valid_config();
+        config.oidc = Some(super::OidcLoginConfig {
+            issuer: config.authgate_url.clone(),
+            client_id: config.oauth_client_id.clone(),
+            client_secret: None,
+            allow_signup: false,
+        });
+        config.authgate_url.clear();
+        config.oauth_client_id.clear();
+        config.mcp_oauth_client_id.clear();
+        config.normalize();
+        assert!(config.validate().is_ok());
+        for bad in [
+            "http://public.example.test",
+            "https://user:password@example.test",
+            "https://example.test#fragment",
+        ] {
+            config.oidc.as_mut().unwrap().issuer = bad.to_owned();
             assert!(config.validate().is_err());
         }
     }

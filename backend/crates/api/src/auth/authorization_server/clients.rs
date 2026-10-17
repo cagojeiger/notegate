@@ -17,7 +17,8 @@ pub(super) struct ClientMetadata {
 
 async fn fetch(client_id: &str) -> Result<(ClientMetadata, Duration), &'static str> {
     let url = Url::parse(client_id).map_err(|_| "invalid_client")?;
-    if client_id.len() > 2048 || client_id.chars().any(char::is_control)
+    if client_id.len() > 2048
+        || client_id.chars().any(char::is_control)
         || url.scheme() != "https"
         || url.host_str().is_none()
         || !url.username().is_empty()
@@ -90,7 +91,10 @@ async fn fetch(client_id: &str) -> Result<(ClientMetadata, Duration), &'static s
         || metadata.client_name.len() > 200
         || metadata.redirect_uris.is_empty()
         || metadata.redirect_uris.len() > 20
-        || metadata.redirect_uris.iter().any(|uri|uri.len()>2048 || uri.chars().any(char::is_control))
+        || metadata
+            .redirect_uris
+            .iter()
+            .any(|uri| uri.len() > 2048 || uri.chars().any(char::is_control))
     {
         return Err("invalid_client");
     }

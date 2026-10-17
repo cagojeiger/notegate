@@ -424,14 +424,33 @@ async fn local_sessions_reject_old_issuer_and_expire_without_upstream_refresh()
 use axum::response::IntoResponse as _;
 
 #[tokio::test]
-async fn malformed_oauth_requests_return_private_protocol_errors() -> Result<(),Box<dyn std::error::Error>> {
-    let Some(db)=TestDb::setup().await? else {return Ok(());};let router=app(standalone_state(&db)?);
-    for path in ["/oauth/token","/oauth/revoke","/oauth/device/authorize"] {
-        let response=post(&router,path,"unexpected=value",None,None).await;
-        assert_eq!(response.status(),StatusCode::BAD_REQUEST);assert_eq!(response.headers()[header::CACHE_CONTROL],"no-store");
-        assert_eq!(body(response).await["error"],"invalid_request");
+async fn malformed_oauth_requests_return_private_protocol_errors()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let router = app(standalone_state(&db)?);
+    for path in ["/oauth/token", "/oauth/revoke", "/oauth/device/authorize"] {
+        let response = post(&router, path, "unexpected=value", None, None).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(body(response).await["error"], "invalid_request");
     }
-    let response=router.oneshot(Request::builder().method("POST").uri("/oauth/token").header(header::CONTENT_TYPE,"application/x-www-form-urlencoded").header(header::AUTHORIZATION,"Basic dGVzdDpwYXNzd29yZA==").body(Body::from("grant_type=refresh_token&client_id=client&refresh_token=token"))?).await?;
-    assert_eq!(response.status(),StatusCode::UNAUTHORIZED);assert!(response.headers().contains_key(header::WWW_AUTHENTICATE));assert_eq!(body(response).await["error"],"invalid_client");
-    db.cleanup().await;Ok(())
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/oauth/token")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::AUTHORIZATION, "Basic dGVzdDpwYXNzd29yZA==")
+                .body(Body::from(
+                    "grant_type=refresh_token&client_id=client&refresh_token=token",
+                ))?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(response.headers().contains_key(header::WWW_AUTHENTICATE));
+    assert_eq!(body(response).await["error"], "invalid_client");
+    db.cleanup().await;
+    Ok(())
 }

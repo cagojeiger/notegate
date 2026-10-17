@@ -112,6 +112,17 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
     .map_err(map_sqlx_error)?
     .get("deleted_count");
 
+    // Access hashes are disposable after expiry; consumed refresh hashes must remain
+    // while their grant can still rotate, so reuse detection survives cleanup.
+    let oauth_access_deleted = sqlx::query(
+        "DELETE FROM oauth_credentials WHERE token_hash IN (         SELECT token_hash FROM oauth_credentials WHERE kind='access' AND expires_at<=now() \
+         ORDER BY expires_at LIMIT 1000)",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?
+    .rows_affected();
+
     // Expiry is enforced synchronously at lookup; these bounded batches only reclaim storage.
     for table in [
         "oidc_login_flows",
@@ -136,6 +147,7 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
         accounts_anonymized,
         api_keys_deleted,
         browser_sessions_deleted,
+        oauth_access_deleted,
     );
 
     Ok(PurgedIdentities {
