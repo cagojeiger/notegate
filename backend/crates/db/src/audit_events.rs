@@ -593,6 +593,25 @@ pub(crate) async fn trash_purge_requested(
     .await
 }
 
+pub(crate) async fn oauth_grant_changed(
+    tx: &mut PgConnection,
+    user_id: Uuid,
+    grant_id: Uuid,
+    op_type: &'static str,
+    reason: Option<&str>,
+) -> Result<()> {
+    event(
+        tx,
+        AuditContext::rest(user_id),
+        user_id,
+        op_type,
+        "oauth_grant",
+        Some(grant_id),
+        json!({"reason":reason}),
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -725,23 +744,4 @@ mod tests {
             })
         );
     }
-}
-
-pub(crate) async fn oauth_grant_changed(
-    tx: &mut PgConnection,
-    user_id: Uuid,
-    grant_id: Uuid,
-    op_type: &'static str,
-    reason: Option<&str>,
-) -> Result<()> {
-    event(
-        tx,
-        AuditContext::rest(user_id),
-        user_id,
-        op_type,
-        "oauth_grant",
-        Some(grant_id),
-        json!({"reason":reason}),
-    )
-    .await
 }

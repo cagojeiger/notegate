@@ -223,7 +223,7 @@ pub struct Config {
     /// Base URL for authgate, with trailing slash trimmed.
     #[serde(default)]
     pub authgate_url: String,
-    /// Standalone mode. AuthGate configuration is unused when this is set.
+    /// Local sessions and OAuth grants. `authgate_url` only binds legacy identities in this mode.
     #[serde(default)]
     pub oidc: Option<OidcLoginConfig>,
     /// Public URL for notegate as seen by browsers/MCP clients, with trailing slash trimmed.

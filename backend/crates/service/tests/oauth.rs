@@ -43,79 +43,344 @@ async fn authorization_code_is_browser_pkce_client_redirect_and_resource_bound()
     assert_eq!(tokens.scope,"mcp offline_access");assert!(tokens.refresh_token.is_some());
     assert_eq!(svc.access_user(&tokens.access_token,RESOURCE,"mcp",t).await?,Some(user));
     rejected(exchange(&svc,"code",t).await?,"invalid_grant");
+    assert_eq!(svc.access_user(&tokens.access_token,RESOURCE,"mcp",t).await?,None);
     let count:i64=sqlx::query_scalar("SELECT count(*) FROM oauth_grants").fetch_one(&db.pool).await?;assert_eq!(count,1);
     db.cleanup().await;Ok(())
 }
 
 #[tokio::test]
-async fn code_and_access_expire_at_exact_boundaries_without_cleanup()->Result<(),Box<dyn std::error::Error>>{
-    let Some(db)=TestDb::setup().await? else{return Ok(())};let user=insert_user_account(&db.pool,"expiry","user@test").await?;let svc=service(&db);let t=now();
-    approved(&db,user,"expired","mcp",t).await?;rejected(exchange(&svc,"expired",t+Duration::seconds(60)).await?,"invalid_grant");
-    approved(&db,user,"live","mcp",t).await?;let tokens=issued(exchange(&svc,"live",t+Duration::seconds(59)).await?);assert!(tokens.refresh_token.is_none());
-    let start=t+Duration::seconds(59);
-    assert_eq!(svc.access_user(&tokens.access_token,RESOURCE,"mcp",start+Duration::seconds(599)).await?,Some(user));
-    assert_eq!(svc.access_user(&tokens.access_token,RESOURCE,"mcp",start+Duration::seconds(600)).await?,None);
-    assert_eq!(svc.access_user(&tokens.access_token,"https://notes.example.test/cli","cli",start).await?,None);
-    assert_eq!(svc.access_user(&tokens.access_token,RESOURCE,"cli",start).await?,None);
-    sqlx::query("UPDATE accounts SET is_active=false WHERE id=$1").bind(user).execute(&db.pool).await?;
-    assert_eq!(svc.access_user(&tokens.access_token,RESOURCE,"mcp",start).await?,None);
-    db.cleanup().await;Ok(())
+async fn code_and_access_expire_at_exact_boundaries_without_cleanup()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "expiry", "user@test").await?;
+    let svc = service(&db);
+    let t = now();
+    approved(&db, user, "expired", "mcp", t).await?;
+    rejected(
+        exchange(&svc, "expired", t + Duration::seconds(60)).await?,
+        "invalid_grant",
+    );
+    approved(&db, user, "live", "mcp", t).await?;
+    let tokens = issued(exchange(&svc, "live", t + Duration::seconds(59)).await?);
+    assert!(tokens.refresh_token.is_none());
+    let start = t + Duration::seconds(59);
+    assert_eq!(
+        svc.access_user(
+            &tokens.access_token,
+            RESOURCE,
+            "mcp",
+            start + Duration::seconds(599)
+        )
+        .await?,
+        Some(user)
+    );
+    assert_eq!(
+        svc.access_user(
+            &tokens.access_token,
+            RESOURCE,
+            "mcp",
+            start + Duration::seconds(600)
+        )
+        .await?,
+        None
+    );
+    assert_eq!(
+        svc.access_user(
+            &tokens.access_token,
+            "https://notes.example.test/cli",
+            "cli",
+            start
+        )
+        .await?,
+        None
+    );
+    assert_eq!(
+        svc.access_user(&tokens.access_token, RESOURCE, "cli", start)
+            .await?,
+        None
+    );
+    sqlx::query("UPDATE accounts SET is_active=false WHERE id=$1")
+        .bind(user)
+        .execute(&db.pool)
+        .await?;
+    assert_eq!(
+        svc.access_user(&tokens.access_token, RESOURCE, "mcp", start)
+            .await?,
+        None
+    );
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
-async fn refresh_rotation_commits_family_revocation_on_reuse()->Result<(),Box<dyn std::error::Error>>{
-    let Some(db)=TestDb::setup().await? else{return Ok(())};let user=insert_user_account(&db.pool,"refresh","user@test").await?;let svc=service(&db);let t=now();
-    approved(&db,user,"code","mcp offline_access",t).await?;let first=issued(exchange(&svc,"code",t).await?);let refresh=first.refresh_token.unwrap();
-    rejected(svc.refresh(&refresh,"other",RESOURCE,t).await?,"invalid_grant");
-    rejected(svc.refresh(&refresh,CLIENT,"https://other.test/mcp",t).await?,"invalid_grant");
-    let second=issued(svc.refresh(&refresh,CLIENT,RESOURCE,t+Duration::seconds(1)).await?);
-    assert_eq!(svc.access_user(&second.access_token,RESOURCE,"mcp",t+Duration::seconds(1)).await?,Some(user));
-    rejected(svc.refresh(&refresh,CLIENT,RESOURCE,t+Duration::seconds(2)).await?,"invalid_grant");
-    assert_eq!(svc.access_user(&second.access_token,RESOURCE,"mcp",t+Duration::seconds(2)).await?,None);
-    assert_eq!(svc.access_user(&first.access_token,RESOURCE,"mcp",t+Duration::seconds(2)).await?,None);
-    rejected(svc.refresh(&second.refresh_token.unwrap(),CLIENT,RESOURCE,t+Duration::seconds(2)).await?,"invalid_grant");
-    let events:i64=sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE op_type='oauth.revoke' AND metadata->>'reason'='refresh_reuse'").fetch_one(&db.pool).await?;assert_eq!(events,1);
-    db.cleanup().await;Ok(())
+async fn refresh_rotation_commits_family_revocation_on_reuse()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "refresh", "user@test").await?;
+    let svc = service(&db);
+    let t = now();
+    approved(&db, user, "code", "mcp offline_access", t).await?;
+    let first = issued(exchange(&svc, "code", t).await?);
+    let refresh = first.refresh_token.unwrap();
+    rejected(
+        svc.refresh(&refresh, "other", RESOURCE, t).await?,
+        "invalid_grant",
+    );
+    rejected(
+        svc.refresh(&refresh, CLIENT, "https://other.test/mcp", t)
+            .await?,
+        "invalid_grant",
+    );
+    let second = issued(
+        svc.refresh(&refresh, CLIENT, RESOURCE, t + Duration::seconds(1))
+            .await?,
+    );
+    assert_eq!(
+        svc.access_user(
+            &second.access_token,
+            RESOURCE,
+            "mcp",
+            t + Duration::seconds(1)
+        )
+        .await?,
+        Some(user)
+    );
+    rejected(
+        svc.refresh(&refresh, CLIENT, RESOURCE, t + Duration::seconds(2))
+            .await?,
+        "invalid_grant",
+    );
+    assert_eq!(
+        svc.access_user(
+            &second.access_token,
+            RESOURCE,
+            "mcp",
+            t + Duration::seconds(2)
+        )
+        .await?,
+        None
+    );
+    assert_eq!(
+        svc.access_user(
+            &first.access_token,
+            RESOURCE,
+            "mcp",
+            t + Duration::seconds(2)
+        )
+        .await?,
+        None
+    );
+    rejected(
+        svc.refresh(
+            &second.refresh_token.unwrap(),
+            CLIENT,
+            RESOURCE,
+            t + Duration::seconds(2),
+        )
+        .await?,
+        "invalid_grant",
+    );
+    let events:i64=sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE op_type='oauth.revoke' AND metadata->>'reason'='refresh_reuse'").fetch_one(&db.pool).await?;
+    assert_eq!(events, 1);
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
-async fn refresh_idle_and_absolute_expiry_are_independent()->Result<(),Box<dyn std::error::Error>>{
-    let Some(db)=TestDb::setup().await? else{return Ok(())};let user=insert_user_account(&db.pool,"lifetime","user@test").await?;let svc=service(&db);let t=now();
-    approved(&db,user,"idle","mcp offline_access",t).await?;let idle=issued(exchange(&svc,"idle",t).await?).refresh_token.unwrap();
-    rejected(svc.refresh(&idle,CLIENT,RESOURCE,t+Duration::days(7)).await?,"invalid_grant");
-    approved(&db,user,"absolute","mcp offline_access",t).await?;let mut refresh=issued(exchange(&svc,"absolute",t).await?).refresh_token.unwrap();
-    for day in [6,12,18,24,29] {refresh=issued(svc.refresh(&refresh,CLIENT,RESOURCE,t+Duration::days(day)).await?).refresh_token.unwrap();}
-    let near=issued(svc.refresh(&refresh,CLIENT,RESOURCE,t+Duration::days(30)-Duration::seconds(1)).await?);assert_eq!(near.expires_in,1);
-    rejected(svc.refresh(&near.refresh_token.unwrap(),CLIENT,RESOURCE,t+Duration::days(30)).await?,"invalid_grant");
-    db.cleanup().await;Ok(())
+async fn refresh_idle_and_absolute_expiry_are_independent() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "lifetime", "user@test").await?;
+    let svc = service(&db);
+    let t = now();
+    approved(&db, user, "idle", "mcp offline_access", t).await?;
+    let idle = issued(exchange(&svc, "idle", t).await?)
+        .refresh_token
+        .unwrap();
+    rejected(
+        svc.refresh(&idle, CLIENT, RESOURCE, t + Duration::days(7))
+            .await?,
+        "invalid_grant",
+    );
+    approved(&db, user, "absolute", "mcp offline_access", t).await?;
+    let mut refresh = issued(exchange(&svc, "absolute", t).await?)
+        .refresh_token
+        .unwrap();
+    for day in [6, 12, 18, 24, 29] {
+        refresh = issued(
+            svc.refresh(&refresh, CLIENT, RESOURCE, t + Duration::days(day))
+                .await?,
+        )
+        .refresh_token
+        .unwrap();
+    }
+    let near = issued(
+        svc.refresh(
+            &refresh,
+            CLIENT,
+            RESOURCE,
+            t + Duration::days(30) - Duration::seconds(1),
+        )
+        .await?,
+    );
+    assert_eq!(near.expires_in, 1);
+    rejected(
+        svc.refresh(
+            &near.refresh_token.unwrap(),
+            CLIENT,
+            RESOURCE,
+            t + Duration::days(30),
+        )
+        .await?,
+        "invalid_grant",
+    );
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
-async fn device_pending_slowdown_approval_and_single_use()->Result<(),Box<dyn std::error::Error>>{
-    let Some(db)=TestDb::setup().await? else{return Ok(())};let user=insert_user_account(&db.pool,"device","user@test").await?;let svc=service(&db);let t=now();let resource="https://notes.example.test/cli";
-    let device=svc.device("cli",resource,"cli offline_access","https://notes.example.test",t).await?;
-    assert_eq!(device.interval,5);
-    rejected(svc.poll_device(&device.device_code,"wrong",resource,t).await?,"invalid_grant");
-    rejected(svc.poll_device(&device.device_code,"cli",resource,t).await?,"authorization_pending");
-    rejected(svc.poll_device(&device.device_code,"cli",resource,t+Duration::seconds(1)).await?,"slow_down");
-    assert!(svc.approve_device(&device.user_code.to_lowercase().replace('-',""),user,true,t+Duration::seconds(2)).await?);
-    assert!(!svc.approve_device(&device.user_code,user,true,t+Duration::seconds(2)).await?);
-    let tokens=issued(svc.poll_device(&device.device_code,"cli",resource,t+Duration::seconds(11)).await?);
-    assert_eq!(svc.access_user(&tokens.access_token,resource,"cli",t+Duration::seconds(11)).await?,Some(user));
-    rejected(svc.poll_device(&device.device_code,"cli",resource,t+Duration::seconds(30)).await?,"invalid_grant");
-    db.cleanup().await;Ok(())
+async fn device_pending_slowdown_approval_and_single_use() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "device", "user@test").await?;
+    let svc = service(&db);
+    let t = now();
+    let resource = "https://notes.example.test/cli";
+    let device = svc
+        .device(
+            "cli",
+            resource,
+            "cli offline_access",
+            "https://notes.example.test",
+            t,
+        )
+        .await?;
+    assert_eq!(device.interval, 5);
+    rejected(
+        svc.poll_device(&device.device_code, "wrong", resource, t)
+            .await?,
+        "invalid_grant",
+    );
+    rejected(
+        svc.poll_device(&device.device_code, "cli", resource, t)
+            .await?,
+        "authorization_pending",
+    );
+    rejected(
+        svc.poll_device(
+            &device.device_code,
+            "cli",
+            resource,
+            t + Duration::seconds(1),
+        )
+        .await?,
+        "slow_down",
+    );
+    assert!(
+        svc.approve_device(
+            &device.user_code.to_lowercase().replace('-', ""),
+            user,
+            true,
+            t + Duration::seconds(2)
+        )
+        .await?
+    );
+    assert!(
+        !svc.approve_device(&device.user_code, user, true, t + Duration::seconds(2))
+            .await?
+    );
+    let tokens = issued(
+        svc.poll_device(
+            &device.device_code,
+            "cli",
+            resource,
+            t + Duration::seconds(11),
+        )
+        .await?,
+    );
+    assert_eq!(
+        svc.access_user(
+            &tokens.access_token,
+            resource,
+            "cli",
+            t + Duration::seconds(11)
+        )
+        .await?,
+        Some(user)
+    );
+    rejected(
+        svc.poll_device(
+            &device.device_code,
+            "cli",
+            resource,
+            t + Duration::seconds(30),
+        )
+        .await?,
+        "invalid_grant",
+    );
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
-async fn device_denial_and_expiry_never_issue_tokens()->Result<(),Box<dyn std::error::Error>>{
-    let Some(db)=TestDb::setup().await? else{return Ok(())};let user=insert_user_account(&db.pool,"denied","user@test").await?;let svc=service(&db);let t=now();
-    let denied=svc.device("cli",RESOURCE,"cli offline_access","https://notes.example.test",t).await?;
-    assert!(svc.approve_device(&denied.user_code,user,false,t).await?);
-    rejected(svc.poll_device(&denied.device_code,"cli",RESOURCE,t).await?,"access_denied");
-    let expired=svc.device("cli",RESOURCE,"cli offline_access","https://notes.example.test",t).await?;
-    assert!(!svc.approve_device(&expired.user_code,user,true,t+Duration::seconds(300)).await?);
-    rejected(svc.poll_device(&expired.device_code,"cli",RESOURCE,t+Duration::seconds(300)).await?,"expired_token");
-    db.cleanup().await;Ok(())
+async fn device_denial_and_expiry_never_issue_tokens() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "denied", "user@test").await?;
+    let svc = service(&db);
+    let t = now();
+    let denied = svc
+        .device(
+            "cli",
+            RESOURCE,
+            "cli offline_access",
+            "https://notes.example.test",
+            t,
+        )
+        .await?;
+    assert!(
+        svc.approve_device(&denied.user_code, user, false, t)
+            .await?
+    );
+    rejected(
+        svc.poll_device(&denied.device_code, "cli", RESOURCE, t)
+            .await?,
+        "access_denied",
+    );
+    let expired = svc
+        .device(
+            "cli",
+            RESOURCE,
+            "cli offline_access",
+            "https://notes.example.test",
+            t,
+        )
+        .await?;
+    assert!(
+        !svc.approve_device(&expired.user_code, user, true, t + Duration::seconds(300))
+            .await?
+    );
+    rejected(
+        svc.poll_device(
+            &expired.device_code,
+            "cli",
+            RESOURCE,
+            t + Duration::seconds(300),
+        )
+        .await?,
+        "expired_token",
+    );
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
@@ -124,34 +389,77 @@ async fn concurrent_code_and_refresh_requests_issue_once()->Result<(),Box<dyn st
     approved(&db,user,"code","mcp offline_access",t).await?;
     let mut tasks=Vec::new();for _ in 0..8 {let svc=svc.clone();tasks.push(tokio::spawn(async move {exchange(&svc,"code",t).await}));}
     let mut results=Vec::new();for task in tasks {if let TokenOutcome::Issued(tokens)=task.await?? {results.push(tokens);}}assert_eq!(results.len(),1);
-    let refresh=results.pop().unwrap().refresh_token.unwrap();
+    approved(&db,user,"refresh-code","mcp offline_access",t).await?;
+    let refresh=issued(exchange(&svc,"refresh-code",t).await?).refresh_token.unwrap();
     let mut tasks=Vec::new();for _ in 0..8 {let svc=svc.clone();let refresh=refresh.clone();tasks.push(tokio::spawn(async move {svc.refresh(&refresh,CLIENT,RESOURCE,t+Duration::seconds(1)).await}));}
     let mut count=0;for task in tasks {if let TokenOutcome::Issued(_)=task.await?? {count+=1;}}assert_eq!(count,1);
-    let grants:i64=sqlx::query_scalar("SELECT count(*) FROM oauth_grants").fetch_one(&db.pool).await?;assert_eq!(grants,1);
+    let grants:i64=sqlx::query_scalar("SELECT count(*) FROM oauth_grants").fetch_one(&db.pool).await?;assert_eq!(grants,2);
     db.cleanup().await;Ok(())
 }
 
 #[tokio::test]
-async fn issuance_failure_rolls_back_code_consumption_and_grant()->Result<(),Box<dyn std::error::Error>>{
-    let Some(db)=TestDb::setup().await? else{return Ok(())};let user=insert_user_account(&db.pool,"rollback","user@test").await?;let svc=service(&db);let t=now();
-    approved(&db,user,"code","mcp offline_access",t).await?;
+async fn issuance_failure_rolls_back_code_consumption_and_grant()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "rollback", "user@test").await?;
+    let svc = service(&db);
+    let t = now();
+    approved(&db, user, "code", "mcp offline_access", t).await?;
     sqlx::raw_sql("CREATE FUNCTION reject_oauth() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected credential failure'; END $$; CREATE TRIGGER reject_oauth BEFORE INSERT ON oauth_credentials FOR EACH ROW EXECUTE FUNCTION reject_oauth();").execute(&db.pool).await?;
-    assert!(exchange(&svc,"code",t).await.is_err());
-    let grants:i64=sqlx::query_scalar("SELECT count(*) FROM oauth_grants").fetch_one(&db.pool).await?;assert_eq!(grants,0);
-    sqlx::query("DROP TRIGGER reject_oauth ON oauth_credentials").execute(&db.pool).await?;
-    issued(exchange(&svc,"code",t).await?);
-    db.cleanup().await;Ok(())
+    assert!(exchange(&svc, "code", t).await.is_err());
+    let grants: i64 = sqlx::query_scalar("SELECT count(*) FROM oauth_grants")
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(grants, 0);
+    sqlx::query("DROP TRIGGER reject_oauth ON oauth_credentials")
+        .execute(&db.pool)
+        .await?;
+    issued(exchange(&svc, "code", t).await?);
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
-async fn revoke_and_account_deletion_immediately_disable_existing_tokens()->Result<(),Box<dyn std::error::Error>>{
-    let Some(db)=TestDb::setup().await? else{return Ok(())};let user=insert_user_account(&db.pool,"revoked","user@test").await?;let svc=service(&db);let t=Utc::now();
-    approved(&db,user,"first","mcp offline_access",t).await?;let tokens=issued(exchange(&svc,"first",t).await?);
-    svc.revoke(&tokens.access_token,"other",t).await?;assert_eq!(svc.access_user(&tokens.access_token,RESOURCE,"mcp",t).await?,Some(user));
-    svc.revoke(&tokens.refresh_token.unwrap(),CLIENT,t).await?;assert_eq!(svc.access_user(&tokens.access_token,RESOURCE,"mcp",t).await?,None);
-    approved(&db,user,"second","mcp offline_access",t).await?;let tokens=issued(exchange(&svc,"second",t).await?);
-    notegate_db::AccountRepo::new(db.pool.clone()).soft_delete_user(user,user).await?;
-    assert_eq!(svc.access_user(&tokens.access_token,RESOURCE,"mcp",t).await?,None);
-    rejected(svc.refresh(&tokens.refresh_token.unwrap(),CLIENT,RESOURCE,t).await?,"invalid_grant");
-    db.cleanup().await;Ok(())
+async fn revoke_and_account_deletion_immediately_disable_existing_tokens()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "revoked", "user@test").await?;
+    let svc = service(&db);
+    let t = Utc::now();
+    approved(&db, user, "first", "mcp offline_access", t).await?;
+    let tokens = issued(exchange(&svc, "first", t).await?);
+    svc.revoke(&tokens.access_token, "other", t).await?;
+    assert_eq!(
+        svc.access_user(&tokens.access_token, RESOURCE, "mcp", t)
+            .await?,
+        Some(user)
+    );
+    svc.revoke(&tokens.refresh_token.unwrap(), CLIENT, t)
+        .await?;
+    assert_eq!(
+        svc.access_user(&tokens.access_token, RESOURCE, "mcp", t)
+            .await?,
+        None
+    );
+    approved(&db, user, "second", "mcp offline_access", t).await?;
+    let tokens = issued(exchange(&svc, "second", t).await?);
+    notegate_db::AccountRepo::new(db.pool.clone())
+        .soft_delete_user(user, user)
+        .await?;
+    assert_eq!(
+        svc.access_user(&tokens.access_token, RESOURCE, "mcp", t)
+            .await?,
+        None
+    );
+    rejected(
+        svc.refresh(&tokens.refresh_token.unwrap(), CLIENT, RESOURCE, t)
+            .await?,
+        "invalid_grant",
+    );
+    db.cleanup().await;
+    Ok(())
 }

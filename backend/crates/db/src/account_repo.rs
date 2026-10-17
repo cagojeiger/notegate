@@ -313,6 +313,14 @@ impl AccountRepo {
         account_identity::ensure_legacy_issuer(&self.pool, issuer).await
     }
 
+    /// An old unbound database must name its original issuer before switching providers.
+    pub async fn require_legacy_identity_binding(&self) -> Result<()> {
+        let unbound: bool=sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users WHERE provider_sub_hash IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM legacy_identity_issuer)")
+            .fetch_one(&self.pool).await.map_err(map_sqlx_error)?;
+        if unbound { return Err(Error::validation("bind the original authgate_url before enabling standalone authentication")); }
+        Ok(())
+    }
+
     pub async fn upsert_user_by_identity(&self, attrs: &ResolveAttrs) -> Result<(Account, User)> {
         validate_resolve_attrs(attrs)?;
         let subject_hash = self.crypto.provider_sub_hash(&attrs.issuer, &attrs.sub)?;

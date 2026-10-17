@@ -1,4 +1,6 @@
 ALTER TABLE browser_sessions ADD COLUMN local_session BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE browser_sessions ADD COLUMN oidc_issuer TEXT;
+ALTER TABLE browser_sessions ADD CONSTRAINT browser_session_issuer CHECK (local_session = (oidc_issuer IS NOT NULL));
 
 CREATE TABLE oidc_login_flows (
     id UUID PRIMARY KEY,

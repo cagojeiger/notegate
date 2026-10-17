@@ -51,13 +51,23 @@ impl PiiCrypto {
 mod tests {
     #[test]
     fn oauth_secrets_are_domain_and_record_bound() -> crate::Result<()> {
-        let crypto=super::PiiCrypto::test();
-        let ciphertext=crypto.encrypt_oauth_state("flow-one","secret state")?;
-        assert_eq!(crypto.decrypt_oauth_state("flow-one",&ciphertext)?,"secret state");
-        assert!(crypto.decrypt_oauth_state("flow-two",&ciphertext).is_err());
-        assert_ne!(crypto.oauth_hash("token","value")?,crypto.oauth_hash("code","value")?);
-        assert_ne!(crypto.oauth_hash("token","value")?,crypto.provider_sub_hash("token","value")?);
-        let serialized=serde_json::to_string(&ciphertext).map_err(|_|crate::Error::internal("serialization failed"))?;
+        let crypto = super::PiiCrypto::test();
+        let ciphertext = crypto.encrypt_oauth_state("flow-one", "secret state")?;
+        assert_eq!(
+            crypto.decrypt_oauth_state("flow-one", &ciphertext)?,
+            "secret state"
+        );
+        assert!(crypto.decrypt_oauth_state("flow-two", &ciphertext).is_err());
+        assert_ne!(
+            crypto.oauth_hash("token", "value")?,
+            crypto.oauth_hash("code", "value")?
+        );
+        assert_ne!(
+            crypto.oauth_hash("token", "value")?,
+            crypto.provider_sub_hash("token", "value")?
+        );
+        let serialized = serde_json::to_string(&ciphertext)
+            .map_err(|_| crate::Error::internal("serialization failed"))?;
         assert!(!serialized.contains("secret state"));
         Ok(())
     }

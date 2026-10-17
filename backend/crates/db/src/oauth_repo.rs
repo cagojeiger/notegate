@@ -184,15 +184,17 @@ impl OAuthRepo {
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(map_sqlx_error)?;
-        if auth.expires_at <= now
-            || auth.consumed_at.is_some()
-            || auth.client_id != client
-            || auth.resource != resource
-            || auth.redirect_uri != redirect
-            || auth.code_challenge != challenge
-        {
+        if auth.client_id != client || auth.resource != resource || auth.redirect_uri != redirect || auth.code_challenge != challenge {
             return Ok(ExchangeOutcome::Rejected("invalid_grant"));
         }
+        if auth.consumed_at.is_some() {
+            let grant: Option<OAuthGrant> = sqlx::query_as("SELECT * FROM oauth_grants WHERE id=$1 FOR UPDATE")
+                .bind(auth.id).fetch_optional(&mut *tx).await.map_err(map_sqlx_error)?;
+            if let Some(grant)=grant { revoke_grant(&mut tx,&grant,now,"code_reuse").await?; }
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return Ok(ExchangeOutcome::Rejected("invalid_grant"));
+        }
+        if auth.expires_at <= now { return Ok(ExchangeOutcome::Rejected("invalid_grant")); }
         sqlx::query("UPDATE oauth_authorizations SET consumed_at=$2 WHERE id=$1")
             .bind(auth.id)
             .bind(now)
@@ -201,6 +203,7 @@ impl OAuthRepo {
             .map_err(map_sqlx_error)?;
         let grant = new_grant(
             &mut tx,
+            auth.id,
             user,
             &auth.client_id,
             &auth.client_name,
@@ -416,6 +419,7 @@ impl OAuthRepo {
                 ExchangeOutcome::Issued(
                     new_grant(
                         &mut tx,
+                        Uuid::new_v4(),
                         user,
                         client,
                         "NoteGate CLI",
@@ -448,6 +452,7 @@ async fn lock_user(conn: &mut PgConnection, user: Uuid) -> Result<bool> {
 
 async fn new_grant(
     conn: &mut PgConnection,
+    id: Uuid,
     user: Uuid,
     client: &str,
     name: &str,
@@ -456,8 +461,11 @@ async fn new_grant(
     issue: &CredentialIssue<'_>,
     now: DateTime<Utc>,
 ) -> Result<OAuthGrant> {
+    let offline=scope.split_whitespace().any(|s|s=="offline_access");
+    let expires=if offline {issue.grant_expires_at} else {issue.access_expires_at};
+    let idle=issue.idle_expires_at.min(expires);
     let grant:OAuthGrant=sqlx::query_as("INSERT INTO oauth_grants (id,user_id,client_id,client_name,resource,scope,created_at,expires_at,idle_expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *")
-        .bind(Uuid::new_v4()).bind(user).bind(client).bind(name).bind(resource).bind(scope).bind(now).bind(issue.grant_expires_at).bind(issue.idle_expires_at)
+        .bind(id).bind(user).bind(client).bind(name).bind(resource).bind(scope).bind(now).bind(expires).bind(idle)
         .fetch_one(&mut *conn).await.map_err(map_sqlx_error)?;
     insert_credentials(conn, &grant, issue).await?;
     crate::audit_events::oauth_grant_changed(conn, user, grant.id, "oauth.approve", None).await?;

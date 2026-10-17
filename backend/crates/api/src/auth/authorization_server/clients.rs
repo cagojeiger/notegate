@@ -106,12 +106,24 @@ impl ClientMetadata {
             return false;
         }
         self.redirect_uris.iter().any(|registered| {
-            if registered == redirect { return true; }
+            if registered == redirect {
+                return true;
+            }
             // RFC 8252 permits an ephemeral loopback port; host, path, and query stay exact.
-            let Ok(mut registered) = Url::parse(registered) else { return false; };
-            if !loopback || url.scheme() != "http" || registered.scheme() != "http" || registered.host() != url.host() { return false; }
+            let Ok(mut registered) = Url::parse(registered) else {
+                return false;
+            };
+            if !loopback
+                || url.scheme() != "http"
+                || registered.scheme() != "http"
+                || registered.host() != url.host()
+            {
+                return false;
+            }
             let mut requested = url.clone();
-            if registered.set_port(None).is_err() || requested.set_port(None).is_err() { return false; }
+            if registered.set_port(None).is_err() || requested.set_port(None).is_err() {
+                return false;
+            }
             registered == requested
         })
     }
@@ -144,14 +156,68 @@ fn public_ip(ip: IpAddr) -> bool {
     }
 }
 
+/// Bounded, short-lived positive cache and admission for untrusted metadata fetches.
+#[derive(Clone)]
+pub(crate) struct ClientRegistry {
+    cache: std::sync::Arc<
+        tokio::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, ClientMetadata)>>,
+    >,
+    admission: std::sync::Arc<tokio::sync::Semaphore>,
+}
+
+impl ClientRegistry {
+    pub fn new() -> Self {
+        Self { cache: Default::default(), admission: std::sync::Arc::new(tokio::sync::Semaphore::new(8)) }
+    }
+
+    pub(super) async fn get(&self, id: &str) -> Result<ClientMetadata, &'static str> {
+        {
+            let mut cache = self.cache.lock().await;
+            cache.retain(|_, (time, _)| time.elapsed() < Duration::from_secs(300));
+            if let Some((_, client)) = cache.get(id) {
+                return Ok(client.clone());
+            }
+        }
+        let _permit = self
+            .admission
+            .try_acquire()
+            .map_err(|_| "temporarily_unavailable")?;
+        let client = fetch(id).await?;
+        let mut cache = self.cache.lock().await;
+        if cache.len() >= 256 {
+            cache.clear();
+        }
+        cache.insert(id.to_owned(), (std::time::Instant::now(), client.clone()));
+        Ok(client)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
     fn redirects_match_exactly_except_loopback_port() {
-        let client=super::ClientMetadata { client_id:"https://client.example.test/metadata".to_owned(),client_name:"Client".to_owned(),redirect_uris:vec!["https://app.example.test/callback".to_owned(),"http://127.0.0.1/callback".to_owned()],token_endpoint_auth_method:None,token_endpoint_auth_methods_supported:vec![] };
+        let client = super::ClientMetadata {
+            client_id: "https://client.example.test/metadata".to_owned(),
+            client_name: "Client".to_owned(),
+            redirect_uris: vec![
+                "https://app.example.test/callback".to_owned(),
+                "http://127.0.0.1/callback".to_owned(),
+            ],
+            token_endpoint_auth_method: None,
+            token_endpoint_auth_methods_supported: vec![],
+        };
         assert!(client.allows_redirect("http://127.0.0.1:53001/callback"));
         assert!(client.allows_redirect("https://app.example.test/callback"));
-        for redirect in ["http://localhost:53001/callback","http://127.0.0.1:53001/other","https://app.example.test:8443/callback","https://app.example.test/callback?other=true","https://app.example.test/callback#fragment","https://user@app.example.test/callback"] { assert!(!client.allows_redirect(redirect)); }
+        for redirect in [
+            "http://localhost:53001/callback",
+            "http://127.0.0.1:53001/other",
+            "https://app.example.test:8443/callback",
+            "https://app.example.test/callback?other=true",
+            "https://app.example.test/callback#fragment",
+            "https://user@app.example.test/callback",
+        ] {
+            assert!(!client.allows_redirect(redirect));
+        }
     }
 
     #[test]
@@ -178,33 +244,5 @@ mod tests {
         assert!(super::public_ip(std::net::IpAddr::V4(
             std::net::Ipv4Addr::new(8, 8, 8, 8)
         )));
-    }
-}
-
-
-/// Bounded, short-lived positive cache and admission for untrusted metadata fetches.
-#[derive(Clone)]
-pub(crate) struct ClientRegistry {
-    cache: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, ClientMetadata)>>>,
-    admission: std::sync::Arc<tokio::sync::Semaphore>,
-}
-
-impl ClientRegistry {
-    pub fn new() -> Self {
-        Self { cache: Default::default(), admission: std::sync::Arc::new(tokio::sync::Semaphore::new(8)) }
-    }
-
-    pub async fn get(&self, id: &str) -> Result<ClientMetadata, &'static str> {
-        {
-            let mut cache = self.cache.lock().await;
-            cache.retain(|_, (time, _)| time.elapsed() < Duration::from_secs(300));
-            if let Some((_, client)) = cache.get(id) { return Ok(client.clone()); }
-        }
-        let _permit = self.admission.try_acquire().map_err(|_| "temporarily_unavailable")?;
-        let client = fetch(id).await?;
-        let mut cache = self.cache.lock().await;
-        if cache.len() >= 256 { cache.clear(); }
-        cache.insert(id.to_owned(), (std::time::Instant::now(), client.clone()));
-        Ok(client)
     }
 }
