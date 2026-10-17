@@ -20,7 +20,7 @@ use uuid::Uuid;
 /// `provider_sub_hash` and PII as a
 /// tombstone. The purge run anonymizes PII and frees the sub-hash once the
 /// retention window elapses; re-login during the window is rejected by
-/// `upsert_user_by_sub`, so a returning sub never duplicates the account.
+/// `upsert_user_by_identity`, so a returning sub never duplicates the account.
 pub(crate) async fn soft_delete_user(
     pool: &PgPool,
     account_id: Uuid,

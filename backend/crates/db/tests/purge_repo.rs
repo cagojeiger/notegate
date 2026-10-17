@@ -37,7 +37,7 @@ async fn space_purge_preserves_legacy_change_owners_before_background_encryption
     .bind(space)
     .execute(&db.pool)
     .await?;
-    for version in 48..=51 {
+    for version in 48..=55 {
         db.apply_migration(version).await?;
     }
     sqlx::query(

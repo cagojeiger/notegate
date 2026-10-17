@@ -238,7 +238,8 @@ async fn background_jobs_return_owned_queue_history_and_attempts()
 
     let (account, user) = state
         .accounts
-        .upsert_user_by_sub(&ResolveAttrs {
+        .upsert_user_by_identity(&ResolveAttrs {
+            issuer: "https://auth.example.test".to_owned(),
             sub: "history-stranger".to_owned(),
             email: "history-stranger@example.test".to_owned(),
             name: "History Stranger".to_owned(),
@@ -374,7 +375,8 @@ async fn owned_changes_remain_private_and_paginated_after_space_removal()
         state.security.clone(),
         state.config.default_user_tier,
     )
-    .upsert_user_by_sub(&ResolveAttrs {
+    .upsert_user_by_identity(&ResolveAttrs {
+        issuer: "https://auth.example.test".to_owned(),
         sub: "other-history-owner".into(),
         email: "other-history@example.test".into(),
         name: "Other".into(),

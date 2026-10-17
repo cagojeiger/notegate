@@ -36,6 +36,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         crypto.clone(),
         config.default_user_tier,
     );
+    account_repo
+        .ensure_legacy_identity_issuer(&config.authgate_url)
+        .await?;
     // Optional CI suffix creates independent identities without changing existing seeds.
     let suffix = std::env::args().nth(1);
     let (sub, email, name) = match suffix {
@@ -63,7 +66,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
     };
     let (account, _user) = account_repo
-        .upsert_user_by_sub(&ResolveAttrs { sub, email, name })
+        .upsert_user_by_identity(&ResolveAttrs {
+            issuer: config.authgate_url.clone(),
+            sub,
+            email,
+            name,
+        })
         .await?;
 
     let browser_session = create_browser_session(&config, &pool, &crypto, account.id).await?;

@@ -24,6 +24,12 @@ GET /auth/callback?code=...&state=...
 
 AuthGate는 refresh token의 canonical state, rotation, revoke 여부를 관리한다. NoteGate는 해당 refresh token 값을 브라우저 세션 갱신에 다시 제출할 수 있도록 저장할 뿐이며, browser client에는 refresh token을 노출하지 않는다.
 
+Local user 조회는 검증된 `issuer + sub`를 사용한다. Browser는 검증에 사용한 OIDC
+issuer를, MCP·CLI는 검증된 JWT의 `iss`를 전달한다. Email로 신원을 연결하지 않는다.
+기존 subject hash는 API startup에서 DB에 고정한 기존 AuthGate issuer에만 허용한다.
+해당 설정을 다른 issuer로 바꾸면 startup이 실패하므로 provider 변경 전 별도 신원
+전환이 필요하다. 현재 login/token/refresh 경로는 기존 AuthGate를 유지한다.
+
 Browser ID token 검증용 discovery metadata와 JWKS는 프로세스에서 캐시하며, discovery
 갱신 주기는 1시간이다. Discovery 실패 시 기존 snapshot을 유지한다.
 콜백에서 일치하는 서명 키가 없거나 캐시된 키로 서명 검증이 실패하면, 앞서 discovery한

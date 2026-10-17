@@ -171,6 +171,7 @@ pub async fn callback(
             }
         };
     let attrs = ResolveAttrs {
+        issuer: state.oidc.issuer().to_owned(),
         sub: login_userinfo.userinfo.sub,
         email: login_userinfo.userinfo.email.unwrap_or_default(),
         name: login_userinfo.userinfo.name.unwrap_or_default(),

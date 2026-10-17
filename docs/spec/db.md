@@ -20,6 +20,8 @@ Migration은 forward-only로 운영한다.
 crypto_key_epochs
 accounts
 users
+external_identities
+legacy_identity_issuer
 agents
 api_keys
 audit_events
@@ -96,6 +98,30 @@ users
   tier text not null default 'tier0'
   anonymized_at timestamptz null
 ```
+
+```text
+external_identities
+  user_id uuid not null references users(id) on delete cascade
+  issuer text not null
+  subject_hash text not null
+  subject_hash_key_id text not null references crypto_key_epochs(key_id)
+  subject_hash_version int not null
+  created_at timestamptz not null default now()
+  primary key (issuer, subject_hash)
+  index (user_id)
+
+legacy_identity_issuer
+  singleton bool pk default true check (singleton)
+  issuer text not null
+```
+
+외부 신원은 검증된 `issuer`와 subject의 HMAC으로 찾는다. Email이 같아도 계정을 자동 연결하지 않는다.
+API startup은 기존 `NOTEGATE_AUTHGATE_URL`을 `legacy_identity_issuer`에 한 번 고정하며,
+다른 issuer로 재설정하려 하면 실패한다. 기존 `users.provider_sub_hash`는 이 issuer에만
+호환 조회를 허용한다. Browser 재로그인 시 기존 UUID를 유지한 채 `external_identities`를
+같은 transaction에서 추가하며, 기존 issuer의 신규 계정은 구 binary와의 호환을 위해
+`users.provider_sub_hash`도 함께 기록한다. 다른 issuer의 계정에는 legacy hash를 기록하지 않는다.
+`issuer`는 두 테이블 모두 1..2048자다.
 
 ```text
 agents

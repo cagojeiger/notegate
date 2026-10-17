@@ -56,6 +56,8 @@ impl Caller {
 /// Verified OAuth attributes extracted from a bearer/browser credential.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolveAttrs {
+    /// The issuer authenticated by the token verifier or OIDC provider.
+    pub issuer: String,
     pub sub: String,
     pub email: String,
     pub name: String,

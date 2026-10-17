@@ -7,7 +7,7 @@
 //! - browser session cookies resolve an already-registered user account on the
 //!   browser channel;
 //! - MCP OAuth bearer tokens resolve an already-registered user account
-//!   (an authenticated authgate identity with no local account is
+//!   (an authenticated external identity with no local account is
 //!   [`IdentityError::NotRegistered`] — the spec onboarding path);
 //! - Command API OAuth bearer tokens resolve an already-registered user on the
 //!   API channel;
@@ -67,7 +67,7 @@ impl Resolver {
     /// Resolve a browser login: create or update the user account, then return
     /// the caller on the browser channel. Inactive accounts remain rejected.
     pub async fn resolve_browser(&self, attrs: ResolveAttrs) -> Result<Caller, IdentityError> {
-        let (account, user) = self.users.upsert_user_by_sub(&attrs).await?;
+        let (account, user) = self.users.upsert_user_by_identity(&attrs).await?;
         caller_from_user(account, user, Channel::Browser)
     }
 
@@ -86,12 +86,14 @@ impl Resolver {
 
     /// Resolve an MCP bearer for an already-registered user account.
     pub async fn resolve_mcp(&self, attrs: ResolveAttrs) -> Result<Caller, IdentityError> {
-        self.resolve_registered_user(&attrs.sub, Channel::Mcp).await
+        self.resolve_registered_user(&attrs.issuer, &attrs.sub, Channel::Mcp)
+            .await
     }
 
     /// Resolve a Command API OAuth bearer for an already-registered user account.
     pub async fn resolve_command_user(&self, attrs: ResolveAttrs) -> Result<Caller, IdentityError> {
-        self.resolve_registered_user(&attrs.sub, Channel::Api).await
+        self.resolve_registered_user(&attrs.issuer, &attrs.sub, Channel::Api)
+            .await
     }
 
     /// Resolve an Agent API key on the given channel.
@@ -123,10 +125,11 @@ impl Resolver {
 
     async fn resolve_registered_user(
         &self,
+        issuer: &str,
         sub: &str,
         channel: Channel,
     ) -> Result<Caller, IdentityError> {
-        let resolved = self.users.find_user_by_sub(sub).await?;
+        let resolved = self.users.find_user_by_identity(issuer, sub).await?;
         let (account, user) = resolved.ok_or(IdentityError::NotRegistered)?;
         caller_from_user(account, user, channel)
     }

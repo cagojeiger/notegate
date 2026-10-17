@@ -236,7 +236,8 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
 
     let (stranger_account, stranger_user) = state
         .accounts
-        .upsert_user_by_sub(&ResolveAttrs {
+        .upsert_user_by_identity(&ResolveAttrs {
+            issuer: "https://auth.example.test".to_owned(),
             sub: "link-graph-stranger".to_owned(),
             email: "link-graph-stranger@example.test".to_owned(),
             name: "Link Graph Stranger".to_owned(),

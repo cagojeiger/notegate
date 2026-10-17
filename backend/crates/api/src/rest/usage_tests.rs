@@ -179,7 +179,8 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
 
     let (stranger_account, stranger_user) = state
         .accounts
-        .upsert_user_by_sub(&ResolveAttrs {
+        .upsert_user_by_identity(&ResolveAttrs {
+            issuer: "https://auth.example.test".to_owned(),
             sub: "rest-usage-stranger".to_owned(),
             email: "rest-usage-stranger@example.test".to_owned(),
             name: "REST Usage Stranger".to_owned(),

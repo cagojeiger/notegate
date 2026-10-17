@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::{audit_events, map_sqlx_error};
+use crate::{account_identity, audit_events, map_sqlx_error};
 use chrono::{DateTime, Utc};
 use notegate_core::security::{EncryptedField, PiiAad, PiiCrypto, PiiFieldKind};
 use notegate_core::tier::UserTier;
@@ -17,8 +17,6 @@ use notegate_model::account::{Account, AccountKind, AccountRef};
 use notegate_model::user::User;
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
-
-const AUTH_PROVIDER: &str = "authgate";
 
 /// FROM/WHERE selecting the live spaces an account owns. `$1` binds the account id.
 /// Shared by the service deletion gate and the repository transaction invariant so
@@ -285,7 +283,7 @@ impl AccountRepo {
     /// `provider_sub_hash` and PII as a
     /// tombstone. The purge run anonymizes PII and frees the sub-hash once the
     /// retention window elapses; re-login during the window is rejected by
-    /// `upsert_user_by_sub`, so a returning sub never duplicates the account.
+    /// `upsert_user_by_identity`, so a returning sub never duplicates the account.
     pub async fn soft_delete_user(&self, account_id: Uuid, deleted_by: Uuid) -> Result<()> {
         crate::account_delete::soft_delete_user(&self.pool, account_id, deleted_by).await
     }
@@ -310,28 +308,40 @@ impl AccountRepo {
             .transpose()
     }
 
-    pub async fn upsert_user_by_sub(&self, attrs: &ResolveAttrs) -> Result<(Account, User)> {
+    /// Register the issuer that owns pre-migration subject hashes. Rebinding is rejected.
+    pub async fn ensure_legacy_identity_issuer(&self, issuer: &str) -> Result<()> {
+        account_identity::ensure_legacy_issuer(&self.pool, issuer).await
+    }
+
+    pub async fn upsert_user_by_identity(&self, attrs: &ResolveAttrs) -> Result<(Account, User)> {
         validate_resolve_attrs(attrs)?;
-        let provider_sub_hash = self.crypto.provider_sub_hash(AUTH_PROVIDER, &attrs.sub)?;
+        let subject_hash = self.crypto.provider_sub_hash(&attrs.issuer, &attrs.sub)?;
+        let legacy_hash = self
+            .crypto
+            .provider_sub_hash(account_identity::LEGACY_PROVIDER, &attrs.sub)?;
         let email_hash = self.crypto.email_hash(&attrs.email)?;
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let is_legacy = account_identity::is_legacy_issuer(&mut tx, &attrs.issuer).await?;
 
+        // Keep the old binary's lock for the legacy issuer during rolling upgrades.
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(&provider_sub_hash)
+            .bind(if is_legacy { &legacy_hash } else { &subject_hash })
             .execute(&mut *tx)
             .await
             .map_err(map_sqlx_error)?;
 
-        let existing: Option<(Uuid, bool)> = sqlx::query_as(
-            "SELECT u.id, a.is_active \
-                 FROM users u \
-                 JOIN accounts a ON a.id = u.id \
-                 WHERE u.provider_sub_hash = $1",
-        )
-        .bind(&provider_sub_hash)
-        .fetch_optional(&mut *tx)
+        let existing = sqlx::query_as::<_, (Uuid, bool)>(sqlx::AssertSqlSafe(format!(
+            "SELECT a.id, (a.is_active AND a.deleted_at IS NULL) \
+             FROM accounts a WHERE a.id IN ({}) ORDER BY a.id FOR UPDATE OF a",
+            account_identity::USER_IDS
+        )))
+        .bind(&attrs.issuer)
+        .bind(&subject_hash)
+        .bind(&legacy_hash)
+        .fetch_all(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+        let existing = account_identity::only_row(existing)?;
 
         let created = existing.is_none();
         let account_id = match existing {
@@ -438,9 +448,9 @@ impl AccountRepo {
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
                 )
                 .bind(id)
-                .bind(&provider_sub_hash)
-                .bind(self.crypto.lookup_key_id())
-                .bind(self.crypto.version())
+                .bind(is_legacy.then_some(legacy_hash.as_str()))
+                .bind(is_legacy.then_some(self.crypto.lookup_key_id()))
+                .bind(is_legacy.then_some(self.crypto.version()))
                 .bind(email.ciphertext)
                 .bind(email.nonce)
                 .bind(self.crypto.enc_key_id())
@@ -456,6 +466,16 @@ impl AccountRepo {
                 id
             }
         };
+
+        account_identity::insert_identity(
+            &mut tx,
+            account_id,
+            &attrs.issuer,
+            &subject_hash,
+            self.crypto.lookup_key_id(),
+            self.crypto.version(),
+        )
+        .await?;
 
         let account_row = sqlx::query_as::<_, AccountRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {ACCOUNT_COLUMNS} \
@@ -484,31 +504,49 @@ impl AccountRepo {
         Ok((account, user_row.into_user(&self.crypto)?))
     }
 
-    pub async fn find_user_by_sub(&self, sub: &str) -> Result<Option<(Account, User)>> {
-        let provider_sub_hash = self.crypto.provider_sub_hash(AUTH_PROVIDER, sub)?;
-        let row = sqlx::query_as::<_, UserCallerRow>(sqlx::AssertSqlSafe(format!(
+    pub async fn find_user_by_identity(
+        &self,
+        issuer: &str,
+        sub: &str,
+    ) -> Result<Option<(Account, User)>> {
+        let subject_hash = self.crypto.provider_sub_hash(issuer, sub)?;
+        let legacy_hash = self
+            .crypto
+            .provider_sub_hash(account_identity::LEGACY_PROVIDER, sub)?;
+        let rows = sqlx::query_as::<_, UserCallerRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {USER_CALLER_COLUMNS} \
              FROM accounts a \
              JOIN users u ON u.id = a.id \
-             WHERE u.provider_sub_hash = $1"
+             WHERE a.id IN ({})",
+            account_identity::USER_IDS
         )))
-        .bind(&provider_sub_hash)
-        .fetch_optional(&self.pool)
+        .bind(issuer)
+        .bind(subject_hash)
+        .bind(legacy_hash)
+        .fetch_all(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
 
-        row.map(|row| row.into_parts(&self.crypto)).transpose()
+        account_identity::only_row(rows)?
+            .map(|row| row.into_parts(&self.crypto))
+            .transpose()
     }
 
     /// Resolve only the local user id for subject-equality checks. This avoids
     /// loading and decrypting caller PII on browser refresh validation paths.
-    pub async fn find_user_id_by_sub(&self, sub: &str) -> Result<Option<Uuid>> {
-        let provider_sub_hash = self.crypto.provider_sub_hash(AUTH_PROVIDER, sub)?;
-        sqlx::query_scalar("SELECT id FROM users WHERE provider_sub_hash = $1")
-            .bind(provider_sub_hash)
-            .fetch_optional(&self.pool)
+    pub async fn find_user_id_by_identity(&self, issuer: &str, sub: &str) -> Result<Option<Uuid>> {
+        let subject_hash = self.crypto.provider_sub_hash(issuer, sub)?;
+        let legacy_hash = self
+            .crypto
+            .provider_sub_hash(account_identity::LEGACY_PROVIDER, sub)?;
+        let rows = sqlx::query_scalar(sqlx::AssertSqlSafe(account_identity::USER_IDS.to_owned()))
+            .bind(issuer)
+            .bind(subject_hash)
+            .bind(legacy_hash)
+            .fetch_all(&self.pool)
             .await
-            .map_err(map_sqlx_error)
+            .map_err(map_sqlx_error)?;
+        account_identity::only_row(rows)
     }
 
     async fn fetch_account_row(&self, account_id: Uuid) -> Result<Option<AccountRow>> {
@@ -526,6 +564,9 @@ impl AccountRepo {
 }
 
 fn validate_resolve_attrs(attrs: &ResolveAttrs) -> Result<()> {
+    if attrs.issuer.is_empty() || attrs.issuer.len() > 2048 {
+        return Err(Error::validation("invalid identity issuer"));
+    }
     if attrs.sub.trim().is_empty() {
         return Err(Error::validation("provider subject cannot be empty"));
     }

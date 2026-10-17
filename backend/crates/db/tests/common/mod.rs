@@ -30,7 +30,8 @@ pub async fn insert_user_account(
     email: &str,
 ) -> Result<Uuid, Box<dyn std::error::Error>> {
     let (account, _) = AccountRepo::new(pool.clone())
-        .upsert_user_by_sub(&ResolveAttrs {
+        .upsert_user_by_identity(&ResolveAttrs {
+            issuer: "https://auth.example.test".to_owned(),
             sub: sub.to_owned(),
             email: email.to_owned(),
             name: format!("user-{sub}"),

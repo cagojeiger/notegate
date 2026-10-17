@@ -217,12 +217,18 @@ impl HasScope for JwtClaims {
 }
 
 fn attrs_from_claims(claims: JwtClaims) -> Result<ResolveAttrs, AuthError> {
+    let issuer = claims
+        .iss()
+        .ok_or(AuthError::InvalidToken)?
+        .as_str()
+        .to_owned();
     let sub = claims
         .sub()
         .ok_or(AuthError::InvalidToken)?
         .as_str()
         .to_owned();
     Ok(ResolveAttrs {
+        issuer,
         sub,
         email: claims.email.unwrap_or_default(),
         name: claims.name.unwrap_or_default(),

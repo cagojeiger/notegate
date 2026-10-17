@@ -87,6 +87,11 @@ impl OidcProvider {
         }
     }
 
+    /// The configured issuer whose discovery and ID tokens are verified.
+    pub(crate) fn issuer(&self) -> &str {
+        &self.issuer
+    }
+
     /// Build an OIDC client from cached (or freshly discovered) provider metadata.
     pub(crate) async fn client(&self) -> notegate_core::Result<OidcClient> {
         Ok(self.client_snapshot().await?.client)

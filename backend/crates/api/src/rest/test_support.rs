@@ -153,7 +153,8 @@ pub(crate) async fn caller_and_space(
         state.security.clone(),
         state.config.default_user_tier,
     )
-    .upsert_user_by_sub(&ResolveAttrs {
+    .upsert_user_by_identity(&ResolveAttrs {
+        issuer: "https://auth.example.test".to_owned(),
         sub: "rest-test-owner".to_owned(),
         email: "rest-test-owner@example.test".to_owned(),
         name: "REST Test Owner".to_owned(),

@@ -343,7 +343,7 @@ async fn refreshed_sub_matches_session(
 ) -> Result<bool, AuthError> {
     let resolved = state
         .accounts
-        .find_user_id_by_sub(sub)
+        .find_user_id_by_identity(state.oidc.issuer(), sub)
         .await
         .map_err(|_error| AuthError::Internal)?;
     Ok(resolved == Some(user_id))

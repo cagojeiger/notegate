@@ -37,6 +37,9 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
                  updated_at = now() \
              FROM due WHERE accounts.id = due.id \
              RETURNING accounts.id \
+         ), anon_identities AS ( \
+             DELETE FROM external_identities i USING due WHERE i.user_id = due.id \
+             RETURNING i.user_id \
          ), anon_users AS ( \
              UPDATE users SET \
                  provider_sub_hash = NULL, provider_sub_hash_key_id = NULL, \
