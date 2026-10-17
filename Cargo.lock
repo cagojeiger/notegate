@@ -2901,7 +2901,7 @@ checksum = "38bf9645c8b145698bb0b18a4637dcacbc421ea49bef2317e4fd8065a387cf21"
 
 [[package]]
 name = "notegate-api"
-version = "0.1.106"
+version = "0.1.107"
 dependencies = [
  "aliri",
  "aliri_clock",
@@ -2956,7 +2956,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-cli"
-version = "0.1.106"
+version = "0.1.107"
 dependencies = [
  "axum",
  "clap",
@@ -2976,7 +2976,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-command"
-version = "0.1.106"
+version = "0.1.107"
 dependencies = [
  "schemars 1.2.2",
  "serde",
@@ -2985,7 +2985,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-core"
-version = "0.1.106"
+version = "0.1.107"
 dependencies = [
  "aes-gcm",
  "base64 0.23.1",
@@ -3004,7 +3004,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-db"
-version = "0.1.106"
+version = "0.1.107"
 dependencies = [
  "chrono",
  "notegate-core",
@@ -3023,7 +3023,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-jobs"
-version = "0.1.106"
+version = "0.1.107"
 dependencies = [
  "chrono",
  "futures-util",
@@ -3041,7 +3041,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-media"
-version = "0.1.106"
+version = "0.1.107"
 dependencies = [
  "infer",
  "roxmltree",
@@ -3050,7 +3050,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-model"
-version = "0.1.106"
+version = "0.1.107"
 dependencies = [
  "chrono",
  "notegate-core",
@@ -3062,7 +3062,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-reconciliation"
-version = "0.1.106"
+version = "0.1.107"
 dependencies = [
  "futures-util",
  "metrics",
@@ -3078,7 +3078,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-search"
-version = "0.1.106"
+version = "0.1.107"
 dependencies = [
  "chrono",
  "metrics",
@@ -3097,7 +3097,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-service"
-version = "0.1.106"
+version = "0.1.107"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -3128,7 +3128,7 @@ dependencies = [
 
 [[package]]
 name = "notegate-text"
-version = "0.1.106"
+version = "0.1.107"
 dependencies = [
  "serde_json",
  "sha2 0.11.0",
