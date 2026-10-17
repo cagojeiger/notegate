@@ -84,10 +84,20 @@ pub async fn authorization_server_metadata(
 
 pub fn authorization_server_metadata_for_config(config: &Config) -> AuthorizationServerMetadata {
     let standalone = config.oidc.is_some();
-    let issuer = if standalone { &config.notegate_public_url } else { &config.authgate_url }.trim_end_matches('/').to_owned();
+    let issuer = if standalone {
+        &config.notegate_public_url
+    } else {
+        &config.authgate_url
+    }
+    .trim_end_matches('/')
+    .to_owned();
     AuthorizationServerMetadata {
         issuer: issuer.clone(),
-        authorization_endpoint: if standalone { format!("{issuer}/oauth/authorize") } else { format!("{issuer}/authorize") },
+        authorization_endpoint: if standalone {
+            format!("{issuer}/oauth/authorize")
+        } else {
+            format!("{issuer}/authorize")
+        },
         token_endpoint: format!("{issuer}/oauth/token"),
         revocation_endpoint: format!("{issuer}/oauth/revoke"),
         device_authorization_endpoint: format!("{issuer}/oauth/device/authorize"),
@@ -97,9 +107,17 @@ pub fn authorization_server_metadata_for_config(config: &Config) -> Authorizatio
             "refresh_token",
             "urn:ietf:params:oauth:grant-type:device_code",
         ],
-        token_endpoint_auth_methods_supported: if standalone { vec!["none"] } else { vec!["none","client_secret_basic","client_secret_post"] },
+        token_endpoint_auth_methods_supported: if standalone {
+            vec!["none"]
+        } else {
+            vec!["none", "client_secret_basic", "client_secret_post"]
+        },
         code_challenge_methods_supported: vec!["S256"],
-        scopes_supported: if standalone { vec!["mcp", "cli", "offline_access"] } else { vec!["openid", "profile", "email", "offline_access"] },
+        scopes_supported: if standalone {
+            vec!["mcp", "cli", "offline_access"]
+        } else {
+            vec!["openid", "profile", "email", "offline_access"]
+        },
         client_id_metadata_text_supported: (!standalone).then_some(true),
         client_id_metadata_document_supported: standalone.then_some(true),
         cli_client_id: config.cli_oauth_client_id.clone(),
@@ -115,10 +133,21 @@ pub async fn protected_resource_metadata(
 pub fn protected_resource_metadata_for_config(config: &Config) -> ProtectedResourceMetadata {
     ProtectedResourceMetadata {
         resource: config.resource_url.clone(),
-        authorization_servers: vec![if config.oidc.is_some() { config.notegate_public_url.clone() } else { config.authgate_url.clone() }],
-        scopes_supported: if config.oidc.is_some() { vec!["mcp","offline_access"] } else { vec!["openid", "profile", "email", "offline_access"] },
+        authorization_servers: vec![if config.oidc.is_some() {
+            config.notegate_public_url.clone()
+        } else {
+            config.authgate_url.clone()
+        }],
+        scopes_supported: if config.oidc.is_some() {
+            vec!["mcp", "offline_access"]
+        } else {
+            vec!["openid", "profile", "email", "offline_access"]
+        },
         bearer_methods_supported: vec!["header"],
-        mcp_client_id: config.oidc.is_none().then(||config.mcp_oauth_client_id.clone()),
+        mcp_client_id: config
+            .oidc
+            .is_none()
+            .then(|| config.mcp_oauth_client_id.clone()),
     }
 }
 
@@ -237,7 +266,7 @@ mod tests {
             vec!["none", "client_secret_basic", "client_secret_post"]
         );
         assert_eq!(metadata.code_challenge_methods_supported, vec!["S256"]);
-        assert!(metadata.client_id_metadata_text_supported);
+        assert_eq!(metadata.client_id_metadata_text_supported, Some(true));
         assert_eq!(metadata.cli_client_id, "notegate-cli-local");
         let json = serde_json::to_value(metadata).expect("metadata serializes");
         assert_eq!(json["cli_client_id"], "notegate-cli-local");

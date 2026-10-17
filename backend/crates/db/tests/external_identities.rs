@@ -374,3 +374,31 @@ async fn inconsistent_legacy_and_scoped_owners_fail_closed()
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn verified_identity_import_is_idempotent_and_preserves_ownership() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db)=TestDb::setup().await? else { return Ok(()); };
+    let owner=legacy_user(&db.pool,"authgate-uuid").await?;
+    let repo=AccountRepo::new(db.pool.clone());
+    repo.ensure_legacy_identity_issuer(LEGACY_ISSUER).await?;
+    let space:Uuid=sqlx::query_scalar("INSERT INTO spaces (owner_user_id,name) VALUES ($1,'Preserved') RETURNING id").bind(owner).fetch_one(&db.pool).await?;
+    let mappings=vec![notegate_db::account_repo::IdentityLink {account_id:owner,issuer:OTHER_ISSUER.to_owned(),subject:"verified-google-subject".to_owned()}];
+    repo.import_identity_links(&mappings).await?;repo.import_identity_links(&mappings).await?;
+    let (account,_)=repo.upsert_user_by_identity(&attrs(OTHER_ISSUER,"verified-google-subject")).await?;
+    assert_eq!(account.id,owner);
+    let space_owner:Uuid=sqlx::query_scalar("SELECT owner_user_id FROM spaces WHERE id=$1").bind(space).fetch_one(&db.pool).await?;assert_eq!(space_owner,owner);
+    assert_eq!(repo.find_user_id_by_identity(LEGACY_ISSUER,"authgate-uuid").await?,Some(owner));
+    db.cleanup().await;Ok(())
+}
+
+#[tokio::test]
+async fn conflicting_identity_import_rolls_back_all_mappings() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db)=TestDb::setup().await? else { return Ok(()); };
+    let first=legacy_user(&db.pool,"first").await?;let second=legacy_user(&db.pool,"second").await?;let repo=AccountRepo::new(db.pool.clone());
+    let mapping=|account_id,subject:&str|notegate_db::account_repo::IdentityLink {account_id,issuer:OTHER_ISSUER.to_owned(),subject:subject.to_owned()};
+    repo.import_identity_links(&[mapping(first,"taken")]).await?;
+    assert!(repo.import_identity_links(&[mapping(second,"new"),mapping(second,"taken")]).await.is_err());
+    assert_eq!(repo.find_user_id_by_identity(OTHER_ISSUER,"new").await?,None);
+    assert_eq!(repo.find_user_id_by_identity(OTHER_ISSUER,"taken").await?,Some(first));
+    db.cleanup().await;Ok(())
+}

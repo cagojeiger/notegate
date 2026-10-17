@@ -39,7 +39,8 @@ pub async fn login(
     Query(query): Query<LoginQuery>,
 ) -> Response {
     if state.config.oidc.is_some() {
-        return super::standalone_login::login(&state, jar, sanitize_next(query.next.as_deref())).await;
+        return super::standalone_login::login(&state, jar, sanitize_next(query.next.as_deref()))
+            .await;
     }
     let login_flow = match new_login_flow(&state.oidc).await {
         Ok(flow) => flow,
@@ -85,7 +86,14 @@ pub async fn callback(
     Query(query): Query<CallbackQuery>,
 ) -> Response {
     if state.config.oidc.is_some() {
-        return super::standalone_login::callback(&state, jar, query.code, query.state, query.error).await;
+        return super::standalone_login::callback(
+            &state,
+            jar,
+            query.code,
+            query.state,
+            query.error,
+        )
+        .await;
     }
     let cookie_state = jar
         .get(LOGIN_STATE_COOKIE)
@@ -179,7 +187,12 @@ pub async fn callback(
     complete_login(&state, jar, login_userinfo, next).await
 }
 
-pub(super) async fn complete_login(state: &AppState, jar: CookieJar, login_userinfo: super::oauth_exchange::LoginUserInfo, next: Option<String>) -> Response {
+pub(super) async fn complete_login(
+    state: &AppState,
+    jar: CookieJar,
+    login_userinfo: super::oauth_exchange::LoginUserInfo,
+    next: Option<String>,
+) -> Response {
     let attrs = ResolveAttrs {
         issuer: state.oidc.issuer().to_owned(),
         sub: login_userinfo.userinfo.sub,
@@ -187,9 +200,33 @@ pub(super) async fn complete_login(state: &AppState, jar: CookieJar, login_useri
         name: login_userinfo.userinfo.name.unwrap_or_default(),
     };
     if let Some(oidc) = &state.config.oidc {
-        match state.accounts.find_user_id_by_identity(&attrs.issuer, &attrs.sub).await {
-            Ok(None) if !oidc.allow_signup => return (jar, html_page(StatusCode::FORBIDDEN, "Account linking required", "Ask the operator to link your existing account before signing in.")).into_response(),
-            Err(_) => return (jar, html_page(StatusCode::INTERNAL_SERVER_ERROR,"Login failed","Account lookup failed")).into_response(),
+        match state
+            .accounts
+            .find_user_id_by_identity(&attrs.issuer, &attrs.sub)
+            .await
+        {
+            Ok(None) if !oidc.allow_signup => {
+                return (
+                    jar,
+                    html_page(
+                        StatusCode::FORBIDDEN,
+                        "Account linking required",
+                        "Ask the operator to link your existing account before signing in.",
+                    ),
+                )
+                    .into_response();
+            }
+            Err(_) => {
+                return (
+                    jar,
+                    html_page(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Login failed",
+                        "Account lookup failed",
+                    ),
+                )
+                    .into_response();
+            }
             _ => {}
         }
     }

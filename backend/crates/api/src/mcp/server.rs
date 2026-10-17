@@ -452,11 +452,7 @@ fn log_mcp_auth_denied(error: &AuthError, status: StatusCode) {
 }
 
 fn user_mcp_auth_response(state: &AppState, error: AuthError) -> Response {
-    mcp_auth_response(
-        state,
-        error,
-        shared_scoped_challenge_header(&state.config),
-    )
+    mcp_auth_response(state, error, shared_scoped_challenge_header(&state.config))
 }
 
 fn agent_mcp_auth_response(state: &AppState, error: AuthError) -> Response {

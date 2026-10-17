@@ -1,4 +1,5 @@
 pub mod api_key;
+pub mod authorization_server;
 pub mod bearer;
 #[cfg(test)]
 mod bearer_tests;
@@ -12,9 +13,8 @@ pub mod oidc;
 mod origin;
 pub mod page;
 mod public_api;
-mod standalone_login;
-pub mod authorization_server;
 pub mod session;
+mod standalone_login;
 
 pub(crate) use browser_session::{require_browser_session, require_browser_session_for_docs};
 pub(crate) use public_api::{

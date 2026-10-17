@@ -62,7 +62,11 @@ impl AuthorizationServerMetadata {
         Ok(AuthConfiguration {
             issuer,
             client_id: self.cli_client_id,
-            device_scope: if self.scopes_supported.iter().any(|s|s=="cli") { "cli offline_access" } else { super::DEVICE_SCOPE },
+            device_scope: if self.scopes_supported.iter().any(|s| s == "cli") {
+                "cli offline_access"
+            } else {
+                super::DEVICE_SCOPE
+            },
             token_endpoint,
             revocation_endpoint,
             device_authorization_endpoint,

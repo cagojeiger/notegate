@@ -113,9 +113,18 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
     .get("deleted_count");
 
     // Expiry is enforced synchronously at lookup; these bounded batches only reclaim storage.
-    for table in ["oidc_login_flows", "oauth_authorizations", "oauth_device_codes"] {
-        let sql=format!("DELETE FROM {table} WHERE ctid IN (SELECT ctid FROM {table} WHERE expires_at<=now() ORDER BY expires_at LIMIT 1000)");
-        sqlx::query(sqlx::AssertSqlSafe(sql)).execute(&mut *tx).await.map_err(map_sqlx_error)?;
+    for table in [
+        "oidc_login_flows",
+        "oauth_authorizations",
+        "oauth_device_codes",
+    ] {
+        let sql = format!(
+            "DELETE FROM {table} WHERE ctid IN (SELECT ctid FROM {table} WHERE expires_at<=now() ORDER BY expires_at LIMIT 1000)"
+        );
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
     }
     sqlx::query("DELETE FROM oauth_grants WHERE id IN (SELECT g.id FROM oauth_grants g JOIN users u ON u.id=g.user_id WHERE LEAST(g.expires_at,g.idle_expires_at,COALESCE(g.revoked_at,g.expires_at))<=now()-interval '15 days' OR u.anonymized_at IS NOT NULL ORDER BY g.created_at LIMIT 1000)")
         .execute(&mut *tx).await.map_err(map_sqlx_error)?;

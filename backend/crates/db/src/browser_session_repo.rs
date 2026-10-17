@@ -38,11 +38,18 @@ impl BrowserSessionRepo {
         self.insert_session_inner(args, false).await
     }
 
-    pub async fn insert_local_session(&self, args: InsertBrowserSession<'_>) -> Result<BrowserSession> {
+    pub async fn insert_local_session(
+        &self,
+        args: InsertBrowserSession<'_>,
+    ) -> Result<BrowserSession> {
         self.insert_session_inner(args, true).await
     }
 
-    async fn insert_session_inner(&self, args: InsertBrowserSession<'_>, local: bool) -> Result<BrowserSession> {
+    async fn insert_session_inner(
+        &self,
+        args: InsertBrowserSession<'_>,
+        local: bool,
+    ) -> Result<BrowserSession> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let row = sqlx::query_as::<_, BrowserSessionRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO browser_sessions \

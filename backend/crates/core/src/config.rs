@@ -340,11 +340,16 @@ impl Validate for Config {
             errors.add("authgate_url", ValidationError::new("http_url"));
         }
         if let Some(oidc) = &self.oidc {
-            let secure = url::Url::parse(&oidc.issuer).is_ok_and(|u| u.scheme()=="https" || (u.scheme()=="http" && u.host_str()==Some("127.0.0.1")));
+            let secure = url::Url::parse(&oidc.issuer).is_ok_and(|u| {
+                u.scheme() == "https" || (u.scheme() == "http" && u.host_str() == Some("127.0.0.1"))
+            });
             if validate_http_url_value(&oidc.issuer).is_err()
                 || !secure
                 || oidc.client_id.is_empty()
-                || oidc.client_secret.as_ref().is_some_and(|value| value.expose_secret().is_empty())
+                || oidc
+                    .client_secret
+                    .as_ref()
+                    .is_some_and(|value| value.expose_secret().is_empty())
             {
                 errors.add("oidc", ValidationError::new("invalid_provider"));
             }
@@ -460,7 +465,9 @@ impl Config {
 
     fn normalize(&mut self) {
         self.authgate_url = trim_trailing_slashes(&self.authgate_url);
-        if let Some(oidc)=&mut self.oidc { oidc.issuer=trim_trailing_slashes(&oidc.issuer); }
+        if let Some(oidc) = &mut self.oidc {
+            oidc.issuer = trim_trailing_slashes(&oidc.issuer);
+        }
         self.notegate_public_url = trim_trailing_slashes(&self.notegate_public_url);
         self.oauth_redirect_url = if self.oauth_redirect_url.trim().is_empty() {
             format!("{}/auth/callback", self.notegate_public_url)

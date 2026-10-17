@@ -191,7 +191,11 @@ fn data_plane_routes(state: AppState) -> Router<AppState> {
     );
     let router = Router::new()
         .merge(auth_routes())
-        .merge(if state.config.oidc.is_some() { crate::auth::authorization_server::routes() } else { Router::new() })
+        .merge(if state.config.oidc.is_some() {
+            crate::auth::authorization_server::routes()
+        } else {
+            Router::new()
+        })
         .merge(metadata_routes(&state))
         .merge(crate::openapi::routes(state.clone()))
         .merge(browser_v1)

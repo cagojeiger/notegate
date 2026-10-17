@@ -734,5 +734,14 @@ pub(crate) async fn oauth_grant_changed(
     op_type: &'static str,
     reason: Option<&str>,
 ) -> Result<()> {
-    event(tx, AuditContext::rest(user_id), user_id, op_type, "oauth_grant", Some(grant_id), json!({"reason":reason})).await
+    event(
+        tx,
+        AuditContext::rest(user_id),
+        user_id,
+        op_type,
+        "oauth_grant",
+        Some(grant_id),
+        json!({"reason":reason}),
+    )
+    .await
 }

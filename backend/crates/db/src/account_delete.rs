@@ -110,7 +110,10 @@ pub(crate) async fn soft_delete_user(
     .map_err(map_sqlx_error)?;
 
     sqlx::query("UPDATE oauth_grants SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL")
-        .bind(account_id).execute(&mut *tx).await.map_err(map_sqlx_error)?;
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
 
     let disconnected_connections = sqlx::query(
         "UPDATE space_agent_connections \

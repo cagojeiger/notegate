@@ -149,7 +149,9 @@ pub(crate) async fn run() -> anyhow::Result<()> {
             config.default_user_tier,
         );
         if config.oidc.is_none() {
-            account_repo.ensure_legacy_identity_issuer(&config.authgate_url).await?;
+            account_repo
+                .ensure_legacy_identity_issuer(&config.authgate_url)
+                .await?;
         }
         let api_key_repo = notegate_db::ApiKeyRepo::with_lookup_key(
             pool.clone(),
