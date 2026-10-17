@@ -110,7 +110,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("ACCOUNT_ID={}", account.id);
     println!("AGENT_API_KEY={}", agent_key.token);
     println!("BROWSER_SESSION={browser_session}");
+    if config.oidc.is_some() {
+        let fixture = create_oauth_consent(&config, &pool, &crypto).await?;
+        println!("OAUTH_CONSENT_FIXTURE={fixture}");
+    }
     Ok(())
+}
+
+async fn create_oauth_consent(
+    config: &Config,
+    pool: &notegate_db::PgPool,
+    crypto: &PiiCrypto,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    use notegate_db::oauth_repo::{Authorization, OAuthRepo};
+    use notegate_service::oauth::pkce_challenge;
+    use serde_json::json;
+
+    let id = Uuid::new_v4();
+    let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let verifier = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let client_id = "https://oauth-client.example.test/metadata";
+    let redirect_uri = "http://localhost:39327/callback";
+    let state = "browser-consent-regression";
+    let payload =
+        crypto.encrypt_oauth_state(&id.to_string(), &serde_json::to_string(&Some(state))?)?;
+    OAuthRepo::new(pool.clone())
+        .insert_authorization(&Authorization {
+            id,
+            client_id: client_id.to_owned(),
+            client_name: "Browser consent fixture".to_owned(),
+            resource: config.resource_url.clone(),
+            redirect_uri: redirect_uri.to_owned(),
+            scope: "mcp offline_access".to_owned(),
+            code_challenge: pkce_challenge(&verifier),
+            cookie_hash: crypto.oauth_hash("authorization-cookie", &secret)?,
+            private_payload: serde_json::to_value(payload)?,
+            user_id: None,
+            code_hash: None,
+            expires_at: Utc::now() + chrono::Duration::minutes(5),
+            consumed_at: None,
+        })
+        .await?;
+    Ok(
+        json!({"id":id,"secret":secret,"verifier":verifier,"client_id":client_id,"redirect_uri":redirect_uri,"state":state}),
+    )
 }
 
 async fn create_browser_session(

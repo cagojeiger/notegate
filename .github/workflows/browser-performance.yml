@@ -104,12 +104,19 @@ jobs:
           output=$(target/release/examples/seed_user)
           key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
           session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
+          consent=$(printf '%s\n' "$output" | sed -n 's/^OAUTH_CONSENT_FIXTURE=//p')
           test -n "$key"
           test -n "$session"
+          test -n "$consent"
           echo "::add-mask::$key"
           echo "::add-mask::$session"
-          echo "api_key=$key" >> "$GITHUB_OUTPUT"
-          echo "browser_session=$session" >> "$GITHUB_OUTPUT"
+          echo "::add-mask::$(jq -r .secret <<< "$consent")"
+          echo "::add-mask::$(jq -r .verifier <<< "$consent")"
+          {
+            echo "api_key=$key"
+            echo "browser_session=$session"
+            echo "oauth_consent=$consent"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Start application
         run: |
@@ -130,6 +137,7 @@ jobs:
         timeout-minutes: 5
         env:
           NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.identity.outputs.browser_session }}
+          NOTEGATE_WEB_E2E_OAUTH_CONSENT: ${{ steps.identity.outputs.oauth_consent }}
           NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.identity.outputs.api_key }}
         run: |
           pnpm --filter web exec playwright test --config playwright.performance.config.ts
