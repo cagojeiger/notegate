@@ -397,8 +397,13 @@ async fn verified_identity_import_is_idempotent_and_preserves_ownership()
     }];
     repo.import_identity_links(&mappings).await?;
     repo.import_identity_links(&mappings).await?;
-    let audit_count:i64=sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE op_type='identity.link' AND owner_user_id=$1").bind(owner).fetch_one(&db.pool).await?;
-    assert_eq!(audit_count,1);
+    let audit_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE op_type='identity.link' AND owner_user_id=$1",
+    )
+    .bind(owner)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(audit_count, 1);
     let (account, _) = repo
         .upsert_user_by_identity(&attrs(OTHER_ISSUER, "verified-google-subject"))
         .await?;

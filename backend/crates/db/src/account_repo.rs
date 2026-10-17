@@ -697,7 +697,10 @@ impl AccountRepo {
                 self.crypto.version(),
             )
             .await?;
-            if !exists { audit_events::external_identity_linked(&mut tx,link.account_id,&link.issuer).await?; }
+            if !exists {
+                audit_events::external_identity_linked(&mut tx, link.account_id, &link.issuer)
+                    .await?;
+            }
         }
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())

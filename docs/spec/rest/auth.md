@@ -84,4 +84,4 @@ Settings → Account의 **Manage connected applications**는 `/oauth/connections
 
 `oidc`가 없으면 기존 AuthGate OAuth 설정을 사용한다. 브라우저 로그인은 `offline_access`를 요청하고 외부 refresh token을 암호화 보관한다. 로컬 validation lease는 기본 1시간, absolute lifetime은 기본 30일이다. 갱신은 기존 claim/rotation/revoke 절차를 따르며 transient 실패는 retry 가능한 503, 영구 실패는 revoke 후 401이다. Logout의 외부 revoke는 best effort다.
 
-MCP·CLI는 이 모드에서만 AuthGate JWT/JWKS를 검증한다. 두 경로가 JWKS cache를 공유하며 초기·unknown-kid 조회의 완료 시점부터 5초 동안 재조회를 억제한다. 브라우저 OIDC discovery cache는 1시간이며 콜백의 키 갱신은 code를 재교환하지 않는다. 두 모드의 브라우저 세션은 섞어 사용하지 않는다. 독립 모드 전환 시 기존 브라우저와 MCP·CLI 연결은 재로그인이 필요하다.
+MCP·CLI는 이 모드에서만 AuthGate JWT/JWKS를 검증한다. 두 경로가 JWKS cache를 공유하며 초기·unknown-kid 조회의 완료 시점부터 5초 동안 재조회를 억제한다. 브라우저 OIDC discovery cache는 1시간이며 콜백의 키 갱신은 code를 재교환하지 않는다. 두 모드의 브라우저 세션은 섞어 사용하지 않는다. 독립 모드 전환 시 기존 브라우저와 MCP·CLI 연결은 재로그인이 필요하다. CLI는 두 모드의 scope discovery를 지원하는 버전으로 먼저 갱신한다. 서버·CLI를 호환 모드로 배포한 뒤 전체 인스턴스의 설정을 일관되게 전환하며, 같은 endpoint에 서로 다른 인증 모드를 섞어 두지 않는다.

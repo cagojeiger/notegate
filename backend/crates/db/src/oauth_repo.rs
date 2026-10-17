@@ -492,7 +492,7 @@ async fn new_grant(
         .bind(id).bind(user).bind(client).bind(name).bind(resource).bind(scope).bind(now).bind(expires).bind(idle)
         .fetch_one(&mut *conn).await.map_err(map_sqlx_error)?;
     insert_credentials(conn, &grant, issue).await?;
-    crate::audit_events::oauth_grant_changed(conn, user, grant.id, "oauth.approve", None).await?;
+    crate::audit_events::oauth_grant_changed(conn, user, grant.id, crate::audit_events::OAuthGrantEvent::Approved).await?;
     Ok(ExchangeOutcome::Issued(grant))
 }
 
@@ -544,8 +544,7 @@ async fn revoke_grant(
             conn,
             grant.user_id,
             grant.id,
-            "oauth.revoke",
-            Some(reason),
+            crate::audit_events::OAuthGrantEvent::Revoked(reason),
         )
         .await?;
     }

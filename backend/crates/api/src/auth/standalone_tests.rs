@@ -330,11 +330,42 @@ async fn authorization_consent_is_bound_single_use_and_explicit()
         .await?
         .pop()
         .ok_or("no grant")?;
-    let other=state.accounts.upsert_user_by_identity(&ResolveAttrs {issuer:state.oidc.issuer().to_owned(),sub:"other-subject".to_owned(),email:"other@test".to_owned(),name:"Other".to_owned()}).await?.0.id;
-    let other_cookie=format!("{BROWSER_SESSION_COOKIE}={}",create_browser_session(&state,other,"").await?);
-    post(&router,"/oauth/connections/revoke",&format!("id={}",grant.id),Some(&other_cookie),Some("http://localhost:9191")).await;
-    assert!(crate::auth::bearer::verify_bearer_mcp(&state,access).await.is_ok());
-    assert!(state.oauth.store.list_grants(other,Utc::now()).await?.is_empty());
+    let other = state
+        .accounts
+        .upsert_user_by_identity(&ResolveAttrs {
+            issuer: state.oidc.issuer().to_owned(),
+            sub: "other-subject".to_owned(),
+            email: "other@test".to_owned(),
+            name: "Other".to_owned(),
+        })
+        .await?
+        .0
+        .id;
+    let other_cookie = format!(
+        "{BROWSER_SESSION_COOKIE}={}",
+        create_browser_session(&state, other, "").await?
+    );
+    post(
+        &router,
+        "/oauth/connections/revoke",
+        &format!("id={}", grant.id),
+        Some(&other_cookie),
+        Some("http://localhost:9191"),
+    )
+    .await;
+    assert!(
+        crate::auth::bearer::verify_bearer_mcp(&state, access)
+            .await
+            .is_ok()
+    );
+    assert!(
+        state
+            .oauth
+            .store
+            .list_grants(other, Utc::now())
+            .await?
+            .is_empty()
+    );
     assert_eq!(
         post(
             &router,
@@ -391,3 +422,16 @@ async fn local_sessions_reject_old_issuer_and_expire_without_upstream_refresh()
 }
 
 use axum::response::IntoResponse as _;
+
+#[tokio::test]
+async fn malformed_oauth_requests_return_private_protocol_errors() -> Result<(),Box<dyn std::error::Error>> {
+    let Some(db)=TestDb::setup().await? else {return Ok(());};let router=app(standalone_state(&db)?);
+    for path in ["/oauth/token","/oauth/revoke","/oauth/device/authorize"] {
+        let response=post(&router,path,"unexpected=value",None,None).await;
+        assert_eq!(response.status(),StatusCode::BAD_REQUEST);assert_eq!(response.headers()[header::CACHE_CONTROL],"no-store");
+        assert_eq!(body(response).await["error"],"invalid_request");
+    }
+    let response=router.oneshot(Request::builder().method("POST").uri("/oauth/token").header(header::CONTENT_TYPE,"application/x-www-form-urlencoded").header(header::AUTHORIZATION,"Basic dGVzdDpwYXNzd29yZA==").body(Body::from("grant_type=refresh_token&client_id=client&refresh_token=token"))?).await?;
+    assert_eq!(response.status(),StatusCode::UNAUTHORIZED);assert!(response.headers().contains_key(header::WWW_AUTHENTICATE));assert_eq!(body(response).await["error"],"invalid_client");
+    db.cleanup().await;Ok(())
+}

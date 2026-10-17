@@ -220,7 +220,7 @@ pub(super) fn validate_token_response(token: TokenResponse) -> Result<TokenRespo
     {
         return Err(CliError::protocol(
             "invalid_token_response",
-            "AuthGate returned an invalid token response",
+            "The authorization server returned an invalid token response",
         ));
     }
     Ok(token)
