@@ -23,6 +23,7 @@ mod tests {
     fn mcp_me_output_flattens_identity_and_reports_running_version() -> Result<(), serde_json::Error>
     {
         let output = McpMeOutput::new(MeOutput {
+            oauth_connections_url: None,
             account: AccountRefOutput {
                 id: "account-id".to_owned(),
                 kind: "agent".to_owned(),

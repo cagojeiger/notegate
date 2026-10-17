@@ -686,6 +686,8 @@ impl AccountRepo {
             }
         }
         for (link, hash) in links.iter().zip(hashes) {
+            let exists: bool=sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM external_identities WHERE issuer=$1 AND subject_hash=$2)")
+                .bind(&link.issuer).bind(&hash).fetch_one(&mut *tx).await.map_err(map_sqlx_error)?;
             account_identity::insert_identity(
                 &mut tx,
                 link.account_id,
@@ -695,6 +697,7 @@ impl AccountRepo {
                 self.crypto.version(),
             )
             .await?;
+            if !exists { audit_events::external_identity_linked(&mut tx,link.account_id,&link.issuer).await?; }
         }
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())

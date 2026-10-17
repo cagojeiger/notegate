@@ -341,10 +341,17 @@ impl Validate for Config {
         }
         if let Some(oidc) = &self.oidc {
             let secure = secure_oauth_url(&oidc.issuer).is_some();
-            let public=secure_oauth_url(&self.notegate_public_url).filter(|u|matches!(u.path(), "" | "/"));
-            if public.is_none() { errors.add("notegate_public_url",ValidationError::new("oauth_origin")); }
-            if secure_oauth_url(&self.resource_url).is_none() { errors.add("resource_url",ValidationError::new("secure_oauth_url")); }
-            if self.oauth_redirect_url != format!("{}/auth/callback",self.notegate_public_url) { errors.add("oauth_redirect_url",ValidationError::new("oauth_callback")); }
+            let public = secure_oauth_url(&self.notegate_public_url)
+                .filter(|u| matches!(u.path(), "" | "/"));
+            if public.is_none() {
+                errors.add("notegate_public_url", ValidationError::new("oauth_origin"));
+            }
+            if secure_oauth_url(&self.resource_url).is_none() {
+                errors.add("resource_url", ValidationError::new("secure_oauth_url"));
+            }
+            if self.oauth_redirect_url != format!("{}/auth/callback", self.notegate_public_url) {
+                errors.add("oauth_redirect_url", ValidationError::new("oauth_callback"));
+            }
             if validate_http_url_value(&oidc.issuer).is_err()
                 || !secure
                 || oidc.client_id.is_empty()
@@ -467,9 +474,6 @@ impl Config {
 
     fn normalize(&mut self) {
         self.authgate_url = trim_trailing_slashes(&self.authgate_url);
-        if let Some(oidc) = &mut self.oidc {
-            oidc.issuer = trim_trailing_slashes(&oidc.issuer);
-        }
         self.notegate_public_url = trim_trailing_slashes(&self.notegate_public_url);
         self.oauth_redirect_url = if self.oauth_redirect_url.trim().is_empty() {
             format!("{}/auth/callback", self.notegate_public_url)
@@ -637,9 +641,17 @@ fn validate_http_url_value(value: &str) -> std::result::Result<(), ValidationErr
 }
 
 fn secure_oauth_url(value: &str) -> Option<Url> {
-    let url=Url::parse(value).ok()?;
-    let loopback=matches!(url.host(),Some(url::Host::Ipv4(ip)) if ip.is_loopback()) || matches!(url.host(),Some(url::Host::Ipv6(ip)) if ip.is_loopback()) || url.host_str()==Some("localhost");
-    (url.has_host() && (url.scheme()=="https" || (url.scheme()=="http" && loopback)) && url.username().is_empty() && url.password().is_none() && url.query().is_none() && url.fragment().is_none()).then_some(url)
+    let url = Url::parse(value).ok()?;
+    let loopback = matches!(url.host(),Some(url::Host::Ipv4(ip)) if ip.is_loopback())
+        || matches!(url.host(),Some(url::Host::Ipv6(ip)) if ip.is_loopback())
+        || url.host_str() == Some("localhost");
+    (url.has_host()
+        && (url.scheme() == "https" || (url.scheme() == "http" && loopback))
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none())
+    .then_some(url)
 }
 
 fn validate_internal_service_url(value: &str) -> std::result::Result<(), ValidationError> {
@@ -1438,10 +1450,23 @@ mod tests {
 
     #[test]
     fn standalone_authorization_server_requires_secure_origin_and_own_callback() {
-        let mut config=valid_config();
-        config.oidc=Some(super::OidcLoginConfig {issuer:config.authgate_url.clone(),client_id:config.oauth_client_id.clone(),client_secret:None,allow_signup:false});
-        for bad in ["http://public.example.test", "https://example.test/path", "https://example.test?query=true"] { config.notegate_public_url=bad.to_owned(); assert!(config.validate().is_err()); }
-        config.notegate_public_url="https://notes.example.test".to_owned();config.oauth_redirect_url="https://evil.example.test/auth/callback".to_owned();assert!(config.validate().is_err());
+        let mut config = valid_config();
+        config.oidc = Some(super::OidcLoginConfig {
+            issuer: config.authgate_url.clone(),
+            client_id: config.oauth_client_id.clone(),
+            client_secret: None,
+            allow_signup: false,
+        });
+        for bad in [
+            "http://public.example.test",
+            "https://example.test/path",
+            "https://example.test?query=true",
+        ] {
+            config.notegate_public_url = bad.to_owned();
+            assert!(config.validate().is_err());
+        }
+        config.notegate_public_url = "https://notes.example.test".to_owned();
+        config.oauth_redirect_url = "https://evil.example.test/auth/callback".to_owned();
+        assert!(config.validate().is_err());
     }
-
 }

@@ -617,23 +617,56 @@ async fn revoke_and_account_deletion_immediately_disable_existing_tokens()
 }
 
 #[tokio::test]
-async fn refresh_accepts_original_scope_but_never_expands_it() -> Result<(),Box<dyn std::error::Error>> {
-    let Some(db)=TestDb::setup().await? else{return Ok(());};let user=insert_user_account(&db.pool,"scope","user@test").await?;let svc=service(&db);let t=now();
-    approved(&db,user,"code","mcp offline_access",t).await?;let token=issued(exchange(&svc,"code",t).await?).refresh_token.unwrap();
-    rejected(svc.refresh_with_scope(&token,CLIENT,RESOURCE,Some("cli offline_access"),t).await?,"invalid_scope");
-    issued(svc.refresh_with_scope(&token,CLIENT,RESOURCE,Some("mcp offline_access"),t).await?);
-    db.cleanup().await;Ok(())
+async fn refresh_accepts_original_scope_but_never_expands_it()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "scope", "user@test").await?;
+    let svc = service(&db);
+    let t = now();
+    approved(&db, user, "code", "mcp offline_access", t).await?;
+    let token = issued(exchange(&svc, "code", t).await?)
+        .refresh_token
+        .unwrap();
+    rejected(
+        svc.refresh_with_scope(&token, CLIENT, RESOURCE, Some("cli offline_access"), t)
+            .await?,
+        "invalid_scope",
+    );
+    issued(
+        svc.refresh_with_scope(&token, CLIENT, RESOURCE, Some("mcp offline_access"), t)
+            .await?,
+    );
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
-async fn concurrent_approvals_respect_the_connection_limit() -> Result<(),Box<dyn std::error::Error>> {
-    let Some(db)=TestDb::setup().await? else{return Ok(());};let user=insert_user_account(&db.pool,"limit","user@test").await?;let svc=service(&db);let t=now();
+async fn concurrent_approvals_respect_the_connection_limit()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "limit", "user@test").await?;
+    let svc = service(&db);
+    let t = now();
     sqlx::query("INSERT INTO oauth_grants (id,user_id,client_id,client_name,resource,scope,created_at,expires_at,idle_expires_at) SELECT gen_random_uuid(),$1,'seed','Seed',$2,'mcp offline_access',$3,$3+interval '30 days',$3+interval '7 days' FROM generate_series(1,99)")
         .bind(user).bind(RESOURCE).bind(t).execute(&db.pool).await?;
-    approved(&db,user,"one","mcp offline_access",t).await?;approved(&db,user,"two","mcp offline_access",t).await?;
-    let one=svc.clone();let two=svc.clone();
-    let (one,two)=tokio::join!(exchange(&one,"one",t),exchange(&two,"two",t));
-    let mut success=0;for outcome in [one?,two?] {match outcome {TokenOutcome::Issued(_)=>success+=1,TokenOutcome::Rejected(e)=>assert_eq!(e,"access_denied")}}
-    assert_eq!(success,1);assert_eq!(svc.store.list_grants(user,t).await?.len(),100);
-    db.cleanup().await;Ok(())
+    approved(&db, user, "one", "mcp offline_access", t).await?;
+    approved(&db, user, "two", "mcp offline_access", t).await?;
+    let one = svc.clone();
+    let two = svc.clone();
+    let (one, two) = tokio::join!(exchange(&one, "one", t), exchange(&two, "two", t));
+    let mut success = 0;
+    for outcome in [one?, two?] {
+        match outcome {
+            TokenOutcome::Issued(_) => success += 1,
+            TokenOutcome::Rejected(e) => assert_eq!(e, "access_denied"),
+        }
+    }
+    assert_eq!(success, 1);
+    assert_eq!(svc.store.list_grants(user, t).await?.len(), 100);
+    db.cleanup().await;
+    Ok(())
 }

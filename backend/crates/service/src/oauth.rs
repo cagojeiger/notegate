@@ -97,10 +97,18 @@ impl OAuthService {
         resource: &str,
         now: DateTime<Utc>,
     ) -> Result<TokenOutcome> {
-        self.refresh_with_scope(token,client,resource,None,now).await
+        self.refresh_with_scope(token, client, resource, None, now)
+            .await
     }
 
-    pub async fn refresh_with_scope(&self, token: &str, client: &str, resource: &str, scope: Option<&str>, now: DateTime<Utc>) -> Result<TokenOutcome> {
+    pub async fn refresh_with_scope(
+        &self,
+        token: &str,
+        client: &str,
+        resource: &str,
+        scope: Option<&str>,
+        now: DateTime<Utc>,
+    ) -> Result<TokenOutcome> {
         let tokens = self.tokens()?;
         let issue = self.issue(&tokens, now);
         let outcome = self

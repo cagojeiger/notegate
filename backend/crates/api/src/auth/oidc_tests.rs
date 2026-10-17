@@ -820,16 +820,50 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
 
 #[tokio::test]
 async fn standalone_confidential_oidc_requires_recent_auth_time_and_not_a_refresh_token() {
-    let mock=MockProvider::start().await;mock.state.omit_refresh.store(true,Ordering::SeqCst);
-    let mut config=config(&mock.issuer);
-    config.oidc=Some(notegate_core::config::OidcLoginConfig {issuer:mock.issuer.clone(),client_id:CLIENT_ID.to_owned(),client_secret:Some(SecretString::from("test-client-secret".to_owned())),allow_signup:false});
-    let http=reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().expect("client");
-    let oidc=OidcProvider::new(&config,http.clone());
-    assert!(exchange_code_for_userinfo(&oidc,&http,"code","verifier",NONCE).await.is_err());
-    mock.set_token(KEY_A,"key-a",json!({"auth_time":chrono::Utc::now().timestamp()-120}),Algorithm::RS256).await;
-    assert!(exchange_code_for_userinfo(&oidc,&http,"code","verifier",NONCE).await.is_err());
-    mock.set_token(KEY_A,"key-a",json!({"auth_time":chrono::Utc::now().timestamp()}),Algorithm::RS256).await;
-    let result=exchange_code_for_userinfo(&oidc,&http,"code","verifier",NONCE).await.expect("fresh confidential OIDC");
+    let mock = MockProvider::start().await;
+    mock.state.omit_refresh.store(true, Ordering::SeqCst);
+    let mut config = config(&mock.issuer);
+    config.oidc = Some(notegate_core::config::OidcLoginConfig {
+        issuer: mock.issuer.clone(),
+        client_id: CLIENT_ID.to_owned(),
+        client_secret: Some(SecretString::from("test-client-secret".to_owned())),
+        allow_signup: false,
+    });
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("client");
+    let oidc = OidcProvider::new(&config, http.clone());
+    assert!(
+        exchange_code_for_userinfo(&oidc, &http, "code", "verifier", NONCE)
+            .await
+            .is_err()
+    );
+    mock.set_token(
+        KEY_A,
+        "key-a",
+        json!({"auth_time":chrono::Utc::now().timestamp()-120}),
+        Algorithm::RS256,
+    )
+    .await;
+    assert!(
+        exchange_code_for_userinfo(&oidc, &http, "code", "verifier", NONCE)
+            .await
+            .is_err()
+    );
+    mock.set_token(
+        KEY_A,
+        "key-a",
+        json!({"auth_time":chrono::Utc::now().timestamp()}),
+        Algorithm::RS256,
+    )
+    .await;
+    let result = exchange_code_for_userinfo(&oidc, &http, "code", "verifier", NONCE)
+        .await
+        .expect("fresh confidential OIDC");
     assert!(result.refresh_token.is_empty());
-    assert_eq!(mock.state.last_token_form.read().await["client_secret"],"test-client-secret");
+    assert_eq!(
+        mock.state.last_token_form.read().await["client_secret"],
+        "test-client-secret"
+    );
 }

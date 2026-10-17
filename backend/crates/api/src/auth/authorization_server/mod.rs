@@ -307,6 +307,10 @@ async fn token(
     if form.scope.is_some() && form.grant_type != "refresh_token" {
         return oauth_error("invalid_scope");
     }
+    let requested_scope=match form.scope.as_deref() {
+        Some(scope)=>match validate_scope(scope,if form.client_id==state.config.cli_oauth_client_id {"cli"} else {"mcp"}) {Ok(scope)=>Some(scope),Err(error)=>return oauth_error(error)},
+        None=>None,
+    };
     let now = Utc::now();
     let result = match form.grant_type.as_str() {
         "authorization_code" => match (form.code, form.redirect_uri, form.code_verifier) {
@@ -322,7 +326,13 @@ async fn token(
             Some(token) => {
                 state
                     .oauth
-                    .refresh_with_scope(&token, &form.client_id, &resource, form.scope.as_deref(), now)
+                    .refresh_with_scope(
+                        &token,
+                        &form.client_id,
+                        &resource,
+                        requested_scope.as_deref(),
+                        now,
+                    )
                     .await
             }
             None => return oauth_error("invalid_request"),
@@ -595,8 +605,10 @@ fn login_redirect(next: &str) -> Response {
     Redirect::to(&format!("/auth/login?{query}")).into_response()
 }
 fn oauth_error(error: &'static str) -> Response {
-    tracing::debug!(event="oauth.rejected",reason=error);
-    let status = if error == "temporarily_unavailable" { StatusCode::SERVICE_UNAVAILABLE } else if error == "server_error" {
+    tracing::debug!(event = "oauth.rejected", reason = error);
+    let status = if error == "temporarily_unavailable" {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else if error == "server_error" {
         StatusCode::INTERNAL_SERVER_ERROR
     } else {
         StatusCode::BAD_REQUEST
@@ -628,10 +640,18 @@ fn page(title: &str, body: &str) -> Response {
     response
 }
 
-
-async fn private_response(request: axum::http::Request<axum::body::Body>, next: axum::middleware::Next) -> Response {
-    let mut response=no_store(next.run(request).await);
-    response.headers_mut().insert(header::REFERRER_POLICY,header::HeaderValue::from_static("no-referrer"));
-    response.headers_mut().insert(header::X_FRAME_OPTIONS,header::HeaderValue::from_static("DENY"));
+async fn private_response(
+    request: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> Response {
+    let mut response = no_store(next.run(request).await);
+    response.headers_mut().insert(
+        header::REFERRER_POLICY,
+        header::HeaderValue::from_static("no-referrer"),
+    );
+    response.headers_mut().insert(
+        header::X_FRAME_OPTIONS,
+        header::HeaderValue::from_static("DENY"),
+    );
     response
 }

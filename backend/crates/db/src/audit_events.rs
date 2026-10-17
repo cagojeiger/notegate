@@ -612,6 +612,10 @@ pub(crate) async fn oauth_grant_changed(
     .await
 }
 
+pub(crate) async fn external_identity_linked(tx: &mut PgConnection, user: Uuid, issuer: &str) -> Result<()> {
+    insert_audit_event(tx,NewAuditEvent {operation_id:None,owner_user_id:Some(user),actor_account_id:None,source:"system",op_type:"identity.link",resource_type:"account",resource_id:Some(user),metadata:json!({"issuer":issuer,"reason":"operator_import"})}).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

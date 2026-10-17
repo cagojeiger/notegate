@@ -191,7 +191,13 @@ fn data_plane_routes(state: AppState) -> Router<AppState> {
     );
     let router = Router::new()
         .merge(if state.config.oidc.is_some() {
-            apply_rate_limit(auth_routes().merge(crate::auth::authorization_server::routes()), HttpRateLimitConfig { requests_per_second: 10, burst: 30 })
+            apply_rate_limit(
+                auth_routes().merge(crate::auth::authorization_server::routes()),
+                HttpRateLimitConfig {
+                    requests_per_second: 10,
+                    burst: 30,
+                },
+            )
         } else {
             auth_routes()
         })

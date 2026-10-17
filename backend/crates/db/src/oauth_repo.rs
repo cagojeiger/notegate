@@ -255,9 +255,7 @@ impl OAuthRepo {
         if grant.client_id != client || grant.resource != resource || !grant.is_live(now) {
             return Ok(ExchangeOutcome::Rejected("invalid_grant"));
         }
-        if requested_scope.is_some_and(|scope| scope != grant.scope) {
-            return Ok(ExchangeOutcome::Rejected("invalid_scope"));
-        }
+
         let (expires, consumed): (DateTime<Utc>, Option<DateTime<Utc>>) = sqlx::query_as(
             "SELECT expires_at,consumed_at FROM oauth_credentials WHERE token_hash=$1",
         )
@@ -270,6 +268,9 @@ impl OAuthRepo {
             // This is deliberately committed: returning an error must not undo revocation.
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(ExchangeOutcome::Rejected("invalid_grant"));
+        }
+        if requested_scope.is_some_and(|scope| scope != grant.scope) {
+            return Ok(ExchangeOutcome::Rejected("invalid_scope"));
         }
         if expires <= now {
             return Ok(ExchangeOutcome::Rejected("invalid_grant"));
@@ -433,17 +434,17 @@ impl OAuthRepo {
                     .await
                     .map_err(map_sqlx_error)?;
                 new_grant(
-                        &mut tx,
-                        Uuid::new_v4(),
-                        user,
-                        client,
-                        "NoteGate CLI",
-                        resource,
-                        &device.scope,
-                        issue,
-                        now,
-                    )
-                    .await?
+                    &mut tx,
+                    Uuid::new_v4(),
+                    user,
+                    client,
+                    "NoteGate CLI",
+                    resource,
+                    &device.scope,
+                    issue,
+                    now,
+                )
+                .await?
             }
         } else {
             ExchangeOutcome::Rejected("authorization_pending")
@@ -477,7 +478,9 @@ async fn new_grant(
 ) -> Result<ExchangeOutcome> {
     let active: i64=sqlx::query_scalar("SELECT count(*) FROM oauth_grants WHERE user_id=$1 AND revoked_at IS NULL AND expires_at>$2 AND idle_expires_at>$2")
         .bind(user).bind(now).fetch_one(&mut *conn).await.map_err(map_sqlx_error)?;
-    if active>=100 { return Ok(ExchangeOutcome::Rejected("access_denied")); }
+    if active >= 100 {
+        return Ok(ExchangeOutcome::Rejected("access_denied"));
+    }
     let offline = scope.split_whitespace().any(|s| s == "offline_access");
     let expires = if offline {
         issue.grant_expires_at

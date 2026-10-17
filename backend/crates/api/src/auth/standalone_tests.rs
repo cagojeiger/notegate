@@ -142,7 +142,7 @@ async fn device_http_flow_rejects_csrf_and_uses_own_tokens_without_authgate()
     let first = post(
         &router,
         "/oauth/token",
-        &format!("grant_type=refresh_token&client_id=notegate-cli-local&refresh_token={refresh}"),
+        &format!("grant_type=refresh_token&client_id=notegate-cli-local&scope=offline_access+cli&refresh_token={refresh}"),
         None,
         None,
     )
@@ -330,6 +330,11 @@ async fn authorization_consent_is_bound_single_use_and_explicit()
         .await?
         .pop()
         .ok_or("no grant")?;
+    let other=state.accounts.upsert_user_by_identity(&ResolveAttrs {issuer:state.oidc.issuer().to_owned(),sub:"other-subject".to_owned(),email:"other@test".to_owned(),name:"Other".to_owned()}).await?.0.id;
+    let other_cookie=format!("{BROWSER_SESSION_COOKIE}={}",create_browser_session(&state,other,"").await?);
+    post(&router,"/oauth/connections/revoke",&format!("id={}",grant.id),Some(&other_cookie),Some("http://localhost:9191")).await;
+    assert!(crate::auth::bearer::verify_bearer_mcp(&state,access).await.is_ok());
+    assert!(state.oauth.store.list_grants(other,Utc::now()).await?.is_empty());
     assert_eq!(
         post(
             &router,
