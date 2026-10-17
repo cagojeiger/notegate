@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+
 import { expect, test } from "@playwright/test";
 
 test("standalone CLI approval and connection revocation", async ({ browser, playwright, baseURL }) => {
@@ -58,6 +60,20 @@ test("standalone MCP consent follows its registered callback and exchanges the P
   const fixture = JSON.parse(rawFixture!) as {
     id: string; secret: string; verifier: string; client_id: string; redirect_uri: string; state: string;
   };
+  const callback = new URL(fixture.redirect_uri);
+  let returned: { url: URL; referer: string | undefined } | undefined;
+  const server = createServer((incoming, response) => {
+    const url = new URL(incoming.url ?? "/", callback.origin);
+    if (url.pathname === callback.pathname) {
+      returned = { url, referer: incoming.headers.referer };
+      response.writeHead(303, { location: "/done" });
+      response.end();
+    } else {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end("OAuth callback received");
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(Number(callback.port), "127.0.0.1", resolve));
   const request = await playwright.request.newContext({ baseURL });
   const context = await browser.newContext({ baseURL });
   try {
@@ -66,27 +82,15 @@ test("standalone MCP consent follows its registered callback and exchanges the P
       { name: `notegate_authorization_${fixture.id}`, value: fixture.secret, url: baseURL!, httpOnly: true, sameSite: "Lax" }
     ]);
     const page = await context.newPage();
-    const callback = new URL(fixture.redirect_uri);
-    await page.route(`${callback.origin}/**`, async (route) => {
-      if (new URL(route.request().url()).pathname === callback.pathname) {
-        await route.fulfill({ status: 303, headers: { location: `${callback.origin}/done` } });
-      } else {
-        await route.fulfill({ status: 200, contentType: "text/html", body: "OAuth callback received" });
-      }
-    });
     await page.goto(`/oauth/approve?id=${fixture.id}`);
     await expect(page.getByRole("heading", { name: "Connect application" })).toBeVisible();
-    const returned = page.waitForRequest((r) => {
-      const url = new URL(r.url());
-      return url.origin === callback.origin && url.pathname === callback.pathname;
-    });
     await page.getByRole("button", { name: "Allow access", exact: true }).click();
-    const callbackRequest = await returned;
     await expect(page).toHaveURL(`${callback.origin}/done`);
-    const parameters = new URL(callbackRequest.url()).searchParams;
+    expect(returned).toBeDefined();
+    const parameters = returned!.url.searchParams;
     expect(parameters.get("state")).toBe(fixture.state);
     expect(parameters.get("iss")).toBe(baseURL);
-    expect((await callbackRequest.allHeaders()).referer).toBeUndefined();
+    expect(returned!.referer).toBeUndefined();
     const response = await request.post("/oauth/token", {
       form: {
         grant_type: "authorization_code", client_id: fixture.client_id, resource: `${baseURL}/mcp`,
@@ -102,5 +106,6 @@ test("standalone MCP consent follows its registered callback and exchanges the P
   } finally {
     await context.close();
     await request.dispose();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
