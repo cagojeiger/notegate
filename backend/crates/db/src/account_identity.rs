@@ -86,7 +86,9 @@ pub(crate) async fn insert_identity(
 
 pub(crate) fn only_row<T>(mut rows: Vec<T>) -> Result<Option<T>> {
     if rows.len() > 1 {
-        return Err(Error::internal("external identity ownership is inconsistent"));
+        return Err(Error::internal(
+            "external identity ownership is inconsistent",
+        ));
     }
     Ok(rows.pop())
 }

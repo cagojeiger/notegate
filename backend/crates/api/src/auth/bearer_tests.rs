@@ -1090,7 +1090,10 @@ async fn issuer_scoped_identity_preserves_legacy_user_across_auth_channels()
         db.pool.clone(),
     )?;
     let issuer = state.config.authgate_url.clone();
-    state.accounts.ensure_legacy_identity_issuer(&issuer).await?;
+    state
+        .accounts
+        .ensure_legacy_identity_issuer(&issuer)
+        .await?;
     let attrs = ResolveAttrs {
         issuer: issuer.clone(),
         sub: "legacy-channel-user".to_owned(),
@@ -1111,24 +1114,60 @@ async fn issuer_scoped_identity_preserves_legacy_user_across_auth_channels()
         ),
         state.security.clone(),
     ));
-    let mcp_token = token(&attrs.sub, &issuer, json!(state.config.resource_url), future_exp(), "kid-1")?;
-    assert_eq!(verify_bearer_mcp(&state, &mcp_token).await?.account_id(), account.id);
-    let cli_token = token(&attrs.sub, &issuer, json!(state.config.cli_oauth_client_id), future_exp(), "kid-1")?;
+    let mcp_token = token(
+        &attrs.sub,
+        &issuer,
+        json!(state.config.resource_url),
+        future_exp(),
+        "kid-1",
+    )?;
+    assert_eq!(
+        verify_bearer_mcp(&state, &mcp_token).await?.account_id(),
+        account.id
+    );
+    let cli_token = token(
+        &attrs.sub,
+        &issuer,
+        json!(state.config.cli_oauth_client_id),
+        future_exp(),
+        "kid-1",
+    )?;
     let session = create_browser_session(&state, account.id, "legacy-refresh-token").await?;
     let app = crate::routes::app(state.clone());
     for request in [
-        cli_request().header("authorization", format!("Bearer {cli_token}")).body(cli_body("me", json!({})))?,
-        Request::builder().uri("/api/v1/me").header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}")).body(Body::empty())?,
+        cli_request()
+            .header("authorization", format!("Bearer {cli_token}"))
+            .body(cli_body("me", json!({})))?,
+        Request::builder()
+            .uri("/api/v1/me")
+            .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+            .body(Body::empty())?,
     ] {
         let response = app.clone().oneshot(request).await?;
         assert_eq!(response.status(), StatusCode::OK);
-        let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), 16 * 1024).await?)?;
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 16 * 1024).await?)?;
         assert_eq!(body["account"]["id"], json!(account.id));
     }
-    assert_eq!(state.accounts.find_user_id_by_identity("https://other.example.test", &attrs.sub).await?, None);
-    assert_eq!(state.accounts.upsert_user_by_identity(&attrs).await?.0.id, account.id);
-    state.accounts.soft_delete_user(account.id, account.id).await?;
-    assert!(matches!(verify_bearer_mcp(&state, &mcp_token).await, Err(AuthError::Inactive)));
+    assert_eq!(
+        state
+            .accounts
+            .find_user_id_by_identity("https://other.example.test", &attrs.sub)
+            .await?,
+        None
+    );
+    assert_eq!(
+        state.accounts.upsert_user_by_identity(&attrs).await?.0.id,
+        account.id
+    );
+    state
+        .accounts
+        .soft_delete_user(account.id, account.id)
+        .await?;
+    assert!(matches!(
+        verify_bearer_mcp(&state, &mcp_token).await,
+        Err(AuthError::Inactive)
+    ));
     db.cleanup().await;
     Ok(())
 }

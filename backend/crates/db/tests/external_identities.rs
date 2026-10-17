@@ -23,7 +23,11 @@ async fn legacy_user(pool: &PgPool, sub: &str) -> Result<Uuid, Box<dyn std::erro
     let id = common::insert_legacy_user_account(pool).await?;
     let crypto = PiiCrypto::test();
     let display = crypto.encrypt_pii_string(
-        &PiiAad::new(PiiFieldKind::AccountDisplayName, id.to_string(), crypto.enc_key_id()),
+        &PiiAad::new(
+            PiiFieldKind::AccountDisplayName,
+            id.to_string(),
+            crypto.enc_key_id(),
+        ),
         "Identity User",
     )?;
     let email = crypto.encrypt_pii_string(
@@ -72,16 +76,33 @@ async fn migration_preserves_legacy_owner_and_encrypted_pii()
     .fetch_one(&db.pool)
     .await?;
     let repo = AccountRepo::new(db.pool.clone());
-    let before = repo.find_caller_by_account_id(owner).await?.ok_or("owner missing")?;
+    let before = repo
+        .find_caller_by_account_id(owner)
+        .await?
+        .ok_or("owner missing")?;
 
     db.apply_migration(55).await?;
     // An unbound database must not interpret the legacy subject under any issuer.
-    assert_eq!(repo.find_user_id_by_identity(LEGACY_ISSUER, "legacy-sub").await?, None);
+    assert_eq!(
+        repo.find_user_id_by_identity(LEGACY_ISSUER, "legacy-sub")
+            .await?,
+        None
+    );
     repo.ensure_legacy_identity_issuer(LEGACY_ISSUER).await?;
-    assert_eq!(repo.find_user_id_by_identity(LEGACY_ISSUER, "legacy-sub").await?, Some(owner));
-    assert_eq!(repo.find_user_id_by_identity(OTHER_ISSUER, "legacy-sub").await?, None);
+    assert_eq!(
+        repo.find_user_id_by_identity(LEGACY_ISSUER, "legacy-sub")
+            .await?,
+        Some(owner)
+    );
+    assert_eq!(
+        repo.find_user_id_by_identity(OTHER_ISSUER, "legacy-sub")
+            .await?,
+        None
+    );
 
-    let (after, user) = repo.upsert_user_by_identity(&attrs(LEGACY_ISSUER, "legacy-sub")).await?;
+    let (after, user) = repo
+        .upsert_user_by_identity(&attrs(LEGACY_ISSUER, "legacy-sub"))
+        .await?;
     assert_eq!(after.id, before.0.id);
     assert_eq!(after.created_at, before.0.created_at);
     assert_eq!(after.display_name, before.0.display_name);
@@ -109,16 +130,38 @@ async fn same_subject_and_email_under_different_issuers_are_separate()
     };
     let repo = AccountRepo::new(db.pool.clone());
     repo.ensure_legacy_identity_issuer(LEGACY_ISSUER).await?;
-    let (first, _) = repo.upsert_user_by_identity(&attrs(LEGACY_ISSUER, "same-sub")).await?;
-    let (second, _) = repo.upsert_user_by_identity(&attrs(OTHER_ISSUER, "same-sub")).await?;
-    assert_ne!(first.id, second.id);
-    assert_eq!(repo.find_user_id_by_identity(LEGACY_ISSUER, "same-sub").await?, Some(first.id));
-    assert_eq!(repo.find_user_id_by_identity(OTHER_ISSUER, "same-sub").await?, Some(second.id));
-    let legacy_hash: Option<String> = sqlx::query_scalar("SELECT provider_sub_hash FROM users WHERE id = $1")
-        .bind(second.id)
-        .fetch_one(&db.pool)
+    let (first, _) = repo
+        .upsert_user_by_identity(&attrs(LEGACY_ISSUER, "same-sub"))
         .await?;
+    let (second, _) = repo
+        .upsert_user_by_identity(&attrs(OTHER_ISSUER, "same-sub"))
+        .await?;
+    assert_ne!(first.id, second.id);
+    assert_eq!(
+        repo.find_user_id_by_identity(LEGACY_ISSUER, "same-sub")
+            .await?,
+        Some(first.id)
+    );
+    assert_eq!(
+        repo.find_user_id_by_identity(OTHER_ISSUER, "same-sub")
+            .await?,
+        Some(second.id)
+    );
+    let legacy_hash: Option<String> =
+        sqlx::query_scalar("SELECT provider_sub_hash FROM users WHERE id = $1")
+            .bind(second.id)
+            .fetch_one(&db.pool)
+            .await?;
     assert!(legacy_hash.is_none());
+    let legacy_hash: String =
+        sqlx::query_scalar("SELECT provider_sub_hash FROM users WHERE id = $1")
+            .bind(first.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(
+        legacy_hash,
+        PiiCrypto::test().provider_sub_hash("authgate", "same-sub")?
+    );
     db.cleanup().await;
     Ok(())
 }
@@ -132,7 +175,11 @@ async fn legacy_issuer_is_idempotent_and_cannot_be_rebound()
     let repo = AccountRepo::new(db.pool.clone());
     repo.ensure_legacy_identity_issuer(LEGACY_ISSUER).await?;
     repo.ensure_legacy_identity_issuer(LEGACY_ISSUER).await?;
-    assert!(repo.ensure_legacy_identity_issuer(OTHER_ISSUER).await.is_err());
+    assert!(
+        repo.ensure_legacy_identity_issuer(OTHER_ISSUER)
+            .await
+            .is_err()
+    );
     let registered: String = sqlx::query_scalar("SELECT issuer FROM legacy_identity_issuer")
         .fetch_one(&db.pool)
         .await?;
@@ -154,7 +201,8 @@ async fn concurrent_legacy_logins_keep_one_account_and_identity()
     for _ in 0..12 {
         let repo = repo.clone();
         tasks.push(tokio::spawn(async move {
-            repo.upsert_user_by_identity(&attrs(LEGACY_ISSUER, "concurrent-sub")).await
+            repo.upsert_user_by_identity(&attrs(LEGACY_ISSUER, "concurrent-sub"))
+                .await
         }));
     }
     for task in tasks {
@@ -181,7 +229,8 @@ async fn concurrent_first_logins_create_one_scoped_account()
     for _ in 0..12 {
         let repo = repo.clone();
         tasks.push(tokio::spawn(async move {
-            repo.upsert_user_by_identity(&attrs(OTHER_ISSUER, "first-login")).await
+            repo.upsert_user_by_identity(&attrs(OTHER_ISSUER, "first-login"))
+                .await
         }));
     }
     let mut ids = std::collections::HashSet::new();
@@ -212,18 +261,66 @@ async fn scoped_identity_tombstone_is_removed_only_during_account_purge()
     let (account, _) = repo.upsert_user_by_identity(&identity).await?;
     repo.soft_delete_user(account.id, account.id).await?;
     assert!(repo.upsert_user_by_identity(&identity).await.is_err());
-    assert_eq!(repo.find_user_id_by_identity(LEGACY_ISSUER, "deleted-sub").await?, Some(account.id));
-    assert_eq!(PurgeRepo::new(db.pool.clone()).run_once().await?.accounts_anonymized, 0);
-    sqlx::query("UPDATE accounts SET deleted_at = now() - make_interval(days => $2::int) WHERE id = $1")
-        .bind(account.id)
-        .bind(i32::try_from(notegate_core::limits::ACCOUNT_DELETION_RETENTION_DAYS + 1)?)
+    assert_eq!(
+        repo.find_user_id_by_identity(LEGACY_ISSUER, "deleted-sub")
+            .await?,
+        Some(account.id)
+    );
+    assert_eq!(
+        PurgeRepo::new(db.pool.clone())
+            .run_once()
+            .await?
+            .accounts_anonymized,
+        0
+    );
+    sqlx::query(
+        "UPDATE accounts SET deleted_at = now() - make_interval(days => $2::int) WHERE id = $1",
+    )
+    .bind(account.id)
+    .bind(i32::try_from(
+        notegate_core::limits::ACCOUNT_DELETION_RETENTION_DAYS + 1,
+    )?)
+    .execute(&db.pool)
+    .await?;
+    sqlx::raw_sql("CREATE FUNCTION reject_identity_purge() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'identity purge failure'; END $$; CREATE TRIGGER reject_identity_purge BEFORE DELETE ON external_identities FOR EACH ROW EXECUTE FUNCTION reject_identity_purge();")
+        .execute(&db.pool).await?;
+    assert!(PurgeRepo::new(db.pool.clone()).run_once().await.is_err());
+    assert_eq!(
+        repo.find_user_id_by_identity(LEGACY_ISSUER, "deleted-sub")
+            .await?,
+        Some(account.id)
+    );
+    assert_eq!(
+        repo.find_account(account.id)
+            .await?
+            .ok_or("account shell missing")?
+            .display_name,
+        "Identity User"
+    );
+    sqlx::query("DROP TRIGGER reject_identity_purge ON external_identities")
         .execute(&db.pool)
         .await?;
-    assert_eq!(PurgeRepo::new(db.pool.clone()).run_once().await?.accounts_anonymized, 1);
-    assert_eq!(repo.find_user_id_by_identity(LEGACY_ISSUER, "deleted-sub").await?, None);
+    assert_eq!(
+        PurgeRepo::new(db.pool.clone())
+            .run_once()
+            .await?
+            .accounts_anonymized,
+        1
+    );
+    assert_eq!(
+        repo.find_user_id_by_identity(LEGACY_ISSUER, "deleted-sub")
+            .await?,
+        None
+    );
     let (new_account, _) = repo.upsert_user_by_identity(&identity).await?;
     assert_ne!(new_account.id, account.id);
-    assert!(!repo.find_account(account.id).await?.ok_or("account shell missing")?.is_live());
+    assert!(
+        !repo
+            .find_account(account.id)
+            .await?
+            .ok_or("account shell missing")?
+            .is_live()
+    );
     db.cleanup().await;
     Ok(())
 }
@@ -237,7 +334,9 @@ async fn inconsistent_legacy_and_scoped_owners_fail_closed()
     let owner = legacy_user(&db.pool, "conflicting-sub").await?;
     let repo = AccountRepo::new(db.pool.clone());
     repo.ensure_legacy_identity_issuer(LEGACY_ISSUER).await?;
-    let (other, _) = repo.upsert_user_by_identity(&attrs(OTHER_ISSUER, "other-sub")).await?;
+    let (other, _) = repo
+        .upsert_user_by_identity(&attrs(OTHER_ISSUER, "other-sub"))
+        .await?;
     let crypto = PiiCrypto::test();
     sqlx::query(
         "INSERT INTO external_identities \
@@ -250,10 +349,28 @@ async fn inconsistent_legacy_and_scoped_owners_fail_closed()
     .bind(crypto.version())
     .execute(&db.pool)
     .await?;
-    assert!(repo.find_user_id_by_identity(LEGACY_ISSUER, "conflicting-sub").await.is_err());
-    assert!(repo.find_user_by_identity(LEGACY_ISSUER, "conflicting-sub").await.is_err());
-    assert!(repo.upsert_user_by_identity(&attrs(LEGACY_ISSUER, "conflicting-sub")).await.is_err());
-    assert_eq!(repo.find_account(owner).await?.ok_or("owner missing")?.display_name, "Identity User");
+    assert!(
+        repo.find_user_id_by_identity(LEGACY_ISSUER, "conflicting-sub")
+            .await
+            .is_err()
+    );
+    assert!(
+        repo.find_user_by_identity(LEGACY_ISSUER, "conflicting-sub")
+            .await
+            .is_err()
+    );
+    assert!(
+        repo.upsert_user_by_identity(&attrs(LEGACY_ISSUER, "conflicting-sub"))
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        repo.find_account(owner)
+            .await?
+            .ok_or("owner missing")?
+            .display_name,
+        "Identity User"
+    );
     db.cleanup().await;
     Ok(())
 }

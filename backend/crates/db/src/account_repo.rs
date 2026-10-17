@@ -325,7 +325,11 @@ impl AccountRepo {
 
         // Keep the old binary's lock for the legacy issuer during rolling upgrades.
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(if is_legacy { &legacy_hash } else { &subject_hash })
+            .bind(if is_legacy {
+                &legacy_hash
+            } else {
+                &subject_hash
+            })
             .execute(&mut *tx)
             .await
             .map_err(map_sqlx_error)?;
