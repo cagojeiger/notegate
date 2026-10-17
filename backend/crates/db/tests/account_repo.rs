@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 fn attrs(sub: &str, email: &str, name: &str) -> ResolveAttrs {
     ResolveAttrs {
+        issuer: "https://auth.example.test".to_owned(),
         sub: sub.to_owned(),
         email: email.to_owned(),
         name: name.to_owned(),
@@ -23,10 +24,10 @@ async fn upsert_user_creates_and_updates_same_account() -> Result<(), Box<dyn st
     let repo = AccountRepo::new(db.pool.clone());
 
     let (first, first_user) = repo
-        .upsert_user_by_sub(&attrs("sub-1", "first@example.test", "First"))
+        .upsert_user_by_identity(&attrs("sub-1", "first@example.test", "First"))
         .await?;
     let (second, second_user) = repo
-        .upsert_user_by_sub(&attrs("sub-1", "second@example.test", "Second"))
+        .upsert_user_by_identity(&attrs("sub-1", "second@example.test", "Second"))
         .await?;
 
     assert_eq!(first.id, second.id);
@@ -40,12 +41,16 @@ async fn upsert_user_creates_and_updates_same_account() -> Result<(), Box<dyn st
     assert_eq!(by_id.display_name, "Second");
     assert_eq!(by_id_user.email.as_deref(), Some("second@example.test"));
     let (by_sub, by_sub_user) = repo
-        .find_user_by_sub("sub-1")
+        .find_user_by_identity("https://auth.example.test", "sub-1")
         .await?
         .ok_or("caller should resolve by provider subject")?;
     assert_eq!(by_sub.id, second.id);
     assert_eq!(by_sub_user.id, second_user.id);
-    assert_eq!(repo.find_user_id_by_sub("sub-1").await?, Some(second.id));
+    assert_eq!(
+        repo.find_user_id_by_identity("https://auth.example.test", "sub-1")
+            .await?,
+        Some(second.id)
+    );
     let op_types = sqlx::query_scalar::<_, String>(
         "SELECT op_type FROM audit_events WHERE owner_user_id = $1 ORDER BY id",
     )
@@ -70,7 +75,7 @@ async fn upsert_user_uses_configured_default_tier() -> Result<(), Box<dyn std::e
     );
 
     let (_account, user) = repo
-        .upsert_user_by_sub(&attrs("tier-sub", "tier@example.test", "Tier User"))
+        .upsert_user_by_identity(&attrs("tier-sub", "tier@example.test", "Tier User"))
         .await?;
 
     assert_eq!(user.tier, "tier0");
@@ -107,7 +112,7 @@ async fn soft_deleted_user_cannot_be_resurrected_before_purge()
     };
     let repo = AccountRepo::new(db.pool.clone());
     let (account, _) = repo
-        .upsert_user_by_sub(&attrs("delete-sub", "delete@example.test", "Delete Me"))
+        .upsert_user_by_identity(&attrs("delete-sub", "delete@example.test", "Delete Me"))
         .await?;
 
     repo.soft_delete_user(account.id, account.id).await?;
@@ -117,7 +122,7 @@ async fn soft_deleted_user_cannot_be_resurrected_before_purge()
         .ok_or("account shell missing")?;
     assert!(!deleted.is_active);
     assert!(
-        repo.upsert_user_by_sub(&attrs("delete-sub", "delete@example.test", "Return"))
+        repo.upsert_user_by_identity(&attrs("delete-sub", "delete@example.test", "Return"))
             .await
             .is_err()
     );

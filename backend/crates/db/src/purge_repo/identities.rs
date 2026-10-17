@@ -37,6 +37,9 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
                  updated_at = now() \
              FROM due WHERE accounts.id = due.id \
              RETURNING accounts.id \
+         ), anon_identities AS ( \
+             DELETE FROM external_identities i USING due WHERE i.user_id = due.id \
+             RETURNING i.user_id \
          ), anon_users AS ( \
              UPDATE users SET \
                  provider_sub_hash = NULL, provider_sub_hash_key_id = NULL, \
@@ -109,6 +112,35 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
     .map_err(map_sqlx_error)?
     .get("deleted_count");
 
+    // Access hashes are disposable after expiry; consumed refresh hashes must remain
+    // while their grant can still rotate, so reuse detection survives cleanup.
+    let oauth_access_deleted = sqlx::query(
+        "DELETE FROM oauth_credentials WHERE token_hash IN ( \
+         SELECT token_hash FROM oauth_credentials WHERE kind='access' AND expires_at<=now() \
+         ORDER BY expires_at LIMIT 1000)",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?
+    .rows_affected();
+
+    // Expiry is enforced synchronously at lookup; these bounded batches only reclaim storage.
+    for table in [
+        "oidc_login_flows",
+        "oauth_authorizations",
+        "oauth_device_codes",
+    ] {
+        let sql = format!(
+            "DELETE FROM {table} WHERE ctid IN (SELECT ctid FROM {table} WHERE expires_at<=now() ORDER BY expires_at LIMIT 1000)"
+        );
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+    }
+    sqlx::query("DELETE FROM oauth_grants WHERE id IN (SELECT g.id FROM oauth_grants g JOIN users u ON u.id=g.user_id WHERE LEAST(g.expires_at,g.idle_expires_at,COALESCE(g.revoked_at,g.expires_at))<=now()-interval '15 days' OR u.anonymized_at IS NOT NULL ORDER BY g.created_at LIMIT 1000)")
+        .execute(&mut *tx).await.map_err(map_sqlx_error)?;
+
     tx.commit().await.map_err(map_sqlx_error)?;
     tracing::info!(
         event = "purge.group_completed",
@@ -116,6 +148,7 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
         accounts_anonymized,
         api_keys_deleted,
         browser_sessions_deleted,
+        oauth_access_deleted,
     );
 
     Ok(PurgedIdentities {

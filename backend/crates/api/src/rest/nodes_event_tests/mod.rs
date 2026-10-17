@@ -334,7 +334,8 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
         state.security.clone(),
         state.config.default_user_tier,
     )
-    .upsert_user_by_sub(&ResolveAttrs {
+    .upsert_user_by_identity(&ResolveAttrs {
+        issuer: "https://auth.example.test".to_owned(),
         sub: "rest-events-stranger".to_owned(),
         email: "stranger@example.test".to_owned(),
         name: "Stranger".to_owned(),

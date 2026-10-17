@@ -117,6 +117,9 @@ account.delete
 session.login
 session.logout
 session.revoke
+oauth.approve
+oauth.revoke
+identity.link
 
 space.create
 space.update
@@ -160,6 +163,17 @@ connection.upsert
 
 session.revoke
   reason: "refresh_failed"
+
+oauth.approve
+  metadata: {}
+
+oauth.revoke
+  reason: "refresh_reuse" | "code_reuse" | "client_revoked" | "user_revoked"
+
+identity.link
+  issuer: verified public issuer URL
+  reason: "operator_import"
+  source: "system"; actor_account_id: null
 
 node.purge
   completion_scope: "database"

@@ -489,7 +489,8 @@ async fn v2_respects_connection_permission_and_space_visibility()
         state.security.clone(),
         state.config.default_user_tier,
     )
-    .upsert_user_by_sub(&ResolveAttrs {
+    .upsert_user_by_identity(&ResolveAttrs {
+        issuer: "https://auth.example.test".to_owned(),
         sub: "v2-hidden-owner".to_owned(),
         email: "v2-hidden-owner@example.test".to_owned(),
         name: "V2 Hidden Owner".to_owned(),

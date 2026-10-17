@@ -17,6 +17,7 @@ pub mod files;
 pub mod history;
 pub mod identity;
 pub mod link_graph;
+pub mod oauth;
 mod pagination;
 pub mod spaces;
 pub mod usage;

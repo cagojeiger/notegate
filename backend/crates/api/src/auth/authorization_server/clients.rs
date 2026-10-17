@@ -1,0 +1,301 @@
+//! CIMD is fetched without credentials, proxies, redirects, or a second DNS lookup.
+use serde::Deserialize;
+use std::net::{IpAddr, SocketAddr};
+use std::time::Duration;
+use url::Url;
+
+#[derive(Clone, Debug, Deserialize)]
+pub(super) struct ClientMetadata {
+    pub client_id: String,
+    pub client_name: String,
+    pub redirect_uris: Vec<String>,
+    #[serde(default)]
+    token_endpoint_auth_method: Option<String>,
+    #[serde(default)]
+    token_endpoint_auth_methods_supported: Vec<String>,
+}
+
+async fn fetch(client_id: &str) -> Result<(ClientMetadata, Duration), &'static str> {
+    let url = Url::parse(client_id).map_err(|_| "invalid_client")?;
+    if client_id.len() > 2048
+        || client_id.chars().any(char::is_control)
+        || url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+        || url.query().is_some()
+        || url.port_or_known_default() != Some(443)
+    {
+        return Err("invalid_client");
+    }
+    let host = url.host_str().ok_or("invalid_client")?;
+    let addresses: Vec<SocketAddr> =
+        tokio::time::timeout(Duration::from_secs(3), tokio::net::lookup_host((host, 443)))
+            .await
+            .map_err(|_| "invalid_client")?
+            .map_err(|_| "invalid_client")?
+            .take(17)
+            .collect();
+    if addresses.is_empty() || addresses.len() > 16 || addresses.iter().any(|a| !public_ip(a.ip()))
+    {
+        return Err("invalid_client");
+    }
+    let http = reqwest::Client::builder()
+        .https_only(true)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(5))
+        .resolve_to_addrs(host, &addresses)
+        .build()
+        .map_err(|_| "invalid_client")?;
+    let mut response = http
+        .get(url)
+        .header("accept", "application/json")
+        .send()
+        .await
+        .map_err(|_| "invalid_client")?;
+    if !response.status().is_success() || response.content_length().is_some_and(|n| n > 65536) {
+        return Err("invalid_client");
+    }
+    let cache_control = response
+        .headers()
+        .get(reqwest::header::CACHE_CONTROL)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let mut cache_seconds = 300;
+    for directive in cache_control.split(',').map(str::trim) {
+        if directive.eq_ignore_ascii_case("no-store") || directive.eq_ignore_ascii_case("no-cache")
+        {
+            cache_seconds = 0;
+            break;
+        }
+        if let Some(value) = directive
+            .strip_prefix("max-age=")
+            .and_then(|v| v.trim_matches('"').parse::<u64>().ok())
+        {
+            cache_seconds = cache_seconds.min(value);
+        }
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| "invalid_client")? {
+        if bytes.len().saturating_add(chunk.len()) > 65536 {
+            return Err("invalid_client");
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let metadata: ClientMetadata = serde_json::from_slice(&bytes).map_err(|_| "invalid_client")?;
+    if metadata.client_id != client_id
+        || metadata.client_name.is_empty()
+        || metadata.client_name.len() > 200
+        || metadata.redirect_uris.is_empty()
+        || metadata.redirect_uris.len() > 20
+        || metadata
+            .redirect_uris
+            .iter()
+            .any(|uri| uri.len() > 2048 || uri.chars().any(char::is_control))
+    {
+        return Err("invalid_client");
+    }
+    if !metadata.supports_public_method() {
+        return Err("invalid_client");
+    }
+    Ok((metadata, Duration::from_secs(cache_seconds)))
+}
+
+impl ClientMetadata {
+    fn supports_public_method(&self) -> bool {
+        if self.token_endpoint_auth_methods_supported.is_empty() {
+            self.token_endpoint_auth_method
+                .as_deref()
+                .is_none_or(|method| method == "none")
+        } else {
+            self.token_endpoint_auth_methods_supported
+                .iter()
+                .any(|method| method == "none")
+        }
+    }
+
+    pub fn allows_redirect(&self, redirect: &str) -> bool {
+        if redirect.len() > 2048 || redirect.chars().any(char::is_control) {
+            return false;
+        }
+        let Ok(url) = Url::parse(redirect) else {
+            return false;
+        };
+        if url.fragment().is_some() || !url.username().is_empty() || url.password().is_some() {
+            return false;
+        }
+        let loopback = matches!(url.host(),Some(url::Host::Ipv4(ip)) if ip.is_loopback())
+            || matches!(url.host(),Some(url::Host::Ipv6(ip)) if ip.is_loopback())
+            || url.host_str() == Some("localhost");
+        if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
+            return false;
+        }
+        self.redirect_uris.iter().any(|registered| {
+            if registered == redirect {
+                return true;
+            }
+            // RFC 8252 permits an ephemeral loopback port; host, path, and query stay exact.
+            let Ok(mut registered) = Url::parse(registered) else {
+                return false;
+            };
+            if !loopback
+                || url.scheme() != "http"
+                || registered.scheme() != "http"
+                || registered.host() != url.host()
+            {
+                return false;
+            }
+            let mut requested = url.clone();
+            if registered.set_port(None).is_err() || requested.set_port(None).is_err() {
+                return false;
+            }
+            registered == requested
+        })
+    }
+}
+
+fn public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
+            !(a == 0
+                || a == 10
+                || a == 127
+                || a >= 224
+                || (a == 100 && (64..=127).contains(&b))
+                || (a == 169 && b == 254)
+                || (a == 172 && (16..=31).contains(&b))
+                || (a == 192
+                    && (b == 168 || (b == 0 && (c == 0 || c == 2)) || (b == 88 && c == 99)))
+                || (a == 198 && (b == 18 || b == 19 || (b == 51 && c == 100)))
+                || (a == 203 && b == 0 && c == 113)
+                || ip.octets() == [168, 63, 129, 16])
+        }
+        IpAddr::V6(ip) => {
+            let [first, second, _, _, _, _, _, _] = ip.segments();
+            (first & 0xe000) == 0x2000
+                && !(first == 0x2001 && (second < 0x0200 || second == 0x0db8))
+                && first != 0x2002
+                && !(first == 0x3fff && second < 0x1000)
+        }
+    }
+}
+
+/// Bounded, short-lived positive cache and admission for untrusted metadata fetches.
+#[derive(Clone)]
+pub(crate) struct ClientRegistry {
+    cache: std::sync::Arc<
+        tokio::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, ClientMetadata)>>,
+    >,
+    admission: std::sync::Arc<tokio::sync::Semaphore>,
+}
+
+impl ClientRegistry {
+    pub fn new() -> Self {
+        Self {
+            cache: Default::default(),
+            admission: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+        }
+    }
+
+    pub(super) async fn get(&self, id: &str) -> Result<ClientMetadata, &'static str> {
+        {
+            let mut cache = self.cache.lock().await;
+            cache.retain(|_, (expires, _)| *expires > std::time::Instant::now());
+            if let Some((_, client)) = cache.get(id) {
+                return Ok(client.clone());
+            }
+        }
+        let _permit = self
+            .admission
+            .try_acquire()
+            .map_err(|_| "temporarily_unavailable")?;
+        let (client, ttl) = fetch(id).await?;
+        if ttl.is_zero() {
+            return Ok(client);
+        }
+        let mut cache = self.cache.lock().await;
+        if cache.len() >= 256 {
+            cache.clear();
+        }
+        cache.insert(
+            id.to_owned(),
+            (std::time::Instant::now() + ttl, client.clone()),
+        );
+        Ok(client)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn redirects_match_exactly_except_loopback_port() {
+        let client = super::ClientMetadata {
+            client_id: "https://client.example.test/metadata".to_owned(),
+            client_name: "Client".to_owned(),
+            redirect_uris: vec![
+                "https://app.example.test/callback".to_owned(),
+                "http://127.0.0.1/callback".to_owned(),
+            ],
+            token_endpoint_auth_method: None,
+            token_endpoint_auth_methods_supported: vec![],
+        };
+        assert!(client.allows_redirect("http://127.0.0.1:53001/callback"));
+        assert!(client.allows_redirect("https://app.example.test/callback"));
+        for redirect in [
+            "http://localhost:53001/callback",
+            "http://127.0.0.1:53001/other",
+            "https://app.example.test:8443/callback",
+            "https://app.example.test/callback?other=true",
+            "https://app.example.test/callback#fragment",
+            "https://user@app.example.test/callback",
+        ] {
+            assert!(!client.allows_redirect(redirect));
+        }
+    }
+
+    #[test]
+    fn public_exchange_supports_cimd_method_transition() -> Result<(), serde_json::Error> {
+        let base = serde_json::json!({
+            "client_id": "https://client.example.test/metadata",
+            "client_name": "Client",
+            "redirect_uris": ["https://client.example.test/callback"],
+            "token_endpoint_auth_method": "private_key_jwt",
+            "token_endpoint_auth_methods_supported": ["none", "private_key_jwt"]
+        });
+        let mut client: super::ClientMetadata = serde_json::from_value(base)?;
+        assert!(client.supports_public_method());
+        client.token_endpoint_auth_methods_supported = vec!["private_key_jwt".to_owned()];
+        assert!(!client.supports_public_method());
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_nonpublic_destinations() {
+        for ip in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "169.254.169.254",
+            "100.100.100.200",
+            "168.63.129.16",
+            "192.0.2.1",
+            "::1",
+            "::ffff:127.0.0.1",
+            "fc00::1",
+            "fe80::1",
+            "2001:db8::1",
+            "2002:7f00:1::",
+        ] {
+            assert!(!super::public_ip(
+                ip.parse()
+                    .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
+            ));
+        }
+        assert!(super::public_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(8, 8, 8, 8)
+        )));
+    }
+}

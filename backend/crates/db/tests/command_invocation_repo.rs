@@ -13,8 +13,7 @@ async fn legacy_payload_encryption_is_bounded_restartable_and_row_bound()
     let Some(db) = TestDb::setup_before(49).await? else {
         return Ok(());
     };
-    let owner =
-        insert_user_account(&db.pool, "legacy-history", "legacy-history@example.test").await?;
+    let owner = insert_legacy_user_account(&db.pool).await?;
     sqlx::query(
         "INSERT INTO command_invocations \
          (owner_user_id, actor_account_id, caller_kind, surface, tool, op, purpose, input, response, outcome, duration_ms) \

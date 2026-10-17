@@ -37,8 +37,8 @@ async fn space_purge_preserves_legacy_change_owners_before_background_encryption
     .bind(space)
     .execute(&db.pool)
     .await?;
-    for version in 48..=51 {
-        db.apply_migration(version).await?;
+    for migration in notegate_db::MIGRATOR.iter().filter(|m| m.version >= 48) {
+        db.apply_migration(migration.version).await?;
     }
     sqlx::query(
         "UPDATE spaces SET deleted_at = now(), deleted_by_user_id = $2, \

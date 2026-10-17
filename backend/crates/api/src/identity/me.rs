@@ -50,6 +50,8 @@ pub struct MeOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentDetailOutput>,
     pub capabilities: CapabilitiesOutput,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_connections_url: Option<String>,
 }
 
 pub fn build_me(caller: &Caller) -> MeOutput {
@@ -81,6 +83,7 @@ pub fn build_me(caller: &Caller) -> MeOutput {
         user,
         agent,
         capabilities,
+        oauth_connections_url: None,
     }
 }
 

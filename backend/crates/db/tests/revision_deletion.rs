@@ -157,7 +157,8 @@ async fn current_body_delete_after_upgrade_is_atomic_and_records_unknown_reason(
     let Some(db) = TestDb::setup_before(53).await? else {
         return Ok(());
     };
-    let (owner, space, root) = space_with_root(&db.pool, "current-revision-delete").await?;
+    let (owner, space, root) =
+        common::legacy_space_with_root(&db.pool, "current-revision-delete").await?;
     let files = FilesRepo::new(db.pool.clone());
     let (node, _) = files
         .insert_text(space, root, "secret.md", &body("private first"), owner)

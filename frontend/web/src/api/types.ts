@@ -6,6 +6,7 @@ export type Page = {
 };
 
 export type Me = {
+  oauth_connections_url?: string;
   account: {
     id: string;
     kind: "user" | "agent";

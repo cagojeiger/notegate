@@ -20,7 +20,7 @@ use uuid::Uuid;
 /// `provider_sub_hash` and PII as a
 /// tombstone. The purge run anonymizes PII and frees the sub-hash once the
 /// retention window elapses; re-login during the window is rejected by
-/// `upsert_user_by_sub`, so a returning sub never duplicates the account.
+/// `upsert_user_by_identity`, so a returning sub never duplicates the account.
 pub(crate) async fn soft_delete_user(
     pool: &PgPool,
     account_id: Uuid,
@@ -108,6 +108,12 @@ pub(crate) async fn soft_delete_user(
     .execute(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
+
+    sqlx::query("UPDATE oauth_grants SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL")
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
 
     let disconnected_connections = sqlx::query(
         "UPDATE space_agent_connections \

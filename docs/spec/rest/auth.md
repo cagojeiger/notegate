@@ -1,100 +1,87 @@
 # REST 인증
 
-NoteGate는 자체 password login API를 두지 않는다. 사람 사용자는 authgate OAuth/OIDC로 로그인하고, API key는 Agent credential로만 발급한다.
+NoteGate는 password login API를 두지 않는다. 브라우저의 신원 확인은 표준 OIDC 공급자가 담당한다. 현재 공급자는 AuthGate이며, MCP·CLI 접근 토큰의 발급 주체와는 별개다. API key는 Agent 전용이다.
 
-Auth endpoint는 JSON resource API와 성격이 다르므로 `/api/v1` 아래에 넣지 않는다. Browser redirect/callback, session cookie 발급, OAuth protected-resource metadata를 담당한다.
+## 모드와 계정 연결
 
-## Browser login 시작
+- `oidc` 설정: 외부 OIDC 로그인 + 로컬 브라우저 세션 + NoteGate OAuth 서버.
+- `oidc` 미설정: 기존 AuthGate 브라우저 refresh 및 MCP·CLI JWT 호환 모드.
 
-```http
-GET /auth/login
-```
+로컬 계정 ID와 Space·문서·이력 소유권은 유지한다. 신원은 검증된 `issuer + sub` HMAC으로 조회하며 email로 연결하지 않는다. 기존 subject hash는 `authgate_url`로 한 번 고정한 원래 issuer에만 허용한다. 독립 모드에서 이 값은 기존 신원 연결용이며 외부 토큰 검증·갱신 URL로 사용하지 않는다. 기존 hash가 남은 DB에 issuer binding이 없으면 해당 값을 지정하기 전 startup을 거부한다.
 
-authgate OAuth/OIDC authorization-code + PKCE login으로 redirect한다. Browser session 갱신을 위해 `offline_access` scope를 요청한다.
+현재 AuthGate를 OIDC 공급자로 유지하면 같은 subject로 기존 계정에 연결된다. 다른 공급자로 전환할 때는 검증된 `account_id / issuer / subject` 매핑을 operator 전용 `import_identities` example로 원자적으로 가져온다. 충돌은 전체 rollback하며, mapping 원문은 비밀 자료로 취급한다. `oidc.allow_signup`은 기본 `false`다. 연결이 끝난 후에만 신규 가입을 열 수 있다.
 
-선택적인 `next`는 `/`로 시작하는 내부 경로만 허용한다. `//`, 역슬래시와 제어 문자는 거부하며, query와 callback cookie를 디코딩한 값에 같은 검증을 적용한다.
-
-## OAuth callback
-
-```http
-GET /auth/callback?code=...&state=...
-```
-
-`state`/`nonce`를 검증하고 authgate token을 교환한 뒤 lifecycle 정책에 따라 active local user를 생성하거나 갱신한다. 최초 생성이면 `account.create`, browser session 생성에 성공하면 `session.login` audit event를 같은 transaction에서 기록한다. authgate가 발급한 refresh token은 NoteGate browser session 갱신용 credential로 암호화 저장한다. 그 다음 opaque browser session cookie를 발급하고 `/auth/success`로 redirect한다. Inactive local account는 자동 재활성화하지 않는다.
-
-AuthGate는 refresh token의 canonical state, rotation, revoke 여부를 관리한다. NoteGate는 해당 refresh token 값을 브라우저 세션 갱신에 다시 제출할 수 있도록 저장할 뿐이며, browser client에는 refresh token을 노출하지 않는다.
-
-Browser ID token 검증용 discovery metadata와 JWKS는 프로세스에서 캐시하며, discovery
-갱신 주기는 1시간이다. Discovery 실패 시 기존 snapshot을 유지한다.
-콜백에서 일치하는 서명 키가 없거나 캐시된 키로 서명 검증이 실패하면, 앞서 discovery한
-`jwks_uri`에서 공개 키를 한 번 다시 조회하고 같은 ID token을 재검증한다. Authorization
-code를 다시 교환하지 않으며 issuer·audience·nonce·만료·알고리즘·`at_hash` 및 UserInfo
-subject 검증은 그대로 적용한다. 다른 claims 오류는 키 재조회로 재시도하지 않는다.
-동시에 같은 캐시를 사용하는 콜백은 재조회 시도를 공유한다. 재조회 실패 시 해당 콜백을
-거부하고 기존 캐시를 유지하며, 성공한 키 재조회도 discovery의 1시간 TTL을 연장하지 않는다.
-
-## Login success
-
-```http
-GET /auth/success
-```
-
-Browser/MCP onboarding용 간단한 HTML 완료 화면을 보여준다. 사용자는 탭을 닫거나 MCP client를 다시 연결할 수 있다.
-
-## Logout
-
-```http
-POST /auth/logout
-```
-
-notegate browser session cookie를 제거하고 해당 `browser_sessions` row를 revoke한다. 활성 session이 실제로 revoke되면 같은 transaction에서 `session.logout` audit event를 기록한다. 저장된 refresh token은 authgate revoke endpoint에 best-effort로 revoke 요청한다. Revoke 요청 실패는 logout 실패로 처리하지 않는다.
-
-## Browser session renewal
-
-Browser session cookie는 opaque token이다. Token 원문은 cookie에만 있고 DB에는 HMAC hash만 저장한다.
+## 브라우저 로그인과 세션
 
 ```text
-request with browser session cookie
--> session token hash lookup
--> revoked or absolute expires_at reached: 401
--> validated_until still valid: resolve user
--> validated_until expired: claim this session refresh
-   -> another request is already refreshing: 503, session remains live for retry
-   -> claim acquired: refresh via authgate refresh_token grant
-   -> success: rotate stored refresh token if authgate returned one, extend validated_until
-   -> invalid_grant/sub mismatch: revoke local browser session, return 401
-   -> transient authgate/userinfo failure: store rotated refresh token if token exchange returned one, clear refresh claim, return 503
+GET /auth/login?next=<내부 경로>
+  → OIDC authorization code + S256 PKCE
+  → GET /auth/callback?code=...&state=...
+  → issuer / audience / signature / expiry / state / nonce / at_hash / UserInfo subject 검증
+  → 같은 로컬 계정 조회·갱신
+  → HttpOnly browser session cookie
 ```
 
-Browser session absolute lifetime은 30일이다. Local validation lease는 1시간이다. 30일이 지나면 refresh token이 authgate에서 아직 유효하더라도 NoteGate browser session은 재로그인을 요구한다.
+독립 모드의 로그인 상태는 5분 동안 DB에 암호화 저장한다. PKCE verifier·nonce·next는 cookie에 저장하지 않는다. 각 flow에 독립적인 browser-binding cookie를 발급하고 콜백에서 한 번만 소비한다. `next`는 내부 경로만 허용한다.
 
-Agent API key와 browser session의 `last_used_at`은 인증 결과를 바꾸지 않는 관측 metadata다. 성공한 인증은 process-local write-behind buffer에 사용 시각을 기록하고 DB에는 batch로 반영한다. 같은 credential의 관측값은 가장 최신 시각으로 합치며 DB row write는 기존 값보다 1시간 이상 최신인 경우로 제한한다. 따라서 `last_used_at`은 실시간 접속 상태나 보안 판정에 사용하지 않는다.
+`max_age=0`과 `auth_time`을 요청하며, 검증된 `auth_time`이 현재 시각과 60초를 초과해 차이 나면 거부한다. 공급자의 재인증 정책이 적용되며, 이것이 특정 MFA 수행을 보장한다는 의미는 아니다. 외부 access/refresh token은 로컬 세션에 보관하지 않는다. 기존 non-null encrypted refresh 필드는 빈 값을 암호화한 호환용 envelope다.
 
-## OAuth metadata
+세션은 issuer에 연결된다. 활성 계정·철회·absolute expiry와 24시간 로컬 인증 기간을 요청마다 확인한다. 기간이 끝나면 OIDC 로그인으로 돌아가며 외부 refresh 호출은 하지 않는다. Cookie의 최대 수명은 기존 설정(기본 30일)을 따른다. 사용 시각은 기존 write-behind 관측 metadata로만 사용한다.
 
-```http
-GET /.well-known/oauth-authorization-server
-GET /.well-known/oauth-protected-resource
-GET /.well-known/oauth-protected-resource/mcp
+`POST /auth/logout`은 same-origin Origin/Referer와 로컬 세션을 사용해 해당 세션을 철회한다. 독립 모드에서는 외부 token revoke를 호출하지 않는다. 다른 기기의 OAuth 연결 철회는 별도다.
+
+## MCP 연결 승인
+
+```text
+MCP client
+  → resource / authorization-server metadata
+  → GET /oauth/authorize
+  → OIDC login 필요 여부 확인
+  → GET /oauth/approve: 사용자·client ID·redirect URI·resource·scope 표시
+  → POST /oauth/approve: 명시적 승인 또는 거절
+  → 검증된 redirect URI로 code + state + iss 반환
+  → POST /oauth/token: code + PKCE verifier 교환
 ```
 
-MCP OAuth client가 authgate authorization server와 resource metadata를 discovery할 수 있게 한다. MCP OAuth public client id 기본값은 `notegate-mcp`이며 설정으로 바꿀 수 있다.
-`/mcp/v2`는 Agent API key 전용이므로 OAuth protected-resource metadata를 제공하지 않는다.
+Authorize는 `response_type=code`, `code_challenge_method=S256`, 정확한 MCP resource와 `mcp [offline_access]` scope를 요구한다. 공개 HTTPS CIMD URL을 client ID로 사용한다. 메타데이터 조회는 public IP만 허용하고 DNS 결과를 연결에 고정하며 proxy와 redirect를 사용하지 않는다. 응답은 64 KiB, 요청은 5초, 동시 조회는 8개로 제한한다. Positive cache는 HTTP no-store/no-cache와 더 짧은 max-age를 존중하며 최대 5분·256개다.
 
-MCP `401` 응답은 `WWW-Authenticate` header에 resource metadata와 scope를 포함한다.
+Redirect는 등록 값과 일치해야 한다. HTTP loopback redirect는 port만 달라질 수 있으며 승인 화면에서 로컬 앱으로 시작한 로그인인지 확인하도록 안내한다. GET은 승인하지 않는다. POST는 browser-bound flow, 활성 로컬 세션, 5분 이내의 로그인, same-origin Origin/Referer를 요구한다. 매 연결에 동의를 받으며 자동 승인을 하지 않는다.
 
-## 인증 경계
+## 토큰과 CLI
 
-- Browser UI는 `/auth/callback`이 발급한 browser session cookie를 사용한다.
-- Browser session cookie는 `Path=/`, `HttpOnly`, `SameSite=Lax`로 발급한다. 운영 HTTPS 환경에서는 `Secure`를 붙인다.
-- Browser session cookie는 opaque token이다. Cookie token hash와 encrypted refresh token은 `browser_sessions`에 저장한다.
-- `/api/v1/*`는 browser session cookie만 허용한다. `Authorization` bearer를 보내면 인증을 거부한다.
-- `/api/v2/*`는 Agent 소유 `ngk_v2_` API key만 허용한다. User 소유 API key, browser session cookie, OAuth JWT는 인증 수단으로 인정하지 않는다.
-- Cookie 기반 browser session으로 `POST`, `PUT`, `PATCH`, `DELETE`를 호출하려면 same-origin `Origin` 또는 `Referer`가 필요하다.
-- Swagger UI는 `/swagger-ui/v2`, OpenAPI JSON은 `/openapi/v2.json`에서 제공하며 browser session을 요구한다. 미로그인 브라우저는 로그인 후 요청했던 문서 경로로 복귀한다. 문서 열람 세션은 `/api/v2/*` 호출 권한이 아니며, Swagger API 호출은 별도의 API key를 사용한다.
-- MCP는 bearer credential만 허용한다. Browser session cookie는 `/mcp`와 `/mcp/v2`에서 인증 수단으로 인정하지 않는다.
-- `/mcp`는 user MCP OAuth bearer만 허용한다.
-- `/mcp/v2`는 Agent 소유 `ngk_v2_` API key만 허용한다.
-- Device flow는 authgate flow이며 user account로 resolve한다.
+| 항목 | 정책 |
+|---|---|
+| Authorization code | 승인 후 60초, 한 번 교환, client/resource/redirect/PKCE에 연결 |
+| Access token | 256-bit opaque secret, 최대 10분, resource + scope + 활성 계정 + grant 철회 확인 |
+| Refresh token | `offline_access`에서만 발급, 매번 회전, idle 7일 / absolute 30일 |
+| Code/refresh 재사용 | 보존된 사용 기록으로 확인하면 해당 grant와 연결된 모든 token을 철회 |
+| Scope | MCP는 `mcp`, CLI는 `cli`, 선택적 `offline_access`; 기존 Space·node 권한도 적용 |
+| 연결 수 | 사용자당 활성 grant 최대 100개; 동시 승인에도 같은 한도 적용 |
 
-`/mcp`와 `/cli`의 OAuth bearer JWKS는 프로세스에서 공유한다. 요청이 일으키는 초기 조회와 unknown-kid 재조회는 한 번에 하나만 실행하고 성공·실패·요청 취소가 끝난 시점부터 5초 동안 추가 조회를 억제한다. 조회 차례를 기다리다 취소된 요청은 이 시간을 연장하지 않는다. 캐시된 키로 검증되는 토큰은 재조회를 기다리지 않는다. 키 교체 직후에는 재시도가 필요할 수 있으며, 주기 갱신은 기존 JWKS TTL을 따른다.
+토큰 원문은 응답에서만 전달하고 DB에는 별도 목적 키로 HMAC 저장한다. 외부 OIDC 토큰을 API bearer로 받지 않는다. Refresh 요청은 원래 scope를 반복할 수 있으며 scope 변경은 거부한다. 토큰·철회·실패 응답은 no-store다. 승인 화면의 Referrer-Policy는 `same-origin`으로 동일 출처 form POST의 Origin 검증을 유지하면서 외부 redirect에는 Referer를 보내지 않는다.
+
+CLI는 정적으로 설정한 public client ID로 `POST /oauth/device/authorize`를 호출한다. `cli offline_access`를 요청하고 browser에서 `/oauth/device`에 표시된 요청을 승인한다. Device code는 5분, 기본 poll 간격은 5초다. 빠른 poll은 `slow_down`과 간격 증가를 반환한다. 승인·거절·만료·소비 상태를 DB에서 판정한다. CLI resource는 NoteGate public URL의 `/cli`로 고정한다.
+
+`POST /oauth/token`은 code, refresh, Device grant를 제공한다. Public client 인증 방식은 `none`이며 client secret/HTTP Authorization을 받지 않는다. `POST /oauth/revoke`는 해당 client의 token이 속한 grant를 철회한다. 계정 삭제는 grant도 같은 삭제 트랜잭션에서 철회한다. 만료 판정은 요청 시 수행하고 background purge는 물리 정리만 담당한다.
+
+Settings → Account의 **Manage connected applications**는 `/oauth/connections`로 연결한다. 이 화면에서 현재 사용자의 활성 grant만 표시하고 same-origin POST로 개별 철회한다. 승인·철회 audit에는 사용자·grant ID와 사유만 남기며 credential은 기록하지 않는다.
+
+## Discovery와 경계
+
+`/.well-known/oauth-authorization-server`는 독립 모드에서 NoteGate issuer·authorize/token/revoke/Device endpoint·S256·CIMD·RFC 9207 issuer 응답 지원·`mcp`, `cli`, `offline_access` scope를 게시한다. 자체 OIDC ID token/JWKS를 제공하는 서버는 아니다.
+
+`/.well-known/oauth-protected-resource[/mcp]`는 MCP resource와 NoteGate authorization server를 게시한다. MCP 401 challenge도 같은 metadata와 MCP scope를 가리킨다.
+
+- `/api/v1/*`: 브라우저 cookie만 허용; mutation은 same-origin.
+- `/api/v2/*`, `/mcp/v2`: Agent의 `ngk_v2_` key만 허용.
+- `/mcp`: MCP resource용 user OAuth bearer만 허용.
+- `/cli`: CLI resource용 user OAuth bearer만 허용.
+- Swagger는 브라우저 세션으로 열지만 실제 V2 호출에는 별도 Agent key가 필요하다.
+
+독립 모드의 auth endpoint는 IP별 10 req/s, burst 30 제한을 공유하며 기존 전체 ingress 제한도 적용한다. 일반 문서 API 요청에는 이 추가 auth 제한을 적용하지 않는다.
+
+## 호환 모드
+
+`oidc`가 없으면 기존 AuthGate OAuth 설정을 사용한다. 브라우저 로그인은 `offline_access`를 요청하고 외부 refresh token을 암호화 보관한다. 로컬 validation lease는 기본 1시간, absolute lifetime은 기본 30일이다. 갱신은 기존 claim/rotation/revoke 절차를 따르며 transient 실패는 retry 가능한 503, 영구 실패는 revoke 후 401이다. Logout의 외부 revoke는 best effort다.
+
+MCP·CLI는 이 모드에서만 AuthGate JWT/JWKS를 검증한다. 두 경로가 JWKS cache를 공유하며 초기·unknown-kid 조회의 완료 시점부터 5초 동안 재조회를 억제한다. 브라우저 OIDC discovery cache는 1시간이며 콜백의 키 갱신은 code를 재교환하지 않는다. 두 모드의 브라우저 세션은 섞어 사용하지 않는다. 독립 모드 전환 시 기존 브라우저와 MCP·CLI 연결은 재로그인이 필요하다. CLI는 두 모드의 scope discovery를 지원하는 버전으로 먼저 갱신한다. 서버·CLI를 호환 모드로 배포한 뒤 전체 인스턴스의 설정을 일관되게 전환하며, 같은 endpoint에 서로 다른 인증 모드를 섞어 두지 않는다.

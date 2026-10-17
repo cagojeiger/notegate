@@ -39,6 +39,9 @@ jobs:
     env:
       NOTEGATE_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
       NOTEGATE_AUTHGATE_URL: http://127.0.0.1:9192
+      # Exercise local sessions/grants; CI has no live identity-provider dependency.
+      NOTEGATE_OIDC__ISSUER: http://127.0.0.1:9192
+      NOTEGATE_OIDC__CLIENT_ID: notegate-web
       NOTEGATE_PUBLIC_URL: http://127.0.0.1:9191
       NOTEGATE_OAUTH_CLIENT_ID: notegate-web
       NOTEGATE_MCP_OAUTH_CLIENT_ID: notegate-mcp

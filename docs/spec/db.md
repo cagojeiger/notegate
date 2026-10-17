@@ -20,6 +20,8 @@ Migration은 forward-only로 운영한다.
 crypto_key_epochs
 accounts
 users
+external_identities
+legacy_identity_issuer
 agents
 api_keys
 audit_events
@@ -98,6 +100,30 @@ users
 ```
 
 ```text
+external_identities
+  user_id uuid not null references users(id) on delete cascade
+  issuer text not null
+  subject_hash text not null
+  subject_hash_key_id text not null references crypto_key_epochs(key_id)
+  subject_hash_version int not null
+  created_at timestamptz not null default now()
+  primary key (issuer, subject_hash)
+  index (user_id)
+
+legacy_identity_issuer
+  singleton bool pk default true check (singleton)
+  issuer text not null
+```
+
+외부 신원은 검증된 `issuer`와 subject의 HMAC으로 찾는다. Email이 같아도 계정을 자동 연결하지 않는다.
+API startup은 기존 `NOTEGATE_AUTHGATE_URL`을 `legacy_identity_issuer`에 한 번 고정하며,
+다른 issuer로 재설정하려 하면 실패한다. 기존 `users.provider_sub_hash`는 이 issuer에만
+호환 조회를 허용한다. Browser 재로그인 시 기존 UUID를 유지한 채 `external_identities`를
+같은 transaction에서 추가하며, 기존 issuer의 신규 계정은 구 binary와의 호환을 위해
+`users.provider_sub_hash`도 함께 기록한다. 다른 issuer의 계정에는 legacy hash를 기록하지 않는다.
+`issuer`는 두 테이블 모두 1..2048자다.
+
+```text
 agents
   id uuid pk references accounts(id) on delete cascade
   owner_user_id uuid not null references users(id)
@@ -162,6 +188,8 @@ browser_sessions
   token_hash text not null unique
   hash_key_id text not null references crypto_key_epochs(key_id)
   hash_version int not null
+  local_session boolean not null default false
+  oidc_issuer text null -- local_session=true일 때만 필수
   refresh_token_ciphertext bytea not null
   refresh_token_nonce bytea not null
   refresh_token_enc_key_id text not null references crypto_key_epochs(key_id)
@@ -178,7 +206,7 @@ browser_sessions
   updated_at timestamptz
 ```
 
-Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. `refresh_token_*` 필드는 authgate refresh token을 암호화 저장한다. AuthGate가 refresh token의 canonical state를 관리하고, NoteGate는 브라우저 세션 갱신을 위해 발급받은 값을 보관한다.
+Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. 호환 모드에서 `refresh_token_*` 필드는 authgate refresh token을 암호화 저장한다. 독립 모드는 `local_session=true`와 검증한 `oidc_issuer`를 저장하고, refresh 필드에는 빈 값을 암호화한 호환 envelope만 둔다. 외부 token은 보관하지 않는다.
 
 Browser session DB 제약:
 
@@ -188,6 +216,20 @@ browser_sessions.validated_until <= browser_sessions.expires_at
 browser_sessions.refresh_* claim: refresh_started_at과 refresh_claim_id는 둘 다 NULL이거나 둘 다 non-NULL
 browser_sessions.revoked_reason: revoked_at이 NULL이면 NULL
 ```
+
+## Local OAuth tables
+
+0056 migration은 독립 모드의 인증 상태를 추가한다. 모드가 꺼져 있으면 새 OAuth endpoint는 등록하지 않는다.
+
+| 테이블 | 책임·핵심 연결 |
+|---|---|
+| `oidc_login_flows` | 5분짜리 OIDC state; browser cookie HMAC, issuer, 암호화된 PKCE/nonce/next |
+| `oauth_authorizations` | browser-bound 동의 요청과 1회용 code; client/resource/redirect/S256 challenge 및 nullable 승인 user ID |
+| `oauth_grants` | user FK, client/resource/scope, absolute/idle expiry, revoked_at; 사용자당 활성 100개 |
+| `oauth_credentials` | access/refresh HMAC PK와 key epoch; grant FK `ON DELETE CASCADE`, expires_at, consumed_at |
+| `oauth_device_codes` | device/user-code HMAC, CLI client/resource/scope, 승인 user FK, polling·거절·소비 상태 |
+
+Bearer token·code·PKCE verifier 원문은 평문 DB 필드에 남기지 않는다. Grant 발급·code 소비·credential 삽입·승인 audit는 함께 commit한다. Refresh 재사용에 의한 철회는 오류 응답 전에 commit한다. 계정 삭제는 grant를 함께 철회한다. 만료·철회는 조회 시 바로 적용하며 purge는 short-lived flow와 15일 이상 지난 dead grant를 제한된 batch로 물리 삭제한다. 만료된 access HMAC은 별도 batch로 바로 정리하고, 사용된 refresh HMAC은 해당 grant의 재사용 탐지를 위해 보존한다.
 
 ## Event history tables
 

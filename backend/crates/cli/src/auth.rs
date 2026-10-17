@@ -362,7 +362,7 @@ impl AuthManager {
             .header(USER_AGENT, user_agent())
             .form(&[
                 ("client_id", configuration.client_id.as_str()),
-                ("scope", DEVICE_SCOPE),
+                ("scope", configuration.device_scope),
             ])
             .send()
             .await

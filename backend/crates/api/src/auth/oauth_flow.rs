@@ -22,17 +22,30 @@ pub(super) struct LoginFlow {
 pub(super) async fn new_login_flow(oidc: &OidcProvider) -> notegate_core::Result<LoginFlow> {
     let client = oidc.client().await?;
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
-    let (redirect_url, csrf_state, nonce) = client
+    let standalone = oidc.is_standalone();
+    let builder = client
         .authorize_url(
             CoreAuthenticationFlow::AuthorizationCode,
-            CsrfToken::new_random,
+            move || {
+                if standalone {
+                    CsrfToken::new(uuid::Uuid::new_v4().to_string())
+                } else {
+                    CsrfToken::new_random()
+                }
+            },
             Nonce::new_random,
         )
         .add_scope(Scope::new("profile".to_owned()))
         .add_scope(Scope::new("email".to_owned()))
-        .add_scope(Scope::new("offline_access".to_owned()))
-        .set_pkce_challenge(pkce_challenge)
-        .url();
+        .set_pkce_challenge(pkce_challenge);
+    let builder = if oidc.is_standalone() {
+        builder
+            .add_extra_param("max_age", "0")
+            .add_extra_param("claims", r#"{"id_token":{"auth_time":{"essential":true}}}"#)
+    } else {
+        builder.add_scope(Scope::new("offline_access".to_owned()))
+    };
+    let (redirect_url, csrf_state, nonce) = builder.url();
 
     Ok(LoginFlow {
         redirect_url: redirect_url.to_string(),
@@ -45,7 +58,7 @@ pub(super) async fn new_login_flow(oidc: &OidcProvider) -> notegate_core::Result
 /// Build a hardened cookie (path=/, HttpOnly, SameSite=Lax) with the given
 /// max-age. Shared by every auth cookie so the security flags never drift.
 pub(super) fn hardened_cookie(
-    name: &'static str,
+    name: impl Into<std::borrow::Cow<'static, str>>,
     value: String,
     max_age_secs: i64,
     secure: bool,

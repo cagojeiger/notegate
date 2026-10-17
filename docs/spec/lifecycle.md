@@ -9,12 +9,14 @@
 ```text
 accounts(kind='user')
 users
+external_identities(issuer, subject_hash, user_id)
 ```
 
 - user 생성은 space, agent, API key를 자동 생성하지 않는다.
 - users.tier는 `NOTEGATE_DEFAULT_USER_TIER` 값으로 설정한다.
 - 첫 space는 user가 명시적으로 생성한다.
 - 재로그인은 PII ciphertext/hash만 갱신하고 space/agent/key를 만들지 않는다.
+- 외부 신원은 `issuer + sub`로 구분한다. 기존 issuer의 legacy user는 재로그인 시 같은 account ID로 연결하며, email로 다른 계정을 합치지 않는다.
 
 ### User 삭제
 
@@ -36,8 +38,12 @@ purge 시점:
 ```text
 users PII ciphertext/hash 제거
 provider_sub_hash tombstone 해제
+external_identities 제거
 attribution 보존용 account/user shell 유지
 ```
+
+Soft delete 직후에는 외부 신원도 tombstone으로 유지해 재가입을 차단한다. 기존 15일
+계정 보관 기간이 지난 뒤 purge가 PII와 신원 연결을 같은 transaction에서 제거한다.
 
 ## Agent
 

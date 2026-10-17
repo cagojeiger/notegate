@@ -9,6 +9,7 @@
 use notegate_core::{Error, Result};
 
 mod account_delete;
+mod account_identity;
 pub mod account_repo;
 pub mod agent_repo;
 pub mod api_key_repo;
@@ -28,6 +29,7 @@ pub mod link_graph_repo;
 mod link_graph_state;
 pub mod link_graph_work_repo;
 pub mod metadata_write_repo;
+pub mod oauth_repo;
 pub mod object_storage_repo;
 pub mod postgres_pool;
 pub mod purge_repo;
