@@ -112,9 +112,11 @@ jobs:
           echo "::add-mask::$session"
           echo "::add-mask::$(jq -r .secret <<< "$consent")"
           echo "::add-mask::$(jq -r .verifier <<< "$consent")"
-          echo "api_key=$key" >> "$GITHUB_OUTPUT"
-          echo "browser_session=$session" >> "$GITHUB_OUTPUT"
-          echo "oauth_consent=$consent" >> "$GITHUB_OUTPUT"
+          {
+            echo "api_key=$key"
+            echo "browser_session=$session"
+            echo "oauth_consent=$consent"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Start application
         run: |
