@@ -99,6 +99,9 @@ legacy 해시를 함께 제거하되 attribution용 account/user shell은 보존
 | Access token | 256-bit 이상 CSPRNG opaque credential, DB에는 용도를 분리한 HMAC만 저장 |
 | Refresh token | Client·resource·scope·grant에 바인딩한 opaque credential, HMAC 저장, 매 사용 시 원자적으로 회전 |
 
+제품이 발급한 client secret도 무작위 값과 용도를 분리한 HMAC으로 관리한다. 외부 OIDC client secret은
+배포 Secret에서 주입하며 source·일반 설정 출력·이력에 포함하지 않는다.
+
 Token 형식을 클라이언트가 해석하지 않게 한다. Opaque token은 signing key·JWKS 배포를 추가하지 않고
 폐기 상태를 DB에서 확인할 수 있어 단일 제품에 맞는다. 공용 DB의 indexed lookup과 grant·account
 상태 확인을 함께 수행하며 권한 폐기를 지연시키는 process-local 인증 캐시는 도입하지 않는다.
@@ -169,6 +172,7 @@ PR은 앞선 PR의 검증·병합 후 하나씩 올린다. 각 구현에서 현�
 3. **OAuth 기반**: server library의 CI 적합성 검증을 먼저 수행하고 채택 결과를 기록한다.
    Grant·client·code·token transaction, metadata, 사용자 승인·철회 UI를 구현한다.
 4. **MCP와 CLI**: 자체 issuer의 Code/Device Flow, client 등록, scope/resource 검증과 credential 저장·갱신·폐기를 통합한다.
+   기존 CLI의 hard-coded scope와 discovery 확장을 바꾸고 구·신 CLI/server 조합의 호환 구간과 업그레이드 순서를 검증한다.
 5. **전환 검증**: 실제 client 호환 검증, AuthGate 통신 차단 검증, 기존 DB 이전 연습, 배포·롤백 절차를 검증한다.
 6. **이름과 출시**: 새 이름이 정해지면 CLI keychain·profile·다운로드 경로와 배포 참조를 이전한다.
    도메인 변경이 있다면 issuer 전환과 같은 운영 전환으로 묶어 token 재발급을 반복하지 않는다.
