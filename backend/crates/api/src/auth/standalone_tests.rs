@@ -179,7 +179,10 @@ async fn device_http_flow_rejects_csrf_and_uses_own_tokens_without_authgate()
     .await;
     assert_eq!(metadata["issuer"], "http://localhost:9191");
     assert_eq!(metadata["client_id_metadata_document_supported"], true);
-    assert_eq!(metadata["authorization_response_iss_parameter_supported"], true);
+    assert_eq!(
+        metadata["authorization_response_iss_parameter_supported"],
+        true
+    );
     assert_eq!(
         metadata["token_endpoint_auth_methods_supported"],
         json!(["none"])

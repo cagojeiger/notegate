@@ -266,11 +266,9 @@ mod tests {
             "token_endpoint_auth_method": "private_key_jwt",
             "token_endpoint_auth_methods_supported": ["none", "private_key_jwt"]
         });
-        let client: super::ClientMetadata = serde_json::from_value(base.clone())?;
+        let mut client: super::ClientMetadata = serde_json::from_value(base)?;
         assert!(client.supports_public_method());
-        let mut private_only = base;
-        private_only["token_endpoint_auth_methods_supported"] = serde_json::json!(["private_key_jwt"]);
-        let client: super::ClientMetadata = serde_json::from_value(private_only)?;
+        client.token_endpoint_auth_methods_supported = vec!["private_key_jwt".to_owned()];
         assert!(!client.supports_public_method());
         Ok(())
     }

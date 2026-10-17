@@ -670,6 +670,8 @@ async fn private_response(
     next: axum::middleware::Next,
 ) -> Response {
     let mut response = no_store(next.run(request).await);
+    // Fetch serializes navigation POST Origin as null under no-referrer.
+    // Keep same-origin CSRF checks while suppressing cross-origin Referer.
     response.headers_mut().insert(
         header::REFERRER_POLICY,
         header::HeaderValue::from_static("same-origin"),

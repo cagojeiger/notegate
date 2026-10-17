@@ -336,7 +336,9 @@ impl Validate for Config {
             );
         }
         validate_background_jobs(self, &mut errors);
-        if self.oidc.is_none() && validate_http_url_value(&self.authgate_url).is_err() {
+        if (self.oidc.is_none() || !self.authgate_url.is_empty())
+            && validate_http_url_value(&self.authgate_url).is_err()
+        {
             errors.add("authgate_url", ValidationError::new("http_url"));
         }
         if let Some(oidc) = &self.oidc {
@@ -1450,6 +1452,9 @@ mod tests {
         config.mcp_oauth_client_id.clear();
         config.normalize();
         assert!(config.validate().is_ok());
+        config.authgate_url = "invalid legacy issuer".to_owned();
+        assert!(config.validate().is_err());
+        config.authgate_url.clear();
         for bad in [
             "http://public.example.test",
             "https://user:password@example.test",
