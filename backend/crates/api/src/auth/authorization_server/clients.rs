@@ -98,24 +98,25 @@ async fn fetch(client_id: &str) -> Result<(ClientMetadata, Duration), &'static s
     {
         return Err("invalid_client");
     }
-    let public_method = if metadata.token_endpoint_auth_methods_supported.is_empty() {
-        metadata
-            .token_endpoint_auth_method
-            .as_deref()
-            .is_none_or(|m| m == "none")
-    } else {
-        metadata
-            .token_endpoint_auth_methods_supported
-            .iter()
-            .any(|m| m == "none")
-    };
-    if !public_method {
+    if !metadata.supports_public_method() {
         return Err("invalid_client");
     }
     Ok((metadata, Duration::from_secs(cache_seconds)))
 }
 
 impl ClientMetadata {
+    fn supports_public_method(&self) -> bool {
+        if self.token_endpoint_auth_methods_supported.is_empty() {
+            self.token_endpoint_auth_method
+                .as_deref()
+                .is_none_or(|method| method == "none")
+        } else {
+            self.token_endpoint_auth_methods_supported
+                .iter()
+                .any(|method| method == "none")
+        }
+    }
+
     pub fn allows_redirect(&self, redirect: &str) -> bool {
         if redirect.len() > 2048 || redirect.chars().any(char::is_control) {
             return false;
@@ -254,6 +255,24 @@ mod tests {
         ] {
             assert!(!client.allows_redirect(redirect));
         }
+    }
+
+    #[test]
+    fn public_exchange_supports_cimd_method_transition() -> Result<(), serde_json::Error> {
+        let base = serde_json::json!({
+            "client_id": "https://client.example.test/metadata",
+            "client_name": "Client",
+            "redirect_uris": ["https://client.example.test/callback"],
+            "token_endpoint_auth_method": "private_key_jwt",
+            "token_endpoint_auth_methods_supported": ["none", "private_key_jwt"]
+        });
+        let client: super::ClientMetadata = serde_json::from_value(base.clone())?;
+        assert!(client.supports_public_method());
+        let mut private_only = base;
+        private_only["token_endpoint_auth_methods_supported"] = serde_json::json!(["private_key_jwt"]);
+        let client: super::ClientMetadata = serde_json::from_value(private_only)?;
+        assert!(!client.supports_public_method());
+        Ok(())
     }
 
     #[test]

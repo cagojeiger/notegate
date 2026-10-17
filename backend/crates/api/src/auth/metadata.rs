@@ -60,6 +60,8 @@ pub struct AuthorizationServerMetadata {
     client_id_metadata_text_supported: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     client_id_metadata_document_supported: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    authorization_response_iss_parameter_supported: Option<bool>,
     /// Static public OAuth client id registered for the Command API CLI.
     cli_client_id: String,
 }
@@ -120,6 +122,7 @@ pub fn authorization_server_metadata_for_config(config: &Config) -> Authorizatio
         },
         client_id_metadata_text_supported: (!standalone).then_some(true),
         client_id_metadata_document_supported: standalone.then_some(true),
+        authorization_response_iss_parameter_supported: standalone.then_some(true),
         cli_client_id: config.cli_oauth_client_id.clone(),
     }
 }

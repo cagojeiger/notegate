@@ -115,7 +115,8 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
     // Access hashes are disposable after expiry; consumed refresh hashes must remain
     // while their grant can still rotate, so reuse detection survives cleanup.
     let oauth_access_deleted = sqlx::query(
-        "DELETE FROM oauth_credentials WHERE token_hash IN (         SELECT token_hash FROM oauth_credentials WHERE kind='access' AND expires_at<=now() \
+        "DELETE FROM oauth_credentials WHERE token_hash IN ( \
+         SELECT token_hash FROM oauth_credentials WHERE kind='access' AND expires_at<=now() \
          ORDER BY expires_at LIMIT 1000)",
     )
     .execute(&mut *tx)

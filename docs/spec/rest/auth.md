@@ -68,7 +68,7 @@ Settings → Account의 **Manage connected applications**는 `/oauth/connections
 
 ## Discovery와 경계
 
-`/.well-known/oauth-authorization-server`는 독립 모드에서 NoteGate issuer·authorize/token/revoke/Device endpoint·S256·CIMD 지원·`mcp`, `cli`, `offline_access` scope를 게시한다. 자체 OIDC ID token/JWKS를 제공하는 서버는 아니다.
+`/.well-known/oauth-authorization-server`는 독립 모드에서 NoteGate issuer·authorize/token/revoke/Device endpoint·S256·CIMD·RFC 9207 issuer 응답 지원·`mcp`, `cli`, `offline_access` scope를 게시한다. 자체 OIDC ID token/JWKS를 제공하는 서버는 아니다.
 
 `/.well-known/oauth-protected-resource[/mcp]`는 MCP resource와 NoteGate authorization server를 게시한다. MCP 401 challenge도 같은 metadata와 MCP scope를 가리킨다.
 
