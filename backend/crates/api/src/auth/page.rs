@@ -13,7 +13,7 @@ pub fn html_page(status: StatusCode, title: &str, body: &str) -> Response {
         .into_response()
 }
 
-fn escape_html(input: &str) -> String {
+pub(super) fn escape_html(input: &str) -> String {
     input
         .replace('&', "&amp;")
         .replace('<', "&lt;")

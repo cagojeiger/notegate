@@ -6,6 +6,8 @@
 
 mod history;
 pub use history::EncryptedHistoryValue;
+mod oauth;
+pub use oauth::EncryptedOAuthValue;
 
 use std::fmt::Write as _;
 
@@ -36,6 +38,8 @@ const API_KEY_HMAC_LABEL: &[u8] = b"notegate/lookup/api-key-hmac/v1";
 const BROWSER_SESSION_HMAC_LABEL: &[u8] = b"notegate/lookup/browser-session-hmac/v1";
 const SESSION_SIGNING_LABEL: &[u8] = b"notegate/lookup/session-signing/v1";
 const INTERNAL_SEARCH_SIGNING_LABEL: &[u8] = b"notegate/lookup/internal-search-signing/v1";
+const OAUTH_HMAC_LABEL: &[u8] = b"notegate/lookup/oauth-credential/v1";
+const OAUTH_FIELD_LABEL: &[u8] = b"notegate/enc/oauth-state/v1";
 
 const PROVIDER_SUB_PREFIX: &str = "provider-sub:v1:";
 const EMAIL_PREFIX: &str = "email:v1:";
@@ -159,6 +163,8 @@ pub struct PiiCrypto {
     browser_session_hmac_key: [u8; KEY_LEN],
     session_signing_key: [u8; KEY_LEN],
     internal_search_signing_key: [u8; KEY_LEN],
+    oauth_hmac_key: [u8; KEY_LEN],
+    oauth_field_key: [u8; KEY_LEN],
 }
 
 /// Encrypted field value split into ciphertext and nonce columns.
@@ -193,6 +199,8 @@ impl PiiCrypto {
             browser_session_hmac_key: hkdf_key(lookup_root, BROWSER_SESSION_HMAC_LABEL)?,
             session_signing_key: hkdf_key(lookup_root, SESSION_SIGNING_LABEL)?,
             internal_search_signing_key: hkdf_key(lookup_root, INTERNAL_SEARCH_SIGNING_LABEL)?,
+            oauth_hmac_key: hkdf_key(lookup_root, OAUTH_HMAC_LABEL)?,
+            oauth_field_key: hkdf_key(enc_root, OAUTH_FIELD_LABEL)?,
         })
     }
 

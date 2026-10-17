@@ -527,6 +527,7 @@ fn config(issuer: &str) -> notegate_core::Config {
         read_database_url: None,
         read_db_max_connections: 1,
         background_jobs: notegate_core::BackgroundJobsConfig::default(),
+        oidc: None,
         authgate_url: issuer.to_owned(),
         notegate_public_url: "http://localhost:9191".to_owned(),
         oauth_client_id: CLIENT_ID.to_owned(),

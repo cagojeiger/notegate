@@ -38,6 +38,9 @@ pub async fn login(
     jar: CookieJar,
     Query(query): Query<LoginQuery>,
 ) -> Response {
+    if state.config.oidc.is_some() {
+        return super::standalone_login::login(&state, jar, sanitize_next(query.next.as_deref())).await;
+    }
     let login_flow = match new_login_flow(&state.oidc).await {
         Ok(flow) => flow,
         Err(error) => {
@@ -81,6 +84,9 @@ pub async fn callback(
     jar: CookieJar,
     Query(query): Query<CallbackQuery>,
 ) -> Response {
+    if state.config.oidc.is_some() {
+        return super::standalone_login::callback(&state, jar, query.code, query.state, query.error).await;
+    }
     let cookie_state = jar
         .get(LOGIN_STATE_COOKIE)
         .map(|cookie| cookie.value().to_owned());
@@ -170,16 +176,27 @@ pub async fn callback(
                     .into_response();
             }
         };
+    complete_login(&state, jar, login_userinfo, next).await
+}
+
+pub(super) async fn complete_login(state: &AppState, jar: CookieJar, login_userinfo: super::oauth_exchange::LoginUserInfo, next: Option<String>) -> Response {
     let attrs = ResolveAttrs {
         issuer: state.oidc.issuer().to_owned(),
         sub: login_userinfo.userinfo.sub,
         email: login_userinfo.userinfo.email.unwrap_or_default(),
         name: login_userinfo.userinfo.name.unwrap_or_default(),
     };
+    if let Some(oidc) = &state.config.oidc {
+        match state.accounts.find_user_id_by_identity(&attrs.issuer, &attrs.sub).await {
+            Ok(None) if !oidc.allow_signup => return (jar, html_page(StatusCode::FORBIDDEN, "Account linking required", "Ask the operator to link your existing account before signing in.")).into_response(),
+            Err(_) => return (jar, html_page(StatusCode::INTERNAL_SERVER_ERROR,"Login failed","Account lookup failed")).into_response(),
+            _ => {}
+        }
+    }
     match state.resolver.resolve_browser(attrs).await {
         Ok(caller) => {
             let session = match create_browser_session(
-                &state,
+                state,
                 caller.account_id(),
                 &login_userinfo.refresh_token,
             )
@@ -200,7 +217,7 @@ pub async fn callback(
                 }
             };
             (
-                jar.add(browser_session_cookie(&state, session)),
+                jar.add(browser_session_cookie(state, session)),
                 Redirect::to(next.as_deref().unwrap_or("/auth/success")),
             )
                 .into_response()

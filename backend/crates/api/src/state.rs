@@ -115,6 +115,7 @@ pub struct AppState {
     /// Account lookup for resolving attribution refs in REST output.
     pub accounts: AccountRepo,
     pub browser_sessions: BrowserSessionRepo,
+    pub oauth: notegate_service::oauth::OAuthService,
     pub(crate) metadata_writes: MetadataWriteBuffer,
     pub(crate) command_invocations: CommandInvocationRepo,
     pub(crate) metrics: Option<MetricsHandle>,
@@ -211,7 +212,9 @@ impl AppState {
             pii_crypto.lookup_key_id(),
             pii_crypto.version(),
         );
+        let oauth = notegate_service::oauth::OAuthService::new(notegate_db::oauth_repo::OAuthRepo::new(db.clone()), pii_crypto.clone());
         Self {
+            oauth,
             db,
             config,
             jwt,

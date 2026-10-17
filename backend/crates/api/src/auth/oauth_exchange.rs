@@ -114,6 +114,14 @@ pub(super) async fn exchange_code_for_userinfo(
             }
         };
 
+    if oidc.is_standalone() {
+        let now = chrono::Utc::now();
+        let auth_time = claims.auth_time().ok_or_else(||notegate_core::Error::validation("OIDC provider must return auth_time for max_age=0"))?;
+        if auth_time > now + chrono::Duration::seconds(60) || auth_time < now - chrono::Duration::seconds(60) {
+            return Err(notegate_core::Error::validation("OIDC authentication is not recent"));
+        }
+    }
+
     if let Some(expected_access_token_hash) = claims.access_token_hash() {
         let actual_access_token_hash = AccessTokenHash::from_token(
             token_response.access_token(),
@@ -132,13 +140,11 @@ pub(super) async fn exchange_code_for_userinfo(
         }
     }
 
-    let refresh_token = token_response
-        .refresh_token()
-        .ok_or_else(|| {
-            notegate_core::Error::internal("openid token response missing refresh_token")
-        })?
-        .secret()
-        .to_owned();
+    let refresh_token = if oidc.is_standalone() {
+        String::new()
+    } else {
+        token_response.refresh_token().ok_or_else(||notegate_core::Error::internal("openid token response missing refresh_token"))?.secret().to_owned()
+    };
     let userinfo: CoreUserInfoClaims = client
         .user_info(
             token_response.access_token().to_owned(),

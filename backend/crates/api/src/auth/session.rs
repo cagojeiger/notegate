@@ -27,12 +27,10 @@ pub async fn create_browser_session(
         .map_err(|_error| AuthError::Internal)?;
     let encrypted_refresh_token = encrypt_refresh_token(state, session_id, refresh_token)?;
     let now = Utc::now();
-    let validated_until = checked_add(now, state.config.browser_session_ttl)?;
+    let validated_until = if state.config.oidc.is_some() { checked_add(now, std::time::Duration::from_secs(86_400))? } else { checked_add(now, state.config.browser_session_ttl)? };
     let expires_at = checked_add(now, state.config.browser_session_max_ttl)?;
     let token_prefix = token_prefix(session_id);
-    state
-        .browser_sessions
-        .insert_session(InsertBrowserSession {
+    let args = InsertBrowserSession {
             session_id,
             user_id,
             token_prefix: &token_prefix,
@@ -42,9 +40,12 @@ pub async fn create_browser_session(
             refresh_token_enc_version: state.security.version(),
             validated_until,
             expires_at,
-        })
-        .await
-        .map_err(|_error| AuthError::Internal)?;
+        };
+    if state.config.oidc.is_some() {
+        state.browser_sessions.insert_local_session(args).await
+    } else {
+        state.browser_sessions.insert_session(args).await
+    }.map_err(|_| AuthError::Internal)?;
     Ok(format_token(session_id, &secret))
 }
 
@@ -57,6 +58,7 @@ pub async fn verify_browser_session(state: &AppState, token: &str) -> Result<Cal
         .map_err(|_error| AuthError::Internal)?
         .ok_or(AuthError::InvalidToken)?;
 
+    if resolved.local_session != state.config.oidc.is_some() { return Err(AuthError::InvalidToken); }
     if resolved.validated_until > Utc::now() {
         state
             .metadata_writes
@@ -64,6 +66,7 @@ pub async fn verify_browser_session(state: &AppState, token: &str) -> Result<Cal
         return caller_from_live_session(resolved);
     }
 
+    if state.config.oidc.is_some() { return Err(AuthError::InvalidToken); }
     refresh_browser_session(state, parsed).await
 }
 
@@ -87,13 +90,13 @@ pub async fn revoke_browser_session_for_logout(
     let Some(session) = session else {
         return Ok(None);
     };
-    let refresh_token = match decrypt_refresh_token(state, &session) {
+    let refresh_token = if session.local_session || state.config.oidc.is_some() { None } else { match decrypt_refresh_token(state, &session) {
         Ok(refresh_token) => Some(refresh_token),
         Err(error) => {
             tracing::warn!(event = "browser_session.logout_refresh_token_decrypt_failed", %error);
             None
         }
-    };
+    } };
     let revoked = state
         .browser_sessions
         .revoke_session_for_logout(session.id)

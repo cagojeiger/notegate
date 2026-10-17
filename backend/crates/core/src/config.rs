@@ -184,6 +184,18 @@ impl Default for HttpRateLimitsConfig {
     }
 }
 
+/// A trusted external login provider. Its tokens never authorize MCP/CLI requests.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OidcLoginConfig {
+    pub issuer: String,
+    pub client_id: String,
+    pub client_secret: Option<SecretString>,
+    /// Keep closed until existing accounts have been linked explicitly.
+    #[serde(default)]
+    pub allow_signup: bool,
+}
+
 /// Server + database configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -209,7 +221,11 @@ pub struct Config {
     #[serde(default)]
     pub background_jobs: BackgroundJobsConfig,
     /// Base URL for authgate, with trailing slash trimmed.
+    #[serde(default)]
     pub authgate_url: String,
+    /// Standalone mode. AuthGate configuration is unused when this is set.
+    #[serde(default)]
+    pub oidc: Option<OidcLoginConfig>,
     /// Public URL for notegate as seen by browsers/MCP clients, with trailing slash trimmed.
     #[serde(rename = "public_url")]
     pub notegate_public_url: String,
@@ -320,16 +336,26 @@ impl Validate for Config {
             );
         }
         validate_background_jobs(self, &mut errors);
-        if validate_http_url_value(&self.authgate_url).is_err() {
+        if self.oidc.is_none() && validate_http_url_value(&self.authgate_url).is_err() {
             errors.add("authgate_url", ValidationError::new("http_url"));
+        }
+        if let Some(oidc) = &self.oidc {
+            let secure = url::Url::parse(&oidc.issuer).is_ok_and(|u| u.scheme()=="https" || (u.scheme()=="http" && u.host_str()==Some("127.0.0.1")));
+            if validate_http_url_value(&oidc.issuer).is_err()
+                || !secure
+                || oidc.client_id.is_empty()
+                || oidc.client_secret.as_ref().is_some_and(|value| value.expose_secret().is_empty())
+            {
+                errors.add("oidc", ValidationError::new("invalid_provider"));
+            }
         }
         if validate_http_url_value(&self.notegate_public_url).is_err() {
             errors.add("notegate_public_url", ValidationError::new("http_url"));
         }
-        if self.oauth_client_id.is_empty() {
+        if self.oidc.is_none() && self.oauth_client_id.is_empty() {
             errors.add("oauth_client_id", ValidationError::new("length"));
         }
-        if self.mcp_oauth_client_id.is_empty() {
+        if self.oidc.is_none() && self.mcp_oauth_client_id.is_empty() {
             errors.add("mcp_oauth_client_id", ValidationError::new("length"));
         }
         if self.cli_oauth_client_id.is_empty() {
@@ -434,6 +460,7 @@ impl Config {
 
     fn normalize(&mut self) {
         self.authgate_url = trim_trailing_slashes(&self.authgate_url);
+        if let Some(oidc)=&mut self.oidc { oidc.issuer=trim_trailing_slashes(&oidc.issuer); }
         self.notegate_public_url = trim_trailing_slashes(&self.notegate_public_url);
         self.oauth_redirect_url = if self.oauth_redirect_url.trim().is_empty() {
             format!("{}/auth/callback", self.notegate_public_url)
@@ -836,6 +863,7 @@ mod tests {
             read_database_url: None,
             read_db_max_connections: 10,
             background_jobs: BackgroundJobsConfig::default(),
+            oidc: None,
             authgate_url: "https://auth.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),
             oauth_client_id: "notegate-web".to_owned(),

@@ -11,6 +11,7 @@ use crate::url_policy::{is_origin, uses_secure_or_loopback_transport};
 pub(super) struct AuthConfiguration {
     pub(super) issuer: Url,
     pub(super) client_id: String,
+    pub(super) device_scope: &'static str,
     pub(super) token_endpoint: Url,
     pub(super) revocation_endpoint: Url,
     pub(super) device_authorization_endpoint: Url,
@@ -24,6 +25,8 @@ pub(super) struct AuthorizationServerMetadata {
     device_authorization_endpoint: String,
     grant_types_supported: Vec<String>,
     cli_client_id: String,
+    #[serde(default)]
+    scopes_supported: Vec<String>,
 }
 
 impl AuthorizationServerMetadata {
@@ -59,6 +62,7 @@ impl AuthorizationServerMetadata {
         Ok(AuthConfiguration {
             issuer,
             client_id: self.cli_client_id,
+            device_scope: if self.scopes_supported.iter().any(|s|s=="cli") { "cli offline_access" } else { super::DEVICE_SCOPE },
             token_endpoint,
             revocation_endpoint,
             device_authorization_endpoint,
@@ -83,6 +87,7 @@ pub(super) fn configuration_from_override(
     Ok(AuthConfiguration {
         issuer,
         client_id: auth_override.client_id,
+        device_scope: super::DEVICE_SCOPE,
         token_endpoint,
         revocation_endpoint,
         device_authorization_endpoint,

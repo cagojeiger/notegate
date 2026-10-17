@@ -56,7 +56,10 @@ pub struct AuthorizationServerMetadata {
     token_endpoint_auth_methods_supported: Vec<&'static str>,
     code_challenge_methods_supported: Vec<&'static str>,
     scopes_supported: Vec<&'static str>,
-    client_id_metadata_text_supported: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_id_metadata_text_supported: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_id_metadata_document_supported: Option<bool>,
     /// Static public OAuth client id registered for the Command API CLI.
     cli_client_id: String,
 }
@@ -69,7 +72,8 @@ pub struct ProtectedResourceMetadata {
     bearer_methods_supported: Vec<&'static str>,
     /// Static public OAuth client id registered for MCP clients in authgate.
     /// This is an extension field; generic clients may ignore it.
-    mcp_client_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mcp_client_id: Option<String>,
 }
 
 pub async fn authorization_server_metadata(
@@ -79,10 +83,11 @@ pub async fn authorization_server_metadata(
 }
 
 pub fn authorization_server_metadata_for_config(config: &Config) -> AuthorizationServerMetadata {
-    let issuer = config.authgate_url.trim_end_matches('/').to_owned();
+    let standalone = config.oidc.is_some();
+    let issuer = if standalone { &config.notegate_public_url } else { &config.authgate_url }.trim_end_matches('/').to_owned();
     AuthorizationServerMetadata {
         issuer: issuer.clone(),
-        authorization_endpoint: format!("{issuer}/authorize"),
+        authorization_endpoint: if standalone { format!("{issuer}/oauth/authorize") } else { format!("{issuer}/authorize") },
         token_endpoint: format!("{issuer}/oauth/token"),
         revocation_endpoint: format!("{issuer}/oauth/revoke"),
         device_authorization_endpoint: format!("{issuer}/oauth/device/authorize"),
@@ -92,14 +97,11 @@ pub fn authorization_server_metadata_for_config(config: &Config) -> Authorizatio
             "refresh_token",
             "urn:ietf:params:oauth:grant-type:device_code",
         ],
-        token_endpoint_auth_methods_supported: vec![
-            "none",
-            "client_secret_basic",
-            "client_secret_post",
-        ],
+        token_endpoint_auth_methods_supported: if standalone { vec!["none"] } else { vec!["none","client_secret_basic","client_secret_post"] },
         code_challenge_methods_supported: vec!["S256"],
-        scopes_supported: vec!["openid", "profile", "email", "offline_access"],
-        client_id_metadata_text_supported: true,
+        scopes_supported: if standalone { vec!["mcp", "cli", "offline_access"] } else { vec!["openid", "profile", "email", "offline_access"] },
+        client_id_metadata_text_supported: (!standalone).then_some(true),
+        client_id_metadata_document_supported: standalone.then_some(true),
         cli_client_id: config.cli_oauth_client_id.clone(),
     }
 }
@@ -113,10 +115,10 @@ pub async fn protected_resource_metadata(
 pub fn protected_resource_metadata_for_config(config: &Config) -> ProtectedResourceMetadata {
     ProtectedResourceMetadata {
         resource: config.resource_url.clone(),
-        authorization_servers: vec![config.authgate_url.clone()],
-        scopes_supported: vec!["openid", "profile", "email", "offline_access"],
+        authorization_servers: vec![if config.oidc.is_some() { config.notegate_public_url.clone() } else { config.authgate_url.clone() }],
+        scopes_supported: if config.oidc.is_some() { vec!["mcp","offline_access"] } else { vec!["openid", "profile", "email", "offline_access"] },
         bearer_methods_supported: vec!["header"],
-        mcp_client_id: config.mcp_oauth_client_id.clone(),
+        mcp_client_id: config.oidc.is_none().then(||config.mcp_oauth_client_id.clone()),
     }
 }
 
@@ -150,6 +152,7 @@ mod tests {
             read_database_url: None,
             read_db_max_connections: 10,
             background_jobs: notegate_core::BackgroundJobsConfig::default(),
+            oidc: None,
             authgate_url: "https://auth.example.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),
             oauth_client_id: "notegate-web".to_owned(),

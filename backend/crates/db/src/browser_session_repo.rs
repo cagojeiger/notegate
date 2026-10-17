@@ -35,13 +35,21 @@ impl BrowserSessionRepo {
     }
 
     pub async fn insert_session(&self, args: InsertBrowserSession<'_>) -> Result<BrowserSession> {
+        self.insert_session_inner(args, false).await
+    }
+
+    pub async fn insert_local_session(&self, args: InsertBrowserSession<'_>) -> Result<BrowserSession> {
+        self.insert_session_inner(args, true).await
+    }
+
+    async fn insert_session_inner(&self, args: InsertBrowserSession<'_>, local: bool) -> Result<BrowserSession> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let row = sqlx::query_as::<_, BrowserSessionRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO browser_sessions \
              (id, user_id, token_prefix, token_hash, hash_key_id, hash_version, \
               refresh_token_ciphertext, refresh_token_nonce, refresh_token_enc_key_id, refresh_token_enc_version, \
-              validated_until, expires_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) \
+              validated_until, expires_at, local_session) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) \
              RETURNING {BROWSER_SESSION_RETURNING_COLUMNS}"
         )))
         .bind(args.session_id)
@@ -56,6 +64,7 @@ impl BrowserSessionRepo {
         .bind(args.refresh_token_enc_version)
         .bind(args.validated_until)
         .bind(args.expires_at)
+        .bind(local)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -100,7 +109,7 @@ impl BrowserSessionRepo {
         let active = active_account_predicate("a.");
         let row = sqlx::query_as::<_, LiveBrowserSessionCallerRow>(sqlx::AssertSqlSafe(format!(
             "SELECT bs.id AS session_id, \
-                    bs.validated_until AS session_validated_until, \
+                    bs.validated_until AS session_validated_until, bs.local_session, bs.created_at AS session_created_at, \
                     {USER_CALLER_COLUMNS} \
              FROM browser_sessions bs \
              JOIN accounts a ON a.id = bs.user_id \
@@ -309,6 +318,8 @@ pub struct BrowserSession {
     pub refresh_token: EncryptedField,
     pub refresh_token_enc_key_id: String,
     pub refresh_token_enc_version: i32,
+    pub local_session: bool,
+    pub created_at: DateTime<Utc>,
     pub validated_until: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
 }
@@ -334,6 +345,8 @@ pub struct RotatedRefreshToken<'a> {
 #[derive(Debug)]
 pub struct LiveBrowserSessionCaller {
     pub session_id: Uuid,
+    pub local_session: bool,
+    pub created_at: DateTime<Utc>,
     pub validated_until: DateTime<Utc>,
     pub account: Account,
     pub user: User,
@@ -343,6 +356,8 @@ pub struct LiveBrowserSessionCaller {
 struct LiveBrowserSessionCallerRow {
     session_id: Uuid,
     session_validated_until: DateTime<Utc>,
+    local_session: bool,
+    session_created_at: DateTime<Utc>,
     #[sqlx(flatten)]
     caller: UserCallerRow,
 }
@@ -353,6 +368,8 @@ impl LiveBrowserSessionCallerRow {
         Ok(LiveBrowserSessionCaller {
             session_id: self.session_id,
             validated_until: self.session_validated_until,
+            local_session: self.local_session,
+            created_at: self.session_created_at,
             account,
             user,
         })
@@ -367,6 +384,8 @@ struct BrowserSessionRow {
     refresh_token_nonce: Vec<u8>,
     refresh_token_enc_key_id: String,
     refresh_token_enc_version: i32,
+    local_session: bool,
+    created_at: DateTime<Utc>,
     validated_until: DateTime<Utc>,
     expires_at: DateTime<Utc>,
 }
@@ -383,6 +402,8 @@ impl From<BrowserSessionRow> for BrowserSession {
             refresh_token_enc_key_id: row.refresh_token_enc_key_id,
             refresh_token_enc_version: row.refresh_token_enc_version,
             validated_until: row.validated_until,
+            local_session: row.local_session,
+            created_at: row.created_at,
             expires_at: row.expires_at,
         }
     }
@@ -394,11 +415,11 @@ fn live_browser_session_predicate(prefix: &str) -> String {
 
 const BROWSER_SESSION_RETURNING_COLUMNS: &str = "id, user_id, refresh_token_ciphertext, \
      refresh_token_nonce, refresh_token_enc_key_id, refresh_token_enc_version, \
-     validated_until, expires_at";
+     validated_until, expires_at, local_session, created_at";
 
 const BROWSER_SESSION_SELECT_COLUMNS: &str = "bs.id, bs.user_id, bs.refresh_token_ciphertext, \
      bs.refresh_token_nonce, bs.refresh_token_enc_key_id, bs.refresh_token_enc_version, \
-     bs.validated_until, bs.expires_at";
+     bs.validated_until, bs.expires_at, bs.local_session, bs.created_at";
 
 pub fn token_prefix(session_id: Uuid) -> String {
     format!("ngs_v1_{session_id}")

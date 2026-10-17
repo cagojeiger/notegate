@@ -621,3 +621,38 @@ fn decrypt_optional_string(
         _ => Err(Error::internal("invalid encrypted field state")),
     }
 }
+
+/// Operator-supplied, verified issuer/subject mapping. Never inferred from email.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IdentityLink {
+    pub account_id: Uuid,
+    pub issuer: String,
+    pub subject: String,
+}
+
+impl AccountRepo {
+    /// Import a verified migration manifest atomically. Call only from the offline operator tool.
+    pub async fn import_identity_links(&self, links: &[IdentityLink]) -> Result<()> {
+        if links.is_empty() || links.len()>10_000 { return Err(Error::validation("identity import must contain 1 to 10000 mappings")); }
+        let mut hashes=Vec::new();
+        for link in links {
+            if link.issuer.is_empty() || link.issuer.len()>2048 || link.subject.is_empty() || link.subject.len()>255 { return Err(Error::validation("invalid external identity mapping")); }
+            hashes.push(self.crypto.provider_sub_hash(&link.issuer,&link.subject)?);
+        }
+        let mut tx=self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut locks=hashes.clone();locks.sort();locks.dedup();
+        for hash in locks { sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))").bind(hash).execute(&mut *tx).await.map_err(map_sqlx_error)?; }
+        let mut users:Vec<_>=links.iter().map(|l|l.account_id).collect();users.sort();users.dedup();
+        for user in users {
+            let live:Option<Uuid>=sqlx::query_scalar("SELECT id FROM accounts WHERE id=$1 AND kind='user' AND is_active=true AND deleted_at IS NULL FOR UPDATE")
+                .bind(user).fetch_optional(&mut *tx).await.map_err(map_sqlx_error)?;
+            if live.is_none() { return Err(Error::validation("identity mapping references an unavailable account")); }
+        }
+        for (link,hash) in links.iter().zip(hashes) {
+            account_identity::insert_identity(&mut tx,link.account_id,&link.issuer,&hash,self.crypto.lookup_key_id(),self.crypto.version()).await?;
+        }
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(())
+    }
+}

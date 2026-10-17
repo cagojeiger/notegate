@@ -26,6 +26,8 @@ pub(crate) type OidcClient = CoreClient<
 pub(crate) struct OidcProvider {
     issuer: String,
     client_id: String,
+    client_secret: Option<secrecy::SecretString>,
+    standalone: bool,
     redirect_url: String,
     http: reqwest::Client,
     cache: RwLock<MetadataCache>,
@@ -78,14 +80,18 @@ pub(crate) async fn execute_oidc_request(
 impl OidcProvider {
     pub(crate) fn new(config: &notegate_core::Config, http: reqwest::Client) -> Self {
         Self {
-            issuer: config.authgate_url.clone(),
-            client_id: config.oauth_client_id.clone(),
+            issuer: config.oidc.as_ref().map_or_else(||config.authgate_url.clone(), |o|o.issuer.clone()),
+            client_id: config.oidc.as_ref().map_or_else(||config.oauth_client_id.clone(), |o|o.client_id.clone()),
+            client_secret: config.oidc.as_ref().and_then(|o|o.client_secret.clone()),
+            standalone: config.oidc.is_some(),
             redirect_url: config.oauth_redirect_url.clone(),
             http,
             cache: RwLock::new(MetadataCache::default()),
             refresh_lock: Mutex::new(()),
         }
     }
+
+    pub(crate) fn is_standalone(&self) -> bool { self.standalone }
 
     /// The configured issuer whose discovery and ID tokens are verified.
     pub(crate) fn issuer(&self) -> &str {
@@ -119,7 +125,7 @@ impl OidcProvider {
         let client = CoreClient::from_provider_metadata(
             metadata,
             ClientId::new(self.client_id.clone()),
-            None,
+            self.client_secret.as_ref().map(|secret| { use secrecy::ExposeSecret as _; openidconnect::ClientSecret::new(secret.expose_secret().to_owned()) }),
         )
         .set_redirect_uri(
             RedirectUrl::new(self.redirect_url.clone()).map_err(|error| {

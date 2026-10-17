@@ -455,7 +455,7 @@ fn user_mcp_auth_response(state: &AppState, error: AuthError) -> Response {
     mcp_auth_response(
         state,
         error,
-        shared_scoped_challenge_header(&state.config.resource_url),
+        shared_scoped_challenge_header(&state.config),
     )
 }
 
