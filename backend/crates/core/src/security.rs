@@ -147,7 +147,7 @@ impl PiiAad {
 }
 
 /// Runtime security provider derived from ENC and LOOKUP root secrets.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PiiCrypto {
     enc_key_id: String,
     lookup_key_id: String,
@@ -172,6 +172,15 @@ pub struct PiiCrypto {
 pub struct EncryptedField {
     pub ciphertext: Vec<u8>,
     pub nonce: Vec<u8>,
+}
+
+impl std::fmt::Debug for PiiCrypto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PiiCrypto")
+            .field("enc_key_id", &self.enc_key_id)
+            .field("lookup_key_id", &self.lookup_key_id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl PiiCrypto {

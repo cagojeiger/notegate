@@ -36,9 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         crypto.clone(),
         config.default_user_tier,
     );
-    account_repo
-        .ensure_legacy_identity_issuer(&config.authgate_url)
-        .await?;
+    if !config.authgate_url.is_empty() { account_repo.ensure_legacy_identity_issuer(&config.authgate_url).await?; }
     // Optional CI suffix creates independent identities without changing existing seeds.
     let suffix = std::env::args().nth(1);
     let (sub, email, name) = match suffix {
@@ -67,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let (account, _user) = account_repo
         .upsert_user_by_identity(&ResolveAttrs {
-            issuer: config.authgate_url.clone(),
+            issuer: config.oidc.as_ref().map_or_else(||config.authgate_url.clone(),|o|o.issuer.clone()),
             sub,
             email,
             name,
@@ -124,8 +122,8 @@ async fn create_browser_session(
     let expires_at = now + chrono::Duration::from_std(config.browser_session_max_ttl)?;
     let token_prefix = token_prefix(session_id);
 
-    BrowserSessionRepo::with_lookup_key(pool.clone(), crypto.lookup_key_id(), crypto.version())
-        .insert_session(InsertBrowserSession {
+    let repo=BrowserSessionRepo::with_lookup_key(pool.clone(), crypto.lookup_key_id(), crypto.version());
+    let args=InsertBrowserSession {
             session_id,
             user_id,
             token_prefix: &token_prefix,
@@ -135,8 +133,8 @@ async fn create_browser_session(
             refresh_token_enc_version: crypto.version(),
             validated_until,
             expires_at,
-        })
-        .await?;
+        };
+    if let Some(oidc)=&config.oidc { repo.insert_local_session(args,&oidc.issuer).await?; } else {repo.insert_session(args).await?;}
 
     Ok(format_token(session_id, &secret))
 }

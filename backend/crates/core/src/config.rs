@@ -340,9 +340,11 @@ impl Validate for Config {
             errors.add("authgate_url", ValidationError::new("http_url"));
         }
         if let Some(oidc) = &self.oidc {
-            let secure = url::Url::parse(&oidc.issuer).is_ok_and(|u| {
-                u.scheme() == "https" || (u.scheme() == "http" && u.host_str() == Some("127.0.0.1"))
-            });
+            let secure = secure_oauth_url(&oidc.issuer).is_some();
+            let public=secure_oauth_url(&self.notegate_public_url).filter(|u|matches!(u.path(), "" | "/"));
+            if public.is_none() { errors.add("notegate_public_url",ValidationError::new("oauth_origin")); }
+            if secure_oauth_url(&self.resource_url).is_none() { errors.add("resource_url",ValidationError::new("secure_oauth_url")); }
+            if self.oauth_redirect_url != format!("{}/auth/callback",self.notegate_public_url) { errors.add("oauth_redirect_url",ValidationError::new("oauth_callback")); }
             if validate_http_url_value(&oidc.issuer).is_err()
                 || !secure
                 || oidc.client_id.is_empty()
@@ -632,6 +634,12 @@ fn validate_http_url_value(value: &str) -> std::result::Result<(), ValidationErr
     } else {
         Err(ValidationError::new("http_url"))
     }
+}
+
+fn secure_oauth_url(value: &str) -> Option<Url> {
+    let url=Url::parse(value).ok()?;
+    let loopback=matches!(url.host(),Some(url::Host::Ipv4(ip)) if ip.is_loopback()) || matches!(url.host(),Some(url::Host::Ipv6(ip)) if ip.is_loopback()) || url.host_str()==Some("localhost");
+    (url.has_host() && (url.scheme()=="https" || (url.scheme()=="http" && loopback)) && url.username().is_empty() && url.password().is_none() && url.query().is_none() && url.fragment().is_none()).then_some(url)
 }
 
 fn validate_internal_service_url(value: &str) -> std::result::Result<(), ValidationError> {
@@ -1416,4 +1424,24 @@ mod tests {
         assert!(!msg.contains("secret-token"));
         Ok(())
     }
+    #[test]
+    fn standalone_config_can_use_authgate_without_legacy_bearer_settings() {
+        let mut config=valid_config();
+        config.oidc=Some(super::OidcLoginConfig {issuer:config.authgate_url.clone(),client_id:config.oauth_client_id.clone(),client_secret:None,allow_signup:false});
+        config.authgate_url.clear();config.oauth_client_id.clear();config.mcp_oauth_client_id.clear();
+        config.normalize();assert!(config.validate().is_ok());
+        for bad in ["http://public.example.test", "https://user:password@example.test", "https://example.test#fragment"] {
+            config.oidc.as_mut().unwrap().issuer=bad.to_owned();
+            assert!(config.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn standalone_authorization_server_requires_secure_origin_and_own_callback() {
+        let mut config=valid_config();
+        config.oidc=Some(super::OidcLoginConfig {issuer:config.authgate_url.clone(),client_id:config.oauth_client_id.clone(),client_secret:None,allow_signup:false});
+        for bad in ["http://public.example.test", "https://example.test/path", "https://example.test?query=true"] { config.notegate_public_url=bad.to_owned(); assert!(config.validate().is_err()); }
+        config.notegate_public_url="https://notes.example.test".to_owned();config.oauth_redirect_url="https://evil.example.test/auth/callback".to_owned();assert!(config.validate().is_err());
+    }
+
 }

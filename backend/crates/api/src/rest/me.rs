@@ -135,8 +135,10 @@ impl From<CurrentUserUsage> for CurrentUserUsageOut {
     responses((status = 200, description = "Get current caller", body = MeOutput)),
     security(("browser_session" = []))
 )]
-pub(crate) async fn get_me(Extension(caller): Extension<Caller>) -> Json<MeOutput> {
-    Json(build_me(&caller))
+pub(crate) async fn get_me(State(state): State<AppState>, Extension(caller): Extension<Caller>) -> Json<MeOutput> {
+    let mut output=build_me(&caller);
+    if state.config.oidc.is_some() && caller.user().is_some() { output.oauth_connections_url=Some("/oauth/connections".to_owned()); }
+    Json(output)
 }
 
 #[utoipa::path(

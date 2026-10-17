@@ -1844,15 +1844,38 @@ fn base64_url_json(value: &Value) -> String {
     )
 }
 
-pub(super) fn standalone_state(db: &TestDb) -> Result<AppState,Box<dyn std::error::Error>> {
-    let mut state=state_with_pool(ResolverMode::Missing,"http://localhost:9191/mcp",db.pool.clone())?;
-    let mut config=(*state.config).clone();
+pub(super) fn standalone_state(db: &TestDb) -> Result<AppState, Box<dyn std::error::Error>> {
+    let mut state = state_with_pool(
+        ResolverMode::Missing,
+        "http://localhost:9191/mcp",
+        db.pool.clone(),
+    )?;
+    let mut config = (*state.config).clone();
     config.authgate_url.clear();
-    config.oidc=Some(notegate_core::config::OidcLoginConfig {issuer:"https://accounts.google.com".to_owned(),client_id:"notegate-web".to_owned(),client_secret:Some(secrecy::SecretString::from("test-google-secret".to_owned())),allow_signup:false});
-    state.config=Arc::new(config);
-    state.oidc=Arc::new(crate::auth::oidc::OidcProvider::new(&state.config,state.http.clone()));
-    state.jwt=Arc::new(JwtAuthority::from_url(&state.config,"http://127.0.0.1:1/unreachable-authgate".to_owned()));
-    state.resolver=Arc::new(notegate_service::identity::Resolver::new(state.accounts.clone(),notegate_db::ApiKeyRepo::with_lookup_key(db.pool.clone(),state.security.lookup_key_id(),state.security.version()),state.security.clone()));
+    config.oidc = Some(notegate_core::config::OidcLoginConfig {
+        issuer: "https://accounts.google.com".to_owned(),
+        client_id: "notegate-web".to_owned(),
+        client_secret: Some(secrecy::SecretString::from("test-google-secret".to_owned())),
+        allow_signup: false,
+    });
+    state.config = Arc::new(config);
+    state.oidc = Arc::new(crate::auth::oidc::OidcProvider::new(
+        &state.config,
+        state.http.clone(),
+    ));
+    state.jwt = Arc::new(JwtAuthority::from_url(
+        &state.config,
+        "http://127.0.0.1:1/unreachable-authgate".to_owned(),
+    ));
+    state.resolver = Arc::new(notegate_service::identity::Resolver::new(
+        state.accounts.clone(),
+        notegate_db::ApiKeyRepo::with_lookup_key(
+            db.pool.clone(),
+            state.security.lookup_key_id(),
+            state.security.version(),
+        ),
+        state.security.clone(),
+    ));
     Ok(state)
 }
 

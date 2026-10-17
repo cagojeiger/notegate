@@ -1,51 +1,167 @@
 //! Real-Postgres OAuth state-machine tests. Every boundary uses an injected clock.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod common;
 
-use chrono::{DateTime,Duration,Utc};
-use common::{TestDb,insert_user_account};
+use chrono::{DateTime, Duration, Utc};
+use common::{TestDb, insert_user_account};
 use notegate_core::security::PiiCrypto;
-use notegate_db::oauth_repo::{Authorization,OAuthRepo};
-use notegate_service::oauth::{OAuthService,TokenOutcome,TokenResponse,pkce_challenge};
+use notegate_db::oauth_repo::{Authorization, OAuthRepo};
+use notegate_service::oauth::{OAuthService, TokenOutcome, TokenResponse, pkce_challenge};
 use uuid::Uuid;
 
-const CLIENT:&str="https://client.example.test/metadata";
-const RESOURCE:&str="https://notes.example.test/mcp";
-const REDIRECT:&str="https://client.example.test/callback";
-const VERIFIER:&str="0123456789abcdefghijklmnopqrstuvwxyzABCDEFGH";
+const CLIENT: &str = "https://client.example.test/metadata";
+const RESOURCE: &str = "https://notes.example.test/mcp";
+const REDIRECT: &str = "https://client.example.test/callback";
+const VERIFIER: &str = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGH";
 
-fn service(db:&TestDb)->OAuthService {OAuthService::new(OAuthRepo::new(db.pool.clone()),PiiCrypto::test())}
-fn now()->DateTime<Utc>{DateTime::from_timestamp(1_800_000_000,0).unwrap()}
-fn issued(outcome:TokenOutcome)->TokenResponse {match outcome {TokenOutcome::Issued(response)=>response,TokenOutcome::Rejected(e)=>panic!("unexpected OAuth rejection: {e}")}}
-fn rejected(outcome:TokenOutcome,expected:&str){match outcome {TokenOutcome::Rejected(e)=>assert_eq!(e,expected),TokenOutcome::Issued(_)=>panic!("unexpected credential issuance")}}
+fn service(db: &TestDb) -> OAuthService {
+    OAuthService::new(OAuthRepo::new(db.pool.clone()), PiiCrypto::test())
+}
+fn now() -> DateTime<Utc> {
+    DateTime::from_timestamp(1_800_000_000, 0).unwrap()
+}
+fn issued(outcome: TokenOutcome) -> TokenResponse {
+    match outcome {
+        TokenOutcome::Issued(response) => response,
+        TokenOutcome::Rejected(e) => panic!("unexpected OAuth rejection: {e}"),
+    }
+}
+fn rejected(outcome: TokenOutcome, expected: &str) {
+    match outcome {
+        TokenOutcome::Rejected(e) => assert_eq!(e, expected),
+        TokenOutcome::Issued(_) => panic!("unexpected credential issuance"),
+    }
+}
 
-async fn approved(db:&TestDb, user:Uuid, code:&str, scope:&str, time:DateTime<Utc>)->Result<(),Box<dyn std::error::Error>>{
-    let crypto=PiiCrypto::test();let repo=OAuthRepo::new(db.pool.clone());
-    let auth=Authorization {id:Uuid::new_v4(),client_id:CLIENT.to_owned(),client_name:"Test client".to_owned(),resource:RESOURCE.to_owned(),redirect_uri:REDIRECT.to_owned(),scope:scope.to_owned(),code_challenge:pkce_challenge(VERIFIER),cookie_hash:"bound-browser".to_owned(),private_payload:serde_json::json!({}),user_id:None,code_hash:None,expires_at:time+Duration::minutes(5),consumed_at:None};
+async fn approved(
+    db: &TestDb,
+    user: Uuid,
+    code: &str,
+    scope: &str,
+    time: DateTime<Utc>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let crypto = PiiCrypto::test();
+    let repo = OAuthRepo::new(db.pool.clone());
+    let auth = Authorization {
+        id: Uuid::new_v4(),
+        client_id: CLIENT.to_owned(),
+        client_name: "Test client".to_owned(),
+        resource: RESOURCE.to_owned(),
+        redirect_uri: REDIRECT.to_owned(),
+        scope: scope.to_owned(),
+        code_challenge: pkce_challenge(VERIFIER),
+        cookie_hash: "bound-browser".to_owned(),
+        private_payload: serde_json::json!({}),
+        user_id: None,
+        code_hash: None,
+        expires_at: time + Duration::minutes(5),
+        consumed_at: None,
+    };
     repo.insert_authorization(&auth).await?;
-    assert!(repo.find_authorization(auth.id,"other-browser",time).await?.is_none());
-    assert!(!repo.approve_authorization(auth.id,"other-browser",user,"wrong",time,time+Duration::seconds(60)).await?);
-    assert!(repo.approve_authorization(auth.id,"bound-browser",user,&crypto.oauth_hash("code",code)?,time,time+Duration::seconds(60)).await?);
-    assert!(!repo.approve_authorization(auth.id,"bound-browser",user,"second",time,time+Duration::seconds(60)).await?);
+    assert!(
+        repo.find_authorization(auth.id, "other-browser", time)
+            .await?
+            .is_none()
+    );
+    assert!(
+        !repo
+            .approve_authorization(
+                auth.id,
+                "other-browser",
+                user,
+                "wrong",
+                time,
+                time + Duration::seconds(60)
+            )
+            .await?
+    );
+    assert!(
+        repo.approve_authorization(
+            auth.id,
+            "bound-browser",
+            user,
+            &crypto.oauth_hash("code", code)?,
+            time,
+            time + Duration::seconds(60)
+        )
+        .await?
+    );
+    assert!(
+        !repo
+            .approve_authorization(
+                auth.id,
+                "bound-browser",
+                user,
+                "second",
+                time,
+                time + Duration::seconds(60)
+            )
+            .await?
+    );
     Ok(())
 }
-async fn exchange(svc:&OAuthService,code:&str,time:DateTime<Utc>)->notegate_core::Result<TokenOutcome>{svc.exchange_code(code,CLIENT,RESOURCE,REDIRECT,VERIFIER,time).await}
+async fn exchange(
+    svc: &OAuthService,
+    code: &str,
+    time: DateTime<Utc>,
+) -> notegate_core::Result<TokenOutcome> {
+    svc.exchange_code(code, CLIENT, RESOURCE, REDIRECT, VERIFIER, time)
+        .await
+}
 
 #[tokio::test]
-async fn authorization_code_is_browser_pkce_client_redirect_and_resource_bound()->Result<(),Box<dyn std::error::Error>>{
-    let Some(db)=TestDb::setup().await? else{return Ok(())};
-    let user=insert_user_account(&db.pool,"oauth","user@test").await?;let svc=service(&db);let t=now();
-    approved(&db,user,"code","mcp offline_access",t).await?;
-    for (client,resource,redirect,verifier) in [("other",RESOURCE,REDIRECT,VERIFIER),(CLIENT,"https://other.test/mcp",REDIRECT,VERIFIER),(CLIENT,RESOURCE,"https://evil.test/callback",VERIFIER),(CLIENT,RESOURCE,REDIRECT,"wrong"),(CLIENT,RESOURCE,REDIRECT,"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH")] {
-        rejected(svc.exchange_code("code",client,resource,redirect,verifier,t).await?,"invalid_grant");
+async fn authorization_code_is_browser_pkce_client_redirect_and_resource_bound()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "oauth", "user@test").await?;
+    let svc = service(&db);
+    let t = now();
+    approved(&db, user, "code", "mcp offline_access", t).await?;
+    for (client, resource, redirect, verifier) in [
+        ("other", RESOURCE, REDIRECT, VERIFIER),
+        (CLIENT, "https://other.test/mcp", REDIRECT, VERIFIER),
+        (CLIENT, RESOURCE, "https://evil.test/callback", VERIFIER),
+        (CLIENT, RESOURCE, REDIRECT, "wrong"),
+        (
+            CLIENT,
+            RESOURCE,
+            REDIRECT,
+            "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
+        ),
+    ] {
+        rejected(
+            svc.exchange_code("code", client, resource, redirect, verifier, t)
+                .await?,
+            "invalid_grant",
+        );
     }
-    let tokens=issued(exchange(&svc,"code",t).await?);
-    assert_eq!(tokens.scope,"mcp offline_access");assert!(tokens.refresh_token.is_some());
-    assert_eq!(svc.access_user(&tokens.access_token,RESOURCE,"mcp",t).await?,Some(user));
-    rejected(exchange(&svc,"code",t).await?,"invalid_grant");
-    assert_eq!(svc.access_user(&tokens.access_token,RESOURCE,"mcp",t).await?,None);
-    let count:i64=sqlx::query_scalar("SELECT count(*) FROM oauth_grants").fetch_one(&db.pool).await?;assert_eq!(count,1);
-    db.cleanup().await;Ok(())
+    let tokens = issued(exchange(&svc, "code", t).await?);
+    assert_eq!(tokens.scope, "mcp offline_access");
+    assert!(tokens.refresh_token.is_some());
+    assert_eq!(
+        svc.access_user(&tokens.access_token, RESOURCE, "mcp", t)
+            .await?,
+        Some(user)
+    );
+    rejected(exchange(&svc, "code", t).await?, "invalid_grant");
+    assert_eq!(
+        svc.access_user(&tokens.access_token, RESOURCE, "mcp", t)
+            .await?,
+        None
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM oauth_grants")
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(count, 1);
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
@@ -384,17 +500,53 @@ async fn device_denial_and_expiry_never_issue_tokens() -> Result<(), Box<dyn std
 }
 
 #[tokio::test]
-async fn concurrent_code_and_refresh_requests_issue_once()->Result<(),Box<dyn std::error::Error>>{
-    let Some(db)=TestDb::setup().await? else{return Ok(())};let user=insert_user_account(&db.pool,"concurrent","user@test").await?;let svc=service(&db);let t=now();
-    approved(&db,user,"code","mcp offline_access",t).await?;
-    let mut tasks=Vec::new();for _ in 0..8 {let svc=svc.clone();tasks.push(tokio::spawn(async move {exchange(&svc,"code",t).await}));}
-    let mut results=Vec::new();for task in tasks {if let TokenOutcome::Issued(tokens)=task.await?? {results.push(tokens);}}assert_eq!(results.len(),1);
-    approved(&db,user,"refresh-code","mcp offline_access",t).await?;
-    let refresh=issued(exchange(&svc,"refresh-code",t).await?).refresh_token.unwrap();
-    let mut tasks=Vec::new();for _ in 0..8 {let svc=svc.clone();let refresh=refresh.clone();tasks.push(tokio::spawn(async move {svc.refresh(&refresh,CLIENT,RESOURCE,t+Duration::seconds(1)).await}));}
-    let mut count=0;for task in tasks {if let TokenOutcome::Issued(_)=task.await?? {count+=1;}}assert_eq!(count,1);
-    let grants:i64=sqlx::query_scalar("SELECT count(*) FROM oauth_grants").fetch_one(&db.pool).await?;assert_eq!(grants,2);
-    db.cleanup().await;Ok(())
+async fn concurrent_code_and_refresh_requests_issue_once() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "concurrent", "user@test").await?;
+    let svc = service(&db);
+    let t = now();
+    approved(&db, user, "code", "mcp offline_access", t).await?;
+    let mut tasks = Vec::new();
+    for _ in 0..8 {
+        let svc = svc.clone();
+        tasks.push(tokio::spawn(async move { exchange(&svc, "code", t).await }));
+    }
+    let mut results = Vec::new();
+    for task in tasks {
+        if let TokenOutcome::Issued(tokens) = task.await?? {
+            results.push(tokens);
+        }
+    }
+    assert_eq!(results.len(), 1);
+    approved(&db, user, "refresh-code", "mcp offline_access", t).await?;
+    let refresh = issued(exchange(&svc, "refresh-code", t).await?)
+        .refresh_token
+        .unwrap();
+    let mut tasks = Vec::new();
+    for _ in 0..8 {
+        let svc = svc.clone();
+        let refresh = refresh.clone();
+        tasks.push(tokio::spawn(async move {
+            svc.refresh(&refresh, CLIENT, RESOURCE, t + Duration::seconds(1))
+                .await
+        }));
+    }
+    let mut count = 0;
+    for task in tasks {
+        if let TokenOutcome::Issued(_) = task.await?? {
+            count += 1;
+        }
+    }
+    assert_eq!(count, 1);
+    let grants: i64 = sqlx::query_scalar("SELECT count(*) FROM oauth_grants")
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(grants, 2);
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
@@ -462,4 +614,26 @@ async fn revoke_and_account_deletion_immediately_disable_existing_tokens()
     );
     db.cleanup().await;
     Ok(())
+}
+
+#[tokio::test]
+async fn refresh_accepts_original_scope_but_never_expands_it() -> Result<(),Box<dyn std::error::Error>> {
+    let Some(db)=TestDb::setup().await? else{return Ok(());};let user=insert_user_account(&db.pool,"scope","user@test").await?;let svc=service(&db);let t=now();
+    approved(&db,user,"code","mcp offline_access",t).await?;let token=issued(exchange(&svc,"code",t).await?).refresh_token.unwrap();
+    rejected(svc.refresh_with_scope(&token,CLIENT,RESOURCE,Some("cli offline_access"),t).await?,"invalid_scope");
+    issued(svc.refresh_with_scope(&token,CLIENT,RESOURCE,Some("mcp offline_access"),t).await?);
+    db.cleanup().await;Ok(())
+}
+
+#[tokio::test]
+async fn concurrent_approvals_respect_the_connection_limit() -> Result<(),Box<dyn std::error::Error>> {
+    let Some(db)=TestDb::setup().await? else{return Ok(());};let user=insert_user_account(&db.pool,"limit","user@test").await?;let svc=service(&db);let t=now();
+    sqlx::query("INSERT INTO oauth_grants (id,user_id,client_id,client_name,resource,scope,created_at,expires_at,idle_expires_at) SELECT gen_random_uuid(),$1,'seed','Seed',$2,'mcp offline_access',$3,$3+interval '30 days',$3+interval '7 days' FROM generate_series(1,99)")
+        .bind(user).bind(RESOURCE).bind(t).execute(&db.pool).await?;
+    approved(&db,user,"one","mcp offline_access",t).await?;approved(&db,user,"two","mcp offline_access",t).await?;
+    let one=svc.clone();let two=svc.clone();
+    let (one,two)=tokio::join!(exchange(&one,"one",t),exchange(&two,"two",t));
+    let mut success=0;for outcome in [one?,two?] {match outcome {TokenOutcome::Issued(_)=>success+=1,TokenOutcome::Rejected(e)=>assert_eq!(e,"access_denied")}}
+    assert_eq!(success,1);assert_eq!(svc.store.list_grants(user,t).await?.len(),100);
+    db.cleanup().await;Ok(())
 }

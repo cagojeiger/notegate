@@ -65,11 +65,17 @@ refresh_token     = AEAD_ENCRYPT(ENC_SUBKEY, authgate_refresh_token, aad)
 
 - Browser session token plaintext는 HttpOnly cookie에만 들어간다.
 - DB에는 `token_hash`, `hash_key_id`, `hash_version`, `token_prefix`만 저장한다.
-- AuthGate refresh token은 `browser_sessions.refresh_token_*` 컬럼에 암호화 저장한다.
+- 호환 모드에서만 AuthGate refresh token을 `browser_sessions.refresh_token_*` 컬럼에 암호화 저장한다. 독립 모드는 외부 token을 보관하지 않고 issuer에 연결한 로컬 세션을 사용한다.
 - Refresh token은 AuthGate token endpoint에 제출할 때만 복호화한다.
 - Refresh 응답에 새 refresh token이 있으면 기존 encrypted refresh token을 교체한다.
 - Refresh 응답의 subject가 기존 user와 다르면 local browser session을 revoke하고 401로 처리한다.
 - FE는 refresh token과 browser session token 원문을 JavaScript storage에 저장하지 않는다.
+
+## Local OAuth credentials
+
+독립 모드에서 NoteGate는 MCP·CLI용 256-bit opaque access/refresh token을 발급한다. LOOKUP root의 별도 HKDF label(`notegate/lookup/oauth-credential/v1`)과 목적별 domain으로 token/code/cookie/device/user-code를 HMAC하며 원문은 보관하지 않는다. Login flow와 client state는 ENC root의 별도 label(`notegate/enc/oauth-state/v1`)로 암호화하고 record ID와 key ID를 AAD에 포함한다. 기존 PII·문서·API key의 label과 AAD는 변경하지 않는다. `PiiCrypto` Debug 출력에는 key ID만 포함한다.
+
+외부 OIDC ID token은 로그인 신원 확인용이며 MCP·CLI bearer로 받지 않는다. 로컬 bearer는 resource/scope·계정 활성 상태·grant 철회와 만료를 확인한다. Refresh는 회전하며 사용한 token 재사용을 확인하면 해당 연결을 철회한다. CIMD는 public HTTPS endpoint만 읽고 DNS를 고정하며 redirect·proxy·과도한 body와 동시 요청을 차단한다. 상세 계약은 [REST 인증](rest/auth.md)을 따른다.
 
 ## Text content encryption
 

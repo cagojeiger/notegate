@@ -190,11 +190,10 @@ fn data_plane_routes(state: AppState) -> Router<AppState> {
         limits.rate_limits.mcp_v2,
     );
     let router = Router::new()
-        .merge(auth_routes())
         .merge(if state.config.oidc.is_some() {
-            crate::auth::authorization_server::routes()
+            apply_rate_limit(auth_routes().merge(crate::auth::authorization_server::routes()), HttpRateLimitConfig { requests_per_second: 10, burst: 30 })
         } else {
-            Router::new()
+            auth_routes()
         })
         .merge(metadata_routes(&state))
         .merge(crate::openapi::routes(state.clone()))

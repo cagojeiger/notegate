@@ -46,7 +46,7 @@ struct MockState {
     userinfo_requests: AtomicUsize,
     fail_jwks: AtomicBool,
     omit_refresh: AtomicBool,
-    last_token_form: RwLock<std::collections::HashMap<String,String>>,
+    last_token_form: RwLock<std::collections::HashMap<String, String>>,
     pause_tokens: AtomicBool,
     tokens_started: Semaphore,
     tokens_released: Semaphore,
@@ -171,7 +171,10 @@ async fn keys(State(state): State<Arc<MockState>>) -> Response {
     Json(state.keys.read().await.clone()).into_response()
 }
 
-async fn token(State(state): State<Arc<MockState>>, axum::Form(form): axum::Form<std::collections::HashMap<String,String>>) -> Json<Value> {
+async fn token(
+    State(state): State<Arc<MockState>>,
+    axum::Form(form): axum::Form<std::collections::HashMap<String, String>>,
+) -> Json<Value> {
     *state.last_token_form.write().await = form;
     state.token_requests.fetch_add(1, Ordering::SeqCst);
     if state.pause_tokens.load(Ordering::SeqCst) {
@@ -183,13 +186,15 @@ async fn token(State(state): State<Arc<MockState>>, axum::Form(form): axum::Form
             .expect("release mock token response")
             .forget();
     }
-    let mut response=json!({
+    let mut response = json!({
         "access_token": ACCESS_TOKEN,
         "token_type": "Bearer",
         "expires_in": 300,
         "id_token": state.id_token.read().await.clone(),
     });
-    if !state.omit_refresh.load(Ordering::SeqCst) { response["refresh_token"]=json!("test-refresh-token"); }
+    if !state.omit_refresh.load(Ordering::SeqCst) {
+        response["refresh_token"] = json!("test-refresh-token");
+    }
     Json(response)
 }
 
@@ -621,49 +626,210 @@ ouZns5xwKc9+aRL+GWoAGNzwzcjE8cP52sBy/r0rYXTs/sZo5kgV
 -----END RSA PRIVATE KEY-----"#;
 
 #[tokio::test]
-async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refresh() -> Result<(), Box<dyn std::error::Error>> {
-    use axum::body::{Body,to_bytes};
-    use axum::http::{Request,header};
+async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refresh()
+-> Result<(), Box<dyn std::error::Error>> {
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, header};
     use tower::ServiceExt as _;
-    let Some(db)=notegate_db::test_support::TestDb::setup().await? else {return Ok(());};
-    let mock=MockProvider::start().await;
-    mock.state.omit_refresh.store(true,Ordering::SeqCst);
-    let mut state=crate::auth::bearer_tests::standalone_state(&db)?;
-    let mut config=(*state.config).clone();
-    config.oidc.as_mut().unwrap().issuer=mock.issuer.clone();
-    state.config=Arc::new(config);state.oidc=Arc::new(OidcProvider::new(&state.config,state.http.clone()));
+    let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+        return Ok(());
+    };
+    let mock = MockProvider::start().await;
+    mock.state.omit_refresh.store(true, Ordering::SeqCst);
+    let mut state = crate::auth::bearer_tests::standalone_state(&db)?;
+    let mut config = (*state.config).clone();
+    config.oidc.as_mut().unwrap().issuer = mock.issuer.clone();
+    config.oidc.as_mut().unwrap().client_secret = None;
+    state.config = Arc::new(config);
+    state.oidc = Arc::new(OidcProvider::new(&state.config, state.http.clone()));
     // This simulates AuthGate remaining the same standards-based upstream provider.
-    state.accounts.ensure_legacy_identity_issuer(&mock.issuer).await?;
-    let owner=state.accounts.upsert_user_by_identity(&crate::identity::ResolveAttrs {issuer:mock.issuer.clone(),sub:SUBJECT.to_owned(),email:"test@example.test".to_owned(),name:"Existing owner".to_owned()}).await?.0.id;
-    let router=Router::new().route("/auth/login",get(crate::auth::oauth::login)).route("/auth/callback",get(crate::auth::oauth::callback)).with_state(state.clone());
-    let login=router.clone().oneshot(Request::builder().uri("/auth/login?next=%2F").body(Body::empty())?).await?;
-    let location=url::Url::parse(login.headers()[header::LOCATION].to_str()?)?;
-    let query:std::collections::HashMap<_,_>=location.query_pairs().into_owned().collect();
-    assert_eq!(query["max_age"],"0");assert!(!query["scope"].contains("offline_access"));
-    let cookie=login.headers()[header::SET_COOKIE].to_str()?.split(';').next().unwrap().to_owned();
-    let second=router.clone().oneshot(Request::builder().uri("/auth/login").body(Body::empty())?).await?;
-    let second_cookie=second.headers()[header::SET_COOKIE].to_str()?.split(';').next().unwrap().to_owned();assert_ne!(cookie.split('=').next(),second_cookie.split('=').next());
-    let callback=format!("/auth/callback?code=code&state={}",query["state"]);
-    let wrong=router.clone().oneshot(Request::builder().uri(&callback).header(header::COOKIE,&second_cookie).body(Body::empty())?).await?;assert_eq!(wrong.status(),StatusCode::BAD_REQUEST);
-    let payload:Value=sqlx::query_scalar("SELECT private_payload FROM oidc_login_flows WHERE id=$1").bind(uuid::Uuid::parse_str(&query["state"])?).fetch_one(&db.pool).await?;assert!(!payload.to_string().contains(&query["nonce"]));
-    mock.set_token(KEY_A,"key-a",json!({"nonce":query["nonce"],"auth_time":chrono::Utc::now().timestamp()}),Algorithm::RS256).await;
-    let response=router.clone().oneshot(Request::builder().uri(&callback).header(header::COOKIE,&cookie).body(Body::empty())?).await?;
-    assert_eq!(response.status(),StatusCode::SEE_OTHER);assert_eq!(response.headers()[header::LOCATION],"/");
-    let session_cookie=response.headers().get_all(header::SET_COOKIE).iter().filter_map(|v|v.to_str().ok()).find(|v|v.starts_with("notegate_browser_session=")).ok_or("no local session")?.split(';').next().unwrap();
-    let session=session_cookie.strip_prefix("notegate_browser_session=").unwrap();
-    let caller=crate::auth::session::verify_browser_session(&state,session).await?;assert_eq!(caller.account_id(),owner);
-    let form=mock.state.last_token_form.read().await;assert_eq!(form["client_secret"],"test-google-secret");assert_eq!(notegate_service::oauth::pkce_challenge(&form["code_verifier"]),query["code_challenge"]);drop(form);
-    let (id,secret)=notegate_db::browser_session_repo::parse_token(session).unwrap();
-    let stored=state.browser_sessions.find_by_token(id,&state.security.browser_session_hash(&id.to_string(),secret)?).await?.unwrap();
+    state
+        .accounts
+        .ensure_legacy_identity_issuer(&mock.issuer)
+        .await?;
+    let owner = state
+        .accounts
+        .upsert_user_by_identity(&crate::identity::ResolveAttrs {
+            issuer: mock.issuer.clone(),
+            sub: SUBJECT.to_owned(),
+            email: "test@example.test".to_owned(),
+            name: "Existing owner".to_owned(),
+        })
+        .await?
+        .0
+        .id;
+    let router = Router::new()
+        .route("/auth/login", get(crate::auth::oauth::login))
+        .route("/auth/callback", get(crate::auth::oauth::callback))
+        .with_state(state.clone());
+    let login = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/auth/login?next=%2F")
+                .body(Body::empty())?,
+        )
+        .await?;
+    let location = url::Url::parse(login.headers()[header::LOCATION].to_str()?)?;
+    let query: std::collections::HashMap<_, _> = location.query_pairs().into_owned().collect();
+    assert_eq!(query["max_age"], "0");
+    assert!(!query["scope"].contains("offline_access"));
+    let cookie = login.headers()[header::SET_COOKIE]
+        .to_str()?
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let second = router
+        .clone()
+        .oneshot(Request::builder().uri("/auth/login").body(Body::empty())?)
+        .await?;
+    let second_cookie = second.headers()[header::SET_COOKIE]
+        .to_str()?
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    assert_ne!(cookie.split('=').next(), second_cookie.split('=').next());
+    let callback = format!("/auth/callback?code=code&state={}", query["state"]);
+    let wrong = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&callback)
+                .header(header::COOKIE, &second_cookie)
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(wrong.status(), StatusCode::BAD_REQUEST);
+    let payload: Value =
+        sqlx::query_scalar("SELECT private_payload FROM oidc_login_flows WHERE id=$1")
+            .bind(uuid::Uuid::parse_str(&query["state"])?)
+            .fetch_one(&db.pool)
+            .await?;
+    assert!(!payload.to_string().contains(&query["nonce"]));
+    mock.set_token(
+        KEY_A,
+        "key-a",
+        json!({"nonce":query["nonce"],"auth_time":chrono::Utc::now().timestamp()}),
+        Algorithm::RS256,
+    )
+    .await;
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&callback)
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/");
+    let session_cookie = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find(|v| v.starts_with("notegate_browser_session="))
+        .ok_or("no local session")?
+        .split(';')
+        .next()
+        .unwrap();
+    let session = session_cookie
+        .strip_prefix("notegate_browser_session=")
+        .unwrap();
+    let caller = crate::auth::session::verify_browser_session(&state, session).await?;
+    assert_eq!(caller.account_id(), owner);
+    let form = mock.state.last_token_form.read().await;
+    assert!(!form.contains_key("client_secret"));
+    assert_eq!(
+        notegate_service::oauth::pkce_challenge(&form["code_verifier"]),
+        query["code_challenge"]
+    );
+    drop(form);
+    let (id, secret) = notegate_db::browser_session_repo::parse_token(session).unwrap();
+    let stored = state
+        .browser_sessions
+        .find_by_token(
+            id,
+            &state
+                .security
+                .browser_session_hash(&id.to_string(), secret)?,
+        )
+        .await?
+        .unwrap();
     assert!(stored.local_session);
-    assert_eq!(state.security.decrypt_browser_refresh_token(&id.to_string(),&stored.refresh_token_enc_key_id,stored.refresh_token_enc_version,&stored.refresh_token)?,"");
-    let before=mock.counts();
-    let replay=router.clone().oneshot(Request::builder().uri(&callback).header(header::COOKIE,&cookie).body(Body::empty())?).await?;assert_eq!(replay.status(),StatusCode::BAD_REQUEST);assert_eq!(mock.counts(),before);
-    sqlx::query("UPDATE browser_sessions SET validated_until=now()-interval '1 second' WHERE id=$1").bind(id).execute(&db.pool).await?;
-    assert!(crate::auth::session::verify_browser_session(&state,session).await.is_err());assert_eq!(mock.counts(),before);
+    assert_eq!(
+        state.security.decrypt_browser_refresh_token(
+            &id.to_string(),
+            &stored.refresh_token_enc_key_id,
+            stored.refresh_token_enc_version,
+            &stored.refresh_token
+        )?,
+        ""
+    );
+    let before = mock.counts();
+    let replay = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&callback)
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(replay.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(mock.counts(), before);
+    sqlx::query(
+        "UPDATE browser_sessions SET validated_until=now()-interval '1 second' WHERE id=$1",
+    )
+    .bind(id)
+    .execute(&db.pool)
+    .await?;
+    assert!(
+        crate::auth::session::verify_browser_session(&state, session)
+            .await
+            .is_err()
+    );
+    assert_eq!(mock.counts(), before);
     // A valid signed identity from a different issuer cannot silently create a duplicate account.
-    let mut denied_state=state.clone();let mut denied_config=(*state.config).clone();denied_config.oidc.as_mut().unwrap().allow_signup=false;denied_state.config=Arc::new(denied_config);
-    let denied=crate::auth::oauth::complete_login(&denied_state,axum_extra::extract::CookieJar::new(),crate::auth::oauth_exchange::LoginUserInfo {userinfo:crate::auth::oauth_exchange::UserInfo {sub:"unlinked-subject".to_owned(),email:Some("test@example.test".to_owned()),name:Some("Duplicate".to_owned())},refresh_token:String::new()},None).await;
-    assert_eq!(denied.status(),StatusCode::FORBIDDEN);let _=to_bytes(denied.into_body(),10_000).await?;
-    db.cleanup().await;Ok(())
+    let mut denied_state = state.clone();
+    let mut denied_config = (*state.config).clone();
+    denied_config.oidc.as_mut().unwrap().allow_signup = false;
+    denied_state.config = Arc::new(denied_config);
+    let denied = crate::auth::oauth::complete_login(
+        &denied_state,
+        axum_extra::extract::CookieJar::new(),
+        crate::auth::oauth_exchange::LoginUserInfo {
+            userinfo: crate::auth::oauth_exchange::UserInfo {
+                sub: "unlinked-subject".to_owned(),
+                email: Some("test@example.test".to_owned()),
+                name: Some("Duplicate".to_owned()),
+            },
+            refresh_token: String::new(),
+        },
+        None,
+    )
+    .await;
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    let _ = to_bytes(denied.into_body(), 10_000).await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn standalone_confidential_oidc_requires_recent_auth_time_and_not_a_refresh_token() {
+    let mock=MockProvider::start().await;mock.state.omit_refresh.store(true,Ordering::SeqCst);
+    let mut config=config(&mock.issuer);
+    config.oidc=Some(notegate_core::config::OidcLoginConfig {issuer:mock.issuer.clone(),client_id:CLIENT_ID.to_owned(),client_secret:Some(SecretString::from("test-client-secret".to_owned())),allow_signup:false});
+    let http=reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().expect("client");
+    let oidc=OidcProvider::new(&config,http.clone());
+    assert!(exchange_code_for_userinfo(&oidc,&http,"code","verifier",NONCE).await.is_err());
+    mock.set_token(KEY_A,"key-a",json!({"auth_time":chrono::Utc::now().timestamp()-120}),Algorithm::RS256).await;
+    assert!(exchange_code_for_userinfo(&oidc,&http,"code","verifier",NONCE).await.is_err());
+    mock.set_token(KEY_A,"key-a",json!({"auth_time":chrono::Utc::now().timestamp()}),Algorithm::RS256).await;
+    let result=exchange_code_for_userinfo(&oidc,&http,"code","verifier",NONCE).await.expect("fresh confidential OIDC");
+    assert!(result.refresh_token.is_empty());
+    assert_eq!(mock.state.last_token_form.read().await["client_secret"],"test-client-secret");
 }

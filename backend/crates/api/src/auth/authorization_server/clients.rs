@@ -15,7 +15,7 @@ pub(super) struct ClientMetadata {
     token_endpoint_auth_methods_supported: Vec<String>,
 }
 
-pub(super) async fn fetch(client_id: &str) -> Result<ClientMetadata, &'static str> {
+async fn fetch(client_id: &str) -> Result<(ClientMetadata, Duration), &'static str> {
     let url = Url::parse(client_id).map_err(|_| "invalid_client")?;
     if client_id.len() > 2048
         || url.scheme() != "https"
@@ -58,6 +58,12 @@ pub(super) async fn fetch(client_id: &str) -> Result<ClientMetadata, &'static st
     if !response.status().is_success() || response.content_length().is_some_and(|n| n > 65536) {
         return Err("invalid_client");
     }
+    let cache_control=response.headers().get(reqwest::header::CACHE_CONTROL).and_then(|v|v.to_str().ok()).unwrap_or_default();
+    let mut cache_seconds=300;
+    for directive in cache_control.split(',').map(str::trim) {
+        if directive.eq_ignore_ascii_case("no-store") || directive.eq_ignore_ascii_case("no-cache") { cache_seconds=0; break; }
+        if let Some(value)=directive.strip_prefix("max-age=").and_then(|v|v.trim_matches('"').parse::<u64>().ok()) { cache_seconds=cache_seconds.min(value); }
+    }
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|_| "invalid_client")? {
         if bytes.len().saturating_add(chunk.len()) > 65536 {
@@ -74,18 +80,11 @@ pub(super) async fn fetch(client_id: &str) -> Result<ClientMetadata, &'static st
     {
         return Err("invalid_client");
     }
-    if metadata
-        .token_endpoint_auth_method
-        .as_deref()
-        .is_some_and(|m| m != "none")
-        && !metadata
-            .token_endpoint_auth_methods_supported
-            .iter()
-            .any(|m| m == "none")
-    {
-        return Err("invalid_client");
-    }
-    Ok(metadata)
+    let public_method=if metadata.token_endpoint_auth_methods_supported.is_empty() {
+        metadata.token_endpoint_auth_method.as_deref().is_none_or(|m|m=="none")
+    } else { metadata.token_endpoint_auth_methods_supported.iter().any(|m|m=="none") };
+    if !public_method { return Err("invalid_client"); }
+    Ok((metadata, Duration::from_secs(cache_seconds)))
 }
 
 impl ClientMetadata {
@@ -167,13 +166,16 @@ pub(crate) struct ClientRegistry {
 
 impl ClientRegistry {
     pub fn new() -> Self {
-        Self { cache: Default::default(), admission: std::sync::Arc::new(tokio::sync::Semaphore::new(8)) }
+        Self {
+            cache: Default::default(),
+            admission: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+        }
     }
 
     pub(super) async fn get(&self, id: &str) -> Result<ClientMetadata, &'static str> {
         {
             let mut cache = self.cache.lock().await;
-            cache.retain(|_, (time, _)| time.elapsed() < Duration::from_secs(300));
+            cache.retain(|_, (expires, _)| *expires > std::time::Instant::now());
             if let Some((_, client)) = cache.get(id) {
                 return Ok(client.clone());
             }
@@ -182,12 +184,13 @@ impl ClientRegistry {
             .admission
             .try_acquire()
             .map_err(|_| "temporarily_unavailable")?;
-        let client = fetch(id).await?;
+        let (client, ttl) = fetch(id).await?;
+        if ttl.is_zero() { return Ok(client); }
         let mut cache = self.cache.lock().await;
         if cache.len() >= 256 {
             cache.clear();
         }
-        cache.insert(id.to_owned(), (std::time::Instant::now(), client.clone()));
+        cache.insert(id.to_owned(), (std::time::Instant::now()+ttl, client.clone()));
         Ok(client)
     }
 }

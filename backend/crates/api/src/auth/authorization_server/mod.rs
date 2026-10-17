@@ -33,6 +33,7 @@ pub fn routes() -> Router<AppState> {
         .route("/oauth/connections", get(connections))
         .route("/oauth/connections/revoke", post(revoke_connection))
         .layer(axum::extract::DefaultBodyLimit::max(16 * 1024))
+        .layer(axum::middleware::from_fn(private_response))
 }
 
 #[derive(Deserialize)]
@@ -302,8 +303,8 @@ async fn token(
         Ok(resource) => resource,
         Err(error) => return oauth_error(error),
     };
-    // Downscoping is not advertised. Never silently ignore a requested scope change.
-    if form.scope.is_some() {
+    // Refresh may repeat the original scope. Scope expansion/downscoping is not advertised.
+    if form.scope.is_some() && form.grant_type != "refresh_token" {
         return oauth_error("invalid_scope");
     }
     let now = Utc::now();
@@ -321,7 +322,7 @@ async fn token(
             Some(token) => {
                 state
                     .oauth
-                    .refresh(&token, &form.client_id, &resource, now)
+                    .refresh_with_scope(&token, &form.client_id, &resource, form.scope.as_deref(), now)
                     .await
             }
             None => return oauth_error("invalid_request"),
@@ -594,7 +595,8 @@ fn login_redirect(next: &str) -> Response {
     Redirect::to(&format!("/auth/login?{query}")).into_response()
 }
 fn oauth_error(error: &'static str) -> Response {
-    let status = if error == "server_error" {
+    tracing::debug!(event="oauth.rejected",reason=error);
+    let status = if error == "temporarily_unavailable" { StatusCode::SERVICE_UNAVAILABLE } else if error == "server_error" {
         StatusCode::INTERNAL_SERVER_ERROR
     } else {
         StatusCode::BAD_REQUEST
@@ -623,5 +625,13 @@ fn page(title: &str, body: &str) -> Response {
         header::REFERRER_POLICY,
         header::HeaderValue::from_static("no-referrer"),
     );
+    response
+}
+
+
+async fn private_response(request: axum::http::Request<axum::body::Body>, next: axum::middleware::Next) -> Response {
+    let mut response=no_store(next.run(request).await);
+    response.headers_mut().insert(header::REFERRER_POLICY,header::HeaderValue::from_static("no-referrer"));
+    response.headers_mut().insert(header::X_FRAME_OPTIONS,header::HeaderValue::from_static("DENY"));
     response
 }

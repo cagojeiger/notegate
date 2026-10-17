@@ -149,7 +149,9 @@ pub(crate) async fn run() -> anyhow::Result<()> {
             config.default_user_tier,
         );
         if !config.authgate_url.is_empty() {
-            account_repo.ensure_legacy_identity_issuer(&config.authgate_url).await?;
+            account_repo
+                .ensure_legacy_identity_issuer(&config.authgate_url)
+                .await?;
         } else {
             account_repo.require_legacy_identity_binding().await?;
         }

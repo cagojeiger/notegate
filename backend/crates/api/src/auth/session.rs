@@ -33,6 +33,7 @@ pub async fn create_browser_session(
         checked_add(now, state.config.browser_session_ttl)?
     };
     let expires_at = checked_add(now, state.config.browser_session_max_ttl)?;
+    let validated_until = validated_until.min(expires_at);
     let token_prefix = token_prefix(session_id);
     let args = InsertBrowserSession {
         session_id,
@@ -46,7 +47,10 @@ pub async fn create_browser_session(
         expires_at,
     };
     if state.config.oidc.is_some() {
-        state.browser_sessions.insert_local_session(args, state.oidc.issuer()).await
+        state
+            .browser_sessions
+            .insert_local_session(args, state.oidc.issuer())
+            .await
     } else {
         state.browser_sessions.insert_session(args).await
     }
@@ -63,7 +67,9 @@ pub async fn verify_browser_session(state: &AppState, token: &str) -> Result<Cal
         .map_err(|_error| AuthError::Internal)?
         .ok_or(AuthError::InvalidToken)?;
 
-    if resolved.local_session != state.config.oidc.is_some() || (resolved.local_session && resolved.oidc_issuer.as_deref() != Some(state.oidc.issuer())) {
+    if resolved.local_session != state.config.oidc.is_some()
+        || (resolved.local_session && resolved.oidc_issuer.as_deref() != Some(state.oidc.issuer()))
+    {
         return Err(AuthError::InvalidToken);
     }
     if resolved.validated_until > Utc::now() {
