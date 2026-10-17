@@ -212,7 +212,7 @@ async fn authorization_consent_is_bound_single_use_and_explicit()
         client_id: "https://client.test/metadata".to_owned(),
         client_name: "Untrusted <script>".to_owned(),
         resource: state.config.resource_url.clone(),
-        redirect_uri: "https://client.test/callback".to_owned(),
+        redirect_uri: "https://client.test:8443/callback?flow=browser".to_owned(),
         scope: "mcp offline_access".to_owned(),
         code_challenge: pkce_challenge(verifier),
         cookie_hash: state
@@ -238,14 +238,13 @@ async fn authorization_consent_is_bound_single_use_and_explicit()
         )
         .await?;
     assert_eq!(get.status(), StatusCode::OK);
-    assert!(
-        get.headers()[header::CONTENT_SECURITY_POLICY]
-            .to_str()?
-            .contains("frame-ancestors 'none'")
+    assert_eq!(
+        get.headers()[header::CONTENT_SECURITY_POLICY].to_str()?,
+        "default-src 'none'; form-action 'self' https://client.test:8443; frame-ancestors 'none'; base-uri 'none'"
     );
     let html = String::from_utf8(to_bytes(get.into_body(), 100_000).await?.to_vec())?;
     assert!(html.contains("Untrusted &lt;script&gt;"));
-    assert!(html.contains("https://client.test/callback"));
+    assert!(html.contains(&auth.redirect_uri));
     let pending: i64 =
         sqlx::query_scalar("SELECT count(*) FROM oauth_authorizations WHERE code_hash IS NOT NULL")
             .fetch_one(&db.pool)

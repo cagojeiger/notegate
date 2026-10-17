@@ -157,6 +157,10 @@ async fn consent(
     let resource = escape_html(&auth.resource);
     let scope = escape_html(&auth.scope);
     let account = escape_html(&caller.account.display_name);
+    let redirect = match url::Url::parse(&auth.redirect_uri) {
+        Ok(redirect) => redirect,
+        Err(_) => return oauth_error("server_error"),
+    };
     page(
         "Connect application",
         &format!(
@@ -164,6 +168,7 @@ async fn consent(
             escape_html(&auth.redirect_uri),
             auth.id
         ),
+        Some(&redirect),
     )
 }
 
@@ -500,6 +505,7 @@ async fn device_page(
             escape_html(&caller.account.display_name),
             escape_html(&code)
         ),
+        None,
     )
 }
 async fn device_approve(
@@ -529,10 +535,12 @@ async fn device_approve(
         Ok(true) => page(
             "Request completed",
             "<p>Return to your terminal. You can close this tab.</p>",
+            None,
         ),
         Ok(false) => page(
             "Code unavailable",
             "<p>The code expired, was already used, or is incorrect. Start a new CLI login.</p>",
+            None,
         ),
         Err(_) => oauth_error("server_error"),
     }
@@ -556,7 +564,7 @@ async fn connections(State(state): State<AppState>, jar: CookieJar) -> Response 
                 body.push_str(&format!("<li><strong>{}</strong> <code>{}</code><br>{}<form method=post action=/oauth/connections/revoke><input type=hidden name=id value=\"{}\"><button>Revoke connection</button></form></li>",escape_html(&grant.client_name),escape_html(&grant.client_id),escape_html(&grant.scope),grant.id));
             }
             body.push_str("</ul><p><a href=/ >Back to NoteGate</a></p>");
-            page("Connected applications", &body)
+            page("Connected applications", &body, None)
         }
         Err(_) => oauth_error("server_error"),
     }
@@ -650,14 +658,21 @@ fn no_store(mut response: Response) -> Response {
         .insert(header::PRAGMA, header::HeaderValue::from_static("no-cache"));
     response
 }
-fn page(title: &str, body: &str) -> Response {
-    let mut response=no_store(Html(format!("<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width, initial-scale=1\"><title>{}</title></head><body><main><h1>{}</h1>{body}</main></body></html>",escape_html(title),escape_html(title))).into_response());
-    response.headers_mut().insert(
-        header::CONTENT_SECURITY_POLICY,
-        header::HeaderValue::from_static(
-            "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
-        ),
+fn page(title: &str, body: &str, form_redirect: Option<&url::Url>) -> Response {
+    // Chromium applies form-action to the POST redirect as well as its target.
+    let redirect_source = form_redirect
+        .map(|redirect| format!(" {}", redirect.origin().ascii_serialization()))
+        .unwrap_or_default();
+    let policy = format!(
+        "default-src 'none'; form-action 'self'{redirect_source}; frame-ancestors 'none'; base-uri 'none'"
     );
+    let Ok(policy) = header::HeaderValue::from_str(&policy) else {
+        return oauth_error("server_error");
+    };
+    let mut response=no_store(Html(format!("<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width, initial-scale=1\"><title>{}</title></head><body><main><h1>{}</h1>{body}</main></body></html>",escape_html(title),escape_html(title))).into_response());
+    response
+        .headers_mut()
+        .insert(header::CONTENT_SECURITY_POLICY, policy);
     response.headers_mut().insert(
         header::REFERRER_POLICY,
         header::HeaderValue::from_static("same-origin"),

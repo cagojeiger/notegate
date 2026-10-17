@@ -16,7 +16,8 @@ test("standalone CLI approval and connection revocation", async ({ browser, play
     expect(deviceResponse.status()).toBe(200);
     const device = await deviceResponse.json();
     const page = await context.newPage();
-    await page.goto(device.verification_uri_complete);
+    const approvalPage = await page.goto(device.verification_uri_complete);
+    expect(approvalPage?.headers()["content-security-policy"]).toBe("default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
     await expect(page.getByRole("heading", { name: "Connect NoteGate CLI" })).toBeVisible();
     const approvalRequest = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/oauth/device");
     await page.getByRole("button", { name: "Connect CLI", exact: true }).click();
@@ -44,6 +45,60 @@ test("standalone CLI approval and connection revocation", async ({ browser, play
     });
     expect(revoked.status()).toBe(400);
     expect((await revoked.json()).error).toBe("invalid_grant");
+  } finally {
+    await context.close();
+    await request.dispose();
+  }
+});
+
+test("standalone MCP consent follows its registered callback and exchanges the PKCE code", async ({ browser, playwright, baseURL }) => {
+  const session = process.env.NOTEGATE_WEB_E2E_BROWSER_SESSION;
+  const rawFixture = process.env.NOTEGATE_WEB_E2E_OAUTH_CONSENT;
+  expect(Boolean(session && rawFixture)).toBe(true);
+  const fixture = JSON.parse(rawFixture!) as {
+    id: string; secret: string; verifier: string; client_id: string; redirect_uri: string; state: string;
+  };
+  const request = await playwright.request.newContext({ baseURL });
+  const context = await browser.newContext({ baseURL });
+  try {
+    await context.addCookies([
+      { name: "notegate_browser_session", value: session!, url: baseURL!, httpOnly: true, sameSite: "Lax" },
+      { name: `notegate_authorization_${fixture.id}`, value: fixture.secret, url: baseURL!, httpOnly: true, sameSite: "Lax" }
+    ]);
+    const page = await context.newPage();
+    const callback = new URL(fixture.redirect_uri);
+    await page.route(`${callback.origin}/**`, async (route) => {
+      if (new URL(route.request().url()).pathname === callback.pathname) {
+        await route.fulfill({ status: 303, headers: { location: `${callback.origin}/done` } });
+      } else {
+        await route.fulfill({ status: 200, contentType: "text/html", body: "OAuth callback received" });
+      }
+    });
+    await page.goto(`/oauth/approve?id=${fixture.id}`);
+    await expect(page.getByRole("heading", { name: "Connect application" })).toBeVisible();
+    const returned = page.waitForRequest((r) => {
+      const url = new URL(r.url());
+      return url.origin === callback.origin && url.pathname === callback.pathname;
+    });
+    await page.getByRole("button", { name: "Allow access", exact: true }).click();
+    const callbackRequest = await returned;
+    await expect(page).toHaveURL(`${callback.origin}/done`);
+    const parameters = new URL(callbackRequest.url()).searchParams;
+    expect(parameters.get("state")).toBe(fixture.state);
+    expect(parameters.get("iss")).toBe(baseURL);
+    expect((await callbackRequest.allHeaders()).referer).toBeUndefined();
+    const response = await request.post("/oauth/token", {
+      form: {
+        grant_type: "authorization_code", client_id: fixture.client_id, resource: `${baseURL}/mcp`,
+        redirect_uri: fixture.redirect_uri, code: parameters.get("code")!, code_verifier: fixture.verifier
+      }
+    });
+    expect(response.status()).toBe(200);
+    const tokens = await response.json();
+    expect(tokens.scope).toBe("mcp offline_access");
+    expect((await request.post("/oauth/revoke", {
+      form: { client_id: fixture.client_id, token: tokens.refresh_token }
+    })).status()).toBe(200);
   } finally {
     await context.close();
     await request.dispose();
