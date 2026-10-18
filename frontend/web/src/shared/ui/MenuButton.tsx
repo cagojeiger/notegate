@@ -1,9 +1,14 @@
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
+
+import { ContextMenuItems } from "./ContextMenu";
 
 export function MenuButton({ children, onClick, danger, disabled }: { children: ReactNode; onClick: () => void; danger?: boolean; disabled?: boolean }) {
+  const menuItem = useContext(ContextMenuItems);
   return (
     <button
       type="button"
+      role={menuItem ? "menuitem" : undefined}
+      tabIndex={menuItem ? -1 : undefined}
       onClick={onClick}
       disabled={disabled}
       className={`flex min-h-workbench-control w-full items-center gap-2 rounded-workbench px-2 text-left text-workbench outline-none transition focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${

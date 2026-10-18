@@ -53,6 +53,7 @@ function renderLibrary({ externalPollingOwner = false } = {}) {
       <SpaceLibrary
         spaces={[space]}
         activeSpace={space}
+        canCreateSpace
         isMobile={false}
         usagePollingEnabled={!externalPollingOwner}
         inspectorOpen

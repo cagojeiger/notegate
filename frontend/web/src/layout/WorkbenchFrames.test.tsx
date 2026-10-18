@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuxiliarySidebarFrame, AuxiliarySidebarResizeHandle, PanelOverlay, PrimarySidebarFrame, PrimarySidebarResizeHandle } from "./WorkbenchFrames";
 import { WORKBENCH_LAYOUT } from "../shared/model/workbenchLayout";
 import { useUiStore } from "../stores/uiStore";
+import { resolveWorkbenchLayout } from "./workbenchLayout";
 
 describe("WorkbenchFrames", () => {
   beforeEach(() => {
@@ -55,8 +56,9 @@ describe("WorkbenchFrames", () => {
     const { container } = render(<PrimarySidebarResizeHandle visible />);
 
     const handle = container.firstElementChild;
-    expect(handle).toHaveClass("w-1", "bg-transparent");
+    expect(handle).toHaveClass("w-0", "bg-transparent");
     expect(handle).not.toHaveClass("bg-seam");
+    expect(handle?.querySelector("[aria-hidden]")).toHaveClass("bg-transparent");
     expect(screen.getByRole("separator", { name: "Resize Files sidebar" })).toHaveAttribute(
       "aria-valuenow",
       "300"
@@ -165,6 +167,59 @@ describe("WorkbenchFrames", () => {
 
     expect(document.getElementById("auxiliary-sidebar-panel")).toHaveStyle({ width: "330px" });
     expect(separator).toHaveAttribute("aria-valuenow", "330");
+  });
+
+  it("clamps rendered widths on a narrow viewport and restores preferences when widened", () => {
+    useUiStore.setState({ primaryWidth: 520, auxiliaryWidth: 520 });
+    const input = { isMobile: false, primaryOpen: true, auxiliaryOpen: true, editorGroupCount: 1 };
+    const tablet = resolveWorkbenchLayout({ ...input, viewportWidth: 900 }).sidebars;
+    const desktop = resolveWorkbenchLayout({ ...input, viewportWidth: 1440 }).sidebars;
+    const contentRender = vi.fn();
+    function Content() {
+      contentRender();
+      return <div>Document details</div>;
+    }
+    const content = <Content />;
+    const { rerender } = render(
+      <AuxiliarySidebarFrame mode="docked" sidebarLayout={tablet}>{content}</AuxiliarySidebarFrame>
+    );
+    expect(screen.getByText("Document details").parentElement).toHaveStyle({ width: "280px" });
+    expect(useUiStore.getState().auxiliaryWidth).toBe(520);
+
+    rerender(<AuxiliarySidebarFrame mode="docked" sidebarLayout={desktop}>{content}</AuxiliarySidebarFrame>);
+
+    expect(screen.getByText("Document details").parentElement).toHaveStyle({ width: "520px" });
+    expect(contentRender).toHaveBeenCalledTimes(1);
+  });
+
+  it("resizes a constrained inspector from its rendered width instead of the preferred width", () => {
+    useUiStore.setState({ primaryWidth: 520, auxiliaryWidth: 520 });
+    const sidebarLayout = resolveWorkbenchLayout({
+      isMobile: false, primaryOpen: true, auxiliaryOpen: true, editorGroupCount: 1, viewportWidth: 900
+    }).sidebars;
+    render(
+      <>
+        <PrimarySidebarFrame id="primary-sidebar-panel" mode="docked" sidebarLayout={sidebarLayout}><div>Files</div></PrimarySidebarFrame>
+        <AuxiliarySidebarResizeHandle visible sidebarLayout={sidebarLayout} />
+        <AuxiliarySidebarFrame id="auxiliary-sidebar-panel" mode="docked" sidebarLayout={sidebarLayout}><div>Inspector</div></AuxiliarySidebarFrame>
+      </>
+    );
+    const separator = screen.getByRole("separator", { name: "Resize Inspector" });
+    expect(separator).toHaveAttribute("aria-valuenow", "280");
+    fireEvent.keyDown(separator, { key: "ArrowLeft" });
+
+    expect(document.getElementById("auxiliary-sidebar-panel")).toHaveStyle({ width: "290px" });
+    expect(document.getElementById("primary-sidebar-panel")).toHaveStyle({ width: "246px" });
+    expect(separator).toHaveAttribute("aria-valuenow", "290");
+  });
+
+  it("anchors the non-mobile overlay to the right without consuming editor width", () => {
+    const { container } = render(
+      <AuxiliarySidebarFrame mode="overlay" isMobile={false}><div>Inspector</div></AuxiliarySidebarFrame>
+    );
+    expect(container.firstElementChild).toHaveClass("fixed", "right-0");
+    expect(container.firstElementChild).not.toHaveClass("inset-x-0", "h-[70dvh]");
+    expect(container.firstElementChild).toHaveStyle({ width: "320px" });
   });
 
   it("closes overlay panels from the backdrop", async () => {

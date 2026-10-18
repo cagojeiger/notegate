@@ -69,7 +69,7 @@ Token 값의 정본은 `frontend/web/src/design/theme.css`다. 문서는 role만
 Palette, typography, 상태 표시, 접근성은 [DESIGN.md](../../DESIGN.md)가 정본이다.
 
 - Space Library 스크린샷 기준은 Linux CI의 회귀 검사다. OS별 시스템 글꼴 모양의 동일성을 보장하지 않는다.
-- Workbench control/row 4px, section surface와 Panel 6px, 독립 입력·중앙 modal 8px, 독립 card 16px radius.
+- Workbench control/row 4px, 떠 있는 section surface 6px, 독립 입력·중앙 modal 8px, 독립 card 16px radius. 붙어 있는 패널과 Inspector section은 평면 경계로 구성한다.
 - Shadow는 popover/dialog/focus에만 사용한다.
 
 ## Area style

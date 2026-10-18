@@ -248,7 +248,7 @@ Tree/Source toggle은 preview mode만 바꾼다. Expand/Collapse all은 Tree mod
 |---|---|
 | 기본 | Name, path, kind, folder child count/File size/Text line count, metadata JSON |
 | 설정 | 현재 Node 검색 포함 여부, Text 서버 암호화 상태 |
-| 접힌 System details | Created/updated attribution, internal ID |
+| 기본으로 펼친 System details | Created/updated attribution, internal ID. 사용자가 접을 수 있음 |
 
 선택 없어도 빈 Inspector를 표시한다. 검색 포함은 `PUT /nodes/{node_id}/external-access-policy`, Text 암호화는 `PUT /text/{node_id}/encryption`으로 독립 변경한다. Space 기본값은 새 Node에만, Inspector 변경은 현재 Node에 즉시 적용한다. Metadata는 암호화된 content가 아니며 읽기 전용이다.
 

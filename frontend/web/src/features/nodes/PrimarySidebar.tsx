@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { NodeSummary, Space } from "../../api/types";
-import { Tabs } from "../../shared/ui";
+import { PanelHeader, Tabs } from "../../shared/ui";
 import { BrowseActions } from "./BrowseActions";
 import { NodeContextMenu } from "./NodeContextMenu";
 import { PrimarySidebarSections } from "./PrimarySidebarSections";
@@ -84,9 +84,9 @@ export function PrimarySidebar({
 
   return (
     <aside ref={asideRef} onKeyDown={onSidebarKeyDown} className="flex h-full w-full min-h-0 flex-col border-r border-seam bg-panel font-ui">
-      <div className="flex h-workbench-header shrink-0 items-end border-b border-seam px-2">
+      <PanelHeader tabs>
         <Tabs items={browseTabs} value="browse" onChange={() => {}} label="Primary sidebar sections" variant="header" />
-      </div>
+      </PanelHeader>
       {activeSpace ? (
         <PrimarySidebarSections
           activeSpace={activeSpace}

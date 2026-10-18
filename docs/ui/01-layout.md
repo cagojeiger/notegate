@@ -171,5 +171,14 @@ Text/File 한도는 서로 독립이므로 StatusBar에서 합산 비율을 만�
 | 화면 | 규칙 |
 |---|---|
 | Desktop | docked sidebars, split editor, 최대 3 editor groups |
-| Tablet | desktop과 같은 non-mobile workbench path, docked sidebars, split editor |
+| Tablet | non-mobile workbench path와 split editor를 유지하되, 최소 문서 폭을 확보하도록 sidebar 폭을 줄이고 공간이 부족하면 Inspector를 오른쪽 overlay로 표시 |
 | Mobile | editor 우선, sidebars는 overlay/sheet, group은 하나씩 표시 |
+
+
+## Shared panel composition
+
+- Workbench와 Space Library의 같은 행에 놓이는 헤더는 `PanelHeader`의 공통 높이를 사용한다.
+- Space Library의 본문은 독립 Space 카드와 페이지 여백을 사용한다. Space Inspector는 문서 Inspector와 같은 평면 `PanelSection`을 사용한다.
+- 패널 테두리는 가시 경계선 한 줄을 소유한다. 리사이즈 조작 영역은 경계 위에 겹치며, hover/focus 강조가 기본 경계선을 중복해서 만들지 않는다.
+- non-mobile에서는 editor 영역 전체에 최소 320px를 확보한다. 표시할 sidebar 폭만 가용 공간에 맞추고, 창이 다시 넓어지면 사용자가 정한 폭으로 돌아간다.
+- 두 sidebar의 최소 폭을 함께 확보할 수 없으면 Inspector를 오른쪽 overlay로 표시한다. 배경을 클릭하거나 기존 토글로 닫을 수 있다. Editor group과 열린 문서는 유지한다.

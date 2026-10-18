@@ -124,13 +124,17 @@ describe("AuxiliarySidebar", () => {
     );
   });
 
-  it("prioritizes node identity and keeps secondary details collapsed", () => {
+  it("shows System details by default and lets the user collapse them", async () => {
+    const user = userEvent.setup();
     renderSidebar();
 
     expect(screen.getAllByText("Document").length).toBeGreaterThan(0);
     expect(screen.getByText("1.8 KB")).toBeInTheDocument();
     expect(screen.getByText("42")).toBeInTheDocument();
-    expect(screen.getByText("System details").closest("details")).not.toHaveAttribute("open");
+    const summary = screen.getByText("System details");
+    expect(summary.closest("details")).toHaveAttribute("open");
+    await user.click(summary);
+    expect(summary.closest("details")).not.toHaveAttribute("open");
   });
 
   it("shows direct child count for folders without text-only fields", () => {

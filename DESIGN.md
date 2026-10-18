@@ -36,6 +36,7 @@
 
 ## 시각 언어
 
+- 참고 기준: 테마와 색감은 GitLab, Workbench 구조와 조작 패턴은 VS Code를 참고한다. NoteGate의 실제 색상 값과 동작은 코드의 토큰과 공통 컴포넌트가 정의한다.
 - 방향: `Compact Workbench + Calm Reader`. 탐색·상태·도구 chrome은 개발 도구처럼 조밀하게, 문서 읽기 영역은 여유롭게 유지한다.
 - 색상: `Paired Violet Neutral + Muted Violet`을 따른다. Light는 lavender paper chrome보다 editor를 단계적으로 밝게, Dark는 smoky graphite chrome보다 surface와 editor를 한 단계 밝게 표현한다. Muted Violet은 링크·포커스·선택·기본 동작만 담당하고 화면의 약 5% 안쪽으로 제한한다. hover는 neutral, selected surface는 옅은 violet로 구분한다. 초록색은 정상, 주황색은 주의, 빨간색은 실패, 파란색은 정보 상태에만 쓴다.
 - Workbench 글꼴: title bar, Files/Recent, editor tab, Inspector, modal과 status bar를 포함한 시스템 UI는 운영체제별 UI stack을 사용한다. 기본 크기는 13 px, line-height는 18 px다. macOS와 Windows의 한국어 글꼴은 각각 Apple SD Gothic Neo와 Malgun Gothic을 우선 fallback으로 둔다.
@@ -44,6 +45,7 @@
 - 간격: 4 px 리듬을 기준으로 desktop chrome은 36 px header, 28 px control, 26 px row, 22 px status bar를 기본으로 한다. 모바일의 toolbar와 독립 control은 44 px를 유지하되, 전체 폭이 하나의 target인 Files/Recent 행은 36 px로 조밀하게 표시한다.
 - Recent 목록 보기는 파일명과 경로를 한 항목으로 묶기 위해 행 안쪽 상하 2 px, 두 줄 사이 2 px, 항목 사이 2 px를 사용한다. 한 줄짜리 압축 보기와 Files 행의 밀도는 유지한다.
 - 선택 상태: hover, selected, inspected, active 상태가 행의 padding, 높이, 글자 굵기를 바꾸지 않아야 한다. Files/Recent 행은 장식용 side rail 없이 배경만 바꾸고, `aria-current`로 열린 항목을 표현한다.
+- 구성: 같은 행에 놓이는 Workbench/Space Library/Inspector 헤더는 `PanelHeader`를 사용한다. Inspector 내용은 `PanelSection`으로 나누고, 패널 테두리가 경계선을 소유한다. 리사이즈 핸들은 공간을 차지하지 않는 조작 영역이며 hover/focus 때만 강조한다.
 - 형태: Workbench의 붙어 있는 control과 row는 4 px, section surface는 6 px radius를 기본으로 한다. Inspector는 중첩 카드 대신 얇은 seam으로 나뉜 flat section을 사용한다. 큰 radius와 그림자는 modal과 떠 있는 surface에만 사용한다.
 - 아이콘: 기능 아이콘은 원칙적으로 16 px Lucide와 1.75 px stroke를 사용한다.
 - Section header의 동작은 메타데이터 또는 `xs` control로 제한한다. 인덱스 재구축·사용량 재계산 같은 유지보수 동작은 Primary 채움 대신 얇은 Secondary 경계로 클릭 가능한 버튼임을 명확히 하고, 섹션에 주요 데이터가 있으면 데이터 다음에 배치한다. 모바일에서는 시각적 밀도와 별개로 44 px touch target을 유지한다.
@@ -59,7 +61,8 @@
 - 일반 텍스트는 4.5:1, 큰 텍스트와 의미 있는 UI 경계는 3:1 대비를 유지한다.
 - 링크, button, field, tab과 명시적 focus target에는 보이는 focus outline을 제공한다.
 - icon-only control은 문맥을 포함한 접근성 이름을 가진다.
-- 상태 변경과 비동기 결과는 적절한 live region으로 전달한다.
+- 상태 변경과 비동기 결과는 적절한 live region으로 전달한다. 조회 실패를 빈 목록이나 권한 없음으로 표시하지 않고, 오류와 재시도 동작을 제공한다.
+- Context menu는 열릴 때 첫 사용 가능한 항목에 포커스를 두고, 방향키/Home/End 이동과 Escape/Tab 닫기 및 이전 포커스 복귀를 제공한다.
 - drag가 가능한 항목에는 keyboard와 touch로 사용할 수 있는 대체 동작을 제공한다.
 - desktop의 시각 밀도와 별개로 coarse pointer와 모바일에서는 interactive target을 44 px 이상 유지한다.
 

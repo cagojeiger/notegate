@@ -13,6 +13,7 @@ type ResizeSeparatorProps = {
   valueText?: string;
   controls?: string;
   reverseArrowDirection?: boolean;
+  lineVisible?: boolean;
   onPointerDown: PointerEventHandler<HTMLDivElement>;
   onValueChange: (value: number) => void;
 };
@@ -27,6 +28,7 @@ export function ResizeSeparator({
   valueText,
   controls,
   reverseArrowDirection = false,
+  lineVisible = true,
   onPointerDown,
   onValueChange
 }: ResizeSeparatorProps) {
@@ -70,7 +72,7 @@ export function ResizeSeparator({
       <span
         aria-hidden="true"
         className={[
-          "pointer-events-none absolute bg-seam transition-colors group-hover:bg-[var(--ng-active-border)] group-focus-visible:bg-primary",
+          `pointer-events-none absolute transition-colors group-hover:bg-[var(--ng-active-border)] group-focus-visible:bg-primary ${lineVisible ? "bg-seam" : "bg-transparent"}`,
           vertical
             ? "inset-y-0 left-1/2 w-px -translate-x-1/2"
             : "inset-x-0 top-1/2 h-px -translate-y-1/2"
