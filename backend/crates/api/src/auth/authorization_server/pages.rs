@@ -24,7 +24,7 @@ pub(super) fn consent(auth: &Authorization, account: &str, redirect: &url::Url) 
 <dt>Client</dt><dd><code>{}</code></dd><dt>Redirect</dt><dd><code>{}</code></dd>
 <dt>Resource</dt><dd><code>{}</code></dd><dt>Scopes</dt><dd><code>{}</code></dd></dl></details>
 <form method="post" action="/oauth/approve"><input type="hidden" name="id" value="{}">
-<div class="auth-actions"><button type="submit" name="decision" value="deny">Deny</button><button type="submit" name="decision" value="approve">Allow access</button></div></form>"#,
+<div class="auth-actions"><button type="submit" name="decision" value="approve">Allow access</button><button type="submit" name="decision" value="deny">Deny</button></div></form>"#,
             escape_html(account),
             escape_html(&auth.client_name),
             escape_html(&redirect.origin().ascii_serialization()),
@@ -49,7 +49,7 @@ pub(super) fn device(account: &str, code: &str) -> Response {
 <p class="auth-note">Only approve a code displayed by a CLI login you started.</p>
 <form method="post" action="/oauth/device"><label class="auth-field">Code shown in your terminal
 <input name="user_code" maxlength="32" required autocomplete="off" autocapitalize="characters" spellcheck="false" value="{}"></label>
-<div class="auth-actions"><button type="submit" name="decision" value="deny">Deny</button><button type="submit" name="decision" value="approve">Connect CLI</button></div></form>"#,
+<div class="auth-actions"><button type="submit" name="decision" value="approve">Connect CLI</button><button type="submit" name="decision" value="deny">Deny</button></div></form>"#,
             escape_html(account),
             escape_html(code),
         ),

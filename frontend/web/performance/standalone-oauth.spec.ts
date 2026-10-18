@@ -151,7 +151,7 @@ test("CLI consent works without JavaScript and does not depend on browser storag
     const page = await context.newPage();
     await page.goto(device.verification_uri_complete);
     await expect(page.getByLabel("Code shown in your terminal")).toHaveValue(device.user_code);
-    await page.getByRole("button", { name: "Connect CLI", exact: true }).click();
+    await page.getByLabel("Code shown in your terminal").press("Enter");
     await expect(page.getByRole("heading", { name: "Request completed" })).toBeVisible();
     const response = await request.post("/oauth/token", {
       form: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", client_id: metadata.cli_client_id, device_code: device.device_code }
