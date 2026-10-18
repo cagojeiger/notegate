@@ -1613,7 +1613,17 @@ async fn public_routes_do_not_require_bearer() -> Result<(), Box<dyn std::error:
     assert_eq!(response.status(), StatusCode::OK);
 
     for (path, content_type, cache_control) in [
-        ("/auth/success", "text/html; charset=utf-8", None),
+        (
+            "/auth/success",
+            "text/html; charset=utf-8",
+            Some("no-store"),
+        ),
+        ("/auth/ui.css", "text/css; charset=utf-8", Some("no-cache")),
+        (
+            "/auth/ui.js",
+            "text/javascript; charset=utf-8",
+            Some("no-cache"),
+        ),
         (
             "/auth/login-complete.js",
             "text/javascript; charset=utf-8",

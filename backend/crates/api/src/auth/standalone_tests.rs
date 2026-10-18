@@ -240,7 +240,7 @@ async fn authorization_consent_is_bound_single_use_and_explicit()
     assert_eq!(get.status(), StatusCode::OK);
     assert_eq!(
         get.headers()[header::CONTENT_SECURITY_POLICY].to_str()?,
-        "default-src 'none'; form-action 'self' https://client.test:8443; frame-ancestors 'none'; base-uri 'none'"
+        "default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self' https://client.test:8443; frame-ancestors 'none'; base-uri 'none'"
     );
     let html = String::from_utf8(to_bytes(get.into_body(), 100_000).await?.to_vec())?;
     assert!(html.contains("Untrusted &lt;script&gt;"));

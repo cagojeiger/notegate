@@ -17,7 +17,7 @@ for (const viewport of [
   { name: "tablet", width: 900, height: 1024 },
   { name: "mobile", width: 390, height: 844 }
 ]) {
-  test(`login remains usable in light and dark mode on ${viewport.name}`, async ({ page }) => {
+  test(`login remains usable in light and dark mode on ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.goto("/");
 
@@ -35,6 +35,10 @@ for (const viewport of [
     await expect.poll(() => authScreen.evaluate((element) => getComputedStyle(element).overflowX)).toBe("hidden");
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     await expectNoAccessibilityViolations(page);
+    await testInfo.attach(`login-${viewport.name}-light`, {
+      body: await page.screenshot({ path: `test-results/login-${viewport.name}-light.png` }),
+      contentType: "image/png"
+    });
 
     await page.getByRole("button", { name: "Use dark theme" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -42,6 +46,10 @@ for (const viewport of [
     await expect.poll(() => googleButton.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgb(40, 38, 43)");
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     await expectNoAccessibilityViolations(page);
+    await testInfo.attach(`login-${viewport.name}-dark`, {
+      body: await page.screenshot({ path: `test-results/login-${viewport.name}-dark.png` }),
+      contentType: "image/png"
+    });
   });
 }
 
@@ -54,7 +62,7 @@ test("login remains scrollable on a short desktop viewport", async ({ page }) =>
   await expect.poll(() => authScreen.evaluate((element) => getComputedStyle(element).overflowY)).toBe("auto");
   await expect.poll(() => authScreen.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
 
-  const securityMessage = page.getByText("Google SSO is NoteGate's only production sign-in method.", { exact: false });
+  const securityMessage = page.getByText("Your Google password stays with Google.", { exact: true });
   await securityMessage.scrollIntoViewIfNeeded();
   await expect(securityMessage).toBeVisible();
 });

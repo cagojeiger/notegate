@@ -17,6 +17,32 @@ import {
 
 describe("eventDisplay", () => {
   it.each([
+    ["oauth.approve", undefined, "Connected application", null],
+    ["oauth.revoke", "refresh_reuse", "Disconnected application", "Refresh token reuse detected"],
+    ["oauth.revoke", "code_reuse", "Disconnected application", "Authorization code reuse detected"],
+    ["oauth.revoke", "user_revoked", "Disconnected application", "Revoked by you"],
+    ["oauth.revoke", "future_reason", "Disconnected application", "future reason"]
+  ] as const)("formats %s with %s without inventing a different cause", (opType, reason, action, detail) => {
+    const event: AuditEvent = {
+      id: 1, created_at: "2026-07-13T00:00:00Z", actor_account_id: "user-1", source: "rest",
+      op_type: opType, resource_type: "oauth_grant", resource_id: "grant-1", metadata: { reason }
+    };
+    expect(formatAuditAction(event)).toBe(action);
+    expect(formatAuditTarget(event)).toBe("Application connection grant-1");
+    expect(formatAuditDetail(event)).toBe(detail);
+  });
+
+  it("shows the provider of an operator-imported identity link", () => {
+    const event: AuditEvent = {
+      id: 2, created_at: "2026-07-13T00:00:00Z", actor_account_id: null, source: "system",
+      op_type: "identity.link", resource_type: "account", resource_id: "user-1",
+      metadata: { reason: "operator_import", issuer: "https://issuer.example.test" }
+    };
+    expect(formatAuditAction(event)).toBe("Linked sign-in provider");
+    expect(formatAuditDetail(event)).toBe("Linked by operator · https://issuer.example.test");
+  });
+
+  it.each([
     ["deleted", "Body deleted", "Before deletion reason", "Checkpoint retention expired"],
     ["unavailable", "Body unavailable", "Before availability", "No body or deletion record found"]
   ])("distinguishes %s version bodies from the evidence available", (status, bodyLabel, label, value) => {
