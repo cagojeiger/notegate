@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,13 +14,14 @@ const emptyKeys: ApiKeyListResponse = {
 
 function renderKeyManager({
   maxTtlDays = 30,
-  create = vi.fn()
+  create = vi.fn(),
+  list = vi.fn().mockResolvedValue(emptyKeys)
 }: {
   maxTtlDays?: number;
   create?: (input: { name: string; expires_at: string }) => Promise<MintedKey>;
+  list?: () => Promise<ApiKeyListResponse>;
 } = {}) {
   const queryClient = createTestQueryClient();
-  const list = vi.fn().mockResolvedValue(emptyKeys);
   const revoke = vi.fn().mockResolvedValue(undefined);
   render(
     <QueryClientProvider client={queryClient}>
@@ -33,10 +34,37 @@ function renderKeyManager({
       />
     </QueryClientProvider>
   );
-  return { list, revoke };
+  return { list, revoke, queryClient };
 }
 
 describe("KeyManager", () => {
+  it("distinguishes a failed read from an empty key list and retries it", async () => {
+    const list = vi.fn().mockRejectedValueOnce(new Error("Unavailable")).mockResolvedValue(emptyKeys);
+    const user = userEvent.setup();
+    renderKeyManager({ list });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load API keys.");
+    expect(screen.queryByText("No active keys.")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry API keys" }));
+
+    expect(await screen.findByText("No active keys.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not present cached keys as current after a refresh fails", async () => {
+    const key = { id: "key-1", name: "ci-key", created_at: "2026-10-01T00:00:00Z", expires_at: "2026-10-31T00:00:00Z" };
+    const list = vi.fn().mockResolvedValueOnce({ ...emptyKeys, keys: [key] }).mockRejectedValue(new Error("Unavailable"));
+    const { queryClient } = renderKeyManager({ list });
+    await screen.findByRole("button", { name: "Revoke ci-key" });
+
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ["keys", 30] }); });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load API keys.");
+    expect(screen.queryByRole("button", { name: "Revoke ci-key" })).not.toBeInTheDocument();
+    expect(screen.queryByText("No active keys.")).not.toBeInTheDocument();
+  });
+
   it("uses the user-key 30-day cap by default", async () => {
     renderKeyManager();
 

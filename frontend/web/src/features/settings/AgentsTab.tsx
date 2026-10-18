@@ -56,6 +56,11 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
 
       {agentsQuery.isLoading ? (
         <div className="text-sm text-muted">Loading…</div>
+      ) : agentsQuery.isError ? (
+        <Card tone="danger" padding="sm" className="flex flex-wrap items-center justify-between gap-2 text-workbench">
+          <p role="alert" className="text-danger">Could not load agents.</p>
+          <Button size="sm" secondary aria-label="Retry agents" disabled={agentsQuery.isFetching} onClick={() => { void agentsQuery.refetch(); }}>Retry</Button>
+        </Card>
       ) : agents.length === 0 ? (
         <EmptyState>No agents yet.</EmptyState>
       ) : (
@@ -107,6 +112,12 @@ function AgentSpaceAccess({ agent }: { agent: Agent }) {
   const spaces = (spacesQuery.data?.spaces ?? []).filter(canWriteSpace);
 
   if (spacesQuery.isLoading) return <div className="text-sm text-muted">Loading spaces…</div>;
+  if (spacesQuery.isError) return (
+    <Card tone="danger" padding="sm" className="flex flex-wrap items-center justify-between gap-2 text-workbench">
+      <p role="alert" className="text-danger">Could not load spaces.</p>
+      <Button size="sm" secondary aria-label="Retry spaces" disabled={spacesQuery.isFetching} onClick={() => { void spacesQuery.refetch(); }}>Retry</Button>
+    </Card>
+  );
   if (spaces.length === 0) return <EmptyState>No writable spaces.</EmptyState>;
 
   return (
@@ -138,14 +149,19 @@ function SpaceAccessRow({ space, agent }: { space: Space; agent: Agent }) {
     <li className="flex items-center gap-3 px-4 py-3 text-sm max-sm:flex-col max-sm:items-stretch">
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium">{space.name}</div>
-        <div className="text-xs text-muted">{ACCESS_LABELS[access]}</div>
+        {connectionsQuery.isSuccess ? <div className="text-xs text-muted">{ACCESS_LABELS[access]}</div> : null}
       </div>
       {connectionsQuery.isLoading ? (
         <span className="text-xs text-muted">Loading…</span>
+      ) : connectionsQuery.isError ? (
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <p role="alert" className="text-workbench text-danger">Could not load permissions.</p>
+          <Button size="sm" secondary aria-label={`Retry ${space.name} permissions`} disabled={connectionsQuery.isFetching} onClick={() => { void connectionsQuery.refetch(); }}>Retry</Button>
+        </div>
       ) : (
         <select
           aria-label={`${space.name} permission`}
-          className="h-9 w-36 shrink-0 rounded-lg border border-border-strong bg-surface px-3 text-sm text-text outline-none transition disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-full"
+          className="h-9 min-h-[var(--ng-min-target-size)] w-36 shrink-0 rounded-lg border border-border-strong bg-surface px-3 text-sm text-text outline-none transition disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-full"
           value={access}
           disabled={setAccessMutation.isPending}
           onChange={(event) => updateAccess(event.currentTarget.value as AgentSpaceAccessValue)}

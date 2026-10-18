@@ -35,15 +35,14 @@ export function SettingToggle({
         aria-checked={checked}
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative h-6 w-10 shrink-0 rounded-full outline-none transition focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-40 ${
-          checked ? "bg-primary" : "bg-panel-strong"
-        }`}
+        className="grid min-h-[var(--ng-min-target-size)] min-w-[var(--ng-min-target-size)] shrink-0 place-items-center rounded-workbench outline-none transition focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <span
-          className={`absolute top-0.5 size-5 rounded-full bg-white shadow-sm transition ${
-            checked ? "left-[18px]" : "left-0.5"
-          }`}
-        />
+          aria-hidden="true"
+          className={`relative block h-6 w-10 rounded-full transition ${checked ? "bg-primary" : "bg-panel-strong"}`}
+        >
+          <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow-sm transition ${checked ? "left-[18px]" : "left-0.5"}`} />
+        </span>
       </button>
     </div>
   );

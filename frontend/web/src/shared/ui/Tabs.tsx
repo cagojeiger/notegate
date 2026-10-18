@@ -67,7 +67,7 @@ export function Tabs<T extends string>({ items, value, onChange, label = "Tabs",
           tabIndex={index === tabStopIndex ? 0 : -1}
           onClick={() => onChange(item.id)}
           onKeyDown={(event) => handleKeyDown(event, index)}
-          className={`-mb-px shrink-0 rounded-t-workbench-surface border-b-2 ${variant === "header" ? "flex h-[calc(var(--ng-workbench-header-size)-4px)] items-center px-2 text-workbench" : "px-2.5 py-1.5 text-workbench"} font-medium transition ${value === item.id ? "border-primary text-text" : item.disabled ? "border-transparent text-muted" : "border-transparent text-muted hover:bg-[var(--ng-hover)] hover:text-text"}${item.disabled ? " cursor-not-allowed opacity-50" : ""}`}
+          className={`-mb-px min-h-[var(--ng-min-target-size)] shrink-0 rounded-t-workbench-surface border-b-2 ${variant === "header" ? "flex h-[calc(var(--ng-workbench-header-size)-4px)] items-center px-2 text-workbench" : "px-2.5 py-1.5 text-workbench"} font-medium transition ${value === item.id ? "border-primary text-text" : item.disabled ? "border-transparent text-muted" : "border-transparent text-muted hover:bg-[var(--ng-hover)] hover:text-text"}${item.disabled ? " cursor-not-allowed opacity-50" : ""}`}
         >
           {item.label}
         </button>

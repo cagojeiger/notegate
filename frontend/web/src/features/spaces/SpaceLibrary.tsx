@@ -6,7 +6,7 @@ import type { Space } from "../../api/types";
 import type { CurrentUserUsage } from "../../api/usage";
 import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
 import { formatBytes } from "../../shared/lib/formatBytes";
-import { Button, Card, Modal } from "../../shared/ui";
+import { Button, Card, Modal, PanelHeader } from "../../shared/ui";
 import { SortableSpaceGrid } from "./SortableSpaceGrid";
 import { SpaceInspector, type SpaceInspectorProps } from "./SpaceInspector";
 import { useReorderSpacesMutation, useUpdateSpaceMutation } from "./useSpaceQueries";
@@ -98,14 +98,14 @@ export function SpaceLibrary({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg">
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="h-12 shrink-0 border-b border-seam px-5 sm:px-7 lg:px-10">
+        <PanelHeader className="px-5 sm:px-7 lg:px-10">
           <div className="flex h-full w-full items-center justify-between gap-3">
-            <h1 className="text-xl font-semibold">
+            <h1 className="text-workbench font-semibold">
               Spaces <span className="font-normal text-muted">{spaces.length}</span>
             </h1>
             <Button onClick={onCreateSpace}>Create space</Button>
           </div>
-        </header>
+        </PanelHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-7 lg:px-10">
           <div className="w-full">

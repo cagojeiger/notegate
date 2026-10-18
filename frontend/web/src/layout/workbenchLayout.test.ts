@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
-import { resolveWorkbenchLayout } from "./workbenchLayout";
+import { MAX_EDITOR_GROUPS, WORKBENCH_LAYOUT } from "../shared/model/workbenchLayout";
+import { resolveSidebarWidths, resolveWorkbenchLayout } from "./workbenchLayout";
 
 const base = {
   isMobile: false,
@@ -63,5 +63,41 @@ describe("resolveWorkbenchLayout", () => {
       editorPresentation: "focused",
       visibleEditorGroupCount: 1
     });
+  });
+
+  it("reserves editor space while fitting wide panels into a tablet viewport", () => {
+    const layout = resolveWorkbenchLayout({ ...base, viewportWidth: 900 });
+    const widths = resolveSidebarWidths(520, 520, layout.sidebars);
+
+    expect(layout.primaryMode).toBe("docked");
+    expect(layout.auxiliaryMode).toBe("docked");
+    expect(widths).toEqual({ primaryWidth: 256, auxiliaryWidth: 280 });
+    expect(900 - WORKBENCH_LAYOUT.activityRailWidth - widths.primaryWidth - widths.auxiliaryWidth).toBe(WORKBENCH_LAYOUT.minEditorWidth);
+  });
+
+  it("overlays the inspector when the minimum panels and editor no longer fit", () => {
+    const layout = resolveWorkbenchLayout({ ...base, viewportWidth: 800 });
+
+    expect(layout.primaryMode).toBe("docked");
+    expect(layout.auxiliaryMode).toBe("overlay");
+    expect(layout.editorPresentation).toBe("split");
+    expect(resolveSidebarWidths(520, 520, layout.sidebars)).toEqual({ primaryWidth: 436, auxiliaryWidth: 520 });
+  });
+
+  it("restores preferred widths when the viewport grows without changing preferences", () => {
+    const tablet = resolveWorkbenchLayout({ ...base, viewportWidth: 900 });
+    const desktop = resolveWorkbenchLayout({ ...base, viewportWidth: 1440 });
+
+    expect(resolveSidebarWidths(520, 520, tablet.sidebars).primaryWidth).toBe(256);
+    expect(resolveSidebarWidths(520, 520, desktop.sidebars)).toEqual({ primaryWidth: 520, auxiliaryWidth: 520 });
+  });
+
+  it("gives a single docked panel the remaining sidebar budget", () => {
+    const primary = resolveWorkbenchLayout({ ...base, auxiliaryOpen: false, viewportWidth: 800 });
+    const auxiliary = resolveWorkbenchLayout({ ...base, primaryOpen: false, viewportWidth: 800 });
+
+    expect(resolveSidebarWidths(520, 520, primary.sidebars).primaryWidth).toBe(436);
+    expect(auxiliary.auxiliaryMode).toBe("docked");
+    expect(resolveSidebarWidths(520, 520, auxiliary.sidebars).auxiliaryWidth).toBe(436);
   });
 });

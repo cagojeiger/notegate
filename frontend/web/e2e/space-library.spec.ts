@@ -67,6 +67,12 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Spaces 4" })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Space navigation" })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Space inspector" })).toBeVisible();
+  const libraryHeader = page.locator("[data-panel-header]").filter({ has: page.getByRole("heading", { name: "Spaces 4" }) });
+  const inspectorHeader = page.getByRole("complementary", { name: "Space inspector" }).locator("[data-panel-header]");
+  const railHeader = page.getByRole("button", { name: "Open space library" }).locator("..");
+  const headerBounds = await Promise.all([libraryHeader.boundingBox(), inspectorHeader.boundingBox(), railHeader.boundingBox()]);
+  expect(headerBounds.every((bounds) => bounds?.height === 36)).toBe(true);
+  expect(new Set(headerBounds.map((bounds) => bounds?.y)).size).toBe(1);
   await expect(page.locator("footer").getByText("ready", { exact: true })).toBeVisible();
   await expect(page.locator("footer").getByText("Daily", { exact: true })).toBeVisible();
   await expectNoAccessibilityViolations(page);

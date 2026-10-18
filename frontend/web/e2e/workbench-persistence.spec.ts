@@ -100,6 +100,64 @@ test("restores the saved workbench before showing the app and persists panel tog
   });
 });
 
+test("keeps the editor usable while resizing the viewport and restores preferred panel widths", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(({ node, spaceId }) => {
+    window.localStorage.setItem("notegate.lastActiveSpaceId", spaceId);
+    window.localStorage.setItem(`notegate.workbench.v1.space.${spaceId}`, JSON.stringify({
+      version: 1,
+      spaceId,
+      updatedAt: Date.now(),
+      activeGroupIndex: 0,
+      groups: [{ node, mode: "preview", back: [], forward: [] }]
+    }));
+  }, { node: savedNode, spaceId: savedSpace.id });
+  await mockApi(page);
+  await page.goto("/");
+
+  const editor = page.locator('[data-editor-group][data-active="true"]');
+  await expect(editor.getByRole("heading", { name: "Restored workbench" })).toBeVisible();
+  const filesResize = page.getByRole("separator", { name: "Resize Files sidebar" });
+  const inspectorResize = page.getByRole("separator", { name: "Resize Inspector" });
+  await filesResize.focus();
+  await filesResize.press("End");
+  await inspectorResize.focus();
+  await inspectorResize.press("End");
+  await expect(filesResize).toHaveAttribute("aria-valuenow", "520");
+  await expect(inspectorResize).toHaveAttribute("aria-valuenow", "520");
+
+  await page.setViewportSize({ width: 900, height: 1024 });
+  await expect.poll(async () => (await editor.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(320);
+  await expect.poll(() => page.locator('#primary-sidebar-panel, [data-editor-group], #auxiliary-sidebar-panel').evaluateAll((panels) =>
+    panels.every((panel) => {
+      const bounds = panel.getBoundingClientRect();
+      return bounds.width > 0 && bounds.left >= 0 && bounds.right <= window.innerWidth;
+    })
+  )).toBe(true);
+  await expect(filesResize).toHaveAttribute("aria-valuenow", "256");
+  await expect(inspectorResize).toHaveAttribute("aria-valuenow", "280");
+
+  await page.setViewportSize({ width: 800, height: 1024 });
+  const inspector = page.locator("#auxiliary-sidebar-panel");
+  await expect(inspector).toHaveClass(/fixed/);
+  await expect(inspectorResize).toHaveCount(0);
+  await expect.poll(async () => (await editor.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(320);
+  await expect.poll(async () => {
+    const bounds = await inspector.boundingBox();
+    return bounds !== null && bounds.x >= 0 && bounds.x + bounds.width <= 800;
+  }).toBe(true);
+  await page.getByRole("button", { name: "Close panel" }).click({ position: { x: 10, y: 10 } });
+  await expect(inspector).toHaveCount(0);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(filesResize).toHaveAttribute("aria-valuenow", "520");
+  await expect(page.getByRole("button", { name: "Toggle right sidebar" })).toHaveAttribute("aria-pressed", "false");
+  await page.getByRole("button", { name: "Toggle right sidebar" }).click();
+  await expect(inspectorResize).toHaveAttribute("aria-valuenow", "520");
+  await expect.poll(async () => (await inspector.boundingBox())?.width ?? 0).toBe(520);
+  await expect(editor.getByRole("heading", { name: "Restored workbench" })).toBeVisible();
+});
+
 async function mockApi(page: import("@playwright/test").Page) {
   await routeJsonApi(page, (url) => responseFor(url));
 }

@@ -101,6 +101,7 @@ const privateSpace = makeSpace({
 
 describe("AppShell", () => {
   beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440, writable: true });
     useUiStore.setState(useUiStore.getInitialState(), true);
     mocks.recordingState = { status: "idle" };
   });
@@ -301,6 +302,47 @@ describe("AppShell", () => {
       "aria-valuenow",
       "380"
     );
+  });
+
+  it("uses a dismissible right overlay when a non-mobile viewport cannot fit both panels", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800, writable: true });
+    const toggleAuxiliary = vi.fn();
+    mocks.useWorkbenchController.mockReturnValue({
+      ...workbench(),
+      auxiliaryOpen: true,
+      showAuxiliary: true,
+      actions: { toggleAuxiliary }
+    });
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    expect(document.getElementById("auxiliary-sidebar-panel")).toHaveClass("fixed", "right-0");
+    expect(screen.queryByRole("separator", { name: "Resize Inspector" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Close panel" }));
+    expect(toggleAuxiliary).toHaveBeenCalledOnce();
+  });
+
+  it("fits docked panels on viewport resize and restores their preferred widths", () => {
+    useUiStore.setState({ primaryWidth: 520, auxiliaryWidth: 520 });
+    mocks.useWorkbenchController.mockReturnValue({ ...workbench(), auxiliaryOpen: true, showAuxiliary: true });
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    act(() => {
+      window.innerWidth = 900;
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(document.getElementById("primary-sidebar-panel")).toHaveStyle({ width: "256px" });
+    expect(document.getElementById("auxiliary-sidebar-panel")).toHaveStyle({ width: "280px" });
+    expect(useUiStore.getState().primaryWidth).toBe(520);
+    expect(useUiStore.getState().auxiliaryWidth).toBe(520);
+
+    act(() => {
+      window.innerWidth = 1440;
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(document.getElementById("primary-sidebar-panel")).toHaveStyle({ width: "520px" });
+    expect(document.getElementById("auxiliary-sidebar-panel")).toHaveStyle({ width: "520px" });
   });
 
   it("keeps global shell regions mounted while changing surfaces", async () => {
