@@ -28,7 +28,7 @@ export function LoginGate(controllerProps: LoginGateControllerProps) {
         <header className="mb-7 text-center">
           <BrandLockup className="w-[190px]" />
           <p className="mx-auto mt-4 max-w-sm text-sm leading-6 text-muted">
-            Your private notes, files, and agents behind one trusted gate.
+            Your notes and files, ready for you and your AI.
           </p>
         </header>
 
@@ -37,9 +37,8 @@ export function LoginGate(controllerProps: LoginGateControllerProps) {
           aria-labelledby="auth-title"
         >
           <div className="mb-6">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted">Welcome back</p>
             <h1 id="auth-title" className="text-2xl font-semibold tracking-tight">Continue to NoteGate</h1>
-            <p className="mt-2 text-sm leading-6 text-muted">Use the Google account connected to your NoteGate workspace.</p>
+            <p className="mt-2 text-sm leading-6 text-muted">Sign in with your connected Google account to open your Spaces.</p>
           </div>
 
           <button type="button" className="ng-google-button" onClick={auth.startLogin}>
@@ -58,7 +57,7 @@ export function LoginGate(controllerProps: LoginGateControllerProps) {
 
           <div className="mt-6 flex gap-2.5 rounded-xl border border-border bg-panel p-3 text-xs leading-5 text-muted">
             <ShieldCheck className="mt-0.5 text-success" size={16} aria-hidden="true" />
-            <p>Google SSO is NoteGate's only production sign-in method. NoteGate never asks for your Google password.</p>
+            <p>Your Google password stays with Google.</p>
           </div>
 
           {auth.loginHint ? (

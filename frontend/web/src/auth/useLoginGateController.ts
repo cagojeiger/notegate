@@ -64,11 +64,11 @@ export function useLoginGateController({ onSessionAuthenticated }: LoginGateCont
     // direct navigation is the most blocker-tolerant form.
     const popup = window.open(loginUrl(), "notegate-login", "popup,width=520,height=720");
     if (!popup) {
-      setLoginHint("Popup was blocked. Use the “Open Google sign-in in a new window” link below, or allow popups for this site.");
+      setLoginHint("Your browser blocked the sign-in window. Use the “Open Google sign-in in a new window” link below to continue.");
       beginPolling(null);
       return;
     }
-    setLoginHint("Complete login in the popup. This page will continue automatically.");
+    setLoginHint("Complete sign-in in the new window. This page will continue automatically.");
     beginPolling(popup);
     popup.focus();
   }
