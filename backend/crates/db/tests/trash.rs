@@ -318,6 +318,12 @@ async fn trash_migrations_preserve_legacy_targets_and_nullable_event_links() -> 
     db.apply_migration(49).await?;
     db.apply_migration(50).await?;
     db.apply_migration(51).await?;
+    sqlx::query("UPDATE file_change_events SET snapshot_id=$2,private_metadata=$3 WHERE space_id=$1")
+        .bind(space)
+        .bind(Uuid::nil())
+        .bind(common::empty_change_metadata(space))
+        .execute(&db.pool)
+        .await?;
     let after: Vec<(Uuid, Uuid, DateTime<Utc>, DateTime<Utc>)> = sqlx::query_as(
         "SELECT id, deletion_target_node_id, deleted_at, purge_after FROM nodes \
          WHERE space_id = $1 AND deleted_at IS NOT NULL ORDER BY id",
