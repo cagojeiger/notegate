@@ -164,7 +164,7 @@ test("history browsing preserves unsaved edits and blocks restore", async ({ pag
 test("mobile opens history from More actions and keeps read-only history accessible", async ({ page }) => {
   await setup(page, { mobile: true, readOnly: true });
   await page.getByRole("button", { name: "More actions", exact: true }).first().click();
-  await page.getByRole("button", { name: "Version history", exact: true }).click();
+  await page.getByRole("menu", { name: "Editor actions" }).getByRole("menuitem", { name: "Version history", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByLabel("Version comparison", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeDisabled();
@@ -233,7 +233,7 @@ test("small phones keep long reasons and restore controls usable and return focu
   const more = page.getByRole("button", { name: "More actions", exact: true }).first();
   await more.focus();
   await page.keyboard.press("Enter");
-  await page.getByRole("button", { name: "Version history", exact: true }).focus();
+  await page.getByRole("menu", { name: "Editor actions" }).getByRole("menuitem", { name: "Version history", exact: true }).focus();
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog");
   const comparison = dialog.getByLabel("Version comparison", { exact: true });
@@ -322,8 +322,12 @@ for (const mobile of [false, true]) {
       await expect.poll(() => preview.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
       await page.keyboard.press("Home");
       await expect.poll(() => preview.evaluate((element) => element.scrollTop)).toBe(0);
-      if (mobile) await page.getByRole("button", { name: "More actions", exact: true }).first().click();
-      await page.getByRole("button", { name: "Version history", exact: true }).click();
+      if (mobile) {
+        await page.getByRole("button", { name: "More actions", exact: true }).first().click();
+        await page.getByRole("menu", { name: "Editor actions" }).getByRole("menuitem", { name: "Version history", exact: true }).click();
+      } else {
+        await page.getByRole("button", { name: "Version history", exact: true }).click();
+      }
       const dialog = page.getByRole("dialog");
       const comparison = dialog.getByRole("region", { name: "Version comparison", exact: true });
       await expect(comparison.getByText("Updated Line 81", { exact: true })).toBeInViewport();
@@ -415,7 +419,7 @@ for (const colorScheme of ["dark", "light"] as const) {
     await page.addInitScript((theme) => window.localStorage.setItem("notegate.theme", theme), colorScheme);
     await setup(page, { mobile: true, previousContent: before.join("\n"), currentContent: after.join("\n"), purpose: "오버레이 네트워크의 단편화를 줄이기 위해 MTU 측정 결과를 반영했습니다." });
     await page.getByRole("button", { name: "More actions", exact: true }).first().click();
-    await page.getByRole("button", { name: "Version history", exact: true }).click();
+    await page.getByRole("menu", { name: "Editor actions" }).getByRole("menuitem", { name: "Version history", exact: true }).click();
     const dialog = page.getByRole("dialog");
     const picker = dialog.getByRole("button", { name: "Choose saved version", exact: true });
     const comparison = dialog.getByRole("region", { name: "Version comparison", exact: true });

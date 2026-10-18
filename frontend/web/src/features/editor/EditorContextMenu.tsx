@@ -1,4 +1,4 @@
-import { ChevronsDownUp, ChevronsUpDown, Copy, History, Move, PanelRightOpen, Pencil, Save, Trash2, Undo2, X } from "lucide-react";
+import { ChevronsDownUp, ChevronsUpDown, Code, Copy, History, LayoutList, Move, PanelRightOpen, Pencil, Save, Trash2, Undo2, X } from "lucide-react";
 import type { RestNode } from "../../api/types";
 import { MenuButton } from "../../shared/ui";
 import { ContextMenu } from "../../shared/ui/ContextMenu";
@@ -16,6 +16,7 @@ export default function EditorContextMenu({
   canCloseGroup,
   showStructuredActions,
   structuredActionsDisabled,
+  view,
   onClose,
   onCopyContent,
   onVersionHistory,
@@ -43,6 +44,7 @@ export default function EditorContextMenu({
   canCloseGroup: boolean;
   showStructuredActions: boolean;
   structuredActionsDisabled: boolean;
+  view?: { preview: "Tree" | "Table"; sourceOnly: boolean; onChange: (source: boolean) => void };
   onClose: () => void;
   onCopyContent: () => void;
   onVersionHistory?: () => void;
@@ -67,6 +69,10 @@ export default function EditorContextMenu({
     <ContextMenu x={menu.x} y={menu.y} label="Editor actions" onClose={onClose}>
       <div className="truncate px-3 py-1 text-xs text-muted">{node.name}</div>
       <MenuButton onClick={() => run(onCopyContent)} disabled={!canCopyContent}><Copy size={14} /> Copy content</MenuButton>
+      {view ? <>
+        <MenuButton onClick={() => run(() => view.onChange(false))} disabled={view.sourceOnly}><LayoutList size={14} /> {view.preview} view</MenuButton>
+        <MenuButton onClick={() => run(() => view.onChange(true))}><Code size={14} /> Source view</MenuButton>
+      </> : null}
       {showStructuredActions ? (
         <>
           <MenuButton onClick={() => run(onExpandAll)} disabled={structuredActionsDisabled}><ChevronsUpDown size={14} /> Expand all</MenuButton>
