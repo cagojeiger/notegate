@@ -1392,6 +1392,12 @@ async fn permanent_folder_request_only_updates_its_target_with_many_retained_chi
             .await
             .is_err()
     );
+    // A rejected restore queues rollback when its transaction is dropped. Wait
+    // for the Space lock to clear before asserting an uncontended purge pass.
+    sqlx::query("SELECT id FROM spaces WHERE id = $1 FOR UPDATE")
+        .bind(space)
+        .execute(&db.pool)
+        .await?;
     let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
     assert_eq!(first.nodes_deleted, 100);
     assert!(first.resources_pending);
