@@ -6,7 +6,7 @@ NoteGate는 password login API를 두지 않는다. 브라우저의 신원 확�
 
 `oidc.issuer`와 `oidc.client_id`는 필수다. 외부 OIDC 로그인 + 로컬 브라우저 세션 + NoteGate OAuth 서버만 사용한다.
 
-로컬 계정 ID와 Space·문서·이력 소유권은 유지한다. 신원은 검증된 `issuer + sub` HMAC으로 조회하며 email로 연결하지 않는다. 기존 subject hash는 `authgate_url`로 한 번 고정한 원래 issuer에만 허용한다. 이 값은 기존 신원 연결용이며 외부 토큰 검증·갱신 URL로 사용하지 않는다. 기존 hash가 남은 DB에 issuer binding이 없으면 해당 값을 지정하기 전 startup을 거부한다.
+로컬 계정 ID와 Space·문서·이력 소유권은 유지한다. 신원은 검증된 `issuer + sub` HMAC으로 조회하며 email로 연결하지 않는다. 기존 subject hash는 `legacy_identity_issuer`로 한 번 고정한 원래 issuer에만 허용한다. 이 값은 기존 신원 연결용이며 외부 토큰 검증·갱신 URL로 사용하지 않는다. 기존 hash가 남은 DB에 issuer binding이 없으면 해당 값을 지정하기 전 startup을 거부한다.
 
 현재 AuthGate를 OIDC 공급자로 유지하면 같은 subject로 기존 계정에 연결된다. 다른 공급자로 전환할 때는 검증된 `account_id / issuer / subject` 매핑을 operator 전용 `import_identities` example로 원자적으로 가져온다. 충돌은 전체 rollback하며, mapping 원문은 비밀 자료로 취급한다. `oidc.allow_signup`은 기본 `false`다. 연결이 끝난 후에만 신규 가입을 열 수 있다.
 
@@ -79,8 +79,10 @@ Settings → Account의 **Manage connected applications**는 `/oauth/connections
 
 Auth endpoint는 IP별 10 req/s, burst 30 제한을 공유하며 기존 전체 ingress 제한도 적용한다. 일반 문서 API 요청에는 이 추가 auth 제한을 적용하지 않는다.
 
-## 설정 호환성
+## 배포 설정
 
-구형 `oauth_client_id`, `mcp_oauth_client_id`, `jwks_cache_ttl_secs`, `browser_session_ttl_secs`는 배포 설정 전환을 위해 입력만 허용한다. 인증에는 사용하지 않는다. `oidc` 설정이 없으면 startup을 거부한다. 기존 로컬 세션·OAuth grant·계정 연결·이력과 DB schema는 보존한다. 구형 AuthGate bearer와 refresh 기반 브라우저 세션은 허용하지 않는다.
+`oidc` 설정이 없으면 startup을 거부한다. 구형 `authgate_url`, `oauth_client_id`, `mcp_oauth_client_id`, `jwks_cache_ttl_secs`, `browser_session_ttl_secs`는 제거했으므로 배포 환경에서도 삭제해야 한다. 기존 로컬 세션·OAuth grant·계정 연결·이력과 DB schema는 보존한다. 구형 AuthGate bearer와 refresh 기반 브라우저 세션은 허용하지 않는다.
+
+`legacy_identity_issuer`는 기존 계정의 원래 issuer를 처음 고정할 때만 사용한다. DB에 binding이 있으면 생략할 수 있다. 로그인 제공자를 바꿀 때 이 binding을 덮어쓰지 않는다.
 
 OIDC discovery cache는 1시간이며 콜백의 서명 키 갱신은 authorization code를 재교환하지 않는다. 로그인 시 ID token의 issuer·audience·서명·nonce·최근 auth_time과 userinfo subject를 검증한다.

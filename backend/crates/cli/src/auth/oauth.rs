@@ -2,7 +2,7 @@ use reqwest::Url;
 use secrecy::SecretString;
 use serde::Deserialize;
 
-use crate::auth::{AUTHGATE_URL_ENV, AuthOverride, DEFAULT_POLL_INTERVAL_SECONDS, DEVICE_GRANT};
+use crate::auth::{DEFAULT_POLL_INTERVAL_SECONDS, DEVICE_GRANT};
 use crate::credentials::TokenBundle;
 use crate::error::CliError;
 use crate::url_policy::{is_origin, uses_secure_or_loopback_transport};
@@ -45,6 +45,15 @@ impl AuthorizationServerMetadata {
                 "NoteGate OAuth metadata does not advertise Device and refresh grants",
             ));
         }
+        if !["cli", "offline_access"]
+            .iter()
+            .all(|required| self.scopes_supported.iter().any(|scope| scope == required))
+        {
+            return Err(CliError::protocol(
+                "unsupported_oauth_metadata",
+                "NoteGate OAuth metadata must advertise cli and offline_access scopes",
+            ));
+        }
         validate_client_id(&self.cli_client_id)?;
         let issuer = parse_origin_url(&self.issuer, "OAuth issuer")?;
         let token_endpoint =
@@ -62,40 +71,12 @@ impl AuthorizationServerMetadata {
         Ok(AuthConfiguration {
             issuer,
             client_id: self.cli_client_id,
-            device_scope: if self.scopes_supported.iter().any(|s| s == "cli") {
-                "cli offline_access"
-            } else {
-                super::DEVICE_SCOPE
-            },
+            device_scope: "cli offline_access",
             token_endpoint,
             revocation_endpoint,
             device_authorization_endpoint,
         })
     }
-}
-
-pub(super) fn configuration_from_override(
-    auth_override: AuthOverride,
-) -> Result<AuthConfiguration, CliError> {
-    let issuer = parse_origin_url(&auth_override.authgate_url, AUTHGATE_URL_ENV)?;
-    let token_endpoint = issuer.join("oauth/token").map_err(|_error| {
-        CliError::configuration("invalid_auth_override", "invalid AuthGate override URL")
-    })?;
-    let revocation_endpoint = issuer.join("oauth/revoke").map_err(|_error| {
-        CliError::configuration("invalid_auth_override", "invalid AuthGate override URL")
-    })?;
-    let device_authorization_endpoint =
-        issuer.join("oauth/device/authorize").map_err(|_error| {
-            CliError::configuration("invalid_auth_override", "invalid AuthGate override URL")
-        })?;
-    Ok(AuthConfiguration {
-        issuer,
-        client_id: auth_override.client_id,
-        device_scope: super::DEVICE_SCOPE,
-        token_endpoint,
-        revocation_endpoint,
-        device_authorization_endpoint,
-    })
 }
 
 pub(super) struct DeviceAuthorization {
@@ -134,7 +115,7 @@ impl DeviceAuthorization {
         {
             return Err(CliError::protocol(
                 "invalid_device_authorization_response",
-                "AuthGate returned an invalid Device authorization response",
+                "NoteGate OAuth returned an invalid Device authorization response",
             ));
         }
         let verification_uri = parse_same_origin_endpoint(
@@ -191,7 +172,7 @@ pub(super) fn handle_device_poll_result(
             *interval = interval.checked_add(5).ok_or_else(|| {
                 CliError::protocol(
                     "invalid_device_authorization_response",
-                    "AuthGate requested an invalid polling interval",
+                    "NoteGate OAuth requested an invalid polling interval",
                 )
             })?;
             Ok(None)
@@ -207,7 +188,7 @@ pub(super) fn handle_device_poll_result(
         TokenRequestResult::Error(error) if error == "invalid_grant" => Err(login_required()),
         TokenRequestResult::Error(_error) => Err(CliError::auth(
             "device_authorization_failed",
-            "AuthGate could not complete Device authorization",
+            "NoteGate OAuth could not complete Device authorization",
         )),
     }
 }

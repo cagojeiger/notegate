@@ -42,7 +42,7 @@ jobs:
           --health-retries 10
     env:
       NOTEGATE_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
-      NOTEGATE_AUTHGATE_URL: http://127.0.0.1:9192
+      NOTEGATE_LEGACY_IDENTITY_ISSUER: http://127.0.0.1:9192
       NOTEGATE_OIDC__ISSUER: http://127.0.0.1:9192
       NOTEGATE_OIDC__CLIENT_ID: notegate-web
       NOTEGATE_PUBLIC_URL: http://127.0.0.1:9191

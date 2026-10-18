@@ -23,8 +23,6 @@ use crate::tier::UserTier;
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:9191";
 const DEFAULT_SEARCH_BIND_ADDR: &str = "127.0.0.1:9192";
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
-const DEFAULT_JWKS_CACHE_TTL_SECS: u64 = 300;
-const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
 const DEFAULT_BROWSER_SESSION_MAX_TTL_SECS: u64 = 30 * 86_400;
 const DEFAULT_OPENAPI_ENABLED: bool = false;
 const DEFAULT_METRICS_ENABLED: bool = false;
@@ -222,18 +220,12 @@ pub struct Config {
     pub background_jobs: BackgroundJobsConfig,
     /// Original issuer binding for pre-OIDC account IDs; never used for bearer validation.
     #[serde(default)]
-    pub authgate_url: String,
+    pub legacy_identity_issuer: String,
     /// Upstream login provider. NoteGate always owns browser sessions and MCP/CLI grants.
     pub oidc: OidcLoginConfig,
     /// Public URL for notegate as seen by browsers/MCP clients, with trailing slash trimmed.
     #[serde(rename = "public_url")]
     pub notegate_public_url: String,
-    /// Deprecated deployment input, accepted during configuration migration; unused.
-    #[serde(default)]
-    pub oauth_client_id: String,
-    /// Deprecated deployment input, accepted during configuration migration; unused.
-    #[serde(default)]
-    pub mcp_oauth_client_id: String,
     /// First-party public CLI client ID served by NoteGate OAuth metadata.
     #[serde(default)]
     pub cli_oauth_client_id: String,
@@ -243,12 +235,6 @@ pub struct Config {
     /// MCP resource/audience URL, with trailing slash trimmed.
     #[serde(default)]
     pub resource_url: String,
-    /// Deprecated legacy bearer cache input; unused by OIDC discovery.
-    #[serde(
-        rename = "jwks_cache_ttl_secs",
-        deserialize_with = "duration_from_secs"
-    )]
-    pub jwks_cache_ttl: Duration,
     /// Active ENC root key id registered in crypto_key_epochs.
     pub enc_root_key_id: String,
     /// Active ENC root secret used to derive PII encryption subkeys.
@@ -261,12 +247,6 @@ pub struct Config {
     pub lookup_verify_0_key_id: Option<String>,
     /// Optional verify-only LOOKUP root secret for provider subject migration.
     pub lookup_verify_0_secret: Option<SecretString>,
-    /// Deprecated upstream refresh lease input; local sessions require login after 24 hours.
-    #[serde(
-        rename = "browser_session_ttl_secs",
-        deserialize_with = "duration_from_secs"
-    )]
-    pub browser_session_ttl: Duration,
     /// Browser session absolute lifetime.
     #[serde(
         rename = "browser_session_max_ttl_secs",
@@ -335,8 +315,10 @@ impl Validate for Config {
             );
         }
         validate_background_jobs(self, &mut errors);
-        if !self.authgate_url.is_empty() && validate_http_url_value(&self.authgate_url).is_err() {
-            errors.add("authgate_url", ValidationError::new("http_url"));
+        if !self.legacy_identity_issuer.is_empty()
+            && validate_http_url_value(&self.legacy_identity_issuer).is_err()
+        {
+            errors.add("legacy_identity_issuer", ValidationError::new("http_url"));
         }
         {
             let oidc = &self.oidc;
@@ -375,9 +357,6 @@ impl Validate for Config {
         if validate_http_url_value(&self.resource_url).is_err() {
             errors.add("resource_url", ValidationError::new("http_url"));
         }
-        if validate_jwks_cache_ttl(&self.jwks_cache_ttl).is_err() {
-            errors.add("jwks_cache_ttl", ValidationError::new("range"));
-        }
         if validate_key_id(&self.enc_root_key_id).is_err() {
             errors.add("enc_root_key_id", ValidationError::new("format"));
         }
@@ -410,14 +389,8 @@ impl Validate for Config {
                 errors.add("lookup_verify_0", ValidationError::new("paired"));
             }
         }
-        if validate_browser_session_ttl(&self.browser_session_ttl).is_err() {
-            errors.add("browser_session_ttl", ValidationError::new("range"));
-        }
         if validate_browser_session_max_ttl(&self.browser_session_max_ttl).is_err() {
             errors.add("browser_session_max_ttl", ValidationError::new("range"));
-        }
-        if self.browser_session_ttl > self.browser_session_max_ttl {
-            errors.add("browser_session_ttl", ValidationError::new("range"));
         }
         let s3 = &self.s3;
         if validate_http_url_value(&s3.endpoint).is_err() {
@@ -467,7 +440,7 @@ impl Config {
     }
 
     fn normalize(&mut self) {
-        self.authgate_url = trim_trailing_slashes(&self.authgate_url);
+        self.legacy_identity_issuer = trim_trailing_slashes(&self.legacy_identity_issuer);
         self.notegate_public_url = trim_trailing_slashes(&self.notegate_public_url);
         self.oauth_redirect_url = if self.oauth_redirect_url.trim().is_empty() {
             format!("{}/auth/callback", self.notegate_public_url)
@@ -501,9 +474,7 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
         .map_err(map_config_error)?
         .set_default("read_db_max_connections", DEFAULT_DB_MAX_CONNECTIONS)
         .map_err(map_config_error)?
-        .set_default("jwks_cache_ttl_secs", DEFAULT_JWKS_CACHE_TTL_SECS)
         .map_err(map_config_error)?
-        .set_default("browser_session_ttl_secs", DEFAULT_BROWSER_SESSION_TTL_SECS)
         .map_err(map_config_error)?
         .set_default(
             "browser_session_max_ttl_secs",
@@ -657,24 +628,6 @@ fn validate_internal_service_url(value: &str) -> std::result::Result<(), Validat
         Ok(())
     } else {
         Err(ValidationError::new("internal_http_url"))
-    }
-}
-
-fn validate_jwks_cache_ttl(value: &Duration) -> std::result::Result<(), ValidationError> {
-    let seconds = value.as_secs();
-    if (30..=3600).contains(&seconds) {
-        Ok(())
-    } else {
-        Err(ValidationError::new("range"))
-    }
-}
-
-fn validate_browser_session_ttl(value: &Duration) -> std::result::Result<(), ValidationError> {
-    let seconds = value.as_secs();
-    if (60..=86_400).contains(&seconds) {
-        Ok(())
-    } else {
-        Err(ValidationError::new("range"))
     }
 }
 
@@ -890,14 +843,13 @@ mod tests {
                 client_secret: None,
                 allow_signup: false,
             },
-            authgate_url: "https://auth.test".to_owned(),
+            legacy_identity_issuer: "https://auth.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),
-            oauth_client_id: "notegate-web".to_owned(),
-            mcp_oauth_client_id: "notegate-mcp".to_owned(),
+
             cli_oauth_client_id: "notegate-cli-local".to_owned(),
             oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
             resource_url: "http://localhost:9191/mcp".to_owned(),
-            jwks_cache_ttl: Duration::from_secs(300),
+
             enc_root_key_id: "test-enc".to_owned(),
             enc_root_secret: SecretString::from("test-enc-root-secret-32-bytes-long".to_owned()),
             lookup_root_key_id: "test-lookup".to_owned(),
@@ -906,7 +858,7 @@ mod tests {
             ),
             lookup_verify_0_key_id: None,
             lookup_verify_0_secret: None,
-            browser_session_ttl: Duration::from_secs(3600),
+
             browser_session_max_ttl: Duration::from_secs(
                 super::DEFAULT_BROWSER_SESSION_MAX_TTL_SECS,
             ),
@@ -976,10 +928,8 @@ mod tests {
             false,
             test_env(&[
                 ("NOTEGATE_DATABASE_URL", "postgres://env"),
-                ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
+                ("NOTEGATE_LEGACY_IDENTITY_ISSUER", "https://auth.env"),
                 ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
-                ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
-                ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
                 ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
                 (
                     "NOTEGATE_ENC_ROOT_SECRET",
@@ -1006,10 +956,8 @@ mod tests {
             false,
             test_env(&[
                 ("NOTEGATE_DATABASE_URL", "postgres://env"),
-                ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
+                ("NOTEGATE_LEGACY_IDENTITY_ISSUER", "https://auth.env"),
                 ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
-                ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
-                ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
                 ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
                 (
                     "NOTEGATE_ENC_ROOT_SECRET",
@@ -1060,8 +1008,6 @@ mod tests {
         );
         assert_eq!(config.background_jobs.concurrency, 5);
         assert!(config.metrics_enabled);
-        assert_eq!(config.oauth_client_id, "notegate-web");
-        assert_eq!(config.mcp_oauth_client_id, "notegate-mcp");
         assert_eq!(config.cli_oauth_client_id, "notegate-cli-local");
         assert_eq!(
             config.oauth_redirect_url,
@@ -1078,14 +1024,6 @@ mod tests {
         assert_eq!(s3.secret_key.expose_secret(), "notegate-secret");
         assert!(s3.force_path_style);
         assert_eq!(
-            config.jwks_cache_ttl.as_secs(),
-            super::DEFAULT_JWKS_CACHE_TTL_SECS
-        );
-        assert_eq!(
-            config.browser_session_ttl.as_secs(),
-            super::DEFAULT_BROWSER_SESSION_TTL_SECS
-        );
-        assert_eq!(
             config.browser_session_max_ttl.as_secs(),
             super::DEFAULT_BROWSER_SESSION_MAX_TTL_SECS
         );
@@ -1101,10 +1039,8 @@ mod tests {
             false,
             test_env(&[
                 ("NOTEGATE_DATABASE_URL", "postgres://env"),
-                ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
+                ("NOTEGATE_LEGACY_IDENTITY_ISSUER", "https://auth.env"),
                 ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
-                ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
-                ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
                 ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
                 (
                     "NOTEGATE_ENC_ROOT_SECRET",
@@ -1196,10 +1132,8 @@ mod tests {
             false,
             test_env(&[
                 ("NOTEGATE_DATABASE_URL", "postgres://env"),
-                ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
+                ("NOTEGATE_LEGACY_IDENTITY_ISSUER", "https://auth.env"),
                 ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
-                ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
-                ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
                 ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
                 (
                     "NOTEGATE_ENC_ROOT_SECRET",
@@ -1224,8 +1158,6 @@ mod tests {
         config.normalize();
         assert_eq!(config.bind_addr.to_string(), "127.0.0.1:9191");
         assert_eq!(config.db_max_connections, 10);
-        assert_eq!(config.jwks_cache_ttl.as_secs(), 300);
-        assert_eq!(config.browser_session_ttl.as_secs(), 3600);
         assert!(!config.openapi_enabled);
         assert!(!config.metrics_enabled);
         assert!(!config.secure_cookies);
@@ -1248,10 +1180,6 @@ mod tests {
         assert!(config.validate().is_err());
 
         let mut config = valid_config();
-        config.jwks_cache_ttl = Duration::from_secs(1);
-        assert!(config.validate().is_err());
-
-        let mut config = valid_config();
         config.enc_root_secret = SecretString::from("too-short".to_owned());
         assert!(config.validate().is_err());
 
@@ -1260,16 +1188,7 @@ mod tests {
         assert!(config.validate().is_err());
 
         let mut config = valid_config();
-        config.browser_session_ttl = Duration::from_secs(1);
-        assert!(config.validate().is_err());
-
-        let mut config = valid_config();
         config.browser_session_max_ttl = Duration::from_secs(1);
-        assert!(config.validate().is_err());
-
-        let mut config = valid_config();
-        config.browser_session_ttl = Duration::from_secs(86_400);
-        config.browser_session_max_ttl = Duration::from_secs(3600);
         assert!(config.validate().is_err());
 
         let mut config = valid_config();
@@ -1428,7 +1347,7 @@ mod tests {
     #[test]
     fn validation_errors_do_not_echo_values() -> crate::Result<()> {
         let mut config = valid_config();
-        config.authgate_url = "not a url with secret-token".to_owned();
+        config.legacy_identity_issuer = "not a url with secret-token".to_owned();
 
         let err = match config.validate().map_err(super::map_validation_error) {
             Ok(()) => {
@@ -1439,52 +1358,53 @@ mod tests {
             Err(err) => err,
         };
         let msg = err.to_string();
-        assert!(msg.contains("authgate_url:http_url"));
+        assert!(msg.contains("legacy_identity_issuer:http_url"));
         assert!(!msg.contains("secret-token"));
         Ok(())
     }
     #[test]
-    fn legacy_configuration_cannot_enable_an_authentication_fallback() -> crate::Result<()> {
-        let env = test_env(&[
-            ("NOTEGATE_DATABASE_URL", "postgres://env"),
+    fn retired_auth_configuration_keys_are_rejected() {
+        for (key, value) in [
             ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
-            ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
             ("NOTEGATE_OAUTH_CLIENT_ID", "old-browser"),
             ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "old-mcp"),
-            ("NOTEGATE_OIDC__ISSUER", ""),
-            ("NOTEGATE_OIDC__CLIENT_ID", ""),
-            ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
-            (
-                "NOTEGATE_ENC_ROOT_SECRET",
-                "env-enc-root-secret-32-bytes-long",
-            ),
-            ("NOTEGATE_LOOKUP_ROOT_KEY_ID", "env-lookup"),
-            (
-                "NOTEGATE_LOOKUP_ROOT_SECRET",
-                "env-lookup-root-secret-32-bytes-long",
-            ),
-        ]);
-        assert!(load_from_sources(false, env).is_err());
-        Ok(())
+            ("NOTEGATE_JWKS_CACHE_TTL_SECS", "300"),
+            ("NOTEGATE_BROWSER_SESSION_TTL_SECS", "3600"),
+        ] {
+            let env = test_env(&[
+                ("NOTEGATE_DATABASE_URL", "postgres://env"),
+                ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
+                ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
+                (
+                    "NOTEGATE_ENC_ROOT_SECRET",
+                    "env-enc-root-secret-32-bytes-long",
+                ),
+                ("NOTEGATE_LOOKUP_ROOT_KEY_ID", "env-lookup"),
+                (
+                    "NOTEGATE_LOOKUP_ROOT_SECRET",
+                    "env-lookup-root-secret-32-bytes-long",
+                ),
+                (key, value),
+            ]);
+            assert!(load_from_sources(false, env).is_err(), "{key}");
+        }
     }
 
     #[test]
     fn standalone_config_can_use_authgate_without_legacy_bearer_settings() {
         let mut config = valid_config();
         config.oidc = super::OidcLoginConfig {
-            issuer: config.authgate_url.clone(),
-            client_id: config.oauth_client_id.clone(),
+            issuer: config.legacy_identity_issuer.clone(),
+            client_id: "notegate-web".to_owned(),
             client_secret: None,
             allow_signup: false,
         };
-        config.authgate_url.clear();
-        config.oauth_client_id.clear();
-        config.mcp_oauth_client_id.clear();
+        config.legacy_identity_issuer.clear();
         config.normalize();
         assert!(config.validate().is_ok());
-        config.authgate_url = "invalid legacy issuer".to_owned();
+        config.legacy_identity_issuer = "invalid legacy issuer".to_owned();
         assert!(config.validate().is_err());
-        config.authgate_url.clear();
+        config.legacy_identity_issuer.clear();
         for bad in [
             "http://public.example.test",
             "https://user:password@example.test",
@@ -1499,8 +1419,8 @@ mod tests {
     fn standalone_authorization_server_requires_secure_origin_and_own_callback() {
         let mut config = valid_config();
         config.oidc = super::OidcLoginConfig {
-            issuer: config.authgate_url.clone(),
-            client_id: config.oauth_client_id.clone(),
+            issuer: config.legacy_identity_issuer.clone(),
+            client_id: "notegate-web".to_owned(),
             client_secret: None,
             allow_signup: false,
         };

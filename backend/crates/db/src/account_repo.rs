@@ -319,7 +319,7 @@ impl AccountRepo {
             .fetch_one(&self.pool).await.map_err(map_sqlx_error)?;
         if unbound {
             return Err(Error::validation(
-                "bind the original authgate_url before enabling standalone authentication",
+                "bind the original legacy_identity_issuer before enabling standalone authentication",
             ));
         }
         Ok(())

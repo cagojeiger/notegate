@@ -22,16 +22,11 @@ mod oauth;
 
 use oauth::{
     AuthConfiguration, AuthorizationServerMetadata, DeviceAuthorization,
-    DeviceAuthorizationResponse, TokenRequestResult, TokenResponse, configuration_from_override,
-    handle_device_poll_result, map_oauth_error, oauth_error_code, validate_client_id,
-    validate_stored_endpoints, validate_token_response,
+    DeviceAuthorizationResponse, TokenRequestResult, TokenResponse, handle_device_poll_result,
+    map_oauth_error, oauth_error_code, validate_stored_endpoints, validate_token_response,
 };
 
-pub(crate) const AUTHGATE_URL_ENV: &str = "NOTEGATE_AUTHGATE_URL";
-pub(crate) const CLI_CLIENT_ID_ENV: &str = "NOTEGATE_CLI_CLIENT_ID";
-
 pub(super) const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
-const DEVICE_SCOPE: &str = "openid profile email offline_access";
 const METADATA_PATH: &str = "/.well-known/oauth-authorization-server";
 const MAX_AUTH_RESPONSE_BYTES: usize = 64 * 1024;
 pub(super) const DEFAULT_POLL_INTERVAL_SECONDS: u64 = 5;
@@ -41,41 +36,6 @@ pub(crate) struct AuthManager {
     http: reqwest::Client,
     store: Arc<dyn CredentialStore>,
     lock_dir: PathBuf,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct AuthOverride {
-    authgate_url: String,
-    client_id: String,
-}
-
-impl AuthOverride {
-    pub(crate) fn from_env() -> Result<Option<Self>, CliError> {
-        Self::from_values(
-            std::env::var(AUTHGATE_URL_ENV).ok(),
-            std::env::var(CLI_CLIENT_ID_ENV).ok(),
-        )
-    }
-
-    fn from_values(
-        authgate_url: Option<String>,
-        client_id: Option<String>,
-    ) -> Result<Option<Self>, CliError> {
-        match (authgate_url, client_id) {
-            (None, None) => Ok(None),
-            (Some(authgate_url), Some(client_id)) => {
-                validate_client_id(&client_id)?;
-                Ok(Some(Self {
-                    authgate_url,
-                    client_id,
-                }))
-            }
-            _ => Err(CliError::configuration(
-                "incomplete_auth_override",
-                "NOTEGATE_AUTHGATE_URL and NOTEGATE_CLI_CLIENT_ID must be set together",
-            )),
-        }
-    }
 }
 
 impl AuthManager {
@@ -115,14 +75,17 @@ impl AuthManager {
     pub(crate) async fn login(
         &self,
         base_url: &str,
-        auth_override: Option<AuthOverride>,
         mut emit: impl FnMut(&Value) -> Result<(), CliError>,
     ) -> Result<Value, CliError> {
         let base_url = canonical_origin(base_url, "NOTEGATE_BASE_URL")?;
-        let configuration = match auth_override.as_ref() {
-            Some(auth_override) => configuration_from_override(auth_override.clone())?,
-            None => self.discover(&base_url).await?,
-        };
+        // Check the indexed profile before discovery so an existing credential is never orphaned.
+        if let Some(existing) = self.load_selected(&base_url)?
+            && existing.refresh_state == RefreshState::Ready
+            && !self.has_uncertain_marker(&existing.key())?
+        {
+            return Err(already_authenticated());
+        }
+        let configuration = self.discover(&base_url).await?;
         let key = CredentialKey {
             issuer: configuration
                 .issuer
@@ -207,13 +170,9 @@ impl AuthManager {
         }))
     }
 
-    pub(crate) fn status(
-        &self,
-        base_url: &str,
-        auth_override: Option<AuthOverride>,
-    ) -> Result<Value, CliError> {
+    pub(crate) fn status(&self, base_url: &str) -> Result<Value, CliError> {
         let base_url = canonical_origin(base_url, "NOTEGATE_BASE_URL")?;
-        let bundle = self.load_selected(&base_url, auth_override.as_ref())?;
+        let bundle = self.load_selected(&base_url)?;
         let Some(bundle) = bundle else {
             return Ok(json!({
                 "authenticated": false,
@@ -221,7 +180,8 @@ impl AuthManager {
             }));
         };
         let now = unix_time()?;
-        let refresh_uncertain = bundle.refresh_state == RefreshState::Uncertain
+        let refresh_uncertain = bundle.issuer != base_url
+            || bundle.refresh_state == RefreshState::Uncertain
             || self.has_uncertain_marker(&bundle.key())?;
         Ok(json!({
             "authenticated": !refresh_uncertain,
@@ -236,13 +196,9 @@ impl AuthManager {
         }))
     }
 
-    pub(crate) async fn logout(
-        &self,
-        base_url: &str,
-        auth_override: Option<AuthOverride>,
-    ) -> Result<Value, CliError> {
+    pub(crate) async fn logout(&self, base_url: &str) -> Result<Value, CliError> {
         let base_url = canonical_origin(base_url, "NOTEGATE_BASE_URL")?;
-        let Some(bundle) = self.load_selected(&base_url, auth_override.as_ref())? else {
+        let Some(bundle) = self.load_selected(&base_url)? else {
             return Ok(json!({
                 "logged_out": true,
                 "base_url": base_url,
@@ -250,7 +206,12 @@ impl AuthManager {
             }));
         };
         let key = bundle.key();
-        let revoke_result = self.revoke_once(&bundle).await;
+        let revocation_attempted = bundle.issuer == base_url;
+        let revoke_result = if revocation_attempted {
+            self.revoke_once(&bundle).await
+        } else {
+            Ok(())
+        };
         let delete_result = self.store.delete(&key).map_err(map_store_error);
         delete_result?;
         self.clear_uncertain_marker(&key)?;
@@ -258,7 +219,7 @@ impl AuthManager {
         Ok(json!({
             "logged_out": true,
             "base_url": base_url,
-            "revocation_attempted": true,
+            "revocation_attempted": revocation_attempted,
         }))
     }
 
@@ -271,6 +232,9 @@ impl AuthManager {
         else {
             return Err(login_required());
         };
+        if bundle.issuer != base_url {
+            return Err(login_required());
+        }
         if bundle.refresh_state == RefreshState::Uncertain {
             return Err(refresh_uncertain());
         }
@@ -283,25 +247,11 @@ impl AuthManager {
         self.refresh_locked(bundle).await
     }
 
-    fn load_selected(
-        &self,
-        base_url: &str,
-        auth_override: Option<&AuthOverride>,
-    ) -> Result<Option<TokenBundle>, CliError> {
-        let bundle = match auth_override {
-            Some(auth_override) => {
-                let issuer = canonical_origin(&auth_override.authgate_url, AUTHGATE_URL_ENV)?;
-                let key = CredentialKey {
-                    issuer,
-                    client_id: auth_override.client_id.clone(),
-                };
-                self.store.load(&key).map_err(map_store_error)?
-            }
-            None => self
-                .store
-                .load_for_base_url(base_url)
-                .map_err(map_store_error)?,
-        };
+    fn load_selected(&self, base_url: &str) -> Result<Option<TokenBundle>, CliError> {
+        let bundle = self
+            .store
+            .load_for_base_url(base_url)
+            .map_err(map_store_error)?;
         if bundle
             .as_ref()
             .is_some_and(|bundle| bundle.base_url != base_url)
@@ -348,7 +298,14 @@ impl AuthManager {
                     "NoteGate returned invalid OAuth authorization-server metadata",
                 )
             })?;
-        metadata.validate()
+        let configuration = metadata.validate()?;
+        if configuration.issuer.as_str().trim_end_matches('/') != base_url {
+            return Err(CliError::protocol(
+                "invalid_oauth_metadata",
+                "OAuth issuer must be the NoteGate origin",
+            ));
+        }
+        Ok(configuration)
     }
 
     async fn request_device_authorization(
@@ -369,7 +326,7 @@ impl AuthManager {
             .map_err(|_error| {
                 CliError::unavailable(
                     "device_authorization_request_failed",
-                    "could not start AuthGate Device authorization",
+                    "could not start NoteGate OAuth Device authorization",
                 )
             })?;
         let status = response.status();
@@ -378,14 +335,14 @@ impl AuthManager {
             return Err(map_oauth_error(
                 &body,
                 "device_authorization_rejected",
-                "AuthGate rejected the Device authorization request",
+                "NoteGate OAuth rejected the Device authorization request",
             ));
         }
         let response =
             serde_json::from_slice::<DeviceAuthorizationResponse>(&body).map_err(|_error| {
                 CliError::protocol(
                     "invalid_device_authorization_response",
-                    "AuthGate returned an invalid Device authorization response",
+                    "NoteGate OAuth returned an invalid Device authorization response",
                 )
             })?;
         DeviceAuthorization::validate(response, &configuration.issuer)
@@ -401,7 +358,7 @@ impl AuthManager {
             .ok_or_else(|| {
                 CliError::protocol(
                     "invalid_device_authorization_response",
-                    "AuthGate returned an invalid Device authorization expiry",
+                    "NoteGate OAuth returned an invalid Device authorization expiry",
                 )
             })?;
         let mut interval = device.interval;
@@ -448,7 +405,7 @@ impl AuthManager {
             .map_err(|_error| {
                 CliError::unavailable(
                     "token_request_failed",
-                    "AuthGate token request failed before a response was received",
+                    "NoteGate OAuth token request failed before a response was received",
                 )
             })?;
         let status = response.status();
@@ -459,14 +416,16 @@ impl AuthManager {
                 .map_err(|_error| {
                     CliError::protocol(
                         "invalid_token_response",
-                        "AuthGate returned an invalid token response",
+                        "NoteGate OAuth returned an invalid token response",
                     )
                 })
         } else {
             let error = oauth_error_code(&body).ok_or_else(|| {
                 CliError::protocol(
                     "invalid_oauth_error",
-                    format!("AuthGate returned an invalid OAuth error with HTTP status {status}"),
+                    format!(
+                        "NoteGate OAuth returned an invalid OAuth error with HTTP status {status}"
+                    ),
                 )
             })?;
             Ok(TokenRequestResult::Error(error))
@@ -503,7 +462,7 @@ impl AuthManager {
                 "the stored OAuth credential has an invalid token endpoint",
             )
         })?;
-        // Write-ahead marker: if this process exits after AuthGate consumes the
+        // Write-ahead marker: if this process exits after NoteGate OAuth consumes the
         // refresh token but before the rotated bundle is saved, the next process
         // must not submit the old refresh token again.
         self.write_uncertain_marker(&key)?;
@@ -525,7 +484,7 @@ impl AuthManager {
                 self.clear_uncertain_marker(&key)?;
                 return Err(CliError::unavailable(
                     "refresh_request_failed",
-                    "could not connect to AuthGate to refresh the access token",
+                    "could not connect to NoteGate OAuth to refresh the access token",
                 ));
             }
             Err(_error) => return self.mark_ambiguous_refresh(current),
@@ -544,7 +503,7 @@ impl AuthManager {
                 self.clear_uncertain_marker(&key)?;
                 return Err(login_required());
             }
-            // AuthGate may consume the old token before a later issuance step fails.
+            // NoteGate OAuth may consume the old token before a later issuance step fails.
             // Without a complete rotated bundle, the old token must not be reused.
             return self.mark_ambiguous_refresh(current);
         }
@@ -566,7 +525,7 @@ impl AuthManager {
             }
             return Err(CliError::auth(
                 "credential_persistence_failed",
-                "AuthGate rotated the credential, but it could not be saved safely; run auth login again",
+                "NoteGate OAuth rotated the credential, but it could not be saved safely; run auth login again",
             ));
         }
         self.clear_uncertain_marker(&key)?;
@@ -683,7 +642,7 @@ fn expires_at(expires_in: u64) -> Result<u64, CliError> {
     unix_time()?.checked_add(expires_in).ok_or_else(|| {
         CliError::protocol(
             "invalid_token_response",
-            "AuthGate returned an invalid token expiry",
+            "NoteGate OAuth returned an invalid token expiry",
         )
     })
 }
@@ -708,7 +667,7 @@ fn map_store_error(error: StoreError) -> CliError {
     if error.is_state_unknown() {
         CliError::configuration(
             "credential_store_state_unknown",
-            "the keychain write could not be rolled back after the profile index failed; use the explicit AuthGate URL and client ID overrides with auth logout before retrying",
+            "the keychain write could not be rolled back after the profile index failed; revoke the connection in NoteGate and remove the local notegate-cli keychain entry before retrying",
         )
     } else if error.is_already_exists() {
         already_authenticated()
@@ -762,7 +721,7 @@ fn refresh_uncertain() -> CliError {
 fn revocation_failed() -> CliError {
     CliError::unavailable(
         "revocation_failed",
-        "the local credential was deleted, but AuthGate token revocation could not be confirmed",
+        "the local credential was deleted, but NoteGate OAuth token revocation could not be confirmed",
     )
 }
 
@@ -888,32 +847,6 @@ mod tests {
     }
 
     #[test]
-    fn auth_overrides_are_all_or_nothing() {
-        assert!(AuthOverride::from_values(None, None).unwrap().is_none());
-        assert!(
-            AuthOverride::from_values(
-                Some("https://auth.example.test".to_owned()),
-                Some("notegate-cli".to_owned())
-            )
-            .unwrap()
-            .is_some()
-        );
-        for values in [
-            (Some("https://auth.example.test".to_owned()), None),
-            (None, Some("notegate-cli".to_owned())),
-        ] {
-            assert_eq!(
-                AuthOverride::from_values(values.0, values.1)
-                    .unwrap_err()
-                    .body()
-                    .get("error")
-                    .and_then(Value::as_str),
-                Some("incomplete_auth_override")
-            );
-        }
-    }
-
-    #[test]
     fn device_polling_handles_pending_slow_down_and_terminal_errors() {
         let mut interval = 5;
         assert!(
@@ -974,6 +907,7 @@ mod tests {
                                 "device_authorization_endpoint": format!("{metadata_base}/oauth/device/authorize"),
                                 "grant_types_supported": [DEVICE_GRANT, "refresh_token"],
                                 "cli_client_id": "notegate-cli-local",
+                                "scopes_supported": ["cli", "offline_access"],
                             }))
                         }
                     }),
@@ -1025,7 +959,7 @@ mod tests {
         let mut events = Vec::new();
 
         let result = manager
-            .login(&base, None, |event| {
+            .login(&base, |event| {
                 events.push(event.clone());
                 Ok(())
             })
@@ -1085,14 +1019,9 @@ mod tests {
         .unwrap();
 
         let error = manager
-            .login(
-                "https://notegate.example",
-                Some(AuthOverride {
-                    authgate_url: "https://auth.example.test".to_owned(),
-                    client_id: "notegate-cli".to_owned(),
-                }),
-                |_event| panic!("existing credentials must be rejected before Device Flow"),
-            )
+            .login("https://notegate.example", |_event| {
+                panic!("existing credentials must be rejected before Device Flow")
+            })
             .await
             .unwrap_err();
 
@@ -1129,6 +1058,7 @@ mod tests {
                                 "device_authorization_endpoint": format!("{metadata_base}/oauth/device/authorize"),
                                 "grant_types_supported": [DEVICE_GRANT, "refresh_token"],
                                 "cli_client_id": "notegate-cli-local",
+                                "scopes_supported": ["cli", "offline_access"],
                             }))
                         }
                     }),
@@ -1177,14 +1107,14 @@ mod tests {
         let second = AuthManager::new(Duration::from_secs(5), store, lock_dir).unwrap();
         let first_base = base.clone();
         let first_task =
-            tokio::spawn(async move { first.login(&first_base, None, |_event| Ok(())).await });
+            tokio::spawn(async move { first.login(&first_base, |_event| Ok(())).await });
 
         tokio::time::timeout(Duration::from_secs(1), authorization_entered.notified())
             .await
             .expect("first login must reach Device authorization");
         let second_error = tokio::time::timeout(
             Duration::from_millis(500),
-            second.login(&base, None, |_event| Ok(())),
+            second.login(&base, |_event| Ok(())),
         )
         .await
         .expect("second login must fail without waiting for the first login")
@@ -1244,10 +1174,8 @@ mod tests {
             AuthManager::new(Duration::from_secs(5), store.clone(), lock_dir.clone()).unwrap();
         let second = AuthManager::new(Duration::from_secs(5), store.clone(), lock_dir).unwrap();
 
-        let (first_token, second_token) = tokio::join!(
-            first.access_token("http://localhost:9191"),
-            second.access_token("http://localhost:9191")
-        );
+        let (first_token, second_token) =
+            tokio::join!(first.access_token(&base), second.access_token(&base));
 
         assert_eq!(first_token.unwrap().expose_secret(), "new-access");
         assert_eq!(second_token.unwrap().expose_secret(), "new-access");
@@ -1288,7 +1216,7 @@ mod tests {
         store.create(&bundle).unwrap();
         let manager = AuthManager::new(Duration::from_secs(5), store, lock_dir).unwrap();
 
-        let token = manager.access_token("http://localhost:9191").await.unwrap();
+        let token = manager.access_token(&base).await.unwrap();
 
         assert_eq!(token.expose_secret(), "new-access");
         assert!(!marker_path.exists());
@@ -1317,10 +1245,7 @@ mod tests {
         .unwrap();
 
         for _ in 0..2 {
-            let error = manager
-                .access_token("http://localhost:9191")
-                .await
-                .unwrap_err();
+            let error = manager.access_token(&base).await.unwrap_err();
             assert_eq!(
                 error.body().get("error").and_then(Value::as_str),
                 Some("refresh_outcome_unknown")
@@ -1362,10 +1287,7 @@ mod tests {
         let manager = AuthManager::new(Duration::from_secs(5), store.clone(), lock_dir).unwrap();
 
         for _ in 0..2 {
-            let error = manager
-                .access_token("http://localhost:9191")
-                .await
-                .unwrap_err();
+            let error = manager.access_token(&base).await.unwrap_err();
             assert_eq!(
                 error.body().get("error").and_then(Value::as_str),
                 Some("refresh_outcome_unknown")
@@ -1400,6 +1322,7 @@ mod tests {
                                 "device_authorization_endpoint": format!("{metadata_base}/oauth/device/authorize"),
                                 "grant_types_supported": [DEVICE_GRANT, "refresh_token"],
                                 "cli_client_id": "notegate-cli-local",
+                                "scopes_supported": ["cli", "offline_access"],
                             }))
                         }
                     }),
@@ -1468,7 +1391,7 @@ mod tests {
         );
         assert!(marker_path.exists());
 
-        let result = manager.login(&base, None, |_event| Ok(())).await.unwrap();
+        let result = manager.login(&base, |_event| Ok(())).await.unwrap();
 
         assert_eq!(
             result.get("event").and_then(Value::as_str),
@@ -1512,14 +1435,8 @@ mod tests {
         )
         .unwrap();
 
-        let first = manager
-            .access_token("http://localhost:9191")
-            .await
-            .unwrap_err();
-        let second = manager
-            .access_token("http://localhost:9191")
-            .await
-            .unwrap_err();
+        let first = manager.access_token(&base).await.unwrap_err();
+        let second = manager.access_token(&base).await.unwrap_err();
 
         assert_eq!(
             first.body().get("error").and_then(Value::as_str),
@@ -1552,10 +1469,7 @@ mod tests {
         let marker_path = lock_dir.join(format!("{}.refresh-uncertain", key_digest(&bundle.key())));
         let manager = AuthManager::new(Duration::from_secs(5), store.clone(), lock_dir).unwrap();
 
-        let error = manager
-            .access_token("http://localhost:9191")
-            .await
-            .unwrap_err();
+        let error = manager.access_token(&base).await.unwrap_err();
 
         assert_eq!(
             error.body().get("error").and_then(Value::as_str),
@@ -1590,8 +1504,8 @@ mod tests {
         )
         .unwrap();
 
-        let first = manager.logout("http://localhost:9191", None).await.unwrap();
-        let second = manager.logout("http://localhost:9191", None).await.unwrap();
+        let first = manager.logout(&base).await.unwrap();
+        let second = manager.logout(&base).await.unwrap();
 
         assert_eq!(first.get("revocation_attempted"), Some(&Value::Bool(true)));
         assert_eq!(
@@ -1624,10 +1538,7 @@ mod tests {
         )
         .unwrap();
 
-        let error = manager
-            .logout("http://localhost:9191", None)
-            .await
-            .unwrap_err();
+        let error = manager.logout(&base).await.unwrap_err();
 
         assert_eq!(
             error.body().get("error").and_then(Value::as_str),
@@ -1637,18 +1548,86 @@ mod tests {
         assert!(store.load(&bundle.key()).unwrap().is_none());
     }
 
+    #[tokio::test]
+    async fn old_provider_credentials_are_not_used_or_refreshed_and_logout_is_local() {
+        let store = Arc::new(MemoryStore::default());
+        let bundle = TokenBundle::new(
+            "https://notes.example.test".to_owned(),
+            "https://old-provider.example.test".to_owned(),
+            "old-cli".to_owned(),
+            "https://old-provider.example.test/oauth/token".to_owned(),
+            "https://old-provider.example.test/oauth/revoke".to_owned(),
+            "old-access".to_owned(),
+            "old-refresh".to_owned(),
+            0,
+        );
+        store.create(&bundle).unwrap();
+        let manager = AuthManager::new(
+            Duration::from_secs(1),
+            store.clone(),
+            test_lock_dir("old-provider"),
+        )
+        .unwrap();
+        let status = manager.status(&bundle.base_url).unwrap();
+        assert_eq!(status["authenticated"], false);
+        assert_eq!(status["needs_login"], true);
+        let error = manager.access_token(&bundle.base_url).await.unwrap_err();
+        assert_eq!(error.body()["error"], "login_required");
+        assert!(store.load(&bundle.key()).unwrap().is_some());
+        let logout = manager.logout(&bundle.base_url).await.unwrap();
+        assert_eq!(logout["revocation_attempted"], false);
+        assert!(store.load(&bundle.key()).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn discovery_rejects_external_issuer_and_legacy_scopes() {
+        for (external, scopes) in [
+            (true, json!(["cli", "offline_access"])),
+            (false, json!(["openid", "offline_access"])),
+        ] {
+            let base = spawn_with_builder(move |base| {
+                let issuer = if external {
+                    "https://old-provider.example.test".to_owned()
+                } else {
+                    base
+                };
+                Router::new().route(METADATA_PATH, get(move || {
+                    let issuer = issuer.clone();
+                    let scopes = scopes.clone();
+                    async move { Json(json!({
+                        "issuer": issuer,
+                        "token_endpoint": format!("{issuer}/oauth/token"),
+                        "revocation_endpoint": format!("{issuer}/oauth/revoke"),
+                        "device_authorization_endpoint": format!("{issuer}/oauth/device/authorize"),
+                        "grant_types_supported": [DEVICE_GRANT, "refresh_token"],
+                        "cli_client_id": "notegate-cli-local",
+                        "scopes_supported": scopes,
+                    })) }
+                }))
+            })
+            .await;
+            let manager = AuthManager::new(
+                Duration::from_secs(1),
+                Arc::new(MemoryStore::default()),
+                test_lock_dir("metadata-policy"),
+            )
+            .unwrap();
+            assert!(manager.discover(&base).await.is_err());
+        }
+    }
+
     fn bundle_for(
-        authgate_base: &str,
+        issuer_base: &str,
         access_token: &str,
         refresh_token: &str,
         expires_at: u64,
     ) -> TokenBundle {
         TokenBundle::new(
-            "http://localhost:9191".to_owned(),
-            authgate_base.to_owned(),
+            issuer_base.to_owned(),
+            issuer_base.to_owned(),
             "notegate-cli-local".to_owned(),
-            format!("{authgate_base}/oauth/token"),
-            format!("{authgate_base}/oauth/revoke"),
+            format!("{issuer_base}/oauth/token"),
+            format!("{issuer_base}/oauth/revoke"),
             access_token.to_owned(),
             refresh_token.to_owned(),
             expires_at,

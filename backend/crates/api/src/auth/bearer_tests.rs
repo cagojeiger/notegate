@@ -240,14 +240,13 @@ fn state_with_pool(
             client_secret: None,
             allow_signup: false,
         },
-        authgate_url: "https://auth.example.test".to_owned(),
+        legacy_identity_issuer: "https://auth.example.test".to_owned(),
         notegate_public_url: "http://localhost:9191".to_owned(),
-        oauth_client_id: "notegate-web".to_owned(),
-        mcp_oauth_client_id: "notegate-mcp".to_owned(),
+
         cli_oauth_client_id: "notegate-cli-local".to_owned(),
         oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
         resource_url: resource_url.to_owned(),
-        jwks_cache_ttl: Duration::from_secs(300),
+
         enc_root_key_id: "test-enc".to_owned(),
         enc_root_secret: secrecy::SecretString::from(
             "test-enc-root-secret-32-bytes-long".to_owned(),
@@ -258,7 +257,7 @@ fn state_with_pool(
         ),
         lookup_verify_0_key_id: None,
         lookup_verify_0_secret: None,
-        browser_session_ttl: Duration::from_secs(3600),
+
         browser_session_max_ttl: Duration::from_secs(30 * 86_400),
         openapi_enabled: false,
         metrics_enabled: false,
@@ -1035,7 +1034,7 @@ async fn issuer_scoped_identity_preserves_legacy_user_across_auth_channels()
         "https://api.example.test",
         db.pool.clone(),
     )?;
-    let issuer = state.config.authgate_url.clone();
+    let issuer = state.config.legacy_identity_issuer.clone();
     state
         .accounts
         .ensure_legacy_identity_issuer(&issuer)
@@ -1803,7 +1802,7 @@ pub(super) fn standalone_state(db: &TestDb) -> Result<AppState, Box<dyn std::err
         db.pool.clone(),
     )?;
     let mut config = (*state.config).clone();
-    config.authgate_url.clear();
+    config.legacy_identity_issuer.clear();
     config.oidc = notegate_core::config::OidcLoginConfig {
         issuer: "https://accounts.google.com".to_owned(),
         client_id: "notegate-web".to_owned(),

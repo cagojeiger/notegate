@@ -27,7 +27,7 @@ use client::CommandClient;
 pub use error::CliError;
 use url_policy::canonical_origin;
 
-use auth::{AuthManager, AuthOverride};
+use auth::AuthManager;
 
 const API_KEY_ENV: &str = "NOTEGATE_API_KEY";
 const DEFAULT_BASE_URL: &str = "https://notegate.project-jelly.io";
@@ -122,9 +122,9 @@ pub struct AuthArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommand {
-    /// Sign in through production AuthGate using RFC 8628 Device Flow.
+    /// Sign in through NoteGate OAuth using RFC 8628 Device Flow.
     Login,
-    /// Inspect the local credential without contacting NoteGate or AuthGate.
+    /// Inspect the local credential without contacting the server.
     Status,
     /// Revoke the refresh token once, then delete the local credential.
     Logout,
@@ -184,9 +184,8 @@ pub async fn execute_with_events(
     match command {
         Command::Auth(args) => match args.command {
             AuthCommand::Login => {
-                let auth_override = AuthOverride::from_env()?;
                 AuthManager::system(Duration::from_secs(timeout_seconds))?
-                    .login(base_url, auth_override, &mut emit)
+                    .login(base_url, &mut emit)
                     .await
             }
             AuthCommand::Status => match api_key()? {
@@ -196,14 +195,12 @@ pub async fn execute_with_events(
                     "source": "environment",
                     "base_url": canonical_origin(base_url, "NOTEGATE_BASE_URL")?,
                 })),
-                None => AuthManager::system(Duration::from_secs(timeout_seconds))?
-                    .status(base_url, AuthOverride::from_env()?),
+                None => AuthManager::system(Duration::from_secs(timeout_seconds))?.status(base_url),
             },
             AuthCommand::Logout => {
-                let auth_override = AuthOverride::from_env()?;
                 let api_key_active = std::env::var_os(API_KEY_ENV).is_some();
                 let mut result = AuthManager::system(Duration::from_secs(timeout_seconds))?
-                    .logout(base_url, auth_override)
+                    .logout(base_url)
                     .await?;
                 if api_key_active && let Some(object) = result.as_object_mut() {
                     object.insert("agent_api_key_active".to_owned(), Value::Bool(true));

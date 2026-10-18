@@ -36,9 +36,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         crypto.clone(),
         config.default_user_tier,
     );
-    if !config.authgate_url.is_empty() {
+    if !config.legacy_identity_issuer.is_empty() {
         account_repo
-            .ensure_legacy_identity_issuer(&config.authgate_url)
+            .ensure_legacy_identity_issuer(&config.legacy_identity_issuer)
             .await?;
     }
     // Optional CI suffix creates independent identities without changing existing seeds.

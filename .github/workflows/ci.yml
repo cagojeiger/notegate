@@ -248,7 +248,7 @@ jobs:
           --health-retries 10
     env:
       NOTEGATE_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
-      NOTEGATE_AUTHGATE_URL: https://authgate.project-jelly.io
+      NOTEGATE_LEGACY_IDENTITY_ISSUER: https://authgate.project-jelly.io
       NOTEGATE_OIDC__ISSUER: https://authgate.project-jelly.io
       NOTEGATE_OIDC__CLIENT_ID: notegate-web
       NOTEGATE_PUBLIC_URL: http://localhost:9191

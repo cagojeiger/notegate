@@ -3,7 +3,7 @@ name: notegate-split
 x-notegate-environment: &notegate-environment
   NOTEGATE_DATABASE_URL: postgres://notegate:notegate@postgres:5432/notegate
   NOTEGATE_DB_MAX_CONNECTIONS: ${NOTEGATE_DB_MAX_CONNECTIONS:-10}
-  NOTEGATE_AUTHGATE_URL: ${NOTEGATE_AUTHGATE_URL:-https://authgate.project-jelly.io}
+  NOTEGATE_LEGACY_IDENTITY_ISSUER: ${NOTEGATE_LEGACY_IDENTITY_ISSUER:-https://authgate.project-jelly.io}
   NOTEGATE_PUBLIC_URL: ${NOTEGATE_PUBLIC_URL:-http://localhost:9191}
   NOTEGATE_OIDC__ISSUER: ${NOTEGATE_OIDC__ISSUER:-https://authgate.project-jelly.io}
   NOTEGATE_OIDC__CLIENT_ID: ${NOTEGATE_OIDC__CLIENT_ID:-notegate-web}
