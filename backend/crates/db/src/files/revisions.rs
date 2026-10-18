@@ -19,7 +19,7 @@ pub const IDLE_SECONDS: i32 = 120;
 pub const GROUP_SECONDS: i32 = 600;
 pub const SPACE_HISTORY_BYTES: i64 = 1024 * 1024 * 1024;
 const CLEANUP_BATCH: i64 = 100;
-const META: &str = "r.id, r.node_id, r.content_sha256, r.byte_len, r.line_count, r.written_at, r.author_id, r.group_id, r.source, r.purpose, r.private_purpose, r.superseded_at";
+const META: &str = "r.id, r.node_id, r.content_sha256, r.byte_len, r.line_count, r.written_at, r.author_id, r.group_id, r.source, r.private_purpose, r.superseded_at";
 const VISIBLE: &str = "r.space_id = $1 AND r.node_id = $2 AND EXISTS (SELECT 1 FROM text_objects t JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id JOIN spaces s ON s.id = t.space_id WHERE t.node_id = r.node_id AND t.space_id = r.space_id AND t.storage_format = 'plain' AND n.deleted_at IS NULL AND s.deleted_at IS NULL)";
 
 /// Revision attribution to commit together with the replacement body.
@@ -47,7 +47,7 @@ pub(crate) async fn capture(
     let head = sqlx::query(
         "WITH clock AS MATERIALIZED (SELECT COALESCE($6::timestamptz, clock_timestamp()) AS saved_at) \
          SELECT revision_id, revision_written_at, revision_author_id, revision_group_id, \
-         revision_group_started_at, revision_source, revision_purpose, revision_private_purpose, clock.saved_at, \
+         revision_group_started_at, revision_source, revision_private_purpose, clock.saved_at, \
          ($3::uuid IS NOT NULL AND revision_session_id = $3 AND revision_author_id = $4 \
           AND revision_source = $5 AND revision_written_at > clock.saved_at - make_interval(secs => $7) \
           AND revision_group_started_at > clock.saved_at - make_interval(secs => $8)) AS same_group \
@@ -101,21 +101,9 @@ pub(crate) async fn capture(
         if reserved.rows_affected() == 0 {
             return Err(Error::TextRevisionStorageFull);
         }
-        let private_purpose = match head
-            .try_get::<Option<Value>, _>("revision_private_purpose")
-            .map_err(map_sqlx_error)?
-        {
-            Some(encrypted) => encrypted,
-            None => protect_purpose(
-                crypto,
-                current.space_id,
-                current.node_id,
-                id,
-                head.try_get::<Option<String>, _>("revision_purpose")
-                    .map_err(map_sqlx_error)?
-                    .as_deref(),
-            )?,
-        };
+        let private_purpose: Option<Value> = head
+            .try_get("revision_private_purpose")
+            .map_err(map_sqlx_error)?;
         sqlx::query(
             "INSERT INTO text_revisions (id, node_id, space_id, content_sha256, byte_len, line_count, \
              written_at, author_id, group_id, source, checkpoint, superseded_at, cleanup_at, \
@@ -158,8 +146,6 @@ pub(crate) fn protect_purpose(
     if purpose.is_some_and(|value| value.chars().count() > 200) {
         return Err(Error::validation("revision purpose exceeds 200 characters"));
     }
-    // An authenticated null is also a complete new-format snapshot. This keeps
-    // ordinary writes out of the legacy archival trigger, without an extra flag.
     let payload = serde_json::to_string(&purpose)
         .map_err(|_| Error::internal("revision purpose encoding failed"))?;
     serde_json::to_value(crypto.encrypt_history(
@@ -174,11 +160,10 @@ fn open_purpose(
     space: Uuid,
     node: Uuid,
     revision: Uuid,
-    legacy: Option<String>,
     encrypted: Option<Value>,
 ) -> Result<Option<String>> {
     match encrypted {
-        None => Ok(legacy),
+        None => Ok(None),
         Some(value) => {
             let encrypted = serde_json::from_value(value)
                 .map_err(|_| Error::internal("invalid encrypted revision purpose"))?;
@@ -190,32 +175,6 @@ fn open_purpose(
                 .map_err(|_| Error::internal("invalid revision purpose payload"))
         }
     }
-}
-
-/// Each table uses an independent short transaction; a concurrent save either
-/// wins the row lock or sees the migrated envelope, without losing the reason.
-pub async fn encrypt_legacy_purposes(pool: &PgPool, crypto: &PiiCrypto) -> Result<u64> {
-    let mut count = 0;
-    for current in [true, false] {
-        let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
-        let rows: Vec<(Uuid, Uuid, Uuid, String)> = sqlx::query_as(if current {
-            "SELECT space_id, node_id, revision_id, revision_purpose FROM text_objects WHERE revision_purpose IS NOT NULL ORDER BY node_id LIMIT 100 FOR UPDATE SKIP LOCKED"
-        } else {
-            "SELECT space_id, node_id, id, purpose FROM text_revisions WHERE purpose IS NOT NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED"
-        }).fetch_all(&mut *tx).await.map_err(map_sqlx_error)?;
-        count += rows.len() as u64;
-        for (space, node, revision, purpose) in rows {
-            let encrypted = protect_purpose(crypto, space, node, revision, Some(&purpose))?;
-            sqlx::query(if current {
-                "UPDATE text_objects SET revision_purpose=NULL, revision_private_purpose=$4 WHERE space_id=$1 AND node_id=$2 AND revision_id=$3"
-            } else {
-                "UPDATE text_revisions SET purpose=NULL, private_purpose=$4 WHERE space_id=$1 AND node_id=$2 AND id=$3"
-            }).bind(space).bind(node).bind(revision).bind(encrypted)
-                .execute(&mut *tx).await.map_err(map_sqlx_error)?;
-        }
-        tx.commit().await.map_err(map_sqlx_error)?;
-    }
-    Ok(count)
 }
 
 fn metadata(row: &PgRow, crypto: &PiiCrypto, space: Uuid) -> Result<TextRevision> {
@@ -234,7 +193,6 @@ fn metadata(row: &PgRow, crypto: &PiiCrypto, space: Uuid) -> Result<TextRevision
             space,
             row.try_get("node_id").map_err(map_sqlx_error)?,
             row.try_get("id").map_err(map_sqlx_error)?,
-            row.try_get("purpose").map_err(map_sqlx_error)?,
             row.try_get("private_purpose").map_err(map_sqlx_error)?,
         )?,
         superseded_at: row.try_get("superseded_at").map_err(map_sqlx_error)?,
@@ -285,7 +243,7 @@ pub async fn list(
         None
     };
     let head = sqlx::query(
-        "SELECT t.content_sha256, t.revision_id, t.revision_purpose, t.revision_private_purpose FROM text_objects t \
+        "SELECT t.content_sha256, t.revision_id, t.revision_private_purpose FROM text_objects t \
         JOIN nodes n ON n.id=t.node_id AND n.space_id=t.space_id JOIN spaces s ON s.id=t.space_id \
         WHERE t.space_id=$1 AND t.node_id=$2 AND t.storage_format='plain' \
         AND n.deleted_at IS NULL AND s.deleted_at IS NULL \
@@ -306,7 +264,6 @@ pub async fn list(
                     space,
                     node,
                     row.try_get("revision_id").map_err(map_sqlx_error)?,
-                    row.try_get("revision_purpose").map_err(map_sqlx_error)?,
                     row.try_get("revision_private_purpose")
                         .map_err(map_sqlx_error)?,
                 )?,

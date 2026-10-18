@@ -373,13 +373,6 @@ async fn purpose_follows_the_resulting_body_and_ignores_failed_or_unchanged_writ
         ..FileMutationContext::default()
     });
     save(&editing, space, node.id, actor, "b").await?;
-    let clear_count: i64 = sqlx::query_scalar(
-        "SELECT (SELECT count(*) FROM text_objects WHERE revision_purpose IS NOT NULL) + \
-                (SELECT count(*) FROM text_revisions WHERE purpose IS NOT NULL)",
-    )
-    .fetch_one(&db.pool)
-    .await?;
-    assert_eq!(clear_count, 0);
     let page = repo.list_text_revisions(space, node.id, 10, None).await?;
     assert_eq!(
         page.current.unwrap().purpose.as_deref(),
@@ -479,14 +472,14 @@ async fn copied_text_archives_the_copy_request_attribution_on_its_first_edit() -
     let copied_head = revision_head(&db.pool, copied.id).await?;
     assert_ne!(copied_head.0, original_head.0);
     assert_ne!(copied_head.2, original_head.2);
-    let stored: (String, bool, bool) = sqlx::query_as(
-        "SELECT revision_source, revision_purpose IS NULL, revision_private_purpose IS NOT NULL \
+    let stored: (String, bool) = sqlx::query_as(
+        "SELECT revision_source, revision_private_purpose IS NOT NULL \
          FROM text_objects WHERE node_id=$1",
     )
     .bind(copied.id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(stored, ("cli".into(), true, true));
+    assert_eq!(stored, ("cli".into(), true));
     let page = copying
         .list_text_revisions(space, copied.id, 10, None)
         .await?;
@@ -531,13 +524,12 @@ async fn copied_text_archives_the_copy_request_attribution_on_its_first_edit() -
         archived.revision.purpose.as_deref(),
         Some("Make a working copy")
     );
-    let archived_storage: (bool, bool) = sqlx::query_as(
-        "SELECT purpose IS NULL, private_purpose IS NOT NULL FROM text_revisions WHERE id=$1",
-    )
-    .bind(copied_head.0)
-    .fetch_one(&db.pool)
-    .await?;
-    assert_eq!(archived_storage, (true, true));
+    let archived_storage: bool =
+        sqlx::query_scalar("SELECT private_purpose IS NOT NULL FROM text_revisions WHERE id=$1")
+            .bind(copied_head.0)
+            .fetch_one(&db.pool)
+            .await?;
+    assert!(archived_storage);
     let current_source: String =
         sqlx::query_scalar("SELECT revision_source FROM text_objects WHERE node_id=$1")
             .bind(copied.id)
@@ -633,14 +625,14 @@ async fn recursive_copy_uses_request_purpose_including_none_for_every_text() -> 
             let head = revision_head(&db.pool, copied).await?;
             assert_ne!(head.0, *original_revision_id);
             assert!(copied_revision_ids.insert(head.0));
-            let stored: (String, bool, bool) = sqlx::query_as(
-                "SELECT revision_source, revision_purpose IS NULL, revision_private_purpose IS NOT NULL \
+            let stored: (String, bool) = sqlx::query_as(
+                "SELECT revision_source, revision_private_purpose IS NOT NULL \
                  FROM text_objects WHERE node_id=$1",
             )
             .bind(copied)
             .fetch_one(&db.pool)
             .await?;
-            assert_eq!(stored, (source.to_owned(), true, true));
+            assert_eq!(stored, (source.to_owned(), true));
             let page = copying.list_text_revisions(space, copied, 10, None).await?;
             assert!(page.revisions.is_empty());
             assert_eq!(page.current.unwrap().purpose.as_deref(), purpose);
@@ -651,92 +643,29 @@ async fn recursive_copy_uses_request_purpose_including_none_for_every_text() -> 
 }
 
 #[tokio::test]
-async fn legacy_revision_reasons_migrate_and_survive_old_writer_archival() -> TestResult {
+async fn revision_purpose_is_bound_to_its_revision() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let (actor, space, root) = space_with_root(&db.pool, "legacy-reason").await?;
-    let crypto = PiiCrypto::test();
-    let repo = FilesRepo::new(db.pool.clone());
+    let (actor, space, root) = space_with_root(&db.pool, "bound-reason").await?;
+    let repo = FilesRepo::new(db.pool.clone()).with_mutation_context(FileMutationContext {
+        purpose: Some("Preserve this reason".into()),
+        ..FileMutationContext::default()
+    });
     let (node, _) = repo
         .insert_text(space, root, "note.md", &body("a"), actor)
         .await?;
     save(&repo, space, node.id, actor, "b").await?;
-    sqlx::query(
-        "UPDATE text_objects SET revision_purpose='current legacy reason', revision_private_purpose=NULL WHERE node_id=$1",
-    )
-    .bind(node.id)
-    .execute(&db.pool)
-    .await?;
-    sqlx::query("UPDATE text_revisions SET purpose='past legacy reason', private_purpose=NULL WHERE node_id=$1")
-        .bind(node.id)
-        .execute(&db.pool)
-        .await?;
-    let before = repo.list_text_revisions(space, node.id, 10, None).await?;
-    assert_eq!(
-        revisions::encrypt_legacy_purposes(&db.pool, &crypto).await?,
-        2
-    );
-    assert_eq!(
-        revisions::encrypt_legacy_purposes(&db.pool, &crypto).await?,
-        0
-    );
-    let after = repo.list_text_revisions(space, node.id, 10, None).await?;
-    assert_eq!(
-        serde_json::to_value(&before.current)?,
-        serde_json::to_value(&after.current)?
-    );
-    assert_eq!(
-        serde_json::to_value(&before.revisions)?,
-        serde_json::to_value(&after.revisions)?
-    );
-
-    let head = revision_head(&db.pool, node.id).await?;
-    let envelope = crypto.encrypt_text_content(
-        &space.to_string(),
-        &format!("{}/revisions/{}", node.id, head.0),
-        "b",
-    )?;
-    let bytes = (envelope.ciphertext.len() + envelope.nonce.len()) as i64;
-    let mut tx = db.pool.begin().await?;
-    sqlx::query("UPDATE text_revision_usage SET stored_bytes=stored_bytes+$2 WHERE space_id=$1")
-        .bind(space)
-        .bind(bytes)
-        .execute(&mut *tx)
-        .await?;
-    // Exact old-writer shape: INSERT omits private_purpose and copies the now
-    // empty plaintext column. The compatibility trigger preserves the envelope.
-    sqlx::query("INSERT INTO text_revisions(id,node_id,space_id,content_sha256,byte_len,line_count,written_at,author_id,group_id,source,checkpoint,superseded_at,cleanup_at,ciphertext,nonce,enc_key_id,enc_version,purpose) \
-        SELECT revision_id,node_id,space_id,content_sha256,byte_len,line_count,revision_written_at,revision_author_id,revision_group_id,revision_source,true,clock_timestamp(),clock_timestamp()+interval '30 days',$2,$3,$4,$5,revision_purpose FROM text_objects WHERE node_id=$1")
-        .bind(node.id).bind(envelope.ciphertext).bind(envelope.nonce).bind(crypto.enc_key_id()).bind(crypto.version()).execute(&mut *tx).await?;
-    sqlx::query("UPDATE text_objects SET revision_id=$2, revision_purpose='new legacy reason' WHERE node_id=$1")
-        .bind(node.id).bind(Uuid::new_v4()).execute(&mut *tx).await?;
-    tx.commit().await?;
-    let archived = repo.read_text_revision(space, node.id, head.0).await?;
-    assert_eq!(archived.content, "b");
-    assert_eq!(
-        archived.revision.purpose.as_deref(),
-        Some("current legacy reason")
-    );
-    let current = repo
-        .list_text_revisions(space, node.id, 10, None)
-        .await?
-        .current
-        .unwrap();
-    assert_eq!(current.purpose.as_deref(), Some("new legacy reason"));
-    assert_eq!(
-        revisions::encrypt_legacy_purposes(&db.pool, &crypto).await?,
-        1
-    );
+    save(&repo, space, node.id, actor, "c").await?;
+    let page = repo.list_text_revisions(space, node.id, 10, None).await?;
+    assert_eq!(page.revisions.len(), 2);
     let private: serde_json::Value =
         sqlx::query_scalar("SELECT private_purpose FROM text_revisions WHERE id=$1")
-            .bind(head.0)
+            .bind(page.revisions[0].id)
             .fetch_one(&db.pool)
             .await?;
-    assert!(!private.to_string().contains("legacy reason"));
-    // A purpose copied to a different revision fails authentication.
     sqlx::query("UPDATE text_revisions SET private_purpose=$2 WHERE id=$1")
-        .bind(after.revisions[0].id)
+        .bind(page.revisions[1].id)
         .bind(private)
         .execute(&db.pool)
         .await?;

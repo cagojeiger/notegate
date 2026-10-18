@@ -21,34 +21,27 @@ use uuid::Uuid;
 static PURGE_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test]
-async fn space_purge_preserves_legacy_change_owners_before_background_encryption()
+async fn space_purge_preserves_unassigned_change_owners_in_bounded_batches()
 -> Result<(), Box<dyn std::error::Error>> {
     let _guard = PURGE_TEST_MUTEX.lock().await;
-    let Some(db) = TestDb::setup_before(48).await? else {
+    let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let (owner, space, _) =
-        common::legacy_space_with_root(&db.pool, "purge-legacy-changes").await?;
-    sqlx::query(
-        "INSERT INTO file_change_events(space_id, op_type, metadata) \
-         SELECT $1, 'text.write', '{\"item_name\":\"legacy private.md\"}'::jsonb \
-         FROM generate_series(1, 201)",
-    )
-    .bind(space)
-    .execute(&db.pool)
-    .await?;
-    for migration in notegate_db::MIGRATOR.iter().filter(|m| m.version >= 48) {
-        if migration.version == 58 {
-            notegate_db::AccountRepo::new(db.pool.clone())
-                .import_identity_links(&[notegate_db::account_repo::IdentityLink {
-                    account_id: owner,
-                    issuer: "https://auth.example.test".to_owned(),
-                    subject: "purge-legacy-changes".to_owned(),
-                }])
-                .await?;
-        }
-        db.apply_migration(migration.version).await?;
+    let (owner, space, _) = space_with_root(&db.pool, "purge-unassigned-changes").await?;
+    let crypto = PiiCrypto::test();
+    for _ in 0..201 {
+        let snapshot = Uuid::new_v4();
+        let encrypted = serde_json::to_value(crypto.encrypt_history(
+            &format!("changes/{space}/{snapshot}"),
+            "{\"item_name\":\"private.md\"}",
+        )?)?;
+        sqlx::query("INSERT INTO file_change_events(space_id, op_type, metadata, snapshot_id, private_metadata) VALUES($1,'text.write','{}'::jsonb,$2,$3)")
+            .bind(space).bind(snapshot).bind(encrypted).execute(&db.pool).await?;
     }
+    sqlx::query("UPDATE file_change_events SET owner_user_id=NULL WHERE space_id=$1")
+        .bind(space)
+        .execute(&db.pool)
+        .await?;
     sqlx::query(
         "UPDATE spaces SET deleted_at = now(), deleted_by_user_id = $2, \
          purge_after = now(), purge_requested_at = now() WHERE id = $1",
@@ -58,15 +51,14 @@ async fn space_purge_preserves_legacy_change_owners_before_background_encryption
     .execute(&db.pool)
     .await?;
 
-    // Hold the same row lock that background encryption takes. Purge must
-    // preserve other owners in bounded batches without deleting this Space.
-    let mut encryption = db.pool.begin().await?;
+    // A locked history row must delay Space removal until ownership is preserved.
+    let mut locked = db.pool.begin().await?;
     let locked_id: i64 = sqlx::query_scalar(
         "SELECT id FROM file_change_events WHERE space_id = $1 \
          ORDER BY id LIMIT 1 FOR UPDATE",
     )
     .bind(space)
-    .fetch_one(&mut *encryption)
+    .fetch_one(&mut *locked)
     .await?;
     let purge = PurgeRepo::new(db.pool.clone());
     for remaining in [101_i64, 1, 1] {
@@ -86,16 +78,16 @@ async fn space_purge_preserves_legacy_change_owners_before_background_encryption
     let locked_owner: Option<Uuid> =
         sqlx::query_scalar("SELECT owner_user_id FROM file_change_events WHERE id = $1")
             .bind(locked_id)
-            .fetch_one(&mut *encryption)
+            .fetch_one(&mut *locked)
             .await?;
     assert_eq!(locked_owner, None);
-    encryption.rollback().await?;
+    locked.rollback().await?;
 
     let run = purge.run_once().await?;
     assert_eq!(run.spaces_deleted, 1);
     assert!(!run.resources_pending);
     let preserved: (i64, i64, bool) = sqlx::query_as(
-        "SELECT count(*), count(*) FILTER (WHERE owner_user_id = $2 AND private_metadata IS NULL), \
+        "SELECT count(*), count(*) FILTER (WHERE owner_user_id = $2 AND private_metadata IS NOT NULL), \
          EXISTS(SELECT 1 FROM spaces WHERE id = $1) \
          FROM file_change_events WHERE space_id = $1",
     )
@@ -106,12 +98,7 @@ async fn space_purge_preserves_legacy_change_owners_before_background_encryption
     assert_eq!(preserved, (201, 201, false));
     assert_eq!(purge.run_once().await?.spaces_deleted, 0);
 
-    // Encryption runs only after the source Space is gone. It must retain
-    // ownership and all metadata across multiple batches and history pages.
-    let history = notegate_db::ChangeHistoryRepo::new(db.pool.clone(), PiiCrypto::test());
-    for expected in [100, 100, 1, 0] {
-        assert_eq!(history.encrypt_legacy_metadata().await?, expected);
-    }
+    let history = notegate_db::ChangeHistoryRepo::new(db.pool.clone(), crypto);
     let mut cursor = None;
     for expected in [100, 100, 1] {
         let events = history
@@ -119,7 +106,7 @@ async fn space_purge_preserves_legacy_change_owners_before_background_encryption
             .await?;
         assert_eq!(events.len(), expected);
         assert!(events.iter().all(|event| {
-            event.space_id == space && event.metadata["item_name"] == "legacy private.md"
+            event.space_id == space && event.metadata["item_name"] == "private.md"
         }));
         let last = events.last().unwrap();
         cursor = Some(notegate_model::FileChangeEventCursor {
@@ -427,22 +414,24 @@ async fn purge_deletes_expired_command_invocations_in_bounded_batches()
 
     sqlx::query(
         "INSERT INTO command_invocations \
-         (created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, op, purpose, input, outcome, duration_ms) \
+         (created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, op, snapshot_id, private_payload, outcome, duration_ms) \
          SELECT now() - interval '91 days', $1, $1, 'user', \
                 CASE WHEN value % 2 = 0 THEN 'mcp' ELSE 'cli' END, 'search', 'find', \
-                'expired invocation ' || value, '{}'::jsonb, 'success', 1 \
+                '00000000-0000-0000-0000-000000000000'::uuid, $2, 'success', 1 \
          FROM generate_series(1, 1001) AS value",
     )
     .bind(user)
+    .bind(common::empty_invocation_payload(user))
     .execute(&db.pool)
     .await?;
     sqlx::query(
         "INSERT INTO command_invocations \
-         (created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, op, purpose, input, outcome, duration_ms) \
+         (created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, op, snapshot_id, private_payload, outcome, duration_ms) \
          VALUES (now() - interval '89 days', $1, $1, 'user', 'cli', 'read', 'read', \
-                 'recent invocation', '{}'::jsonb, 'success', 1)",
+                 '00000000-0000-0000-0000-000000000000'::uuid, $2, 'success', 1)",
     )
     .bind(user)
+    .bind(common::empty_invocation_payload(user))
     .execute(&db.pool)
     .await?;
 
@@ -452,12 +441,12 @@ async fn purge_deletes_expired_command_invocations_in_bounded_batches()
     assert_eq!(second.command_invocations_deleted, 1);
 
     let remaining: Vec<String> = sqlx::query_scalar(
-        "SELECT purpose FROM command_invocations WHERE owner_user_id = $1 ORDER BY id",
+        "SELECT surface FROM command_invocations WHERE owner_user_id = $1 ORDER BY id",
     )
     .bind(user)
     .fetch_all(&db.pool)
     .await?;
-    assert_eq!(remaining, vec!["recent invocation"]);
+    assert_eq!(remaining, vec!["cli"]);
 
     db.cleanup().await;
     Ok(())
@@ -632,19 +621,20 @@ async fn history_retention_uses_injected_boundaries_and_keeps_pending_cleanup()
         ).bind(audit_cutoff + delta).bind(owner).fetch_one(&db.pool).await?);
         changes.push(
             sqlx::query_scalar::<_, i64>(
-                "INSERT INTO file_change_events (created_at, space_id, actor_account_id, op_type) \
-             VALUES ($1, $2, $3, 'test.boundary') RETURNING id",
+                "INSERT INTO file_change_events (created_at, space_id, actor_account_id, op_type, snapshot_id, private_metadata) \
+             VALUES ($1, $2, $3, 'test.boundary', '00000000-0000-0000-0000-000000000000'::uuid, $4) RETURNING id",
             )
             .bind(ordinary_cutoff + delta)
             .bind(space)
             .bind(owner)
+            .bind(common::empty_change_metadata(space))
             .fetch_one(&db.pool)
             .await?,
         );
         invocations.push(sqlx::query_scalar::<_, i64>(
-            "INSERT INTO command_invocations (created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, input, outcome, duration_ms) \
-             VALUES ($1, $2, $2, 'user', 'mcp', 'read', '{}', 'success', 0) RETURNING id",
-        ).bind(ordinary_cutoff + delta).bind(owner).fetch_one(&db.pool).await?);
+            "INSERT INTO command_invocations (created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, snapshot_id, private_payload, outcome, duration_ms) \
+             VALUES ($1, $2, $2, 'user', 'mcp', 'read', '00000000-0000-0000-0000-000000000000'::uuid, $3, 'success', 0) RETURNING id",
+        ).bind(ordinary_cutoff + delta).bind(owner).bind(common::empty_invocation_payload(owner)).fetch_one(&db.pool).await?);
         let object = Uuid::new_v4();
         sqlx::query(
             "INSERT INTO object_storage_objects (id, object_key, name, declared_byte_len, media_type, state, deleted_at) \

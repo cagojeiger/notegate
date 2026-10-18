@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{FileCommand, FilesService, TextWriteResult, WriteTarget, WriteText, WriteTextBody};
-use crate::{ServiceError, ServiceResult, cursor};
+use crate::{ServiceError, ServiceResult};
+use notegate_core::cursor;
 
 #[derive(Debug, Serialize)]
 pub struct RevisionHistoryPage {

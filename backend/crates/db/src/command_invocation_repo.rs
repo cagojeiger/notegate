@@ -59,8 +59,8 @@ impl CommandInvocationRepo {
         let encrypted = self.protect(invocation.owner_user_id, snapshot_id, &private)?;
         sqlx::query(
             "INSERT INTO command_invocations \
-             (owner_user_id, actor_account_id, caller_kind, surface, tool, op, input, outcome, error_code, duration_ms, snapshot_id, private_payload, invocation_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb, $7, $8, $9, $10, $11, $12)",
+             (owner_user_id, actor_account_id, caller_kind, surface, tool, op, outcome, error_code, duration_ms, snapshot_id, private_payload, invocation_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
         )
         .bind(invocation.owner_user_id)
         .bind(invocation.actor_account_id)
@@ -90,32 +90,6 @@ impl CommandInvocationRepo {
         .map_err(|_| Error::internal("invocation history encoding failed"))
     }
 
-    /// Bounded, restartable migration, including legacy writes during a rolling deploy.
-    pub async fn encrypt_legacy_payloads(&self) -> Result<u64> {
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        let rows = sqlx::query_as::<_, CommandInvocationRow>(
-            "SELECT id, created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, op, purpose, \
-                    space_name, input, response, outcome, error_code, duration_ms, snapshot_id, private_payload, invocation_id \
-             FROM command_invocations WHERE private_payload IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED",
-        ).fetch_all(&mut *tx).await.map_err(map_sqlx_error)?;
-        let count = rows.len() as u64;
-        for row in rows {
-            let snapshot_id = Uuid::new_v4();
-            let private = PrivatePayload {
-                purpose: row.purpose,
-                space_name: row.space_name,
-                input: row.input,
-                response: row.response,
-            };
-            let encrypted = self.protect(row.owner_user_id, snapshot_id, &private)?;
-            sqlx::query("UPDATE command_invocations SET purpose=NULL, space_name=NULL, input='{}'::jsonb, response=NULL, snapshot_id=$2, private_payload=$3 WHERE id=$1")
-                .bind(row.id).bind(snapshot_id).bind(encrypted)
-                .execute(&mut *tx).await.map_err(map_sqlx_error)?;
-        }
-        tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(count)
-    }
-
     pub async fn list_by_owner(
         &self,
         owner_user_id: Uuid,
@@ -126,8 +100,7 @@ impl CommandInvocationRepo {
         let cursor_created_at = cursor.map(|cursor| cursor.created_at);
         let cursor_id = cursor.map(|cursor| cursor.id);
         let rows = sqlx::query_as::<_, CommandInvocationRow>(
-            "SELECT id, created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, op, purpose, \
-                    space_name, input, response, outcome, error_code, duration_ms, snapshot_id, private_payload, invocation_id \
+            "SELECT id, created_at, owner_user_id, actor_account_id, caller_kind, surface, tool, op, outcome, error_code, duration_ms, snapshot_id, private_payload, invocation_id \
              FROM command_invocations \
              WHERE owner_user_id = $1 \
                AND surface = $2 \
@@ -144,25 +117,7 @@ impl CommandInvocationRepo {
         .await
         .map_err(map_sqlx_error)?;
         rows.into_iter()
-            .map(|mut row| {
-                if let Some(private) = row.private_payload.take() {
-                    let snapshot_id = row.snapshot_id.ok_or_else(|| {
-                        Error::internal("encrypted invocation has no snapshot identity")
-                    })?;
-                    let encrypted: EncryptedHistoryValue = serde_json::from_value(private)
-                        .map_err(|_| Error::internal("invalid encrypted invocation history"))?;
-                    let plaintext = self
-                        .crypto
-                        .decrypt_history(&binding(row.owner_user_id, snapshot_id), &encrypted)?;
-                    let payload: PrivatePayload = serde_json::from_str(&plaintext)
-                        .map_err(|_| Error::internal("invalid invocation history payload"))?;
-                    row.purpose = payload.purpose;
-                    row.space_name = payload.space_name;
-                    row.input = payload.input;
-                    row.response = payload.response;
-                }
-                Ok(CommandInvocation::from(row))
-            })
+            .map(|row| row.decode(&self.crypto))
             .collect()
     }
 }
@@ -214,20 +169,23 @@ struct CommandInvocationRow {
     surface: String,
     tool: String,
     op: Option<String>,
-    purpose: Option<String>,
-    space_name: Option<String>,
-    input: Value,
-    response: Option<Value>,
     outcome: String,
     error_code: Option<String>,
     duration_ms: i64,
-    snapshot_id: Option<Uuid>,
-    private_payload: Option<Value>,
+    snapshot_id: Uuid,
+    private_payload: Value,
 }
 
-impl From<CommandInvocationRow> for CommandInvocation {
-    fn from(row: CommandInvocationRow) -> Self {
-        Self {
+impl CommandInvocationRow {
+    fn decode(self, crypto: &PiiCrypto) -> Result<CommandInvocation> {
+        let row = self;
+        let encrypted: EncryptedHistoryValue = serde_json::from_value(row.private_payload)
+            .map_err(|_| Error::internal("invalid encrypted invocation history"))?;
+        let plaintext =
+            crypto.decrypt_history(&binding(row.owner_user_id, row.snapshot_id), &encrypted)?;
+        let payload: PrivatePayload = serde_json::from_str(&plaintext)
+            .map_err(|_| Error::internal("invalid invocation history payload"))?;
+        Ok(CommandInvocation {
             id: row.id,
             invocation_id: row.invocation_id,
             created_at: row.created_at,
@@ -236,13 +194,13 @@ impl From<CommandInvocationRow> for CommandInvocation {
             surface: row.surface,
             tool: row.tool,
             op: row.op,
-            purpose: row.purpose,
-            space_name: row.space_name,
-            input: row.input,
-            response: row.response,
+            purpose: payload.purpose,
+            space_name: payload.space_name,
+            input: payload.input,
+            response: payload.response,
             outcome: row.outcome,
             error_code: row.error_code,
             duration_ms: row.duration_ms,
-        }
+        })
     }
 }

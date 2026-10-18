@@ -9,7 +9,6 @@ type HmacSha256 = Hmac<Sha256>;
 
 pub(super) const TIMESTAMP_HEADER: &str = "x-notegate-internal-timestamp";
 pub(super) const REQUEST_SIGNATURE_HEADER: &str = "x-notegate-internal-signature";
-pub(super) const RESPONSE_SIGNATURE_HEADER: &str = "x-notegate-internal-response-signature";
 pub(super) const BOUND_RESPONSE_SIGNATURE_HEADER: &str =
     "x-notegate-internal-bound-response-signature";
 const MAX_CLOCK_SKEW_SECONDS: u64 = 60;
@@ -80,31 +79,6 @@ impl InternalSearchAuth {
         self.verify(&request_canonical(timestamp, method, path, body), signature)
     }
 
-    pub(super) fn sign_response(
-        &self,
-        request_timestamp: i64,
-        status: u16,
-        path: &str,
-        body: &[u8],
-    ) -> Result<String, InternalAuthError> {
-        self.sign(&response_canonical(request_timestamp, status, path, body))
-    }
-
-    #[cfg(test)]
-    pub(super) fn verify_response(
-        &self,
-        request_timestamp: i64,
-        status: u16,
-        path: &str,
-        body: &[u8],
-        signature: &str,
-    ) -> bool {
-        self.verify(
-            &response_canonical(request_timestamp, status, path, body),
-            signature,
-        )
-    }
-
     pub(super) fn sign_bound_response(
         &self,
         request: &RequestBinding,
@@ -151,14 +125,6 @@ impl InternalSearchAuth {
 fn request_canonical(timestamp: i64, method: &str, path: &str, body: &[u8]) -> Vec<u8> {
     let mut value = format!("notegate-internal-search-request:v1\n{timestamp}\n{method}\n{path}\n")
         .into_bytes();
-    value.extend_from_slice(body);
-    value
-}
-
-fn response_canonical(request_timestamp: i64, status: u16, path: &str, body: &[u8]) -> Vec<u8> {
-    let mut value =
-        format!("notegate-internal-search-response:v1\n{request_timestamp}\n{status}\n{path}\n")
-            .into_bytes();
     value.extend_from_slice(body);
     value
 }
@@ -225,24 +191,6 @@ mod tests {
     }
 
     #[test]
-    fn response_signature_binds_status_path_and_body() -> Result<(), InternalAuthError> {
-        let auth = InternalSearchAuth::new([9; 32]);
-        let body = br#"{"items":[]}"#;
-        let signature = auth.sign_response(1_000, 200, super::super::FIND_PATH, body)?;
-
-        assert!(auth.verify_response(1_000, 200, super::super::FIND_PATH, body, &signature));
-        assert!(!auth.verify_response(1_000, 500, super::super::FIND_PATH, body, &signature));
-        assert!(!auth.verify_response(
-            1_000,
-            200,
-            super::super::FIND_PATH,
-            br#"{"items":[{}]}"#,
-            &signature,
-        ));
-        Ok(())
-    }
-
-    #[test]
     fn bound_response_rejects_other_requests_in_the_same_second() -> Result<(), InternalAuthError> {
         let auth = InternalSearchAuth::new([9; 32]);
         let path = super::super::FIND_PATH;
@@ -278,10 +226,6 @@ mod tests {
                 &signature,
             ));
             assert!(!auth.verify_bound_response(&binding, status, path, b"{}", &signature));
-
-            let legacy = auth.sign_response(1_000, status, path, body)?;
-            assert!(!auth.verify_bound_response(&binding, status, path, body, &legacy));
-            assert!(!auth.verify_response(1_000, status, path, body, &signature));
         }
         Ok(())
     }

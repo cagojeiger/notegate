@@ -8,7 +8,6 @@ NoteGate 대시보드의 현재 화면 구조와 동작을 기록한다.
 - `00-overview.md`: 화면과 용어의 전체 구조
 - `01-layout.md`: layout, panel과 반응형 규칙
 - `02-data-and-flows.md`: 상태 수명, 사용자 흐름과 실패 처리
-- `03-implementation.md`: frontend 구현 경계와 검증 규칙
 - [`docs/spec`](../spec/api.md): API, 보안, 저장소와 성능 계약
 
 실제 동작, 상수와 token의 정본은 코드다. 문서와 코드가 다르면 현재 코드를 확인하고 같은 변경에서 관련 문서를 맞춘다.
@@ -25,4 +24,3 @@ NoteGate 대시보드의 현재 화면 구조와 동작을 기록한다.
 1. `00-overview.md`
 2. `01-layout.md`
 3. `02-data-and-flows.md`
-4. `03-implementation.md`

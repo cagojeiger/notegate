@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
-use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
 use crate::files::validation;
 use crate::files::{
@@ -15,6 +14,7 @@ use crate::files::{
     ReadText, ReadTextBody,
 };
 use crate::pagination;
+use notegate_core::cursor;
 
 use super::{FilesService, join_path};
 

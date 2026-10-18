@@ -224,7 +224,7 @@ History는 group별 독립적이다. 새 Node를 열면 forward를 비우고 새
 
 Near-viewport path 요청을 같은 microtask에서 병합 → `POST /file-previews:batchResolve` → 순서대로 path별 결과와 ready Node URL cache → 이미지별 missing/unsupported/transient 실패를 독립 처리.
 
-단일 File rename/move는 이전 path cache만 제거한다. Folder 변경/외부 path event는 active Space preview cache를 제거한다. Presigned URL 만료는 해당 path만 재조회한다. Batch 상한은 [구현 규칙](03-implementation.md#external-sync)을 따른다.
+단일 File rename/move는 이전 path cache만 제거한다. Folder 변경/외부 path event는 active Space preview cache를 제거한다. Presigned URL 만료는 해당 path만 재조회한다. Batch 상한은 [성능 계약](../spec/performance-limits.md)을 따른다.
 
 ### Split
 
@@ -236,7 +236,7 @@ Near-viewport path 요청을 같은 microtask에서 병합 → `POST /file-previ
 
 ### External sync
 
-Visible tab은 active Space event를 마지막 적용 ID 이후부터 모든 page 오름차순으로 읽어 Node/content·해당 parent children·Recent를 invalidate한다. Expired/unknown token은 file-related cache family를 한 번 refresh하고 새 token을 설정한다. 열린 Node 404는 group을 비운다. Interval/token 적용 규칙은 [External sync 구현](03-implementation.md#external-sync)이 정본이다.
+Visible tab은 active Space event를 마지막 적용 ID 이후부터 모든 page 오름차순으로 읽어 Node/content·해당 parent children·Recent를 invalidate한다. Expired/unknown token은 file-related cache family를 한 번 refresh하고 새 token을 설정한다. 열린 Node 404는 group을 비운다. 숨겨진 tab에서는 polling하지 않는다. Focus/reconnect와 Space 전환 시 다시 동기화한다.
 
 ## Structured preview
 
@@ -275,3 +275,5 @@ Agent 관리 권한이 있는 caller에게만 Agents를 표시한다. 공용 URL
 | Files | File | Open, open in new group, download, rename, move, copy path, delete |
 | EditorHeader | Node | Rename, move, delete, download if File |
 | Inspector | Metadata | View system metadata |
+
+인증 승인·CLI Device Flow·Connected applications 화면은 서버 폼으로 동작하며 JavaScript 없이 승인·거절·연결 해제를 지원한다.

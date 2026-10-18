@@ -24,7 +24,6 @@ const DEFAULT_BIND_ADDR: &str = "0.0.0.0:9191";
 const DEFAULT_SEARCH_BIND_ADDR: &str = "127.0.0.1:9192";
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
 const DEFAULT_BROWSER_SESSION_MAX_TTL_SECS: u64 = 30 * 86_400;
-const DEFAULT_OPENAPI_ENABLED: bool = false;
 const DEFAULT_METRICS_ENABLED: bool = false;
 const DEFAULT_BACKGROUND_JOB_CONCURRENCY: usize = 4;
 const DEFAULT_SEARCH_BODY_CACHE_MAX_CAPACITY_BYTES: u64 = 128 * 1024 * 1024;
@@ -198,22 +197,17 @@ pub struct OidcLoginConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// Address the HTTP server binds to.
     pub bind_addr: SocketAddr,
-    /// Address the internal search server binds to when hosted by this process.
     pub search_bind_addr: SocketAddr,
     /// Optional base URL for a separately deployed internal search server.
     pub search_service_url: Option<String>,
     /// Runtime role. `all` preserves the single-process deployment.
     #[serde(default)]
     pub process_mode: ProcessMode,
-    /// Postgres connection string.
     pub database_url: String,
-    /// Max connections in the sqlx pool.
     pub db_max_connections: u32,
     /// Optional Postgres read endpoint. Search uses this pool when configured.
     pub read_database_url: Option<String>,
-    /// Max connections in the optional read pool.
     pub read_db_max_connections: u32,
     /// In-process durable background job consumer.
     #[serde(default)]
@@ -240,26 +234,17 @@ pub struct Config {
     pub lookup_root_key_id: String,
     /// Active LOOKUP root secret used to derive HMAC/session subkeys.
     pub lookup_root_secret: SecretString,
-    /// Optional verify-only LOOKUP root key id for provider subject migration.
-    pub lookup_verify_0_key_id: Option<String>,
-    /// Optional verify-only LOOKUP root secret for provider subject migration.
-    pub lookup_verify_0_secret: Option<SecretString>,
-    /// Browser session absolute lifetime.
     #[serde(
         rename = "browser_session_max_ttl_secs",
         deserialize_with = "duration_from_secs"
     )]
     pub browser_session_max_ttl: Duration,
-    /// Deprecated OpenAPI toggle retained for configuration compatibility.
-    pub openapi_enabled: bool,
     /// Whether Prometheus metrics are recorded and exposed at `/metrics`.
     pub metrics_enabled: bool,
     /// Optional directory containing the built web dashboard. When set, unknown
     /// non-API routes fall back to this directory's `index.html`.
     pub web_dist_dir: Option<String>,
-    /// S3-compatible object storage connection.
     pub s3: S3Config,
-    /// Tier assigned to newly created users.
     #[serde(default = "default_user_tier", deserialize_with = "user_tier_from_str")]
     pub default_user_tier: UserTier,
     /// Runtime-overridable capacity limits. Defaults match `docs/spec/performance-limits.md`.
@@ -367,20 +352,6 @@ impl Validate for Config {
         if self.enc_root_secret.expose_secret() == self.lookup_root_secret.expose_secret() {
             errors.add("lookup_root_secret", ValidationError::new("reused_root"));
         }
-        match (&self.lookup_verify_0_key_id, &self.lookup_verify_0_secret) {
-            (Some(key_id), Some(secret)) => {
-                if validate_key_id(key_id).is_err() {
-                    errors.add("lookup_verify_0_key_id", ValidationError::new("format"));
-                }
-                if validate_secret_min_32(secret).is_err() {
-                    errors.add("lookup_verify_0_secret", ValidationError::new("length"));
-                }
-            }
-            (None, None) => {}
-            _ => {
-                errors.add("lookup_verify_0", ValidationError::new("paired"));
-            }
-        }
         if validate_browser_session_max_ttl(&self.browser_session_max_ttl).is_err() {
             errors.add("browser_session_max_ttl", ValidationError::new("range"));
         }
@@ -469,8 +440,6 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
             "browser_session_max_ttl_secs",
             DEFAULT_BROWSER_SESSION_MAX_TTL_SECS,
         )
-        .map_err(map_config_error)?
-        .set_default("openapi_enabled", DEFAULT_OPENAPI_ENABLED)
         .map_err(map_config_error)?
         .set_default("metrics_enabled", DEFAULT_METRICS_ENABLED)
         .map_err(map_config_error)?
@@ -844,13 +813,10 @@ mod tests {
             lookup_root_secret: SecretString::from(
                 "test-lookup-root-secret-32-bytes-long".to_owned(),
             ),
-            lookup_verify_0_key_id: None,
-            lookup_verify_0_secret: None,
 
             browser_session_max_ttl: Duration::from_secs(
                 super::DEFAULT_BROWSER_SESSION_MAX_TTL_SECS,
             ),
-            openapi_enabled: false,
             metrics_enabled: false,
             web_dist_dir: None,
             s3: super::S3Config {
@@ -1142,7 +1108,6 @@ mod tests {
         config.normalize();
         assert_eq!(config.bind_addr.to_string(), "127.0.0.1:9191");
         assert_eq!(config.db_max_connections, 10);
-        assert!(!config.openapi_enabled);
         assert!(!config.metrics_enabled);
         assert!(!config.secure_cookies);
         Ok(())
@@ -1354,6 +1319,12 @@ mod tests {
             ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "old-mcp"),
             ("NOTEGATE_JWKS_CACHE_TTL_SECS", "300"),
             ("NOTEGATE_BROWSER_SESSION_TTL_SECS", "3600"),
+            ("NOTEGATE_LOOKUP_VERIFY_0_KEY_ID", "retired-lookup"),
+            (
+                "NOTEGATE_LOOKUP_VERIFY_0_SECRET",
+                "retired-lookup-secret-32-bytes-long",
+            ),
+            ("NOTEGATE_OPENAPI_ENABLED", "true"),
             (
                 "NOTEGATE_LEGACY_IDENTITY_ISSUER",
                 "https://auth.example.test",

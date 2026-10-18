@@ -306,7 +306,6 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
-    use crate::internal_search::auth::RESPONSE_SIGNATURE_HEADER;
     use crate::internal_search::contract::{ErrorOutput, WriteLockScopeWire};
 
     const SIGNING_KEY: [u8; 32] = [7; 32];
@@ -399,14 +398,6 @@ mod tests {
         let bound_signature = InternalSearchAuth::new(response.signing_key)
             .sign_bound_response(&binding, response.status.as_u16(), FIND_PATH, signed_body)
             .expect("fixed-size signing key is valid");
-        let signature = InternalSearchAuth::new(response.signing_key)
-            .sign_response(
-                request_timestamp,
-                response.status.as_u16(),
-                FIND_PATH,
-                signed_body,
-            )
-            .expect("fixed-size signing key is valid");
         let body = if response.stream_body {
             Body::from_stream(stream::iter([Ok::<_, Infallible>(response.body)]))
         } else {
@@ -414,7 +405,10 @@ mod tests {
         };
         let mut output = Response::builder()
             .status(response.status)
-            .header(RESPONSE_SIGNATURE_HEADER, signature)
+            .header(
+                "x-notegate-internal-response-signature",
+                "retired-signature",
+            )
             .body(body)
             .expect("stub response is valid");
         if response.include_bound_signature {

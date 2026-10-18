@@ -10,8 +10,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
-use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
+use notegate_core::cursor;
 
 /// Clamp a requested page limit to `1..=max`, defaulting when omitted.
 pub(crate) fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {

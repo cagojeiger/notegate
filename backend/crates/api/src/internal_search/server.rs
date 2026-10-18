@@ -17,8 +17,8 @@ use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
 
 use super::auth::{
-    BOUND_RESPONSE_SIGNATURE_HEADER, InternalSearchAuth, REQUEST_SIGNATURE_HEADER,
-    RESPONSE_SIGNATURE_HEADER, RequestBinding, TIMESTAMP_HEADER,
+    BOUND_RESPONSE_SIGNATURE_HEADER, InternalSearchAuth, REQUEST_SIGNATURE_HEADER, RequestBinding,
+    TIMESTAMP_HEADER,
 };
 use super::context::SEARCH_RESPONSE_HEADROOM;
 use super::contract::{
@@ -329,12 +329,6 @@ where
     let Ok(body) = serde_json::to_vec(output) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    let Ok(signature) = state
-        .auth
-        .sign_response(binding.timestamp, status.as_u16(), path, &body)
-    else {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    };
     let Ok(bound_signature) =
         state
             .auth
@@ -343,9 +337,6 @@ where
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let Ok(timestamp) = HeaderValue::from_str(&binding.timestamp.to_string()) else {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    };
-    let Ok(signature) = HeaderValue::from_str(&signature) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let Ok(bound_signature) = HeaderValue::from_str(&bound_signature) else {
@@ -357,9 +348,6 @@ where
         HeaderValue::from_static("application/json; charset=utf-8"),
     );
     response.headers_mut().insert(TIMESTAMP_HEADER, timestamp);
-    response
-        .headers_mut()
-        .insert(RESPONSE_SIGNATURE_HEADER, signature);
     response
         .headers_mut()
         .insert(BOUND_RESPONSE_SIGNATURE_HEADER, bound_signature);

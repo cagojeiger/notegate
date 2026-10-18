@@ -157,3 +157,22 @@ pub async fn deactivate_account(
     .await?;
     Ok(())
 }
+
+#[allow(dead_code)]
+pub fn empty_change_metadata(space: Uuid) -> serde_json::Value {
+    let encrypted = notegate_core::security::PiiCrypto::test()
+        .encrypt_history(&format!("changes/{space}/{}", Uuid::nil()), "{}")
+        .expect("fixed test key is valid");
+    serde_json::to_value(encrypted).expect("history envelope serializes")
+}
+
+#[allow(dead_code)]
+pub fn empty_invocation_payload(owner: Uuid) -> serde_json::Value {
+    let encrypted = notegate_core::security::PiiCrypto::test()
+        .encrypt_history(
+            &format!("invocations/{owner}/{}", Uuid::nil()),
+            r#"{"purpose":null,"space_name":null,"input":{},"response":null}"#,
+        )
+        .expect("fixed test key is valid");
+    serde_json::to_value(encrypted).expect("history envelope serializes")
+}

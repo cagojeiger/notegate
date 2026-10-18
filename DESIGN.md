@@ -86,7 +86,7 @@
 - 새 theme system, feature별 raw color, 외부 font CDN 또는 별도 icon dependency를 추가하지 않는다. Workbench UI는 플랫폼 기본 글꼴을 따르고 Reading 영역은 `--font-reading` 경계를 유지한다.
 - Workbench density와 radius는 `theme.css`의 semantic token을 사용하고 Markdown의 typography/spacing을 이 scale에 결합하지 않는다.
 - 시각 변경은 1440×900 desktop과 390×844 mobile에서 light/dark 모두 확인한다.
-- 상세한 상태 소유권, 캐시, preview, recording과 검증 규칙은 [`docs/ui/02-data-and-flows.md`](docs/ui/02-data-and-flows.md)와 [`docs/ui/03-implementation.md`](docs/ui/03-implementation.md)를 따른다.
+- 상세한 상태 소유권, 캐시, preview, recording과 검증 규칙은 [`docs/ui/02-data-and-flows.md`](docs/ui/02-data-and-flows.md)를 따른다.
 - 운영 dashboard의 지표와 label 정책은 [`docs/spec/observability.md`](docs/spec/observability.md)가 소유한다.
 
 ## 시각 구현 제약

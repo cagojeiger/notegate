@@ -1,8 +1,8 @@
 //! Protocol-neutral directional file-change commands.
 
 use notegate_command::{CommandError, READ_OP_CHANGES, RecoveryAction, ToolCallSpec};
+use notegate_core::cursor;
 use notegate_service::ServiceError;
-use notegate_service::cursor;
 use notegate_service::files::{
     FileChangeEvent, FileChangeEventIdCursor, ListFileChangeEventsById, SyncFileChanges,
     parse_target,
