@@ -668,7 +668,7 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
         .bind(owner)
         .execute(&db.pool)
         .await?;
-    sqlx::query("INSERT INTO audit_events (actor_account_id, action, target_type, target_id) VALUES ($1, 'test.before_oidc', 'account', $1)")
+    sqlx::query("INSERT INTO audit_events (owner_user_id, actor_account_id, source, op_type, resource_type, resource_id) VALUES ($1, $1, 'rest', 'test.before_oidc', 'account', $1)")
         .bind(owner).execute(&db.pool).await?;
     let router = Router::new()
         .route("/auth/login", get(crate::auth::oauth::login))
@@ -754,7 +754,7 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
     let caller = crate::auth::session::verify_browser_session(&state, session).await?;
     assert_eq!(caller.account_id(), owner);
     let preserved: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM audit_events WHERE actor_account_id=$1 AND action='test.before_oidc'",
+        "SELECT count(*) FROM audit_events WHERE actor_account_id=$1 AND op_type='test.before_oidc'",
     )
     .bind(owner)
     .fetch_one(&db.pool)

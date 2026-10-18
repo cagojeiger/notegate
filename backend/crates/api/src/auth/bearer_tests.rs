@@ -332,7 +332,9 @@ async fn local_access(
             resource: resource.to_owned(),
             redirect_uri: "http://127.0.0.1/callback".to_owned(),
             scope: scope.to_owned(),
-            code_challenge: notegate_service::oauth::pkce_challenge("verifier"),
+            code_challenge: notegate_service::oauth::pkce_challenge(
+                "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGH",
+            ),
             cookie_hash: cookie_hash.clone(),
             private_payload: json!({}),
             user_id: None,
@@ -362,7 +364,7 @@ async fn local_access(
             "test-client",
             resource,
             "http://127.0.0.1/callback",
-            "verifier",
+            "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGH",
             now,
         )
         .await?;
@@ -1374,7 +1376,7 @@ async fn mcp_routes_reject_cookie_without_bearer() -> Result<(), Box<dyn std::er
         .unwrap_or_default();
     assert!(challenge.contains("resource_metadata="));
     assert!(challenge.contains("/.well-known/oauth-protected-resource/mcp"));
-    assert!(challenge.contains("scope=\"openid offline_access\""));
+    assert!(challenge.contains("scope=\"mcp offline_access\""));
 
     let response = app
         .oneshot(
@@ -1767,7 +1769,7 @@ async fn legacy_browser_sessions_are_rejected_without_deleting_account_or_histor
         verify_browser_session(&state, &session).await,
         Err(AuthError::InvalidToken)
     ));
-    let rows: (i64, i64, i64) = sqlx::query_as("SELECT (SELECT count(*) FROM users), (SELECT count(*) FROM browser_sessions), (SELECT count(*) FROM audit_events WHERE action='session.login')")
+    let rows: (i64, i64, i64) = sqlx::query_as("SELECT (SELECT count(*) FROM users), (SELECT count(*) FROM browser_sessions), (SELECT count(*) FROM audit_events WHERE op_type='session.login')")
         .fetch_one(&db.pool).await?;
     assert_eq!(rows, (1, 1, 1));
     db.cleanup().await;
