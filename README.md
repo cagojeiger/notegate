@@ -104,8 +104,7 @@ See the [CLI contract](docs/spec/cli.md) for JSON input, output, exit codes, and
 - [CLI contract](docs/spec/cli.md)
 - [Background jobs](docs/spec/background-jobs.md)
 - [Reconciliation](docs/spec/reconciliation.md)
-- [UI design principles](DESIGN.md)
-- [UI behavior and implementation](docs/ui/README.md)
+- [UI constraints](docs/ui/README.md)
 - [Security model](docs/spec/security.md)
 
 ## Project status

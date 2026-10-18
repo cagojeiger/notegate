@@ -119,7 +119,7 @@ async fn summaries_are_encrypted_owner_scoped_and_linked_to_changes()
         Some(json!({"status": 200, "body_recorded": false}))
     );
     let raw: (i64, i64) = sqlx::query_as(
-        "SELECT count(*), count(*) FILTER (WHERE input='{}'::jsonb AND response IS NULL AND purpose IS NULL AND private_payload IS NOT NULL AND snapshot_id IS NOT NULL) FROM command_invocations"
+        "SELECT count(*), count(*) FILTER (WHERE private_payload IS NOT NULL AND snapshot_id IS NOT NULL) FROM command_invocations"
     ).fetch_one(&db.pool).await?;
     assert_eq!(raw, (3, 3));
     let events = state

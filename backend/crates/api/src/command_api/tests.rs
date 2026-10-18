@@ -232,14 +232,20 @@ async fn rejected_cli_me_input_never_records_a_purpose() -> Result<(), Box<dyn s
 
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error"], "me_input_must_be_empty");
-    let purpose = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT purpose FROM command_invocations \
-         WHERE actor_account_id = $1 AND surface = 'cli' AND tool = 'me'",
-    )
-    .bind(caller.account_id())
-    .fetch_one(&state.db)
-    .await?;
-    assert_eq!(purpose, None);
+    let rows =
+        notegate_db::CommandInvocationRepo::with_crypto(state.db.clone(), state.security.clone())
+            .list_by_owner(
+                caller.account_id(),
+                notegate_model::CommandInvocationSurface::Cli,
+                10,
+                None,
+            )
+            .await?;
+    let invocation = rows
+        .iter()
+        .find(|row| row.tool == "me")
+        .ok_or("missing invocation")?;
+    assert_eq!(invocation.purpose, None);
 
     db.cleanup().await;
     Ok(())

@@ -488,22 +488,24 @@ async fn purge_deletes_expired_event_history_in_bounded_batches()
 
     sqlx::query(
         "INSERT INTO file_change_events \
-         (created_at, space_id, actor_account_id, op_type, metadata) \
+         (created_at, space_id, actor_account_id, op_type, metadata, snapshot_id, private_metadata) \
          SELECT now() - interval '91 days', $1, $2, 'test.expired', \
-                jsonb_build_object('sequence', value) \
+                jsonb_build_object('sequence', value), '00000000-0000-0000-0000-000000000000'::uuid, $3 \
          FROM generate_series(1, 1001) AS value",
     )
     .bind(space_id)
     .bind(user)
+    .bind(common::empty_change_metadata(space_id))
     .execute(&db.pool)
     .await?;
     sqlx::query(
         "INSERT INTO file_change_events \
-         (created_at, space_id, actor_account_id, op_type) \
-         VALUES (now() - interval '89 days', $1, $2, 'test.recent')",
+         (created_at, space_id, actor_account_id, op_type, snapshot_id, private_metadata) \
+         VALUES (now() - interval '89 days', $1, $2, 'test.recent', '00000000-0000-0000-0000-000000000000'::uuid, $3)",
     )
     .bind(space_id)
     .bind(user)
+    .bind(common::empty_change_metadata(space_id))
     .execute(&db.pool)
     .await?;
 
