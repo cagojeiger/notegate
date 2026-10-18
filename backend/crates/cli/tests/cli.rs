@@ -592,8 +592,6 @@ fn auth_status_reports_api_key_precedence_without_exposing_it() {
         .args(["--base-url", "https://notegate.example", "auth", "status"])
         .env("NOTEGATE_API_KEY", TEST_KEY)
         .env("NOTEGATE_BASE_URL", "https://ignored.example")
-        .env_remove("NOTEGATE_AUTHGATE_URL")
-        .env_remove("NOTEGATE_CLI_CLIENT_ID")
         .output()
         .expect("run auth status");
 
@@ -621,8 +619,6 @@ fn auth_status_uses_production_base_url_by_default() {
         .args(["auth", "status"])
         .env("NOTEGATE_API_KEY", TEST_KEY)
         .env_remove("NOTEGATE_BASE_URL")
-        .env_remove("NOTEGATE_AUTHGATE_URL")
-        .env_remove("NOTEGATE_CLI_CLIENT_ID")
         .output()
         .expect("run auth status with the default base URL");
 
@@ -642,8 +638,6 @@ fn auth_status_uses_environment_base_url_over_default() {
         .args(["auth", "status"])
         .env("NOTEGATE_API_KEY", TEST_KEY)
         .env("NOTEGATE_BASE_URL", "https://self-hosted.example")
-        .env_remove("NOTEGATE_AUTHGATE_URL")
-        .env_remove("NOTEGATE_CLI_CLIENT_ID")
         .output()
         .expect("run auth status with an environment base URL");
 

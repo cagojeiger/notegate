@@ -9,7 +9,7 @@ Authorization: Bearer ngk_v2_...
 ```
 
 - Agent 소유 `ngk_v2_` key만 허용한다.
-- Browser session cookie, OAuth JWT, User 소유 API key, `ngk_v2_` 형식이 아닌 key는 인증되지 않는다.
+- Browser session cookie, User OAuth token, User 소유 API key, `ngk_v2_` 형식이 아닌 key는 인증되지 않는다.
 - Agent는 연결된 Space만 볼 수 있고 connection의 `read` 또는 `write` 권한을 그대로 적용받는다.
 - Node write lock, quota, 이름과 경로 검증, audit/change event 기록은 공통 service layer가 집행한다.
 - 모든 V2 응답은 `Cache-Control: private, no-store`로 전달한다.

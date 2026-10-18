@@ -116,7 +116,7 @@ legacy_identity_issuer
 ```
 
 외부 신원은 검증된 `issuer`와 subject의 HMAC으로 찾는다. Email이 같아도 계정을 자동 연결하지 않는다.
-API startup은 기존 `NOTEGATE_LEGACY_IDENTITY_ISSUER`을 `legacy_identity_issuer`에 한 번 고정하며,
+API startup은 설정된 `NOTEGATE_LEGACY_IDENTITY_ISSUER`를 `legacy_identity_issuer`에 한 번 고정하며,
 다른 issuer로 재설정하려 하면 실패한다. 기존 `users.provider_sub_hash`는 이 issuer에만
 호환 조회를 허용한다. Browser 재로그인 시 기존 UUID를 유지한 채 `external_identities`를
 같은 transaction에서 추가하며, 기존 issuer의 신규 계정은 구 binary와의 호환을 위해

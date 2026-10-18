@@ -7,7 +7,7 @@
 - User PII는 평문 저장하지 않는다.
 - API key plaintext는 저장하지 않고 HMAC hash만 저장한다.
 - Browser session cookie token은 저장하지 않고 HMAC hash만 저장한다.
-- OAuth refresh token은 browser client에 노출하지 않고 서버에서 암호화 저장한다.
+- 외부 OIDC token은 저장하지 않는다. NoteGate MCP·CLI refresh token은 해당 클라이언트에만 발급하고 서버에는 HMAC만 저장한다.
 - Text content는 서버가 읽는 plain content 또는 client-side encrypted payload로 저장한다. `system_max` Space는 plain content를 서버 관리 방식으로 추가 암호화할 수 있다.
 - Node metadata는 content가 아니며 암호화 대상이 아니다. 시스템이 관리하고 외부 caller는 수정할 수 없다.
 - Markdown frontmatter는 Text content 안의 YAML block이다. encrypted Text 안에 있으면 content와 함께 client-side encrypted payload에 포함된다.
@@ -15,7 +15,7 @@
 ## Root key domains
 
 ```text
-ENC_ROOT     PII, browser refresh token, 서버 관리 Text 암호화용
+ENC_ROOT     PII, OAuth state, 서버 관리 Text와 세션 호환 envelope 암호화용
 LOOKUP_ROOT  provider/email/API key/browser session lookup HMAC, session signing과 internal search signing용
 ```
 
@@ -71,7 +71,7 @@ refresh_token     = AEAD_ENCRYPT(ENC_SUBKEY, "", aad) -- schema compatibility on
 
 ## Local OAuth credentials
 
-독립 모드에서 NoteGate는 MCP·CLI용 256-bit opaque access/refresh token을 발급한다. LOOKUP root의 별도 HKDF label(`notegate/lookup/oauth-credential/v1`)과 목적별 domain으로 token/code/cookie/device/user-code를 HMAC하며 원문은 보관하지 않는다. Login flow와 client state는 ENC root의 별도 label(`notegate/enc/oauth-state/v1`)로 암호화하고 record ID와 key ID를 AAD에 포함한다. 기존 PII·문서·API key의 label과 AAD는 변경하지 않는다. `PiiCrypto` Debug 출력에는 key ID만 포함한다.
+NoteGate는 MCP·CLI용 256-bit opaque access/refresh token을 발급한다. LOOKUP root의 별도 HKDF label(`notegate/lookup/oauth-credential/v1`)과 목적별 domain으로 token/code/cookie/device/user-code를 HMAC하며 원문은 보관하지 않는다. Login flow와 client state는 ENC root의 별도 label(`notegate/enc/oauth-state/v1`)로 암호화하고 record ID와 key ID를 AAD에 포함한다. 기존 PII·문서·API key의 label과 AAD는 변경하지 않는다. `PiiCrypto` Debug 출력에는 key ID만 포함한다.
 
 외부 OIDC ID token은 로그인 신원 확인용이며 MCP·CLI bearer로 받지 않는다. 로컬 bearer는 resource/scope·계정 활성 상태·grant 철회와 만료를 확인한다. Refresh는 회전하며 사용한 token 재사용을 확인하면 해당 연결을 철회한다. CIMD는 public HTTPS endpoint만 읽고 DNS를 고정하며 redirect·proxy·과도한 body와 동시 요청을 차단한다. 상세 계약은 [REST 인증](rest/auth.md)을 따른다.
 
