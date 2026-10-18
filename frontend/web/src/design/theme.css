@@ -7,6 +7,7 @@
   --ng-workbench-line-height: 18px;
   --ng-workbench-header-size: 36px;
   --ng-workbench-control-size: 28px;
+  --ng-min-target-size: 24px;
   --ng-workbench-row-size: 26px;
   --ng-tree-row-size: 26px;
   --ng-workbench-status-size: 22px;
@@ -47,10 +48,11 @@
   --ng-google-hover: #e9e9f6;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 767px), (any-pointer: coarse) {
   :root {
     --ng-workbench-header-size: 48px;
     --ng-workbench-control-size: 44px;
+    --ng-min-target-size: 44px;
     --ng-workbench-row-size: 44px;
     --ng-tree-row-size: 36px;
   }

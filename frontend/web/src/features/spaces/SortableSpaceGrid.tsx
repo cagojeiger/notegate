@@ -21,6 +21,7 @@ import {
   GripVertical,
   LockKeyhole,
   Pin,
+  Plus,
   Plug,
   Unplug,
   UnlockKeyhole
@@ -42,6 +43,7 @@ type SortableSpaceGridProps = {
   onOpen: (space: Space) => void;
   onToggleNavigationPin: (space: Space) => void;
   onReorder: (spaces: Space[]) => void;
+  onCreateSpace?: () => void;
 };
 
 export function SortableSpaceGrid({
@@ -53,7 +55,8 @@ export function SortableSpaceGrid({
   onSelect,
   onOpen,
   onToggleNavigationPin,
-  onReorder
+  onReorder,
+  onCreateSpace
 }: SortableSpaceGridProps) {
   const [reorderAnnouncement, setReorderAnnouncement] = useState("");
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -85,7 +88,7 @@ export function SortableSpaceGrid({
       <SortableContext items={spaces.map((space) => space.id)} strategy={rectSortingStrategy}>
         <ul
           aria-label="All spaces"
-          className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] items-stretch gap-3"
+          className="grid auto-rows-fr grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] items-stretch gap-3"
         >
           {spaces.map((space, index) => (
             <SortableSpaceCard
@@ -104,6 +107,19 @@ export function SortableSpaceGrid({
               onMoveLater={() => moveSpace(space.id, 1)}
             />
           ))}
+          {onCreateSpace ? (
+            <li className="w-full max-w-96">
+              <button
+                type="button"
+                aria-label="Create space"
+                title="Create space"
+                onClick={onCreateSpace}
+                className="grid h-full min-h-36 w-full place-items-center rounded-2xl border border-dashed border-border-strong text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
+              >
+                <Plus size={28} strokeWidth={1.5} aria-hidden="true" />
+              </button>
+            </li>
+          ) : null}
         </ul>
       </SortableContext>
       <p className="sr-only" role="status" aria-live="polite">

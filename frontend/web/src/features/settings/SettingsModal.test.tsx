@@ -13,8 +13,8 @@ const space = makeSpace({
   name: "Personal",
 });
 
-function jsonResponse(body: unknown) {
-  return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
+function jsonResponse(body: unknown, status = 200) {
+  return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
 }
 
 const userMe: Me = {
@@ -31,7 +31,9 @@ const agentMe: Me = {
 
 type SpacePermission = "read" | "write" | "none";
 
-function mockSettingsApi(me: unknown = userMe, options: { failPermissionUpdate?: boolean; initialSpacePermission?: SpacePermission } = {}) {
+type SettingsApiOptions = { failPermissionUpdate?: boolean; initialSpacePermission?: SpacePermission; failedRead?: "agents" | "spaces" | "connections" };
+
+function mockSettingsApi(me: unknown = userMe, options: SettingsApiOptions = {}) {
   let spacePermission: SpacePermission = options.initialSpacePermission ?? "write";
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const path = String(input);
@@ -54,13 +56,14 @@ function mockSettingsApi(me: unknown = userMe, options: { failPermissionUpdate?:
       }
     }
     if (path.includes("/api/v1/spaces/space-1/agents")) {
+      if (options.failedRead === "connections") return jsonResponse({ message: "Unavailable" }, 503);
       const connections = spacePermission === "none"
         ? []
         : [{ agent: { id: "agent-1", kind: "agent", display_name: "ci-bot" }, permission: spacePermission, connected_at: "2026-06-13T00:00:00Z" }];
       return jsonResponse({ connections, page });
     }
-    if (path.includes("/api/v1/spaces?")) return jsonResponse({ spaces: [space], page });
-    if (path.endsWith("/api/v1/agents?limit=100")) return jsonResponse({ agents: [{ id: "agent-1", name: "ci-bot", owner_user_id: "user-1" }], page });
+    if (path.includes("/api/v1/spaces?")) return options.failedRead === "spaces" ? jsonResponse({ message: "Unavailable" }, 503) : jsonResponse({ spaces: [space], page });
+    if (path.endsWith("/api/v1/agents?limit=100")) return options.failedRead === "agents" ? jsonResponse({ message: "Unavailable" }, 503) : jsonResponse({ agents: [{ id: "agent-1", name: "ci-bot", owner_user_id: "user-1" }], page });
     if (path.includes("/api/v1/me")) {
       return jsonResponse(me);
     }
@@ -156,6 +159,50 @@ describe("SettingsModal", () => {
     expect(await agentDetails.findByRole("combobox", { name: "Personal permission" })).toHaveValue("write");
     expect(agentDetails.queryByText("Agent MCP")).not.toBeInTheDocument();
     expect(agentDetails.queryByText("REST API")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { failedRead: "agents", message: "Could not load agents.", empty: "No agents yet.", retry: "Retry agents" },
+    { failedRead: "spaces", message: "Could not load spaces.", empty: "No writable spaces.", retry: "Retry spaces" }
+  ] as const)("distinguishes a failed $failedRead read from an empty list and retries it", async ({ failedRead, message, empty, retry }) => {
+    vi.restoreAllMocks();
+    const options: SettingsApiOptions = { failedRead };
+    mockSettingsApi(userMe, options);
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("tab", { name: "Agents" }));
+    if (failedRead === "spaces") await user.click(await screen.findByRole("button", { name: "Toggle ci-bot details" }));
+
+    expect(await screen.findByRole("alert", {}, { timeout: 3_000 })).toHaveTextContent(message);
+    expect(screen.queryByText(empty)).not.toBeInTheDocument();
+    options.failedRead = undefined;
+    await user.click(screen.getByRole("button", { name: retry }));
+
+    if (failedRead === "agents") {
+      expect(await screen.findByRole("button", { name: "Toggle ci-bot details" })).toBeInTheDocument();
+    } else {
+      expect(await screen.findByRole("combobox", { name: "Personal permission" })).toHaveValue("write");
+    }
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not describe unavailable permissions as no access and retries the read", async () => {
+    vi.restoreAllMocks();
+    const options: SettingsApiOptions = { failedRead: "connections" };
+    mockSettingsApi(userMe, options);
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("tab", { name: "Agents" }));
+    await user.click(await screen.findByRole("button", { name: "Toggle ci-bot details" }));
+
+    expect(await screen.findByRole("alert", {}, { timeout: 3_000 })).toHaveTextContent("Could not load permissions.");
+    expect(screen.queryByText("No access")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Personal permission" })).not.toBeInTheDocument();
+    options.failedRead = undefined;
+    await user.click(screen.getByRole("button", { name: "Retry Personal permissions" }));
+
+    expect(await screen.findByRole("combobox", { name: "Personal permission" })).toHaveValue("write");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("updates agent space permissions from the permission select", async () => {

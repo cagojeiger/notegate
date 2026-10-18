@@ -228,20 +228,20 @@ describe("TextEditorView", () => {
     expect(moreActions).toBeEnabled();
     await userEvent.click(moreActions);
     const actionMenu = within(await screen.findByRole("menu", { name: "Editor actions" }));
-    expect(actionMenu.getByRole("button", { name: "Copy content" })).toBeEnabled();
-    expect(actionMenu.getByRole("button", { name: "Rename" })).toBeDisabled();
-    await userEvent.click(actionMenu.getByRole("button", { name: "Copy content" }));
+    expect(actionMenu.getByRole("menuitem", { name: "Copy content" })).toBeEnabled();
+    expect(actionMenu.getByRole("menuitem", { name: "Rename" })).toBeDisabled();
+    await userEvent.click(actionMenu.getByRole("menuitem", { name: "Copy content" }));
 
     fireEvent.contextMenu(await screen.findByText("Large note"));
     const menu = within(screen.getByRole("menu"));
-    expect(menu.getByRole("button", { name: "Copy content" })).toBeEnabled();
-    expect(menu.getByRole("button", { name: "Copy path" })).toBeEnabled();
-    expect(menu.getByRole("button", { name: "Edit" })).toBeDisabled();
-    expect(menu.getByRole("button", { name: "Rename" })).toBeDisabled();
-    expect(menu.getByRole("button", { name: "Move…" })).toBeDisabled();
-    expect(menu.getByRole("button", { name: "Delete" })).toBeDisabled();
+    expect(menu.getByRole("menuitem", { name: "Copy content" })).toBeEnabled();
+    expect(menu.getByRole("menuitem", { name: "Copy path" })).toBeEnabled();
+    expect(menu.getByRole("menuitem", { name: "Edit" })).toBeDisabled();
+    expect(menu.getByRole("menuitem", { name: "Rename" })).toBeDisabled();
+    expect(menu.getByRole("menuitem", { name: "Move…" })).toBeDisabled();
+    expect(menu.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
 
-    await userEvent.click(menu.getByRole("button", { name: "Copy path" }));
+    await userEvent.click(menu.getByRole("menuitem", { name: "Copy path" }));
     expect(copyText).toHaveBeenCalledWith("Daily:/large.md");
   });
 
@@ -478,15 +478,15 @@ describe("TextEditorView", () => {
 
     fireEvent.contextMenu(screen.getByText("plain text"));
 
-    await user.click(within(screen.getByRole("menu")).getByRole("button", { name: "Copy content" }));
+    await user.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Copy content" }));
     expect(copyText).toHaveBeenCalledWith("plain text");
 
     fireEvent.contextMenu(screen.getByText("plain text"));
-    await user.click(within(screen.getByRole("menu")).getByRole("button", { name: "Edit" }));
+    await user.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Edit" }));
     expect(onSetMode).toHaveBeenCalledWith("edit");
 
     fireEvent.contextMenu(screen.getByText("plain text"));
-    await user.click(within(screen.getByRole("menu")).getByRole("button", { name: "Open in new group" }));
+    await user.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Open in new group" }));
     expect(onOpenNodeInNewGroup).toHaveBeenCalledWith(expect.objectContaining({ id: node.id }));
   });
 
@@ -505,13 +505,13 @@ describe("TextEditorView", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 
     fireEvent.contextMenu(textarea.parentElement ?? textarea);
-    await user.click(within(screen.getByRole("menu")).getByRole("button", { name: "Save" }));
+    await user.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Save" }));
     expect(save).toHaveBeenCalledWith(expect.objectContaining({
       node, content: "original changed", expectedSha256: "sha", force: false
     }));
 
     fireEvent.contextMenu(textarea.parentElement ?? textarea);
-    await user.click(within(screen.getByRole("menu")).getByRole("button", { name: "Cancel edit" }));
+    await user.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Cancel edit" }));
     expect(onSetMode).toHaveBeenLastCalledWith("preview");
     expect(useUiStore.getState().toast).toBe("Edit canceled");
   });

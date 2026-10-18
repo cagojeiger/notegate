@@ -87,6 +87,11 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
 
       {keysQuery.isLoading ? (
         <div className="text-sm text-muted">Loading…</div>
+      ) : keysQuery.isError ? (
+        <Card tone="danger" padding="sm" className="flex flex-wrap items-center justify-between gap-2 text-workbench">
+          <p role="alert" className="text-danger">Could not load API keys.</p>
+          <Button size="sm" secondary aria-label="Retry API keys" disabled={keysQuery.isFetching} onClick={() => { void keysQuery.refetch(); }}>Retry</Button>
+        </Card>
       ) : keys.length === 0 ? (
         <EmptyState>{emptyLabel}</EmptyState>
       ) : (

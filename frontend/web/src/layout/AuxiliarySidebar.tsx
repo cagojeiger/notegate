@@ -6,7 +6,7 @@ import { useMarkdownOutlineContext, type InspectorView, type MarkdownOutlineSnap
 import { useFolderChildrenStat } from "../features/editor/useEditorQueries";
 import { NodeLinksPanel } from "../features/links/NodeLinksPanel";
 import { formatBytes } from "../shared/lib/formatBytes";
-import { MetaRow, SectionHeader, SettingToggle, Tabs } from "../shared/ui";
+import { MetaRow, PanelHeader, PanelSection, SectionHeader, SettingToggle, Tabs } from "../shared/ui";
 import { WriteLockStatus } from "./WriteLockStatus";
 
 const EMPTY = "—";
@@ -68,7 +68,7 @@ export function AuxiliarySidebar({
 
   return (
     <aside aria-label="Inspector" className="flex h-full w-full min-h-0 flex-col border-l border-seam bg-surface font-ui text-workbench">
-      <div className="flex h-workbench-header shrink-0 items-end border-b border-seam px-2">
+      <PanelHeader tabs>
         <Tabs
           items={[
             { id: "details", label: "Details", controls: `${panelIdPrefix}-details` },
@@ -80,7 +80,7 @@ export function AuxiliarySidebar({
           label="Inspector sections"
           variant="header"
         />
-      </div>
+      </PanelHeader>
       <div className="min-h-0 flex-1">
       <div
         id={`${panelIdPrefix}-details`}
@@ -91,8 +91,8 @@ export function AuxiliarySidebar({
         className="h-full overflow-y-auto"
         data-testid="node-inspector-scroll-region"
       >
-        <div className="divide-y divide-seam border-b border-seam bg-surface">
-          <section className="p-3">
+        <div className="bg-surface">
+          <PanelSection>
             <SectionHeader title={activeNode ? nodeKindLabel(activeNode) : "Details"} />
             {activeNode ? (
               <>
@@ -118,8 +118,8 @@ export function AuxiliarySidebar({
             ) : (
               <p className="text-xs text-muted">{loadingNode ? "Loading details…" : "Choose something from Files to inspect."}</p>
             )}
-          </section>
-          <section className="p-3">
+          </PanelSection>
+          <PanelSection>
             <SectionHeader
               title="Metadata"
               actions={<span className="text-xs tabular-nums text-muted">{metadataEntries.length}</span>}
@@ -129,8 +129,8 @@ export function AuxiliarySidebar({
             ) : (
               <p className="text-xs text-muted">No metadata.</p>
             )}
-          </section>
-          <section className="p-3">
+          </PanelSection>
+          <PanelSection>
             <SectionHeader
               title="Settings"
               help="Changes apply immediately. A direct lock protects this item and anything inside it; inherited locks must be removed at their source. MCP & API access requires this item and every parent folder to allow access; browser access is unchanged. Stored text encryption is independent. The space root cannot be locked."
@@ -188,8 +188,8 @@ export function AuxiliarySidebar({
             ) : (
               <p className="text-xs text-muted">Choose something from Files to manage its settings.</p>
             )}
-          </section>
-          <details className="group p-3">
+          </PanelSection>
+          <details open className="group border-b border-seam p-3">
             <summary className="flex cursor-pointer list-none items-center justify-between outline-none focus-visible:ring-2 focus-visible:ring-primary/45 [&::-webkit-details-marker]:hidden">
               <span className="text-xs font-semibold uppercase tracking-wide text-muted">System details</span>
               <ChevronRight

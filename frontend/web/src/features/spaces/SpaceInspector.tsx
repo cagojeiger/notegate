@@ -5,7 +5,7 @@ import type { UpdateSpaceInput } from "../../api/spaces";
 import type { Space } from "../../api/types";
 import type { SpaceUsage } from "../../api/usage";
 import { formatBytes } from "../../shared/lib/formatBytes";
-import { Button, MetaRow, SectionHeader, SettingToggle } from "../../shared/ui";
+import { Button, PanelHeader, PanelSection, MetaRow, SectionHeader, SettingToggle } from "../../shared/ui";
 import {
   useReindexSpaceLinksMutation,
   useSpaceLinkIndexStatusQuery
@@ -104,26 +104,24 @@ export function SpaceInspector({
     || reindexPending;
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-panel md:border-l md:border-seam">
+    <div className="flex h-full min-h-0 w-full flex-col bg-surface font-ui text-workbench md:border-l md:border-seam">
       {showHeader ? (
-        <div className="flex h-12 shrink-0 items-center border-b border-seam px-3 text-sm font-medium">
-          Space Inspector
-        </div>
+        <PanelHeader><span className="font-medium">Space Inspector</span></PanelHeader>
       ) : null}
       <div
-        className="min-h-0 flex-1 overflow-y-auto p-3"
+        className="min-h-0 flex-1 overflow-y-auto"
         data-testid="space-inspector-scroll-region"
       >
-        <div className="divide-y divide-seam rounded-2xl border border-border bg-surface">
-          <section className="p-4">
+        <div>
+          <PanelSection>
             <SectionHeader title="Space" />
             <dl className="space-y-2">
               <MetaRow label="Name" value={space?.name ?? "—"} />
               <MetaRow label="Permission" value={space?.permission ?? "—"} />
               <MetaRow label="Updated" value={space?.updated_at.slice(0, 10) ?? "—"} />
             </dl>
-          </section>
-          <section className="p-4">
+          </PanelSection>
+          <PanelSection>
             <SectionHeader
               title="Navigation"
               help="Pinned spaces stay visible in desktop and mobile navigation. Unpinned spaces remain available in the Space Library."
@@ -135,8 +133,8 @@ export function SpaceInspector({
               disabled={!space || pending}
               onChange={(checked) => onUpdate({ navigation_pinned: checked })}
             />
-          </section>
-          <section className="p-4">
+          </PanelSection>
+          <PanelSection>
             <SectionHeader
               title="Access"
               help="Controls whether User MCP can list and access this space. Agent MCP access is configured separately. Pinning does not affect MCP access."
@@ -148,8 +146,8 @@ export function SpaceInspector({
               disabled={!space || pending}
               onChange={(checked) => onUpdate({ user_mcp_enabled: checked })}
             />
-          </section>
-          <section className="p-4">
+          </PanelSection>
+          <PanelSection>
             <SectionHeader
               title="New item defaults"
               help="These settings apply only to new items created in this space. MCP & API access applies to every new item, while encryption applies only to new documents. Existing items are unchanged."
@@ -175,8 +173,8 @@ export function SpaceInspector({
                 onChange={(checked) => onUpdate({ default_text_encryption_enabled: checked })}
               />
             </div>
-          </section>
-          <section className="p-4">
+          </PanelSection>
+          <PanelSection>
             <SectionHeader
               title="Link index"
               help="Rebuilds Markdown link relationships for this Space in the background."
@@ -203,8 +201,8 @@ export function SpaceInspector({
             ) : reindexForCurrentSpace && reindexLinks.isError ? (
               <p className="text-xs text-danger" role="alert">Could not request link reindex.</p>
             ) : null}
-          </section>
-          <section className="p-4">
+          </PanelSection>
+          <PanelSection>
             <SectionHeader title="Usage" />
             {!space ? <p className="text-sm text-muted">Select a space to inspect it.</p> : null}
             {space && usageState === "loading" ? <p className="text-sm text-muted">Loading usage…</p> : null}
@@ -217,9 +215,9 @@ export function SpaceInspector({
                 {usageAction}
               </div>
             ) : null}
-          </section>
+          </PanelSection>
           {error ? (
-            <section role="alert" className="p-4 text-xs text-danger">Could not update this Space.</section>
+            <PanelSection role="alert" className="text-xs text-danger">Could not update this Space.</PanelSection>
           ) : null}
         </div>
       </div>

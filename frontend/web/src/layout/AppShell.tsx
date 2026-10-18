@@ -81,9 +81,13 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
     auxiliaryOpen: workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary,
     editorGroupCount: workbench.editorGroups.length
   });
-  const mobileOverlayVisible = workbench.isMobile && (layout.primaryMode === "overlay" || layout.auxiliaryMode === "overlay");
+  const overlayVisible = layout.primaryMode === "overlay" || layout.auxiliaryMode === "overlay";
   const closeMobilePanels = () => {
     if (workbench.isMobile) actions.closeMobile();
+  };
+  const closeOverlayPanels = () => {
+    if (workbench.isMobile) actions.closeMobile();
+    else if (layout.auxiliaryMode === "overlay") actions.toggleAuxiliary();
   };
   const openInspector = () => {
     if (workbench.isMobile) {
@@ -207,6 +211,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
               <SpaceLibrary
                 spaces={workbench.spaces}
                 activeSpace={workbench.activeSpace}
+                canCreateSpace={workbench.canCreateSpace && !recordingActive}
                 isMobile={workbench.isMobile}
                 usagePollingEnabled={!statusUsageEnabled}
                 inspectorOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
@@ -218,7 +223,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
             </Suspense>
           ) : (
             <>
-              <PrimarySidebarFrame id="primary-sidebar-panel" mode={layout.primaryMode}>
+              <PrimarySidebarFrame id="primary-sidebar-panel" mode={layout.primaryMode} sidebarLayout={layout.sidebars}>
                 <PrimarySidebar
                   activeSpace={workbench.activeSpace}
                   openedNodeId={workbench.activeNode?.id ?? null}
@@ -251,7 +256,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   canOpenInNewGroup={workbench.editorGroups.length < MAX_EDITOR_GROUPS}
                 />
               </PrimarySidebarFrame>
-              <PrimarySidebarResizeHandle visible={layout.primaryMode === "docked"} />
+              <PrimarySidebarResizeHandle visible={layout.primaryMode === "docked"} sidebarLayout={layout.sidebars} />
               <EditorArea
                 groups={workbench.editorGroups}
                 activeGroupIndex={workbench.activeGroupIndex}
@@ -276,8 +281,8 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                 onDownloadFile={actions.downloadFileNode}
                 canWriteActiveSpace={canWriteWorkbench}
               />
-              <AuxiliarySidebarResizeHandle visible={layout.auxiliaryMode === "docked"} />
-              <AuxiliarySidebarFrame id="auxiliary-sidebar-panel" mode={layout.auxiliaryMode}>
+              <AuxiliarySidebarResizeHandle visible={layout.auxiliaryMode === "docked"} sidebarLayout={layout.sidebars} />
+              <AuxiliarySidebarFrame id="auxiliary-sidebar-panel" mode={layout.auxiliaryMode} sidebarLayout={layout.sidebars} isMobile={workbench.isMobile}>
                 <AuxiliarySidebar
                   activeNode={workbench.inspectedNode}
                   activeGroupId={workbench.editorGroups[workbench.activeGroupIndex]?.id ?? null}
@@ -298,7 +303,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   onOutlineNavigate={closeMobilePanels}
                 />
               </AuxiliarySidebarFrame>
-              <PanelOverlay visible={mobileOverlayVisible} onClose={closeMobilePanels} />
+              <PanelOverlay visible={overlayVisible} onClose={closeOverlayPanels} isMobile={workbench.isMobile} />
             </>
           )}
         </main>

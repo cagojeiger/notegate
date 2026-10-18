@@ -1,6 +1,8 @@
 export const MAX_EDITOR_GROUPS = 3;
 
 export const WORKBENCH_LAYOUT = {
+  activityRailWidth: 44,
+  minEditorWidth: 320,
   defaultPrimaryWidth: 300,
   minPrimaryWidth: 220,
   maxPrimaryWidth: 520,

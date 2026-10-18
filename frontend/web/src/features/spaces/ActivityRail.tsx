@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Check, Copy, History, LayoutGrid, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 
 import type { Space } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
-import { Card, MenuButton } from "../../shared/ui";
+import { MenuButton } from "../../shared/ui";
+import { ContextMenu } from "../../shared/ui/ContextMenu";
 import { useUiStore } from "../../stores/uiStore";
 import { reorderSpacesByDrop } from "./spaceReorder";
 
@@ -46,7 +47,7 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
   return (
     <aside
       aria-label="Space navigation"
-      className="hidden w-11 shrink-0 min-h-0 flex-col border-r border-seam bg-surface font-ui text-workbench md:flex"
+      className="hidden w-11 shrink-0 min-h-0 flex-col bg-surface font-ui text-workbench shadow-[inset_-1px_0_0_var(--ng-seam)] md:flex"
     >
       {onOpenLibrary ? (
         <div className="relative flex h-workbench-header shrink-0 items-center justify-center border-b border-seam">
@@ -123,7 +124,7 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
           </button>
         ) : null}
       </div>
-      <div className="space-y-0.5 border-t border-seam p-2">
+      <div className="space-y-0.5 border-t border-seam p-2 [@media(any-pointer:coarse)]:px-0">
         {onOpenTrash ? <button disabled={navigationLocked} onClick={onOpenTrash} className="grid size-workbench-control place-items-center rounded-workbench-surface text-muted transition hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-not-allowed disabled:opacity-45" aria-label="Trash" title="Trash"><Trash2 size={16} /></button> : null}
         <button disabled={navigationLocked} onClick={onOpenHistory} className="grid size-workbench-control place-items-center rounded-workbench-surface text-muted transition hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-not-allowed disabled:opacity-45" aria-label="History" title="History">
           <History size={16} />
@@ -139,14 +140,6 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
 
 function SpaceContextMenu({ menu, canManageSpaces, onClose, onSelectSpace, onRenameSpace, onDeleteSpace }: { menu: { x: number; y: number; space: Space }; canManageSpaces: boolean; onClose: () => void; onSelectSpace: (space: Space) => void; onRenameSpace: (space: Space) => void; onDeleteSpace: (space: Space) => void }) {
   const showToast = useUiStore((state) => state.showToast);
-  useEffect(() => {
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   function run(action: () => void) {
     action();
     onClose();
@@ -158,18 +151,13 @@ function SpaceContextMenu({ menu, canManageSpaces, onClose, onSelectSpace, onRen
     showToast((await copyText(menu.space.id)) ? "Space id copied" : "Could not copy space id");
   }
 
-  const left = Math.min(menu.x, window.innerWidth - 196);
-  const top = Math.min(menu.y, window.innerHeight - 184);
   return (
-    <>
-      <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(event) => { event.preventDefault(); onClose(); }} />
-      <Card className="fixed z-50 w-48 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none" style={{ left, top }} role="menu">
-        <div className="truncate px-3 py-1 text-xs text-muted">{menu.space.name}</div>
-        <MenuButton onClick={() => run(() => onSelectSpace(menu.space))}><Check size={14} /> Select</MenuButton>
-        <MenuButton onClick={() => run(() => onRenameSpace(menu.space))} disabled={!canManageSpace}><Pencil size={14} /> Rename</MenuButton>
-        <MenuButton onClick={() => run(() => { void copySpaceId(); })}><Copy size={14} /> Copy space id</MenuButton>
-        <MenuButton danger onClick={() => run(() => onDeleteSpace(menu.space))} disabled={!canManageSpace}><Trash2 size={14} /> Delete</MenuButton>
-      </Card>
-    </>
+    <ContextMenu x={menu.x} y={menu.y} width={192} label="Space actions" onClose={onClose}>
+      <div className="truncate px-3 py-1 text-xs text-muted">{menu.space.name}</div>
+      <MenuButton onClick={() => run(() => onSelectSpace(menu.space))}><Check size={14} /> Select</MenuButton>
+      <MenuButton onClick={() => run(() => onRenameSpace(menu.space))} disabled={!canManageSpace}><Pencil size={14} /> Rename</MenuButton>
+      <MenuButton onClick={() => run(() => { void copySpaceId(); })}><Copy size={14} /> Copy space id</MenuButton>
+      <MenuButton danger onClick={() => run(() => onDeleteSpace(menu.space))} disabled={!canManageSpace}><Trash2 size={14} /> Delete</MenuButton>
+    </ContextMenu>
   );
 }

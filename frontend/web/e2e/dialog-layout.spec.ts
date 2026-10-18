@@ -39,7 +39,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     if (viewport.name === "mobile") await page.getByRole("button", { name: "Toggle left sidebar" }).click();
     for (const action of ["Rename", "Delete", "Move…"]) {
       await page.getByRole("button", { name: node.name, exact: true }).click({ button: "right" });
-      await page.getByRole("menu").getByRole("button", { name: action, exact: true }).click();
+      await page.getByRole("menu").getByRole("menuitem", { name: action, exact: true }).click();
       const dialog = page.getByRole("dialog");
       await expect(dialog).toBeVisible();
       const bounds = await dialog.boundingBox();

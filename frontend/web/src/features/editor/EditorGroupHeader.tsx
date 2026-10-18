@@ -2,7 +2,7 @@ import { Link2, X } from "lucide-react";
 import type { MouseEventHandler, ReactNode } from "react";
 
 import { copyText } from "../../shared/lib/clipboard";
-import { IconButton } from "../../shared/ui";
+import { IconButton, PanelHeader } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
 
 export function EditorGroupHeader({ title, icon, navigationActions, qualifiedPath, titleActions, actions, canClose, onClose, onContextMenu, dirty, active, collapseSecondaryActions = false }: { title: string; icon?: ReactNode; navigationActions?: ReactNode; qualifiedPath?: string | null; titleActions?: ReactNode; actions?: ReactNode; canClose: boolean; onClose: () => void; onContextMenu?: MouseEventHandler<HTMLDivElement>; dirty?: boolean; active?: boolean; collapseSecondaryActions?: boolean }) {
@@ -14,14 +14,14 @@ export function EditorGroupHeader({ title, icon, navigationActions, qualifiedPat
   }
 
   return (
-    <div data-editor-group-header onContextMenu={onContextMenu} className={`flex h-workbench-header items-center justify-between border-b px-2.5 font-ui text-workbench max-md:px-2 ${active ? "border-[var(--ng-active-border)] bg-[var(--ng-active-surface)]" : "border-seam"}`}>
+    <PanelHeader className="@container/editor-header" data-editor-group-header onContextMenu={onContextMenu} active={active}>
       <div className="flex min-w-0 flex-1 items-center gap-1.5 font-medium">
         {navigationActions ? <div className="flex shrink-0 items-center gap-1">{navigationActions}</div> : null}
-        {icon ? <span className="shrink-0 max-md:hidden">{icon}</span> : null}
+        {icon ? <span className="shrink-0 max-md:hidden @max-[640px]/editor-header:hidden">{icon}</span> : null}
         <span className="min-w-0 truncate">{title}</span>
         {dirty ? <span className="size-1.5 shrink-0 rounded-full bg-warning" title="Unsaved changes" /> : null}
         {qualifiedPath || titleActions ? (
-          <div className={`flex shrink-0 items-center gap-1 ${qualifiedPath ? "" : "ml-1"}`}>
+          <div className={`flex shrink-0 items-center gap-1 ${qualifiedPath ? "" : "ml-1"} ${collapseSecondaryActions ? "@max-[360px]/editor-header:hidden" : ""}`}>
             {qualifiedPath ? (
               <span title="Copy path">
                 <IconButton label="Copy path" size="sm" onClick={() => { void copyPath(); }}>
@@ -29,14 +29,14 @@ export function EditorGroupHeader({ title, icon, navigationActions, qualifiedPat
                 </IconButton>
               </span>
             ) : null}
-            {titleActions ? <span className={`flex items-center gap-1 ${collapseSecondaryActions ? "max-md:hidden" : ""}`}>{titleActions}</span> : null}
+            {titleActions ? <span className={`flex items-center gap-1 ${collapseSecondaryActions ? "max-md:hidden @max-[640px]/editor-header:hidden" : ""}`}>{titleActions}</span> : null}
           </div>
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {actions}
-        {canClose ? <span className={collapseSecondaryActions ? "max-md:hidden" : undefined}><IconButton label="Close editor group" onClick={onClose} size="sm"><X size={15} /></IconButton></span> : null}
+        {canClose ? <span className={collapseSecondaryActions ? "max-md:hidden @max-[640px]/editor-header:hidden" : undefined}><IconButton label="Close editor group" onClick={onClose} size="sm"><X size={15} /></IconButton></span> : null}
       </div>
-    </div>
+    </PanelHeader>
   );
 }

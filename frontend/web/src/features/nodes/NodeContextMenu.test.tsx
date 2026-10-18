@@ -38,10 +38,10 @@ describe("NodeContextMenu", () => {
     );
 
     const menu = within(screen.getByRole("menu"));
-    expect(menu.queryByRole("button", { name: "New folder" })).not.toBeInTheDocument();
-    expect(menu.queryByRole("button", { name: "New document" })).not.toBeInTheDocument();
+    expect(menu.queryByRole("menuitem", { name: "New folder" })).not.toBeInTheDocument();
+    expect(menu.queryByRole("menuitem", { name: "New document" })).not.toBeInTheDocument();
     expect(menu.queryByText("Upload file")).not.toBeInTheDocument();
-    expect(menu.getByRole("button", { name: "Copy path" })).toBeEnabled();
+    expect(menu.getByRole("menuitem", { name: "Copy path" })).toBeEnabled();
   });
 
   it("keeps read navigation available and disables every folder write action under a lock", async () => {
@@ -70,14 +70,14 @@ describe("NodeContextMenu", () => {
     );
 
     const menu = within(screen.getByRole("menu"));
-    expect(menu.getByRole("button", { name: "New folder" })).toBeDisabled();
-    expect(menu.getByRole("button", { name: "New document" })).toBeDisabled();
-    expect(menu.getByText("Upload file").closest("label")?.querySelector("input")).toBeDisabled();
-    expect(menu.getByRole("button", { name: "Rename" })).toBeDisabled();
-    expect(menu.getByRole("button", { name: "Move…" })).toBeDisabled();
-    expect(menu.getByRole("button", { name: "Delete" })).toBeDisabled();
+    expect(menu.getByRole("menuitem", { name: "New folder" })).toBeDisabled();
+    expect(menu.getByRole("menuitem", { name: "New document" })).toBeDisabled();
+    expect(menu.getByRole("menuitem", { name: "Upload file" })).toBeDisabled();
+    expect(menu.getByRole("menuitem", { name: "Rename" })).toBeDisabled();
+    expect(menu.getByRole("menuitem", { name: "Move…" })).toBeDisabled();
+    expect(menu.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
 
-    await user.click(menu.getByRole("button", { name: "Open" }));
+    await user.click(menu.getByRole("menuitem", { name: "Open" }));
     expect(onOpenNode).toHaveBeenCalledWith(lockedFolder);
     expect(onClose).toHaveBeenCalledOnce();
     expect(onCreateInFolder).not.toHaveBeenCalled();
@@ -107,7 +107,7 @@ describe("NodeContextMenu", () => {
       />
     );
 
-    await user.click(screen.getByRole("button", { name: "Copy path" }));
+    await user.click(screen.getByRole("menuitem", { name: "Copy path" }));
 
     expect(copyText).toHaveBeenCalledWith("daily:/Policies");
     expect(useUiStore.getState().toast).toBe("Path copied");

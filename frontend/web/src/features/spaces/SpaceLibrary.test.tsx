@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -64,6 +64,8 @@ function renderLibrary(options: {
   usagePollingEnabled?: boolean;
   inspectorOpen?: boolean;
   onOpenSpace?: (space: Space) => void;
+  onCreateSpace?: () => void;
+  canCreateSpace?: boolean;
   spaces?: Space[];
 } = {}) {
   const isMobile = options.isMobile ?? false;
@@ -78,13 +80,14 @@ function renderLibrary(options: {
       <SpaceLibrary
         spaces={librarySpaces}
         activeSpace={librarySpaces[0] ?? null}
+        canCreateSpace={options.canCreateSpace ?? true}
         isMobile={isMobile}
         usagePollingEnabled={options.usagePollingEnabled ?? true}
         inspectorOpen={inspectorOpen}
         onOpenInspector={() => setInspectorOpen(true)}
         onCloseInspector={() => setInspectorOpen(false)}
         onOpenSpace={options.onOpenSpace ?? vi.fn()}
-        onCreateSpace={vi.fn()}
+        onCreateSpace={options.onCreateSpace ?? vi.fn()}
       />
     );
   }
@@ -158,6 +161,65 @@ describe("SpaceLibrary", () => {
       isError: false,
       isLoading: false
     });
+  });
+
+  it("creates from the final card without selecting or reordering a Space", async () => {
+    const onCreateSpace = vi.fn();
+    const user = userEvent.setup();
+    renderLibrary({ onCreateSpace });
+
+    const items = within(screen.getByRole("list", { name: "All spaces" })).getAllByRole("listitem");
+    const create = within(items[items.length - 1]).getByRole("button", { name: "Create space" });
+    expect(items).toHaveLength(3);
+    expect(screen.getByRole("heading", { name: "Spaces 2" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Move Private later" })).toBeDisabled();
+    create.focus();
+    await user.keyboard("{Enter}");
+
+    expect(onCreateSpace).toHaveBeenCalledTimes(1);
+    expect(mocks.reorder).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Inspect Daily" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("offers the first creation card in an empty library", async () => {
+    const onCreateSpace = vi.fn();
+    const user = userEvent.setup();
+    renderLibrary({ spaces: [], onCreateSpace });
+
+    expect(screen.getByRole("heading", { name: "No spaces yet" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Spaces 0" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create space" }));
+
+    expect(onCreateSpace).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps creation focus when the Space list gains an item", () => {
+    const props = {
+      spaces,
+      activeSpace: spaces[0],
+      canCreateSpace: true,
+      isMobile: false,
+      usagePollingEnabled: true,
+      inspectorOpen: false,
+      onOpenInspector: vi.fn(),
+      onCloseInspector: vi.fn(),
+      onOpenSpace: vi.fn(),
+      onCreateSpace: vi.fn()
+    };
+    const view = render(<SpaceLibrary {...props} />);
+    const create = screen.getByRole("button", { name: "Create space" });
+    create.focus();
+
+    view.rerender(<SpaceLibrary {...props} spaces={[...spaces, makeSpace({ id: "new-space", name: "New space" })]} />);
+
+    expect(screen.getByRole("button", { name: "Create space" })).toBe(create);
+    expect(create).toHaveFocus();
+  });
+
+  it.each([false, true])("hides creation without permission (empty: %s)", (empty) => {
+    renderLibrary({ spaces: empty ? [] : spaces, canCreateSpace: false });
+
+    expect(screen.queryByRole("button", { name: "Create space" })).not.toBeInTheDocument();
   });
 
   it("shows compact policy states and toggles navigation pin from the card", async () => {

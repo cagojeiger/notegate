@@ -1,4 +1,3 @@
-import { FolderOpen } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { UpdateSpaceInput } from "../../api/spaces";
@@ -6,7 +5,7 @@ import type { Space } from "../../api/types";
 import type { CurrentUserUsage } from "../../api/usage";
 import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
 import { formatBytes } from "../../shared/lib/formatBytes";
-import { Button, Card, Modal } from "../../shared/ui";
+import { Card, Modal, PanelHeader } from "../../shared/ui";
 import { SortableSpaceGrid } from "./SortableSpaceGrid";
 import { SpaceInspector, type SpaceInspectorProps } from "./SpaceInspector";
 import { useReorderSpacesMutation, useUpdateSpaceMutation } from "./useSpaceQueries";
@@ -15,6 +14,7 @@ import { useCheckSpaceUsageMutation, useUsageQuery } from "./useUsageQueries";
 type SpaceLibraryProps = {
   spaces: Space[];
   activeSpace: Space | null;
+  canCreateSpace: boolean;
   isMobile: boolean;
   usagePollingEnabled: boolean;
   inspectorOpen: boolean;
@@ -27,6 +27,7 @@ type SpaceLibraryProps = {
 export function SpaceLibrary({
   spaces,
   activeSpace,
+  canCreateSpace,
   isMobile,
   usagePollingEnabled,
   inspectorOpen,
@@ -98,40 +99,34 @@ export function SpaceLibrary({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg">
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="h-12 shrink-0 border-b border-seam px-5 sm:px-7 lg:px-10">
-          <div className="flex h-full w-full items-center justify-between gap-3">
-            <h1 className="text-xl font-semibold">
-              Spaces <span className="font-normal text-muted">{spaces.length}</span>
-            </h1>
-            <Button onClick={onCreateSpace}>Create space</Button>
-          </div>
-        </header>
+        <PanelHeader tabs>
+          <h1 className="-mb-px flex h-[calc(var(--ng-workbench-header-size)-4px)] items-center gap-1.5 border-b-2 border-primary px-2 text-workbench font-medium">
+            Spaces <span className="font-normal text-muted">{spaces.length}</span>
+          </h1>
+        </PanelHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-7 lg:px-10">
           <div className="w-full">
             {spaces.length === 0 ? (
-              <Card className="grid min-h-56 place-items-center border-dashed text-center">
-                <div>
-                  <FolderOpen className="mx-auto text-muted" size={28} />
-                  <h2 className="mt-3 font-semibold">No spaces yet</h2>
-                  <p className="mt-1 text-sm text-muted">Create a space to start organizing your notes and files.</p>
-                </div>
-              </Card>
-            ) : (
-              <section aria-label="Spaces">
-                <SortableSpaceGrid
-                  spaces={spaces}
-                  selectedSpaceId={selectedSpace?.id ?? null}
-                  usageBySpaceId={usageBySpaceId}
-                  updatePending={updatePending || reorderSpaces.isPending}
-                  reorderPending={reorderSpaces.isPending || updatePending}
-                  onSelect={inspectSpace}
-                  onOpen={onOpenSpace}
-                  onToggleNavigationPin={toggleNavigationPin}
-                  onReorder={(orderedSpaces) => reorderSpaces.mutate({ spaces: orderedSpaces })}
-                />
-              </section>
-            )}
+              <div className="mb-4">
+                <h2 className="font-semibold">No spaces yet</h2>
+                <p className="mt-1 text-sm text-muted">{canCreateSpace ? "Create a space to start organizing your notes and files." : "No spaces are available for this account."}</p>
+              </div>
+            ) : null}
+            <section aria-label="Spaces">
+              <SortableSpaceGrid
+                spaces={spaces}
+                selectedSpaceId={selectedSpace?.id ?? null}
+                usageBySpaceId={usageBySpaceId}
+                updatePending={updatePending || reorderSpaces.isPending}
+                reorderPending={reorderSpaces.isPending || updatePending}
+                onSelect={inspectSpace}
+                onOpen={onOpenSpace}
+                onToggleNavigationPin={toggleNavigationPin}
+                onReorder={(orderedSpaces) => reorderSpaces.mutate({ spaces: orderedSpaces })}
+                onCreateSpace={canCreateSpace ? onCreateSpace : undefined}
+              />
+            </section>
             {deletedStorage && deletedStorage.count > 0 ? (
               <section aria-label="Retained storage" className="mt-6 space-y-3">
                 <h2 className="text-sm font-medium">Retained storage</h2>

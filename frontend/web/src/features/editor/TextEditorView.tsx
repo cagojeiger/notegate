@@ -124,12 +124,12 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
   const actions = (
     <>
       {mode === "preview" && visualPreview && !encrypted ? (
-        <>
+        <span className="flex items-center gap-1 @max-[360px]/editor-header:hidden">
           <Button size="xs" variant={!showSource ? "primary" : "secondary"} aria-pressed={!showSource} onClick={() => setSourceView(false)} disabled={sourceOnly}>{structured ? "Tree" : "Table"}</Button>
           <Button size="xs" variant={showSource ? "primary" : "secondary"} aria-pressed={showSource} onClick={() => setSourceView(true)}>Source</Button>
-        </>
+        </span>
       ) : null}
-      <span className="max-md:hidden">
+      <span className="max-md:hidden @max-[640px]/editor-header:hidden">
         <IconButton label="Copy content" size="sm" onClick={() => { void copyContent(); }} disabled={!canCopyContent}>
           <Copy size={15} />
         </IconButton>
@@ -148,7 +148,7 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           <Pencil size={15} />
         </IconButton>
       )}
-      {!encrypted && textQuery.isSuccess ? <span className="max-md:hidden" title="Version history">
+      {!encrypted && textQuery.isSuccess ? <span className="max-md:hidden @max-[640px]/editor-header:hidden" title="Version history">
         <IconButton label="Version history" size="sm" hasPopup="dialog" expanded={historyOpen} onClick={() => setHistoryOpen(true)}><History size={15} /></IconButton>
       </span> : null}
       <div ref={editorActionsRef}>
@@ -237,6 +237,7 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
             canCloseGroup={canClose}
             showStructuredActions={mode === "preview" && structured && !encrypted}
             structuredActionsDisabled={showSource}
+            view={mode === "preview" && visualPreview && !encrypted ? { preview: structured ? "Tree" : "Table", sourceOnly, onChange: setSourceView } : undefined}
             onClose={() => setEditorMenu(null)}
             onVersionHistory={!encrypted && textQuery.isSuccess ? () => {
               // The menu item unmounts; let the modal restore focus to its persistent trigger.
