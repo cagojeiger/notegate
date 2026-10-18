@@ -32,8 +32,9 @@ async fn verify_local(
     scope: &str,
     channel: notegate_model::Channel,
 ) -> Result<Caller, AuthError> {
-    // Agent keys and browser cookies belong to separate credential families.
-    if token.starts_with("ngk_") || token.starts_with("ngs_") {
+    // NoteGate issues 32-byte base64url secrets (43 characters). Do not query
+    // OAuth storage for JWTs, Agent keys, or browser session credentials.
+    if token.len() != 43 {
         return Err(AuthError::InvalidToken);
     }
     let user = state
