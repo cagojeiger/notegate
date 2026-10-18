@@ -1756,7 +1756,7 @@ async fn session_marker_migration_preserves_authentication_decisions()
         "https://api.example.test/mcp",
         db.pool.clone(),
     )?;
-    let (owner, _) = AccountRepo::new(db.pool.clone())
+    let (owner, _) = AccountRepo::with_crypto(db.pool.clone(), state.security.clone())
         .upsert_user_by_identity(&ResolveAttrs {
             issuer: state.oidc.issuer().to_owned(),
             sub: "session-migration".to_owned(),
@@ -1806,7 +1806,7 @@ async fn session_marker_migration_preserves_authentication_decisions()
                     assert_eq!(caller.account_id(), owner.id);
                 }
                 Err(error) => {
-                    assert_ne!(*case, "current", "migrated={migrated}");
+                    assert_ne!(*case, "current", "migrated={migrated}, {error:?}");
                     assert!(matches!(error, AuthError::InvalidToken));
                 }
             }
