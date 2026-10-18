@@ -162,7 +162,6 @@ async fn create_browser_session(
     let session_id = Uuid::new_v4();
     let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let token_hash = crypto.browser_session_hash(&session_id.to_string(), &secret)?;
-    let refresh_token = crypto.encrypt_browser_refresh_token(&session_id.to_string(), "")?;
     let now = Utc::now();
     let validated_until = now + chrono::Duration::days(1);
     let expires_at = now + chrono::Duration::from_std(config.browser_session_max_ttl)?;
@@ -175,9 +174,6 @@ async fn create_browser_session(
         user_id,
         token_prefix: &token_prefix,
         token_hash: &token_hash,
-        refresh_token: &refresh_token,
-        refresh_token_enc_key_id: crypto.enc_key_id(),
-        refresh_token_enc_version: crypto.version(),
         validated_until,
         expires_at,
     };

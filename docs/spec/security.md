@@ -60,12 +60,11 @@ token_hash      = HMAC(API_KEY_SUBKEY, "api-key:v1:" || key_id || ":" || secret)
 ```text
 session plaintext = ngs_v1_{session_id}_{secret}
 session_hash      = HMAC(SESSION_TOKEN_SUBKEY, "browser-session:v1:" || session_id || ":" || secret)
-refresh_token     = AEAD_ENCRYPT(ENC_SUBKEY, "", aad) -- schema compatibility only
 ```
 
 - Browser session token plaintext는 HttpOnly cookie에만 들어간다.
 - DB에는 `token_hash`, `hash_key_id`, `hash_version`, `token_prefix`만 저장한다.
-- 신규 세션은 외부 token을 보관하지 않고 issuer에 연결한 로컬 세션을 사용한다. 기존 refresh 컬럼에는 빈 값을 암호화한 호환 envelope만 둔다.
+- 신규 세션은 외부 token이나 refresh 상태를 보관하지 않고 issuer에 연결한 로컬 세션을 사용한다.
 - 로컬 인증 기간(24시간)이 끝나면 재로그인하며 외부 refresh token으로 갱신하지 않는다.
 - FE는 refresh token과 browser session token 원문을 JavaScript storage에 저장하지 않는다.
 

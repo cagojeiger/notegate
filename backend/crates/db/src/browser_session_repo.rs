@@ -4,7 +4,7 @@ use crate::account_repo::{USER_CALLER_COLUMNS, UserCallerRow};
 use crate::{active_account_predicate, audit_events, map_sqlx_error};
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
-use notegate_core::security::{EncryptedField, PiiCrypto};
+use notegate_core::security::PiiCrypto;
 use notegate_model::{Account, User};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
@@ -43,9 +43,8 @@ impl BrowserSessionRepo {
         let row = sqlx::query_as::<_, BrowserSessionRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO browser_sessions \
              (id, user_id, token_prefix, token_hash, hash_key_id, hash_version, \
-              refresh_token_ciphertext, refresh_token_nonce, refresh_token_enc_key_id, refresh_token_enc_version, \
               validated_until, expires_at, local_session, oidc_issuer) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
              RETURNING {BROWSER_SESSION_RETURNING_COLUMNS}"
         )))
         .bind(args.session_id)
@@ -54,10 +53,6 @@ impl BrowserSessionRepo {
         .bind(args.token_hash)
         .bind(&self.lookup_key_id)
         .bind(self.hash_version)
-        .bind(&args.refresh_token.ciphertext)
-        .bind(&args.refresh_token.nonce)
-        .bind(args.refresh_token_enc_key_id)
-        .bind(args.refresh_token_enc_version)
         .bind(args.validated_until)
         .bind(args.expires_at)
         .bind(true)
@@ -165,9 +160,6 @@ impl BrowserSessionRepo {
 pub struct BrowserSession {
     pub id: Uuid,
     pub user_id: Uuid,
-    pub refresh_token: EncryptedField,
-    pub refresh_token_enc_key_id: String,
-    pub refresh_token_enc_version: i32,
     pub local_session: bool,
     pub oidc_issuer: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -180,9 +172,6 @@ pub struct InsertBrowserSession<'a> {
     pub user_id: Uuid,
     pub token_prefix: &'a str,
     pub token_hash: &'a str,
-    pub refresh_token: &'a EncryptedField,
-    pub refresh_token_enc_key_id: &'a str,
-    pub refresh_token_enc_version: i32,
     pub validated_until: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
 }
@@ -228,10 +217,6 @@ impl LiveBrowserSessionCallerRow {
 struct BrowserSessionRow {
     id: Uuid,
     user_id: Uuid,
-    refresh_token_ciphertext: Vec<u8>,
-    refresh_token_nonce: Vec<u8>,
-    refresh_token_enc_key_id: String,
-    refresh_token_enc_version: i32,
     local_session: bool,
     oidc_issuer: Option<String>,
     created_at: DateTime<Utc>,
@@ -244,12 +229,6 @@ impl From<BrowserSessionRow> for BrowserSession {
         Self {
             id: row.id,
             user_id: row.user_id,
-            refresh_token: EncryptedField {
-                ciphertext: row.refresh_token_ciphertext,
-                nonce: row.refresh_token_nonce,
-            },
-            refresh_token_enc_key_id: row.refresh_token_enc_key_id,
-            refresh_token_enc_version: row.refresh_token_enc_version,
             validated_until: row.validated_until,
             local_session: row.local_session,
             oidc_issuer: row.oidc_issuer,
@@ -263,12 +242,10 @@ fn live_browser_session_predicate(prefix: &str) -> String {
     format!("{prefix}revoked_at IS NULL AND {prefix}expires_at > now()")
 }
 
-const BROWSER_SESSION_RETURNING_COLUMNS: &str = "id, user_id, refresh_token_ciphertext, \
-     refresh_token_nonce, refresh_token_enc_key_id, refresh_token_enc_version, \
+const BROWSER_SESSION_RETURNING_COLUMNS: &str = "id, user_id, \
      validated_until, expires_at, local_session, oidc_issuer, created_at";
 
-const BROWSER_SESSION_SELECT_COLUMNS: &str = "bs.id, bs.user_id, bs.refresh_token_ciphertext, \
-     bs.refresh_token_nonce, bs.refresh_token_enc_key_id, bs.refresh_token_enc_version, \
+const BROWSER_SESSION_SELECT_COLUMNS: &str = "bs.id, bs.user_id, \
      bs.validated_until, bs.expires_at, bs.local_session, bs.oidc_issuer, bs.created_at";
 
 pub fn token_prefix(session_id: Uuid) -> String {

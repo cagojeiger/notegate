@@ -75,16 +75,12 @@ async fn insert_browser_session(
 ) -> Result<Uuid, Box<dyn std::error::Error>> {
     let session_id = Uuid::new_v4();
     let token_hash = crypto.browser_session_hash(&session_id.to_string(), name)?;
-    let refresh_token = crypto.encrypt_browser_refresh_token(&session_id.to_string(), "")?;
     repo.insert_local_session(
         InsertBrowserSession {
             session_id,
             user_id,
             token_prefix: "ngs_v1_test",
             token_hash: &token_hash,
-            refresh_token: &refresh_token,
-            refresh_token_enc_key_id: crypto.enc_key_id(),
-            refresh_token_enc_version: crypto.version(),
             validated_until: chrono::Utc::now() + chrono::Duration::hours(1),
             expires_at: chrono::Utc::now() + chrono::Duration::days(15),
         },

@@ -786,15 +786,9 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
         .await?
         .unwrap();
     assert!(stored.local_session);
-    assert_eq!(
-        state.security.decrypt_browser_refresh_token(
-            &id.to_string(),
-            &stored.refresh_token_enc_key_id,
-            stored.refresh_token_enc_version,
-            &stored.refresh_token
-        )?,
-        ""
-    );
+    assert_eq!(stored.oidc_issuer.as_deref(), Some(mock.issuer.as_str()));
+    assert!(stored.validated_until > chrono::Utc::now());
+    assert!(stored.validated_until <= stored.expires_at);
     let before = mock.counts();
     let replay = router
         .clone()
