@@ -197,6 +197,7 @@ fn data_plane_routes(state: AppState) -> Router<AppState> {
                 burst: 30,
             },
         ))
+        .merge(crate::auth::page::assets())
         .merge(metadata_routes(&state))
         .merge(crate::openapi::routes(state.clone()))
         .merge(browser_v1)

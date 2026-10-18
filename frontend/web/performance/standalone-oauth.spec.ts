@@ -19,7 +19,7 @@ test("standalone CLI approval and connection revocation", async ({ browser, play
     const device = await deviceResponse.json();
     const page = await context.newPage();
     const approvalPage = await page.goto(device.verification_uri_complete);
-    expect(approvalPage?.headers()["content-security-policy"]).toBe("default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+    expect(approvalPage?.headers()["content-security-policy"]).toBe("default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
     await expect(page.getByRole("heading", { name: "Connect NoteGate CLI" })).toBeVisible();
     const approvalRequest = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/oauth/device");
     await page.getByRole("button", { name: "Connect CLI", exact: true }).click();

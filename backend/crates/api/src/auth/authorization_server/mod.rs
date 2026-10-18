@@ -4,7 +4,7 @@ pub(crate) use clients::ClientRegistry;
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
-use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Json, Router};
 use axum_extra::extract::CookieJar;
@@ -659,25 +659,7 @@ fn no_store(mut response: Response) -> Response {
     response
 }
 fn page(title: &str, body: &str, form_redirect: Option<&url::Url>) -> Response {
-    // Chromium applies form-action to the POST redirect as well as its target.
-    let redirect_source = form_redirect
-        .map(|redirect| format!(" {}", redirect.origin().ascii_serialization()))
-        .unwrap_or_default();
-    let policy = format!(
-        "default-src 'none'; form-action 'self'{redirect_source}; frame-ancestors 'none'; base-uri 'none'"
-    );
-    let Ok(policy) = header::HeaderValue::from_str(&policy) else {
-        return oauth_error("server_error");
-    };
-    let mut response=no_store(Html(format!("<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width, initial-scale=1\"><title>{}</title></head><body><main><h1>{}</h1>{body}</main></body></html>",escape_html(title),escape_html(title))).into_response());
-    response
-        .headers_mut()
-        .insert(header::CONTENT_SECURITY_POLICY, policy);
-    response.headers_mut().insert(
-        header::REFERRER_POLICY,
-        header::HeaderValue::from_static("same-origin"),
-    );
-    response
+    super::page::browser_page(StatusCode::OK, title, body, form_redirect)
 }
 
 async fn private_response(

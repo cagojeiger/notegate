@@ -1,7 +1,7 @@
 use axum::extract::{Query, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::Cookie;
 use serde::Deserialize;
@@ -141,7 +141,12 @@ pub(super) async fn complete_login(
 }
 
 pub async fn success() -> Response {
-    Html(login_complete_html()).into_response()
+    super::page::browser_page(
+        StatusCode::OK,
+        "Login complete",
+        r#"<p>You can close this tab and return to NoteGate.</p><script src="/auth/login-complete.js" defer></script>"#,
+        None,
+    )
 }
 
 pub async fn success_script(State(state): State<AppState>) -> Response {
@@ -164,21 +169,6 @@ pub async fn success_script(State(state): State<AppState>) -> Response {
         script,
     )
         .into_response()
-}
-
-fn login_complete_html() -> &'static str {
-    r#"<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Login complete</title>
-  <script src="/auth/login-complete.js" defer></script>
-</head>
-<body>
-  <h1>Login complete</h1>
-  <p>Login complete. You can close this tab and return to NoteGate.</p>
-</body>
-</html>"#
 }
 
 fn login_complete_script(public_url: &str) -> Option<String> {
@@ -246,14 +236,19 @@ mod tests {
     use axum::extract::Query;
     use axum::http::Uri;
 
-    use super::{LoginQuery, login_complete_html, login_complete_script, sanitize_next};
+    use super::{LoginQuery, login_complete_script, sanitize_next, success};
 
-    #[test]
-    fn login_complete_page_uses_same_origin_external_script() {
-        let html = login_complete_html();
+    #[tokio::test]
+    async fn login_complete_page_uses_same_origin_external_scripts()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let response = success().await;
+        let bytes = axum::body::to_bytes(response.into_body(), 100_000).await?;
+        let html = String::from_utf8(bytes.to_vec())?;
         assert!(html.contains(r#"<script src="/auth/login-complete.js" defer></script>"#));
-        assert_eq!(html.matches("<script").count(), 1);
+        assert_eq!(html.matches("<script").count(), 2);
+        assert!(html.contains(r#"<script src="/auth/ui.js"></script>"#));
         assert!(!html.contains("postMessage"));
+        Ok(())
     }
 
     #[test]
