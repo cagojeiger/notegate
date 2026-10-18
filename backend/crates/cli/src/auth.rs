@@ -1569,13 +1569,16 @@ mod tests {
         )
         .unwrap();
         let status = manager.status(&bundle.base_url).unwrap();
-        assert_eq!(status["authenticated"], false);
-        assert_eq!(status["needs_login"], true);
+        assert_eq!(status.get("authenticated"), Some(&Value::Bool(false)));
+        assert_eq!(status.get("needs_login"), Some(&Value::Bool(true)));
         let error = manager.access_token(&bundle.base_url).await.unwrap_err();
         assert_eq!(error.body()["error"], "login_required");
         assert!(store.load(&bundle.key()).unwrap().is_some());
         let logout = manager.logout(&bundle.base_url).await.unwrap();
-        assert_eq!(logout["revocation_attempted"], false);
+        assert_eq!(
+            logout.get("revocation_attempted"),
+            Some(&Value::Bool(false))
+        );
         assert!(store.load(&bundle.key()).unwrap().is_none());
     }
 
