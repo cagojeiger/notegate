@@ -1746,6 +1746,88 @@ async fn logout_does_not_expire_cookie_when_local_revoke_fails()
 }
 
 #[tokio::test]
+async fn session_marker_migration_preserves_authentication_decisions()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup_before(60).await? else {
+        return Ok(());
+    };
+    let state = state_with_pool(
+        ResolverMode::Registered(true),
+        "https://api.example.test/mcp",
+        db.pool.clone(),
+    )?;
+    let (owner, _) = AccountRepo::new(db.pool.clone())
+        .upsert_user_by_identity(&ResolveAttrs {
+            issuer: state.oidc.issuer().to_owned(),
+            sub: "session-migration".to_owned(),
+            email: "session@example.test".to_owned(),
+            name: "Session User".to_owned(),
+        })
+        .await?;
+    let mut tokens = Vec::new();
+    for case in [
+        "current",
+        "unbound",
+        "wrong_issuer",
+        "revoked",
+        "stale",
+        "expired",
+    ] {
+        let id = Uuid::new_v4();
+        let issuer = match case {
+            "unbound" => None,
+            "wrong_issuer" => Some("https://other.example.test"),
+            _ => Some(state.oidc.issuer()),
+        };
+        let hash = state
+            .security
+            .browser_session_hash(&id.to_string(), "retained-secret")?;
+        sqlx::query(
+            "INSERT INTO browser_sessions \
+             (id,user_id,token_prefix,token_hash,hash_key_id,hash_version,local_session,oidc_issuer,validated_until,expires_at,revoked_at) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8, \
+               CASE WHEN $9='expired' THEN now()-interval '2 hours' WHEN $9='stale' THEN now()-interval '1 hour' ELSE now()+interval '1 hour' END, \
+               CASE WHEN $9='expired' THEN now()-interval '1 hour' ELSE now()+interval '7 days' END, \
+               CASE WHEN $9='revoked' THEN now() ELSE NULL END)",
+        )
+        .bind(id).bind(owner.id).bind(notegate_db::browser_session_repo::token_prefix(id))
+        .bind(hash).bind(state.security.lookup_key_id()).bind(state.security.version())
+        .bind(issuer.is_some()).bind(issuer).bind(case).execute(&db.pool).await?;
+        tokens.push((case, format_token(id, "retained-secret")));
+    }
+    for migrated in [false, true] {
+        if migrated {
+            db.apply_migration(60).await?;
+        }
+        for (case, token) in &tokens {
+            match verify_browser_session(&state, token).await {
+                Ok(caller) => {
+                    assert_eq!(*case, "current");
+                    assert_eq!(caller.account_id(), owner.id);
+                }
+                Err(error) => {
+                    assert_ne!(*case, "current", "migrated={migrated}");
+                    assert!(matches!(error, AuthError::InvalidToken));
+                }
+            }
+        }
+    }
+    let fresh = create_browser_session(&state, owner.id).await?;
+    assert_eq!(
+        verify_browser_session(&state, &fresh).await?.account_id(),
+        owner.id
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM browser_sessions")
+            .fetch_one(&db.pool)
+            .await?,
+        7
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn legacy_browser_sessions_are_rejected_without_deleting_account_or_history()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
@@ -1758,7 +1840,7 @@ async fn legacy_browser_sessions_are_rejected_without_deleting_account_or_histor
     )?;
     let session = valid_browser_session(&db, &state).await?;
     let (id, _) = notegate_db::browser_session_repo::parse_token(&session).ok_or("bad session")?;
-    sqlx::query("UPDATE browser_sessions SET local_session=false,oidc_issuer=NULL WHERE id=$1")
+    sqlx::query("UPDATE browser_sessions SET oidc_issuer=NULL WHERE id=$1")
         .bind(id)
         .execute(&db.pool)
         .await?;

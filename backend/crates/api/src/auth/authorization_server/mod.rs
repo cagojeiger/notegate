@@ -580,8 +580,7 @@ async fn recent_user(state: &AppState, jar: &CookieJar) -> Option<Caller> {
         .find_live_by_token(id, &hash)
         .await
         .ok()??;
-    (session.local_session && session.created_at > Utc::now() - Duration::minutes(5))
-        .then_some(caller)
+    (session.created_at > Utc::now() - Duration::minutes(5)).then_some(caller)
 }
 fn validate_scope(scope: &str, required: &str) -> Result<String, &'static str> {
     let scopes: Vec<_> = scope.split_whitespace().collect();

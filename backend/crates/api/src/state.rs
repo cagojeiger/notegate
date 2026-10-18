@@ -28,21 +28,6 @@ use crate::admission::DocxValidationAdmission;
 use crate::auth::oidc::OidcProvider;
 use crate::metadata_write_behind::MetadataWriteBuffer;
 
-/// Space lifecycle service over the db-backed [`SpaceRepo`].
-pub type Spaces = SpaceService;
-/// Current-account lifecycle service over the db-backed [`AccountRepo`].
-pub type Accounts = AccountService;
-/// Agent-connection service over the db-backed [`ConnectionRepo`].
-pub type Connections = ConnectionService;
-/// Agent lifecycle service over the db-backed [`AgentRepo`].
-pub type Agents = AgentService;
-/// File-tree command service over the db-backed [`FilesRepo`].
-pub type Files = FilesService;
-/// Derived Markdown-link graph projection service.
-pub type LinkGraph = LinkGraphService;
-/// User-facing account and Space usage service.
-pub type Usage = UsageService;
-
 #[derive(Debug, Clone)]
 pub(crate) struct DatabasePoolObservation {
     pub(crate) role: &'static str,
@@ -100,16 +85,16 @@ pub struct AppState {
     pub http: reqwest::Client,
     pub object_storage: ObjectStorage,
     pub security: PiiCrypto,
-    pub spaces: Spaces,
-    pub account_lifecycle: Accounts,
+    pub spaces: SpaceService,
+    pub account_lifecycle: AccountService,
     pub history: HistoryService,
-    pub connections: Connections,
-    pub agents: Agents,
-    pub files: Files,
+    pub connections: ConnectionService,
+    pub agents: AgentService,
+    pub files: FilesService,
     pub(crate) search: SearchClient,
-    pub link_graph: LinkGraph,
+    pub link_graph: LinkGraphService,
     pub(crate) docx_validation_admission: DocxValidationAdmission,
-    pub usage: Usage,
+    pub usage: UsageService,
     /// Account lookup for resolving attribution refs in REST output.
     pub accounts: AccountRepo,
     pub browser_sessions: BrowserSessionRepo,

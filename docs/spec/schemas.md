@@ -127,36 +127,7 @@ type RestNodeRevealResponse = {
 
 MCP `read`, `search`, `write`, `manage` 결과가 반환하는 path-first node summary다. Content body와 node metadata는 포함하지 않는다.
 
-```ts
-type McpNodeSummary = {
-  node_id: string
-  path: string
-  name: string
-  kind: NodeKind
-  sort_order: number
-  external_access_enabled: boolean
-  has_children: boolean
-  created_at: string
-  updated_at: string
-
-  // text node에서만 존재
-  content_sha256?: string
-
-  // text 또는 file node에서만 존재
-  byte_len?: number
-
-  // text node에서만 존재
-  line_count?: number
-  text_storage_format?: "plain" | "encrypted"
-  text_at_rest_encryption?: "none" | "server"
-
-  // file node에서만 존재
-  media_type?: string
-  original_filename?: string
-  encryption_mode?: "none" | "client"
-  encryption_metadata?: object
-}
-```
+필드와 optional 여부는 [PathNodeSummary](../../backend/crates/api/src/path_node_summary.rs)가 정의한다. `write_locked`는 노드 자체 설정, `effective_write_locked`는 상위 경로를 포함한 유효 잠금 상태다. Text/file별 선택적 속성과 직렬화 검증도 같은 소스를 따른다.
 
 MCP는 File metadata/stat을 읽지만 File bytes는 전송하지 않는다.
 

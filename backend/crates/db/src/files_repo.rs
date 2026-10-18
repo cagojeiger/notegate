@@ -697,34 +697,6 @@ impl FilesRepo {
         .await
     }
 
-    pub async fn set_detected_file_media_type(
-        &self,
-        space_id: Uuid,
-        node_id: Uuid,
-        detected_media_type: &str,
-    ) -> Result<()> {
-        crate::files::object_uploads::set_detected_media_type(
-            &self.pool,
-            space_id,
-            node_id,
-            detected_media_type,
-        )
-        .await
-    }
-
-    pub async fn set_detected_file_media_types(
-        &self,
-        space_id: Uuid,
-        detected_media_types: &[(Uuid, String)],
-    ) -> Result<()> {
-        crate::files::object_uploads::set_detected_media_types(
-            &self.pool,
-            space_id,
-            detected_media_types,
-        )
-        .await
-    }
-
     pub async fn save_text_content(
         &self,
         space_id: Uuid,

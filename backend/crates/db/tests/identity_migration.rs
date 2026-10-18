@@ -336,19 +336,19 @@ async fn identity_migration_preserves_ownership_pii_documents_sessions_and_oauth
     let session_hash = crypto.browser_session_hash(&session_id.to_string(), "preserved-session")?;
     let prefix = token_prefix(session_id);
     let sessions = BrowserSessionRepo::new(db.pool.clone());
-    sessions
-        .insert_local_session(
-            InsertBrowserSession {
-                session_id,
-                user_id: owner,
-                token_prefix: &prefix,
-                token_hash: &session_hash,
-                validated_until: now + Duration::hours(1),
-                expires_at: now + Duration::days(7),
-            },
-            ISSUER,
-        )
-        .await?;
+    common::insert_pre_marker_removal_session(
+        &db.pool,
+        InsertBrowserSession {
+            session_id,
+            user_id: owner,
+            token_prefix: &prefix,
+            token_hash: &session_hash,
+            validated_until: now + Duration::hours(1),
+            expires_at: now + Duration::days(7),
+        },
+        Some(ISSUER),
+    )
+    .await?;
     let grant = Uuid::new_v4();
     let access_hash = crypto.oauth_hash("token", "preserved-access")?;
     let refresh_hash = crypto.oauth_hash("token", "preserved-refresh")?;

@@ -252,7 +252,7 @@ fn sign_token(
 async fn login(
     oidc: &OidcProvider,
     http: &reqwest::Client,
-) -> notegate_core::Result<crate::auth::oauth_exchange::LoginUserInfo> {
+) -> notegate_core::Result<crate::auth::oauth_exchange::UserInfo> {
     exchange_code_for_userinfo(oidc, http, "single-use-code", "test-pkce-verifier", NONCE).await
 }
 
@@ -264,7 +264,7 @@ async fn valid_cached_callback_does_not_fetch_metadata_or_jwks() {
 
     let result = login(&oidc, &http).await.expect("cached ID token verifies");
 
-    assert_eq!(result.userinfo.sub, SUBJECT);
+    assert_eq!(result.sub, SUBJECT);
     assert_eq!(mock.counts(), (1, 1, 1, 1));
 }
 
@@ -286,7 +286,7 @@ async fn callback_refreshes_new_kid_and_same_kid_replacement_without_redeeming_c
 
         let result = login(&oidc, &http).await.expect("rotated key verifies");
 
-        assert_eq!(result.userinfo.sub, SUBJECT, "kid {kid}");
+        assert_eq!(result.sub, SUBJECT, "kid {kid}");
         assert_eq!(mock.counts(), (1, 2, 1, 1), "kid {kid}");
         assert_eq!(
             oidc.cache
@@ -478,10 +478,7 @@ impl Failure {
         usize::from(matches!(self, Self::UserinfoSubject))
     }
 
-    fn assert_error(
-        self,
-        result: notegate_core::Result<crate::auth::oauth_exchange::LoginUserInfo>,
-    ) {
+    fn assert_error(self, result: notegate_core::Result<crate::auth::oauth_exchange::UserInfo>) {
         let error = result.expect_err("invalid claims must fail").to_string();
         let expected = match self {
             Self::Nonce => "Invalid nonce",
@@ -523,7 +520,7 @@ async fn callback_uses_a_concurrent_ttl_refresh_without_refetching_or_redeeming_
         .expect("callback task")
         .expect("fresh concurrent keys verify");
 
-    assert_eq!(result.userinfo.sub, SUBJECT);
+    assert_eq!(result.sub, SUBJECT);
     assert_eq!(mock.counts(), (2, 2, 1, 1));
 }
 
@@ -772,7 +769,6 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
         )
         .await?
         .unwrap();
-    assert!(stored.local_session);
     assert_eq!(stored.oidc_issuer.as_deref(), Some(mock.issuer.as_str()));
     assert!(stored.validated_until > chrono::Utc::now());
     assert!(stored.validated_until <= stored.expires_at);
@@ -808,12 +804,10 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
     let denied = crate::auth::oauth::complete_login(
         &denied_state,
         axum_extra::extract::CookieJar::new(),
-        crate::auth::oauth_exchange::LoginUserInfo {
-            userinfo: crate::auth::oauth_exchange::UserInfo {
-                sub: "unlinked-subject".to_owned(),
-                email: Some("test@example.test".to_owned()),
-                name: Some("Duplicate".to_owned()),
-            },
+        crate::auth::oauth_exchange::UserInfo {
+            sub: "unlinked-subject".to_owned(),
+            email: Some("test@example.test".to_owned()),
+            name: Some("Duplicate".to_owned()),
         },
         None,
     )
@@ -869,7 +863,7 @@ async fn standalone_confidential_oidc_requires_recent_auth_time_and_not_a_refres
     let result = exchange_code_for_userinfo(&oidc, &http, "code", "verifier", NONCE)
         .await
         .expect("fresh confidential OIDC");
-    assert_eq!(result.userinfo.sub, SUBJECT);
+    assert_eq!(result.sub, SUBJECT);
     assert_eq!(
         mock.state.last_token_form.read().await["client_secret"],
         "test-client-secret"

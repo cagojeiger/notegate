@@ -441,8 +441,7 @@ struct InternalMetricsVisitor {
 impl Visit for InternalMetricsVisitor {
     fn record_f64(&mut self, field: &Field, value: f64) {
         match field.name() {
-            // SQLx 0.8 emits the misspelled `aquired_after_secs` field.
-            "aquired_after_secs" | "acquired_after_secs" => self.acquire_seconds = Some(value),
+            "acquired_after_secs" => self.acquire_seconds = Some(value),
             "duration_seconds" => self.duration_seconds = Some(value),
             _ => {}
         }
@@ -1036,7 +1035,7 @@ mod tests {
             tracing::subscriber::with_default(subscriber, || {
                 tracing::trace!(
                     target: "sqlx::pool::acquire",
-                    aquired_after_secs = 0.002,
+                    acquired_after_secs = 0.002,
                     "acquired connection"
                 );
                 tracing::trace!(
