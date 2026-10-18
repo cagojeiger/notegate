@@ -89,6 +89,42 @@ async fn unlinked_active_and_pending_deleted_accounts_block_identity_migration()
             .await?;
         assert_eq!(identities, 0);
         assert!(repo.find_account(owner).await?.is_some());
+        let snapshot = "SELECT jsonb_build_object('account',to_jsonb(a),'user',to_jsonb(u)) \
+                        FROM accounts a JOIN users u ON u.id=a.id WHERE a.id=$1";
+        let before: serde_json::Value = sqlx::query_scalar(snapshot)
+            .bind(owner)
+            .fetch_one(&db.pool)
+            .await?;
+        repo.import_identity_links(&[link(owner, ISSUER, "unlinked")])
+            .await?;
+        repo.import_identity_links(&[link(owner, ISSUER, "unlinked")])
+            .await?;
+        let after: serde_json::Value = sqlx::query_scalar(snapshot)
+            .bind(owner)
+            .fetch_one(&db.pool)
+            .await?;
+        assert_eq!(after, before);
+        let audit_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_events WHERE op_type='identity.link' AND owner_user_id=$1",
+        )
+        .bind(owner)
+        .fetch_one(&db.pool)
+        .await?;
+        assert_eq!(audit_count, 1);
+        db.apply_migration(58).await?;
+        let login = repo
+            .upsert_user_by_identity(&ResolveAttrs {
+                issuer: ISSUER.to_owned(),
+                sub: "unlinked".to_owned(),
+                name: "Preserved User".to_owned(),
+                email: "preserved@example.test".to_owned(),
+            })
+            .await;
+        if deleted {
+            assert!(login.is_err());
+        } else {
+            assert_eq!(login?.0.id, owner);
+        }
         db.cleanup().await;
     }
     Ok(())
@@ -139,6 +175,12 @@ async fn only_anonymized_account_shells_may_have_no_external_identity() -> TestR
         .execute(&db.pool)
         .await?;
     db.apply_migration(58).await?;
+    assert!(
+        AccountRepo::new(db.pool.clone())
+            .import_identity_links(&[link(owner, ISSUER, "anonymized-subject")])
+            .await
+            .is_err()
+    );
     assert!(
         AccountRepo::new(db.pool.clone())
             .find_account(owner)

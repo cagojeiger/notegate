@@ -38,6 +38,15 @@ async fn space_purge_preserves_legacy_change_owners_before_background_encryption
     .execute(&db.pool)
     .await?;
     for migration in notegate_db::MIGRATOR.iter().filter(|m| m.version >= 48) {
+        if migration.version == 58 {
+            notegate_db::AccountRepo::new(db.pool.clone())
+                .import_identity_links(&[notegate_db::account_repo::IdentityLink {
+                    account_id: owner,
+                    issuer: "https://auth.example.test".to_owned(),
+                    subject: "purge-legacy-changes".to_owned(),
+                }])
+                .await?;
+        }
         db.apply_migration(migration.version).await?;
     }
     sqlx::query(

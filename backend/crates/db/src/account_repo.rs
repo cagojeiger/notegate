@@ -600,7 +600,8 @@ pub struct IdentityLink {
 }
 
 impl AccountRepo {
-    /// Import a verified migration manifest atomically. Call only from the offline operator tool.
+    /// Import a verified migration manifest atomically with API/worker processes stopped.
+    /// Retained deletion tombstones may be linked without reactivating the account.
     pub async fn import_identity_links(&self, links: &[IdentityLink]) -> Result<()> {
         if links.is_empty() || links.len() > 10_000 {
             return Err(Error::validation(
@@ -633,9 +634,16 @@ impl AccountRepo {
         users.sort();
         users.dedup();
         for user in users {
-            let live:Option<Uuid>=sqlx::query_scalar("SELECT id FROM accounts WHERE id=$1 AND kind='user' AND is_active=true AND deleted_at IS NULL FOR UPDATE")
-                .bind(user).fetch_optional(&mut *tx).await.map_err(map_sqlx_error)?;
-            if live.is_none() {
+            let retained: Option<Uuid> = sqlx::query_scalar(
+                "SELECT a.id FROM accounts a JOIN users u ON u.id=a.id \
+                 WHERE a.id=$1 AND a.kind='user' AND u.anonymized_at IS NULL \
+                 FOR UPDATE OF a,u",
+            )
+            .bind(user)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+            if retained.is_none() {
                 return Err(Error::validation(
                     "identity mapping references an unavailable account",
                 ));
