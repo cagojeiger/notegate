@@ -65,7 +65,6 @@ async fn bulk_metadata_flush_is_monotonic_and_idempotent() -> Result<(), Box<dyn
     let crypto = PiiCrypto::test();
     let session_secret = "metadata-write-session-secret";
     let token_hash = crypto.browser_session_hash(&session_id.to_string(), session_secret)?;
-    let encrypted_refresh = crypto.encrypt_browser_refresh_token(&session_id.to_string(), "")?;
     BrowserSessionRepo::new(db.pool.clone())
         .insert_local_session(
             InsertBrowserSession {
@@ -73,9 +72,6 @@ async fn bulk_metadata_flush_is_monotonic_and_idempotent() -> Result<(), Box<dyn
                 user_id,
                 token_prefix: &token_prefix(session_id),
                 token_hash: &token_hash,
-                refresh_token: &encrypted_refresh,
-                refresh_token_enc_key_id: crypto.enc_key_id(),
-                refresh_token_enc_version: crypto.version(),
                 validated_until: Utc::now() + Duration::hours(1),
                 expires_at: Utc::now() + Duration::days(1),
             },

@@ -28,7 +28,6 @@ const CRYPTO_VERSION: i32 = 1;
 
 const ENC_EPOCH_VERIFY_LABEL: &[u8] = b"notegate/enc/epoch-verify/v1";
 const PII_FIELD_LABEL: &[u8] = b"notegate/enc/pii-field/v1";
-const BROWSER_REFRESH_TOKEN_FIELD_LABEL: &[u8] = b"notegate/enc/browser-refresh-token-field/v1";
 const HISTORY_FIELD_LABEL: &[u8] = b"notegate/enc/history-field/v1";
 const TEXT_CONTENT_FIELD_LABEL: &[u8] = b"notegate/enc/text-content-field/v1";
 const LOOKUP_EPOCH_VERIFY_LABEL: &[u8] = b"notegate/lookup/epoch-verify/v1";
@@ -154,7 +153,6 @@ pub struct PiiCrypto {
     enc_epoch_verify_key: [u8; KEY_LEN],
     lookup_epoch_verify_key: [u8; KEY_LEN],
     pii_field_key: [u8; KEY_LEN],
-    browser_refresh_token_field_key: [u8; KEY_LEN],
     text_content_field_key: [u8; KEY_LEN],
     history_field_key: [u8; KEY_LEN],
     provider_sub_hmac_key: [u8; KEY_LEN],
@@ -199,7 +197,6 @@ impl PiiCrypto {
             enc_epoch_verify_key: hkdf_key(enc_root, ENC_EPOCH_VERIFY_LABEL)?,
             lookup_epoch_verify_key: hkdf_key(lookup_root, LOOKUP_EPOCH_VERIFY_LABEL)?,
             pii_field_key: hkdf_key(enc_root, PII_FIELD_LABEL)?,
-            browser_refresh_token_field_key: hkdf_key(enc_root, BROWSER_REFRESH_TOKEN_FIELD_LABEL)?,
             text_content_field_key: hkdf_key(enc_root, TEXT_CONTENT_FIELD_LABEL)?,
             history_field_key: hkdf_key(enc_root, HISTORY_FIELD_LABEL)?,
             provider_sub_hmac_key: hkdf_key(lookup_root, PROVIDER_SUB_HMAC_LABEL)?,
@@ -273,39 +270,6 @@ impl PiiCrypto {
     pub fn decrypt_pii_string(&self, aad: &PiiAad, field: &EncryptedField) -> Result<String> {
         let bytes = decrypt_with_key_and_aad(&self.pii_field_key, field, &aad.bytes())?;
         String::from_utf8(bytes).map_err(|_error| Error::internal("invalid encrypted utf8"))
-    }
-
-    pub fn encrypt_browser_refresh_token(
-        &self,
-        session_id: &str,
-        plaintext: &str,
-    ) -> Result<EncryptedField> {
-        encrypt_with_key_and_aad(
-            &self.browser_refresh_token_field_key,
-            plaintext.as_bytes(),
-            &browser_refresh_token_aad(session_id, &self.enc_key_id),
-        )
-    }
-
-    pub fn decrypt_browser_refresh_token(
-        &self,
-        session_id: &str,
-        key_id: &str,
-        version: i32,
-        field: &EncryptedField,
-    ) -> Result<String> {
-        if version != CRYPTO_VERSION {
-            return Err(Error::internal(format!(
-                "refresh token enc version mismatch: stored {version} != current {CRYPTO_VERSION}"
-            )));
-        }
-        let bytes = decrypt_with_key_and_aad(
-            &self.browser_refresh_token_field_key,
-            field,
-            &browser_refresh_token_aad(session_id, key_id),
-        )?;
-        String::from_utf8(bytes)
-            .map_err(|_error| Error::internal("invalid encrypted refresh token utf8"))
     }
 
     pub fn encrypt_text_content(
@@ -386,13 +350,6 @@ fn hkdf_key(root: &[u8], label: &[u8]) -> Result<[u8; KEY_LEN]> {
     hk.expand(label, &mut out)
         .map_err(|_error| Error::internal("hkdf expand failed"))?;
     Ok(out)
-}
-
-fn browser_refresh_token_aad(session_id: &str, key_id: &str) -> Vec<u8> {
-    format!(
-        "app=notegate;field=browser_session.refresh_token;session_id={session_id};key_id={key_id};version={CRYPTO_VERSION}"
-    )
-    .into_bytes()
 }
 
 fn encrypt_with_key_and_aad(
@@ -508,36 +465,6 @@ mod tests {
         assert_ne!(
             crypto.api_key_hash("key-1", "secret").unwrap(),
             crypto.browser_session_hash("key-1", "secret").unwrap()
-        );
-    }
-
-    #[test]
-    fn browser_refresh_token_encrypt_decrypt_round_trips() {
-        let crypto = PiiCrypto::test();
-        let encrypted = crypto
-            .encrypt_browser_refresh_token("session-1", "refresh-token")
-            .unwrap();
-        assert_ne!(encrypted.ciphertext, b"refresh-token");
-        assert_eq!(
-            crypto
-                .decrypt_browser_refresh_token(
-                    "session-1",
-                    crypto.enc_key_id(),
-                    crypto.version(),
-                    &encrypted,
-                )
-                .unwrap(),
-            "refresh-token"
-        );
-        assert!(
-            crypto
-                .decrypt_browser_refresh_token(
-                    "session-2",
-                    crypto.enc_key_id(),
-                    crypto.version(),
-                    &encrypted,
-                )
-                .is_err()
         );
     }
 

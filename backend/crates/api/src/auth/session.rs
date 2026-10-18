@@ -17,11 +17,6 @@ pub async fn create_browser_session(state: &AppState, user_id: Uuid) -> Result<S
         .security
         .browser_session_hash(&session_id.to_string(), &secret)
         .map_err(|_| AuthError::Internal)?;
-    // Retain the existing schema without storing an upstream refresh token.
-    let empty_refresh = state
-        .security
-        .encrypt_browser_refresh_token(&session_id.to_string(), "")
-        .map_err(|_| AuthError::Internal)?;
     let now = Utc::now();
     let expires_at = checked_add(now, state.config.browser_session_max_ttl)?;
     let validated_until = checked_add(now, std::time::Duration::from_secs(86_400))?.min(expires_at);
@@ -34,9 +29,6 @@ pub async fn create_browser_session(state: &AppState, user_id: Uuid) -> Result<S
                 user_id,
                 token_prefix: &prefix,
                 token_hash: &token_hash,
-                refresh_token: &empty_refresh,
-                refresh_token_enc_key_id: state.security.enc_key_id(),
-                refresh_token_enc_version: state.security.version(),
                 validated_until,
                 expires_at,
             },

@@ -81,7 +81,9 @@ Auth endpoint는 IP별 10 req/s, burst 30 제한을 공유하며 기존 전체 i
 
 ## 배포 설정
 
-`oidc` 설정이 없으면 startup을 거부한다. 구형 `authgate_url`, `oauth_client_id`, `mcp_oauth_client_id`, `jwks_cache_ttl_secs`, `browser_session_ttl_secs`는 제거했으므로 배포 환경에서도 삭제해야 한다. 기존 로컬 세션·OAuth grant·계정 연결·이력과 DB schema는 보존한다. 구형 AuthGate bearer와 refresh 기반 브라우저 세션은 허용하지 않는다.
+`oidc` 설정이 없으면 startup을 거부한다. 구형 `authgate_url`, `oauth_client_id`, `mcp_oauth_client_id`, `jwks_cache_ttl_secs`, `browser_session_ttl_secs`는 제거했으므로 배포 환경에서도 삭제해야 한다. 기존 로컬 세션·OAuth grant·계정 연결·이력은 보존한다. 구형 AuthGate bearer와 refresh 기반 브라우저 세션은 허용하지 않는다.
+
+0057 migration은 브라우저의 사용하지 않는 refresh 암호문·claim·갱신 시각 7개 컬럼을 제거한다. 구버전 API의 SELECT/INSERT와 호환되지 않으므로 rolling 배포하지 않는다. 복구 가능한 DB 백업을 확인하고 구 API 프로세스를 모두 중지한 뒤 신버전의 startup migration과 시작을 수행한다. 이후 readiness·기존 세션·새 로그인·로그아웃·OAuth 연결을 검증한다. 새 migration ledger와 schema를 구버전이 지원하지 않으므로 이전 이미지로만 되돌리는 rollback은 보장하지 않는다. 복구 시 백업 복원 또는 해당 schema와 ledger를 지원하는 복구 바이너리가 필요하다.
 
 `legacy_identity_issuer`는 기존 계정의 원래 issuer를 처음 고정할 때만 사용한다. DB에 binding이 있으면 생략할 수 있다. 로그인 제공자를 바꿀 때 이 binding을 덮어쓰지 않는다.
 

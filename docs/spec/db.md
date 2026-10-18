@@ -190,30 +190,22 @@ browser_sessions
   hash_version int not null
   local_session boolean not null default false
   oidc_issuer text null -- local_session=true일 때만 필수
-  refresh_token_ciphertext bytea not null
-  refresh_token_nonce bytea not null
-  refresh_token_enc_key_id text not null references crypto_key_epochs(key_id)
-  refresh_token_enc_version int not null
   validated_until timestamptz not null
   expires_at timestamptz not null
   last_used_at timestamptz null
-  last_refreshed_at timestamptz null
-  refresh_started_at timestamptz null
-  refresh_claim_id uuid null
   revoked_at timestamptz null
   revoked_reason text null
   created_at timestamptz
   updated_at timestamptz
 ```
 
-Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. 신규 세션은 `local_session=true`와 검증한 `oidc_issuer`를 저장하고, refresh 필드에는 빈 값을 암호화한 호환 envelope만 둔다. 외부 token은 보관하지 않는다.
+Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. 신규 세션은 `local_session=true`와 검증한 `oidc_issuer`를 저장한다. 외부 token과 refresh 상태는 보관하지 않는다.
 
 Browser session DB 제약:
 
 ```text
-browser_sessions.refresh_token_enc_*: refresh token 암호화 필드는 모두 non-NULL
+browser_sessions.local_session = (browser_sessions.oidc_issuer IS NOT NULL)
 browser_sessions.validated_until <= browser_sessions.expires_at
-browser_sessions.refresh_* claim: refresh_started_at과 refresh_claim_id는 둘 다 NULL이거나 둘 다 non-NULL
 browser_sessions.revoked_reason: revoked_at이 NULL이면 NULL
 ```
 
