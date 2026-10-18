@@ -1,50 +1,12 @@
-//! Issuer-scoped identity lookup and the bounded legacy subject compatibility path.
+//! Issuer-scoped identity lookup and verified ownership links.
 
 use notegate_core::{Error, Result};
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgConnection;
 use uuid::Uuid;
 
-pub(crate) const LEGACY_PROVIDER: &str = "authgate";
-
-/// Bind $1 = verified issuer, $2 = scoped hash, $3 = legacy hash.
-/// UNION also lets callers detect inconsistent mappings instead of choosing an owner.
-pub(crate) const USER_IDS: &str = "\
-    SELECT user_id FROM external_identities WHERE issuer = $1 AND subject_hash = $2 \
-    UNION \
-    SELECT id FROM users WHERE provider_sub_hash = $3 \
-      AND EXISTS (SELECT 1 FROM legacy_identity_issuer WHERE issuer = $1)";
-
-pub(crate) async fn ensure_legacy_issuer(pool: &PgPool, issuer: &str) -> Result<()> {
-    if issuer.is_empty() || issuer.len() > 2048 {
-        return Err(Error::validation("invalid legacy identity issuer"));
-    }
-    sqlx::query(
-        "INSERT INTO legacy_identity_issuer (issuer) VALUES ($1) \
-         ON CONFLICT (singleton) DO NOTHING",
-    )
-    .bind(issuer)
-    .execute(pool)
-    .await
-    .map_err(crate::map_sqlx_error)?;
-    let registered: String = sqlx::query_scalar("SELECT issuer FROM legacy_identity_issuer")
-        .fetch_one(pool)
-        .await
-        .map_err(crate::map_sqlx_error)?;
-    if registered != issuer {
-        return Err(Error::validation(
-            "legacy identity issuer cannot be changed; migrate identities before changing the OAuth issuer",
-        ));
-    }
-    Ok(())
-}
-
-pub(crate) async fn is_legacy_issuer(conn: &mut PgConnection, issuer: &str) -> Result<bool> {
-    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM legacy_identity_issuer WHERE issuer = $1)")
-        .bind(issuer)
-        .fetch_one(conn)
-        .await
-        .map_err(crate::map_sqlx_error)
-}
+/// Bind $1 = verified issuer, $2 = scoped hash. The primary key permits one owner.
+pub(crate) const USER_ID_BY_IDENTITY: &str =
+    "SELECT user_id FROM external_identities WHERE issuer = $1 AND subject_hash = $2";
 
 pub(crate) async fn insert_identity(
     conn: &mut PgConnection,
@@ -82,13 +44,4 @@ pub(crate) async fn insert_identity(
         }
     }
     Ok(())
-}
-
-pub(crate) fn only_row<T>(mut rows: Vec<T>) -> Result<Option<T>> {
-    if rows.len() > 1 {
-        return Err(Error::internal(
-            "external identity ownership is inconsistent",
-        ));
-    }
-    Ok(rows.pop())
 }

@@ -1,5 +1,8 @@
 //! Offline, operator-only account migration. Input contains sensitive external subjects.
 //! Supply the normal NoteGate config and a mode-0600 JSON manifest; never expose as an API.
+//! Stop API and worker processes first. Retained deletion tombstones stay inactive.
+//! Before running, remove the retired legacy_identity_issuer setting from all config sources.
+//! Existing databases must first reach schema 57 with the original issuer bound by v0.1.111.
 use notegate_core::{Config, security::PiiCrypto};
 use notegate_db::{AccountRepo, account_repo::IdentityLink};
 

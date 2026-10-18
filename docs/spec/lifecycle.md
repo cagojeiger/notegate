@@ -37,7 +37,6 @@ purge 시점:
 
 ```text
 users PII ciphertext/hash 제거
-provider_sub_hash tombstone 해제
 external_identities 제거
 attribution 보존용 account/user shell 유지
 ```

@@ -147,13 +147,6 @@ pub(crate) async fn run() -> anyhow::Result<()> {
             pii_crypto.clone(),
             config.default_user_tier,
         );
-        if !config.legacy_identity_issuer.is_empty() {
-            account_repo
-                .ensure_legacy_identity_issuer(&config.legacy_identity_issuer)
-                .await?;
-        } else {
-            account_repo.require_legacy_identity_binding().await?;
-        }
         let api_key_repo = notegate_db::ApiKeyRepo::with_lookup_key(
             pool.clone(),
             pii_crypto.lookup_key_id(),

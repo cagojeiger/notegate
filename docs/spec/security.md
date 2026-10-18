@@ -29,15 +29,14 @@ Internal search HTTP는 `notegate/lookup/internal-search-signing/v1` purpose lab
 
 ```text
 external_identities.subject_hash = HMAC(LOOKUP_SUBKEY, "provider-sub:v1:" || issuer || ":" || sub)
-users.provider_sub_hash = HMAC(LOOKUP_SUBKEY, "provider-sub:v1:authgate:" || sub) -- legacy compatibility
 users.email_hash        = HMAC(LOOKUP_SUBKEY, "email:v1:" || normalized_email)
 users.email_ciphertext  = AEAD_ENCRYPT(ENC_SUBKEY, email, aad)
 accounts.display_name_ciphertext = AEAD_ENCRYPT(ENC_SUBKEY, display_name, aad)
 ```
 
-Subject 원문은 저장하지 않는다. Legacy hash는 DB에 고정한 기존 issuer에만 사용하며,
-issuer가 다르면 같은 subject·email이어도 별도 신원이다. 두 매핑이 서로 다른 account를
-가리키면 인증을 거부한다. 기존 HKDF purpose label과 PII AAD는 유지한다.
+Subject 원문은 저장하지 않는다. 신원 조회·저장은 `external_identities` 한 경로를 사용하며,
+issuer가 다르면 같은 subject·email이어도 별도 신원이다. `(issuer, subject_hash)` primary key와
+동일 scoped hash의 transaction lock으로 중복 계정 생성을 막는다. 기존 HKDF purpose label과 PII AAD는 유지한다.
 
 Agent name은 제품 메타데이터로 평문 저장한다. Agent name에 사람 PII를 넣지 않는 것은 제품 입력 정책으로 다룬다.
 

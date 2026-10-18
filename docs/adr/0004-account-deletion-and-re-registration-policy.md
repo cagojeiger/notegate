@@ -23,7 +23,7 @@ Retention 경과 후:
 
 ```text
 users PII ciphertext/hash 제거
-provider_sub_hash tombstone 해제
+external_identities tombstone 해제
 account/user shell 유지
 ```
 

@@ -280,10 +280,10 @@ impl AccountRepo {
     /// Soft-delete a user account (ADR 0004). Mark it deleted and tear down owned
     /// agents, keys, and access, but do not delete spaces. If the user still owns
     /// any live space, reject so the caller must delete those spaces first. KEEP
-    /// `provider_sub_hash` and PII as a
-    /// tombstone. The purge run anonymizes PII and frees the sub-hash once the
-    /// retention window elapses; re-login during the window is rejected by
-    /// `upsert_user_by_identity`, so a returning sub never duplicates the account.
+    /// external identities and PII as tombstones. The purge run anonymizes PII
+    /// and removes identities once the retention window elapses. Re-login during
+    /// the window is rejected by `upsert_user_by_identity`, so a returning sub
+    /// never duplicates the account.
     pub async fn soft_delete_user(&self, account_id: Uuid, deleted_by: Uuid) -> Result<()> {
         crate::account_delete::soft_delete_user(&self.pool, account_id, deleted_by).await
     }
@@ -308,40 +308,14 @@ impl AccountRepo {
             .transpose()
     }
 
-    /// Register the issuer that owns pre-migration subject hashes. Rebinding is rejected.
-    pub async fn ensure_legacy_identity_issuer(&self, issuer: &str) -> Result<()> {
-        account_identity::ensure_legacy_issuer(&self.pool, issuer).await
-    }
-
-    /// An old unbound database must name its original issuer before switching providers.
-    pub async fn require_legacy_identity_binding(&self) -> Result<()> {
-        let unbound: bool=sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users WHERE provider_sub_hash IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM legacy_identity_issuer)")
-            .fetch_one(&self.pool).await.map_err(map_sqlx_error)?;
-        if unbound {
-            return Err(Error::validation(
-                "bind the original legacy_identity_issuer before enabling standalone authentication",
-            ));
-        }
-        Ok(())
-    }
-
     pub async fn upsert_user_by_identity(&self, attrs: &ResolveAttrs) -> Result<(Account, User)> {
         validate_resolve_attrs(attrs)?;
         let subject_hash = self.crypto.provider_sub_hash(&attrs.issuer, &attrs.sub)?;
-        let legacy_hash = self
-            .crypto
-            .provider_sub_hash(account_identity::LEGACY_PROVIDER, &attrs.sub)?;
         let email_hash = self.crypto.email_hash(&attrs.email)?;
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        let is_legacy = account_identity::is_legacy_issuer(&mut tx, &attrs.issuer).await?;
 
-        // Keep the old binary's lock for the legacy issuer during rolling upgrades.
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(if is_legacy {
-                &legacy_hash
-            } else {
-                &subject_hash
-            })
+            .bind(&subject_hash)
             .execute(&mut *tx)
             .await
             .map_err(map_sqlx_error)?;
@@ -349,20 +323,17 @@ impl AccountRepo {
         let existing = sqlx::query_as::<_, (Uuid, bool)>(sqlx::AssertSqlSafe(format!(
             "SELECT a.id, (a.is_active AND a.deleted_at IS NULL) \
              FROM accounts a WHERE a.id IN ({}) ORDER BY a.id FOR UPDATE OF a",
-            account_identity::USER_IDS
+            account_identity::USER_ID_BY_IDENTITY
         )))
         .bind(&attrs.issuer)
         .bind(&subject_hash)
-        .bind(&legacy_hash)
-        .fetch_all(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        let existing = account_identity::only_row(existing)?;
-
         let created = existing.is_none();
         let account_id = match existing {
             // ADR 0004: a soft-deleted (pending-deletion) account still holds its
-            // `provider_sub_hash` tombstone. Reject re-registration until the purge run
+            // external identity tombstone. Reject re-registration until the purge run
             // erases it — never resurrect or duplicate. After purge the tombstone is
             // gone, so the sub no longer matches and falls through to a fresh account.
             Some((_id, false)) => {
@@ -458,15 +429,11 @@ impl AccountRepo {
 
                 sqlx::query(
                     "INSERT INTO users \
-                     (id, provider_sub_hash, provider_sub_hash_key_id, provider_sub_hash_version, \
-                      email_ciphertext, email_nonce, email_enc_key_id, email_enc_version, \
+                     (id, email_ciphertext, email_nonce, email_enc_key_id, email_enc_version, \
                       email_hash, email_hash_key_id, email_hash_version, tier) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                 )
                 .bind(id)
-                .bind(is_legacy.then_some(legacy_hash.as_str()))
-                .bind(is_legacy.then_some(self.crypto.lookup_key_id()))
-                .bind(is_legacy.then_some(self.crypto.version()))
                 .bind(email.ciphertext)
                 .bind(email.nonce)
                 .bind(self.crypto.enc_key_id())
@@ -526,43 +493,32 @@ impl AccountRepo {
         sub: &str,
     ) -> Result<Option<(Account, User)>> {
         let subject_hash = self.crypto.provider_sub_hash(issuer, sub)?;
-        let legacy_hash = self
-            .crypto
-            .provider_sub_hash(account_identity::LEGACY_PROVIDER, sub)?;
-        let rows = sqlx::query_as::<_, UserCallerRow>(sqlx::AssertSqlSafe(format!(
+        let row = sqlx::query_as::<_, UserCallerRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {USER_CALLER_COLUMNS} \
              FROM accounts a \
              JOIN users u ON u.id = a.id \
              WHERE a.id IN ({})",
-            account_identity::USER_IDS
+            account_identity::USER_ID_BY_IDENTITY
         )))
         .bind(issuer)
         .bind(subject_hash)
-        .bind(legacy_hash)
-        .fetch_all(&self.pool)
+        .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
 
-        account_identity::only_row(rows)?
-            .map(|row| row.into_parts(&self.crypto))
-            .transpose()
+        row.map(|row| row.into_parts(&self.crypto)).transpose()
     }
 
     /// Resolve only the local user id for subject-equality checks. This avoids
-    /// loading and decrypting caller PII on browser refresh validation paths.
+    /// loading and decrypting caller PII.
     pub async fn find_user_id_by_identity(&self, issuer: &str, sub: &str) -> Result<Option<Uuid>> {
         let subject_hash = self.crypto.provider_sub_hash(issuer, sub)?;
-        let legacy_hash = self
-            .crypto
-            .provider_sub_hash(account_identity::LEGACY_PROVIDER, sub)?;
-        let rows = sqlx::query_scalar(sqlx::AssertSqlSafe(account_identity::USER_IDS.to_owned()))
+        sqlx::query_scalar(account_identity::USER_ID_BY_IDENTITY)
             .bind(issuer)
             .bind(subject_hash)
-            .bind(legacy_hash)
-            .fetch_all(&self.pool)
+            .fetch_optional(&self.pool)
             .await
-            .map_err(map_sqlx_error)?;
-        account_identity::only_row(rows)
+            .map_err(map_sqlx_error)
     }
 
     async fn fetch_account_row(&self, account_id: Uuid) -> Result<Option<AccountRow>> {
@@ -644,13 +600,17 @@ pub struct IdentityLink {
 }
 
 impl AccountRepo {
-    /// Import a verified migration manifest atomically. Call only from the offline operator tool.
+    /// Import a verified migration manifest atomically with API/worker processes stopped.
+    /// Retained deletion tombstones may be linked without reactivating the account.
     pub async fn import_identity_links(&self, links: &[IdentityLink]) -> Result<()> {
         if links.is_empty() || links.len() > 10_000 {
             return Err(Error::validation(
                 "identity import must contain 1 to 10000 mappings",
             ));
         }
+        crate::CryptoKeyEpochRepo::new(self.pool.clone())
+            .verify_active(&self.crypto)
+            .await?;
         let mut hashes = Vec::new();
         for link in links {
             if link.issuer.is_empty()
@@ -677,9 +637,16 @@ impl AccountRepo {
         users.sort();
         users.dedup();
         for user in users {
-            let live:Option<Uuid>=sqlx::query_scalar("SELECT id FROM accounts WHERE id=$1 AND kind='user' AND is_active=true AND deleted_at IS NULL FOR UPDATE")
-                .bind(user).fetch_optional(&mut *tx).await.map_err(map_sqlx_error)?;
-            if live.is_none() {
+            let retained: Option<Uuid> = sqlx::query_scalar(
+                "SELECT a.id FROM accounts a JOIN users u ON u.id=a.id \
+                 WHERE a.id=$1 AND a.kind='user' AND u.anonymized_at IS NULL \
+                 FOR UPDATE OF a,u",
+            )
+            .bind(user)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+            if retained.is_none() {
                 return Err(Error::validation(
                     "identity mapping references an unavailable account",
                 ));

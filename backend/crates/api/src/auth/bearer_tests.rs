@@ -240,7 +240,6 @@ fn state_with_pool(
             client_secret: None,
             allow_signup: false,
         },
-        legacy_identity_issuer: "https://auth.example.test".to_owned(),
         notegate_public_url: "http://localhost:9191".to_owned(),
 
         cli_oauth_client_id: "notegate-cli-local".to_owned(),
@@ -1024,7 +1023,7 @@ async fn command_routes_accept_cli_oauth_for_registered_users()
 }
 
 #[tokio::test]
-async fn issuer_scoped_identity_preserves_legacy_user_across_auth_channels()
+async fn issuer_scoped_identity_resolves_one_user_across_auth_channels()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -1034,11 +1033,7 @@ async fn issuer_scoped_identity_preserves_legacy_user_across_auth_channels()
         "https://api.example.test",
         db.pool.clone(),
     )?;
-    let issuer = state.config.legacy_identity_issuer.clone();
-    state
-        .accounts
-        .ensure_legacy_identity_issuer(&issuer)
-        .await?;
+    let issuer = state.config.oidc.issuer.clone();
     let attrs = ResolveAttrs {
         issuer: issuer.clone(),
         sub: "legacy-channel-user".to_owned(),
@@ -1046,10 +1041,6 @@ async fn issuer_scoped_identity_preserves_legacy_user_across_auth_channels()
         name: "Legacy Channel User".to_owned(),
     };
     let (account, _) = state.accounts.upsert_user_by_identity(&attrs).await?;
-    sqlx::query("DELETE FROM external_identities WHERE user_id = $1")
-        .bind(account.id)
-        .execute(&db.pool)
-        .await?;
     state.resolver = Arc::new(notegate_service::identity::Resolver::new(
         state.accounts.clone(),
         notegate_db::ApiKeyRepo::with_lookup_key(
@@ -1812,7 +1803,6 @@ pub(super) fn standalone_state(db: &TestDb) -> Result<AppState, Box<dyn std::err
         db.pool.clone(),
     )?;
     let mut config = (*state.config).clone();
-    config.legacy_identity_issuer.clear();
     config.oidc = notegate_core::config::OidcLoginConfig {
         issuer: "https://accounts.google.com".to_owned(),
         client_id: "notegate-web".to_owned(),

@@ -213,8 +213,7 @@ async fn dropping_browser_refresh_storage_preserves_sessions_and_owned_data()
         .fetch_one(&db.pool)
         .await?;
     assert!(!before.get("audit").unwrap().as_array().unwrap().is_empty());
-    notegate_db::run_migrations(&db.pool).await?;
-    notegate_db::check_readiness(&db.pool).await?;
+    db.apply_migration(57).await?;
     let after: serde_json::Value = sqlx::query_scalar(snapshot)
         .bind(&removed[..])
         .fetch_one(&db.pool)

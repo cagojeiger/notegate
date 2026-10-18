@@ -21,7 +21,6 @@ crypto_key_epochs
 accounts
 users
 external_identities
-legacy_identity_issuer
 agents
 api_keys
 audit_events
@@ -85,9 +84,6 @@ accounts
 ```text
 users
   id uuid pk references accounts(id) on delete cascade
-  provider_sub_hash text unique null
-  provider_sub_hash_key_id text null
-  provider_sub_hash_version int null
   email_ciphertext bytea null
   email_nonce bytea null
   email_enc_key_id text null
@@ -109,19 +105,15 @@ external_identities
   created_at timestamptz not null default now()
   primary key (issuer, subject_hash)
   index (user_id)
-
-legacy_identity_issuer
-  singleton bool pk default true check (singleton)
-  issuer text not null
 ```
 
 외부 신원은 검증된 `issuer`와 subject의 HMAC으로 찾는다. Email이 같아도 계정을 자동 연결하지 않는다.
-API startup은 설정된 `NOTEGATE_LEGACY_IDENTITY_ISSUER`를 `legacy_identity_issuer`에 한 번 고정하며,
-다른 issuer로 재설정하려 하면 실패한다. 기존 `users.provider_sub_hash`는 이 issuer에만
-호환 조회를 허용한다. Browser 재로그인 시 기존 UUID를 유지한 채 `external_identities`를
-같은 transaction에서 추가하며, 기존 issuer의 신규 계정은 구 binary와의 호환을 위해
-`users.provider_sub_hash`도 함께 기록한다. 다른 issuer의 계정에는 legacy hash를 기록하지 않는다.
-`issuer`는 두 테이블 모두 1..2048자다.
+조회와 저장은 `external_identities` 한 경로를 사용하며, 최초 로그인은 issuer-scoped hash로
+transaction lock을 잡는다. Primary key는 동일 신원의 중복 소유자를 차단한다.
+삭제 보류 계정의 연결도 retention 동안 유지하고 purge가 PII와 함께 제거한다.
+`issuer`는 1..2048자다. Migration 58은 미익명화 계정과 기존 원래 issuer의 연결을
+검증한 뒤 구형 users subject hash 3개 컬럼과 issuer binding을 제거한다.
+미연결 계정이 있으면 migration을 중단한다. 계정 ID와 소유권·이력·현재 세션은 변경하지 않는다.
 
 ```text
 agents
@@ -139,7 +131,6 @@ Actor DB 제약:
 agents.name: 1..63자이며 trim 후 빈 문자열이면 안 됨
 accounts.display_name_*: 암호화 display-name 필드는 모두 NULL이거나 모두 non-NULL
 accounts.deleted_*: deleted_at과 deleted_by_account_id는 모두 NULL이거나 모두 non-NULL
-users.provider_sub_hash_*: provider_sub hash 필드는 모두 NULL이거나 모두 non-NULL
 users.email_enc_*: email 암호화 필드는 모두 NULL이거나 모두 non-NULL
 users.email_hash_*: email lookup hash 필드는 모두 NULL이거나 모두 non-NULL
 users.tier: 'tier0' 또는 'system_max'. Application은 신규 user 생성 시 `NOTEGATE_DEFAULT_USER_TIER` 값을 명시적으로 저장한다. DB default `tier0`는 직접 SQL 삽입을 위한 fallback이다.

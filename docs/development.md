@@ -155,7 +155,6 @@ Multipart 완료에는 각 part의 `ETag`가 필요하다. `ENDPOINT`는 서버 
 `.env`에서 다음 값을 설정한다.
 
 ```text
-NOTEGATE_LEGACY_IDENTITY_ISSUER
 NOTEGATE_PUBLIC_URL
 NOTEGATE_OIDC__ISSUER
 NOTEGATE_OIDC__CLIENT_ID

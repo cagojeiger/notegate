@@ -218,9 +218,6 @@ pub struct Config {
     /// In-process durable background job consumer.
     #[serde(default)]
     pub background_jobs: BackgroundJobsConfig,
-    /// Original issuer binding for pre-OIDC account IDs; never used for bearer validation.
-    #[serde(default)]
-    pub legacy_identity_issuer: String,
     /// Upstream login provider. NoteGate always owns browser sessions and MCP/CLI grants.
     pub oidc: OidcLoginConfig,
     /// Public URL for notegate as seen by browsers/MCP clients, with trailing slash trimmed.
@@ -315,11 +312,6 @@ impl Validate for Config {
             );
         }
         validate_background_jobs(self, &mut errors);
-        if !self.legacy_identity_issuer.is_empty()
-            && validate_http_url_value(&self.legacy_identity_issuer).is_err()
-        {
-            errors.add("legacy_identity_issuer", ValidationError::new("http_url"));
-        }
         {
             let oidc = &self.oidc;
             let secure = secure_oauth_url(&oidc.issuer).is_some();
@@ -440,7 +432,6 @@ impl Config {
     }
 
     fn normalize(&mut self) {
-        self.legacy_identity_issuer = trim_trailing_slashes(&self.legacy_identity_issuer);
         self.notegate_public_url = trim_trailing_slashes(&self.notegate_public_url);
         self.oauth_redirect_url = if self.oauth_redirect_url.trim().is_empty() {
             format!("{}/auth/callback", self.notegate_public_url)
@@ -841,7 +832,6 @@ mod tests {
                 client_secret: None,
                 allow_signup: false,
             },
-            legacy_identity_issuer: "https://auth.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),
 
             cli_oauth_client_id: "notegate-cli-local".to_owned(),
@@ -926,7 +916,6 @@ mod tests {
             false,
             test_env(&[
                 ("NOTEGATE_DATABASE_URL", "postgres://env"),
-                ("NOTEGATE_LEGACY_IDENTITY_ISSUER", "https://auth.env"),
                 ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
                 ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
                 (
@@ -954,7 +943,6 @@ mod tests {
             false,
             test_env(&[
                 ("NOTEGATE_DATABASE_URL", "postgres://env"),
-                ("NOTEGATE_LEGACY_IDENTITY_ISSUER", "https://auth.env"),
                 ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
                 ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
                 (
@@ -1037,7 +1025,6 @@ mod tests {
             false,
             test_env(&[
                 ("NOTEGATE_DATABASE_URL", "postgres://env"),
-                ("NOTEGATE_LEGACY_IDENTITY_ISSUER", "https://auth.env"),
                 ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
                 ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
                 (
@@ -1130,7 +1117,6 @@ mod tests {
             false,
             test_env(&[
                 ("NOTEGATE_DATABASE_URL", "postgres://env"),
-                ("NOTEGATE_LEGACY_IDENTITY_ISSUER", "https://auth.env"),
                 ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
                 ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
                 (
@@ -1345,7 +1331,7 @@ mod tests {
     #[test]
     fn validation_errors_do_not_echo_values() -> crate::Result<()> {
         let mut config = valid_config();
-        config.legacy_identity_issuer = "not a url with secret-token".to_owned();
+        config.notegate_public_url = "not a url with secret-token".to_owned();
 
         let err = match config.validate().map_err(super::map_validation_error) {
             Ok(()) => {
@@ -1356,7 +1342,7 @@ mod tests {
             Err(err) => err,
         };
         let msg = err.to_string();
-        assert!(msg.contains("legacy_identity_issuer:http_url"));
+        assert!(msg.contains("notegate_public_url:http_url"));
         assert!(!msg.contains("secret-token"));
         Ok(())
     }
@@ -1368,6 +1354,10 @@ mod tests {
             ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "old-mcp"),
             ("NOTEGATE_JWKS_CACHE_TTL_SECS", "300"),
             ("NOTEGATE_BROWSER_SESSION_TTL_SECS", "3600"),
+            (
+                "NOTEGATE_LEGACY_IDENTITY_ISSUER",
+                "https://auth.example.test",
+            ),
         ] {
             let env = test_env(&[
                 ("NOTEGATE_DATABASE_URL", "postgres://env"),
@@ -1392,17 +1382,13 @@ mod tests {
     fn standalone_config_can_use_authgate_without_legacy_bearer_settings() {
         let mut config = valid_config();
         config.oidc = super::OidcLoginConfig {
-            issuer: config.legacy_identity_issuer.clone(),
+            issuer: "https://auth.test".to_owned(),
             client_id: "notegate-web".to_owned(),
             client_secret: None,
             allow_signup: false,
         };
-        config.legacy_identity_issuer.clear();
         config.normalize();
         assert!(config.validate().is_ok());
-        config.legacy_identity_issuer = "invalid legacy issuer".to_owned();
-        assert!(config.validate().is_err());
-        config.legacy_identity_issuer.clear();
         for bad in [
             "http://public.example.test",
             "https://user:password@example.test",
@@ -1417,7 +1403,7 @@ mod tests {
     fn standalone_authorization_server_requires_secure_origin_and_own_callback() {
         let mut config = valid_config();
         config.oidc = super::OidcLoginConfig {
-            issuer: config.legacy_identity_issuer.clone(),
+            issuer: "https://auth.test".to_owned(),
             client_id: "notegate-web".to_owned(),
             client_secret: None,
             allow_signup: false,

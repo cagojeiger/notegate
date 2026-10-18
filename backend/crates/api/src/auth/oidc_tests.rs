@@ -544,7 +544,6 @@ fn config(issuer: &str) -> notegate_core::Config {
             client_secret: None,
             allow_signup: false,
         },
-        legacy_identity_issuer: issuer.to_owned(),
         notegate_public_url: "http://localhost:9191".to_owned(),
 
         cli_oauth_client_id: "notegate-cli-local".to_owned(),
@@ -647,10 +646,6 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
     state.config = Arc::new(config);
     state.oidc = Arc::new(OidcProvider::new(&state.config, state.http.clone()));
     // This simulates AuthGate remaining the same standards-based upstream provider.
-    state
-        .accounts
-        .ensure_legacy_identity_issuer(&mock.issuer)
-        .await?;
     let owner = state
         .accounts
         .upsert_user_by_identity(&crate::identity::ResolveAttrs {
@@ -662,11 +657,6 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
         .await?
         .0
         .id;
-    // Simulate a pre-OIDC account: only the original subject hash is present.
-    sqlx::query("DELETE FROM external_identities WHERE user_id=$1")
-        .bind(owner)
-        .execute(&db.pool)
-        .await?;
     sqlx::query("INSERT INTO audit_events (owner_user_id, actor_account_id, source, op_type, resource_type, resource_id) VALUES ($1, $1, 'rest', 'test.before_oidc', 'account', $1)")
         .bind(owner).execute(&db.pool).await?;
     let router = Router::new()
