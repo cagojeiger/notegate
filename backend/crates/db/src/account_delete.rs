@@ -17,8 +17,8 @@ use uuid::Uuid;
 /// Soft-delete a user account (ADR 0004). Mark it deleted and tear down owned
 /// agents, keys, and access, but do not delete spaces. If the user still owns
 /// any live space, reject so the caller must delete those spaces first. KEEP
-/// `provider_sub_hash` and PII as a
-/// tombstone. The purge run anonymizes PII and frees the sub-hash once the
+/// external identities and PII as tombstones. The purge run anonymizes PII
+/// and removes identities once the
 /// retention window elapses; re-login during the window is rejected by
 /// `upsert_user_by_identity`, so a returning sub never duplicates the account.
 pub(crate) async fn soft_delete_user(
@@ -127,7 +127,7 @@ pub(crate) async fn soft_delete_user(
     .await
     .map_err(map_sqlx_error)?;
 
-    // Soft-delete only: keep display_name and the users-row PII/`provider_sub_hash`
+    // Soft-delete only: keep display_name and the users-row PII/external identity tombstones
     // as a tombstone. The purge run anonymizes PII and frees the sub-hash later.
     sqlx::query(
         "UPDATE accounts \

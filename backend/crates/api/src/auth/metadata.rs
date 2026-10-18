@@ -152,7 +152,6 @@ mod tests {
                 client_secret: None,
                 allow_signup: false,
             },
-            legacy_identity_issuer: "https://auth.example.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),
 
             cli_oauth_client_id: "notegate-cli-local".to_owned(),

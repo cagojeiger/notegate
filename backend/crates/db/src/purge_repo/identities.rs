@@ -18,7 +18,7 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     // ADR 0004: anonymize soft-deleted accounts whose retention window has elapsed.
-    // Wipe PII and free the `provider_sub_hash` tombstone, but KEEP the (now
+    // Wipe PII and remove external identity tombstones, but KEEP the (now
     // identifier-less) account/user rows for attribution. Freeing the tombstone lets
     // the same OAuth sub register fresh on a later login.
     let accounts_anonymized: i64 = sqlx::query(
@@ -42,8 +42,7 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
              RETURNING i.user_id \
          ), anon_users AS ( \
              UPDATE users SET \
-                 provider_sub_hash = NULL, provider_sub_hash_key_id = NULL, \
-                 provider_sub_hash_version = NULL, email_ciphertext = NULL, \
+                 email_ciphertext = NULL, \
                  email_nonce = NULL, email_enc_key_id = NULL, email_enc_version = NULL, \
                  email_hash = NULL, email_hash_key_id = NULL, email_hash_version = NULL, \
                  anonymized_at = now() \
