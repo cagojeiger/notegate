@@ -87,10 +87,10 @@ Auth endpoint는 IP별 10 req/s, burst 30 제한을 공유하며 기존 전체 i
 
 0058 migration은 모든 미익명화 계정의 external identity 연결을 요구한다. 삭제 보류 계정도 포함하며, 기존 subject hash가 남아 있으면 원래 issuer의 연결이 있어야 한다. 미연결 계정이 하나라도 있으면 schema 변경 전에 실패한다. subject hash로 원문 subject를 복원할 수 없으므로 정상 OIDC 로그인 또는 검증된 operator 매핑으로 먼저 연결한다. 이메일로 추정 연결하지 않는다.
 
-미연결 삭제 보류 계정은 로그인할 수 없으므로 새 버전의 `import_identities` operator를 migration 전에 사용한다. API와 worker 프로세스를 모두 중지한 상태에서 검증된 manifest를 가져온다. 이 도구는 schema migration을 실행하지 않으며 활성 계정과 삭제 보류 계정의 신원만 연결한다. 삭제 상태·PII·소유권은 변경하지 않고, 이미 익명화한 계정은 거부한다. 같은 연결을 다시 가져오면 추가 Audit 없이 성공한다.
+미연결 삭제 보류 계정은 로그인할 수 없으므로 새 버전의 `import_identities` operator를 migration 전에 사용한다. 복구 가능한 백업을 확인하고 API와 worker 프로세스를 모두 중지한다. Operator도 새 `Config::load()`를 사용하므로 import 실행 전에 환경 변수와 `.env` 등 설정 파일에서 `NOTEGATE_LEGACY_IDENTITY_ISSUER`/`legacy_identity_issuer`를 제거한다. 신 API의 배포 설정에서도 제거한다. 그다음 검증된 manifest를 가져온다. 이 도구는 schema migration을 실행하지 않으며 활성 계정과 삭제 보류 계정의 신원만 연결한다. 삭제 상태·PII·소유권은 변경하지 않고, 이미 익명화한 계정은 거부한다. 같은 연결을 다시 가져오면 추가 Audit 없이 성공한다.
 
 Import는 저장 전에 현재 ENC/LOOKUP 키 epoch의 ID·상태·version·verify tag를 검증한다. 같은 키 ID에 잘못된 secret을 지정하거나 epoch가 없으면 신원과 Audit을 쓰지 않고 실패하며, 새 epoch를 만들거나 교체하지 않는다.
 
-연결을 확인한 뒤 users의 구형 subject hash 3개 컬럼과 issuer binding 테이블을 제거한다. `NOTEGATE_LEGACY_IDENTITY_ISSUER`도 배포 환경에서 제거한다. 구 API는 이 테이블·컬럼을 조회하므로 0057과 같은 백업·점검 중단 순서를 따르고, 구 프로세스가 남아 있는 동안 migration을 실행하지 않는다. 계정 ID·PII·문서·이력·현재 세션·OAuth grant는 보존한다. 이전 이미지 단독 rollback은 지원하지 않는다.
+연결을 확인한 뒤 신 API의 startup migration으로 users의 구형 subject hash 3개 컬럼과 issuer binding 테이블을 제거한다. 구 API는 이 테이블·컬럼을 조회하므로 구 프로세스가 남아 있는 동안 migration을 실행하지 않는다. 계정 ID·PII·문서·이력·현재 세션·OAuth grant는 보존한다. 이전 이미지 단독 rollback은 지원하지 않는다.
 
 OIDC discovery cache는 1시간이며 콜백의 서명 키 갱신은 authorization code를 재교환하지 않는다. 로그인 시 ID token의 issuer·audience·서명·nonce·최근 auth_time과 userinfo subject를 검증한다.
