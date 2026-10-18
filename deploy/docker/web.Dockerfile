@@ -79,7 +79,7 @@ RUN --mount=type=cache,id=notegate-cargo-registry,target=/usr/local/cargo/regist
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY backend ./backend
 COPY frontend/web/src/design/theme.css ./frontend/web/src/design/theme.css
-COPY frontend/web/public/brand/source/monochrome-icon.svg ./frontend/web/public/brand/source/monochrome-icon.svg
+COPY frontend/web/public/brand/svg/logo-horizontal-light.svg frontend/web/public/brand/svg/logo-horizontal-dark.svg ./frontend/web/public/brand/svg/
 RUN --mount=type=cache,id=notegate-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=notegate-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=notegate-sccache,target=/sccache,sharing=locked \

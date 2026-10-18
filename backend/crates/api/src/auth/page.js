@@ -7,7 +7,11 @@
     : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   document.addEventListener("DOMContentLoaded", () => {
     const toggle = document.getElementById("auth-theme");
-    const label = () => { toggle.textContent = `Use ${root.dataset.theme === "dark" ? "light" : "dark"} theme`; };
+    const label = () => {
+      const next = root.dataset.theme === "dark" ? "light" : "dark";
+      toggle.textContent = next === "dark" ? "Dark" : "Light";
+      toggle.setAttribute("aria-label", `Use ${next} theme`);
+    };
     toggle.hidden = false;
     label();
     toggle.addEventListener("click", () => {

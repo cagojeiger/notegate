@@ -11,8 +11,10 @@ const STYLES: &str = concat!(
     include_str!("page.css")
 );
 const SCRIPT: &str = include_str!("page.js");
-const SYMBOL: &str =
-    include_str!("../../../../../frontend/web/public/brand/source/monochrome-icon.svg");
+const BRAND_LIGHT: &str =
+    include_str!("../../../../../frontend/web/public/brand/svg/logo-horizontal-light.svg");
+const BRAND_DARK: &str =
+    include_str!("../../../../../frontend/web/public/brand/svg/logo-horizontal-dark.svg");
 
 // Public static assets do not consume the separate login/authorization rate limit.
 pub fn assets() -> Router<AppState> {
@@ -83,14 +85,14 @@ pub(super) fn browser_page(
 
 fn document(title: &str, body: &str) -> String {
     let title = escape_html(title);
-    let symbol = SYMBOL.replace("#000000", "currentColor");
+
     format!(
         r#"<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{title} · NoteGate</title><link rel="stylesheet" href="/auth/ui.css">
 <script src="/auth/ui.js"></script></head><body>
 <div class="auth-shell"><header class="auth-header">
-<a class="auth-brand" href="/" aria-label="NoteGate home"><span aria-hidden="true">{symbol}</span>NoteGate</a>
+<a class="auth-brand" href="/" aria-label="NoteGate home"><span class="auth-brand-light" aria-hidden="true">{BRAND_LIGHT}</span><span class="auth-brand-dark" aria-hidden="true">{BRAND_DARK}</span></a>
 <button id="auth-theme" type="button" hidden>Change theme</button></header>
 <main class="auth-card" aria-labelledby="page-title"><h1 id="page-title">{title}</h1>{body}</main>
 <footer class="auth-footer"><a href="/">Back to NoteGate</a></footer></div></body></html>"#
