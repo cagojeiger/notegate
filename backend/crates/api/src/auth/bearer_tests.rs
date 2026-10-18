@@ -1099,7 +1099,7 @@ async fn issuer_scoped_identity_preserves_legacy_user_across_auth_channels()
         .await?;
     assert!(matches!(
         verify_bearer_mcp(&state, &mcp_token).await,
-        Err(AuthError::Inactive)
+        Err(AuthError::InvalidToken)
     ));
     db.cleanup().await;
     Ok(())

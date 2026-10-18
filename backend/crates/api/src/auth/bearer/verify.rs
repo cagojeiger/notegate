@@ -32,6 +32,10 @@ async fn verify_local(
     scope: &str,
     channel: notegate_model::Channel,
 ) -> Result<Caller, AuthError> {
+    // Agent keys and browser cookies belong to separate credential families.
+    if token.starts_with("ngk_") || token.starts_with("ngs_") {
+        return Err(AuthError::InvalidToken);
+    }
     let user = state
         .oauth
         .access_user(token, resource, scope, chrono::Utc::now())

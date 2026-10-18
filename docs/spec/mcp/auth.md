@@ -13,7 +13,7 @@ MCP는 bearer 인증만 사용한다. Endpoint별 credential과 caller mapping�
 missing/malformed token         -> 401
 invalid token                   -> 401
 valid local grant, no user   -> 403 not_registered
-inactive OAuth account -> 403 inactive_account
+inactive OAuth account         -> 401 invalid_token
 inactive API key account        -> 401 invalid_token
 ```
 
