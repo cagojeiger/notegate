@@ -131,6 +131,64 @@ async fn unlinked_active_and_pending_deleted_accounts_block_identity_migration()
 }
 
 #[tokio::test]
+async fn wrong_import_secrets_preserve_legacy_identity_and_block_migration() -> TestResult {
+    let Some(db) = TestDb::setup_before(58).await? else {
+        return Ok(());
+    };
+    let owner = legacy_user(&db.pool, "verified-subject").await?;
+    bind_original_issuer(&db.pool).await?;
+    let snapshot = "SELECT jsonb_build_object( \
+        'accounts',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM accounts t), \
+        'users',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM users t), \
+        'identities',(SELECT jsonb_agg(to_jsonb(t) ORDER BY issuer,subject_hash) FROM external_identities t), \
+        'epochs',(SELECT jsonb_agg(to_jsonb(t) ORDER BY key_id) FROM crypto_key_epochs t), \
+        'audit',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM audit_events t))";
+    let before: serde_json::Value = sqlx::query_scalar(snapshot).fetch_one(&db.pool).await?;
+    for wrong_lookup in [true, false] {
+        let crypto = PiiCrypto::from_root_secrets(
+            "test-enc",
+            &secrecy::SecretString::from(
+                if wrong_lookup {
+                    "notegate-test-enc-root-secret-32-bytes"
+                } else {
+                    "incorrect-enc-root-secret-32-bytes-long"
+                }
+                .to_owned(),
+            ),
+            "test-lookup",
+            &secrecy::SecretString::from(
+                if wrong_lookup {
+                    "incorrect-lookup-root-secret-32-bytes-long"
+                } else {
+                    "notegate-test-lookup-root-secret-32-bytes"
+                }
+                .to_owned(),
+            ),
+        )?;
+        let err = AccountRepo::with_crypto(db.pool.clone(), crypto)
+            .import_identity_links(&[link(owner, ISSUER, "verified-subject")])
+            .await
+            .err()
+            .ok_or("incorrect secret must reject the import")?;
+        assert!(err.to_string().contains("does not match configured secret"));
+        let after: serde_json::Value = sqlx::query_scalar(snapshot).fetch_one(&db.pool).await?;
+        assert_eq!(after, before);
+        assert!(db.apply_migration(58).await.is_err());
+    }
+    let repo = AccountRepo::new(db.pool.clone());
+    repo.import_identity_links(&[link(owner, ISSUER, "verified-subject")])
+        .await?;
+    db.apply_migration(58).await?;
+    assert_eq!(
+        repo.find_user_id_by_identity(ISSUER, "verified-subject")
+            .await?,
+        Some(owner)
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_different_issuer_link_cannot_replace_the_original_identity() -> TestResult {
     let Some(db) = TestDb::setup_before(58).await? else {
         return Ok(());

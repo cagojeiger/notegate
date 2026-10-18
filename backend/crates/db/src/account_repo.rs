@@ -608,6 +608,9 @@ impl AccountRepo {
                 "identity import must contain 1 to 10000 mappings",
             ));
         }
+        crate::CryptoKeyEpochRepo::new(self.pool.clone())
+            .verify_active(&self.crypto)
+            .await?;
         let mut hashes = Vec::new();
         for link in links {
             if link.issuer.is_empty()
