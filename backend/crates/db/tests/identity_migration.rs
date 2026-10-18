@@ -131,6 +131,41 @@ async fn unlinked_active_and_pending_deleted_accounts_block_identity_migration()
 }
 
 #[tokio::test]
+async fn unbound_legacy_issuer_requires_the_staged_upgrade_before_identity_migration() -> TestResult
+{
+    let Some(db) = TestDb::setup_before(55).await? else {
+        return Ok(());
+    };
+    let owner = legacy_user(&db.pool, "staged-subject").await?;
+    for version in 55..=57 {
+        db.apply_migration(version).await?;
+    }
+    let repo = AccountRepo::new(db.pool.clone());
+    repo.import_identity_links(&[link(owner, ISSUER, "staged-subject")])
+        .await?;
+    assert!(db.apply_migration(58).await.is_err());
+    let retained_hash: String =
+        sqlx::query_scalar("SELECT provider_sub_hash FROM users WHERE id=$1")
+            .bind(owner)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(
+        retained_hash,
+        PiiCrypto::test().provider_sub_hash("authgate", "staged-subject")?
+    );
+    // v0.1.111 startup records this verified, immutable binding before the final upgrade.
+    bind_original_issuer(&db.pool).await?;
+    db.apply_migration(58).await?;
+    assert_eq!(
+        repo.find_user_id_by_identity(ISSUER, "staged-subject")
+            .await?,
+        Some(owner)
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn wrong_import_secrets_preserve_legacy_identity_and_block_migration() -> TestResult {
     let Some(db) = TestDb::setup_before(58).await? else {
         return Ok(());

@@ -87,6 +87,8 @@ Auth endpoint는 IP별 10 req/s, burst 30 제한을 공유하며 기존 전체 i
 
 0058 migration은 모든 미익명화 계정의 external identity 연결을 요구한다. 삭제 보류 계정도 포함하며, 기존 subject hash가 남아 있으면 원래 issuer의 연결이 있어야 한다. 미연결 계정이 하나라도 있으면 schema 변경 전에 실패한다. subject hash로 원문 subject를 복원할 수 없으므로 정상 OIDC 로그인 또는 검증된 operator 매핑으로 먼저 연결한다. 이메일로 추정 연결하지 않는다.
 
+기존 계정이 있는 DB의 지원 업그레이드 경로는 v0.1.111의 schema 57을 거친다. Schema 54 이하에서 바로 migration 58로 진행하지 않는다. 먼저 백업·점검 중단 방식으로 v0.1.111을 시작하며, 이 중간 단계에서는 검증된 원래 issuer를 `NOTEGATE_LEGACY_IDENTITY_ISSUER`로 제공한다. v0.1.111이 migration 55~57을 적용하고 immutable issuer binding을 기록한 뒤 schema 57과 바인딩 값을 확인한다. 그다음 아래 신원 import와 최종 업그레이드 절차를 따른다. 이미 schema 55~57이지만 바인딩이 없는 DB도 v0.1.111의 같은 준비 단계를 먼저 수행한다. 바인딩이 없으면 migration 58은 기존 hash를 제거하지 않고 중단한다.
+
 미연결 삭제 보류 계정은 로그인할 수 없으므로 새 버전의 `import_identities` operator를 migration 전에 사용한다. 복구 가능한 백업을 확인하고 API와 worker 프로세스를 모두 중지한다. Operator도 새 `Config::load()`를 사용하므로 import 실행 전에 환경 변수와 `.env` 등 설정 파일에서 `NOTEGATE_LEGACY_IDENTITY_ISSUER`/`legacy_identity_issuer`를 제거한다. 신 API의 배포 설정에서도 제거한다. 그다음 검증된 manifest를 가져온다. 이 도구는 schema migration을 실행하지 않으며 활성 계정과 삭제 보류 계정의 신원만 연결한다. 삭제 상태·PII·소유권은 변경하지 않고, 이미 익명화한 계정은 거부한다. 같은 연결을 다시 가져오면 추가 Audit 없이 성공한다.
 
 Import는 저장 전에 현재 ENC/LOOKUP 키 epoch의 ID·상태·version·verify tag를 검증한다. 같은 키 ID에 잘못된 secret을 지정하거나 epoch가 없으면 신원과 Audit을 쓰지 않고 실패하며, 새 epoch를 만들거나 교체하지 않는다.
