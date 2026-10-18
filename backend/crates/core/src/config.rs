@@ -474,8 +474,6 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
         .map_err(map_config_error)?
         .set_default("read_db_max_connections", DEFAULT_DB_MAX_CONNECTIONS)
         .map_err(map_config_error)?
-        .map_err(map_config_error)?
-        .map_err(map_config_error)?
         .set_default(
             "browser_session_max_ttl_secs",
             DEFAULT_BROWSER_SESSION_MAX_TTL_SECS,
