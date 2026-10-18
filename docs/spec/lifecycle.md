@@ -78,7 +78,7 @@ space_agent_connections disconnect
 User caller만 space를 생성한다.
 
 ```text
-spaces(owner_user_id=user, sort_order=0)
+spaces(owner_user_id=user) → owner 목록 끝에 추가
 root node '/'
 space_usage(live_node_count=1, live_text_bytes=0, live_file_bytes=0)
 ```
@@ -227,7 +227,6 @@ OIDC authorization code + S256 PKCE 로그인에서 확인한 계정에 NoteGate
 
 ```text
 browser_sessions.user_id=existing local user_id
-browser_sessions.local_session=true
 browser_sessions.oidc_issuer=verified upstream issuer
 browser_sessions.token_hash=HMAC(session token)
 browser_sessions.validated_until=min(now()+24h, expires_at)

@@ -6,11 +6,9 @@
 //! keys are persisted by `ApiKeyRepo`, not this aggregate repository.
 
 use crate::audit_events::{self, AuditContext};
-use crate::{active_account_predicate, map_sqlx_error, tier_lookup};
-use chrono::{DateTime, Utc};
+use crate::{map_sqlx_error, tier_lookup};
 use notegate_core::{Error, Result, limits};
 use notegate_model::CreateAgent;
-use notegate_model::account::{Account, AccountKind};
 use notegate_model::agent::Agent;
 
 use sqlx::{FromRow, PgPool, Row as _};
@@ -24,35 +22,6 @@ pub struct AgentRepo {
 impl AgentRepo {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
-    }
-}
-
-/// A row from `accounts`. Agent display names are derived from `agents.name`.
-#[derive(Debug, FromRow)]
-struct AccountRow {
-    id: Uuid,
-    kind: String,
-    is_active: bool,
-    deleted_at: Option<DateTime<Utc>>,
-    deleted_by: Option<Uuid>,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-}
-
-impl AccountRow {
-    fn into_agent_account(self, display_name: String) -> Result<Account> {
-        let kind = AccountKind::parse(&self.kind)
-            .ok_or_else(|| Error::internal(format!("unknown account kind: {}", self.kind)))?;
-        Ok(Account {
-            id: self.id,
-            kind,
-            display_name,
-            is_active: self.is_active,
-            deleted_at: self.deleted_at,
-            deleted_by: self.deleted_by,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
-        })
     }
 }
 
@@ -74,8 +43,6 @@ impl From<AgentRow> for Agent {
     }
 }
 
-const ACCOUNT_COLUMNS: &str =
-    "id, kind, is_active, deleted_at, deleted_by_account_id AS deleted_by, created_at, updated_at";
 const AGENT_COLUMNS: &str = "id, name, owner_user_id";
 impl AgentRepo {
     /// Soft-deactivate an agent account and revoke its non-revoked keys and
@@ -262,41 +229,4 @@ fn validate_agent_name(name: &str) -> Result<()> {
         )));
     }
     Ok(())
-}
-
-impl AgentRepo {
-    pub async fn find_active_agent_by_id(
-        &self,
-        agent_id: Uuid,
-    ) -> Result<Option<(Account, Agent)>> {
-        let account_row = sqlx::query_as::<_, AccountRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT {ACCOUNT_COLUMNS} FROM accounts \
-             WHERE id = $1 AND kind = 'agent' AND {}",
-            active_account_predicate("")
-        )))
-        .bind(agent_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        let Some(account_row) = account_row else {
-            return Ok(None);
-        };
-
-        let agent_row = sqlx::query_as::<_, AgentRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT {AGENT_COLUMNS} FROM agents WHERE id = $1"
-        )))
-        .bind(agent_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        let Some(agent_row) = agent_row else {
-            return Ok(None);
-        };
-
-        let agent = Agent::from(agent_row);
-        let account = account_row.into_agent_account(agent.name.clone())?;
-        Ok(Some((account, agent)))
-    }
 }

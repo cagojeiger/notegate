@@ -47,14 +47,14 @@ pub async fn callback(
 pub(super) async fn complete_login(
     state: &AppState,
     jar: CookieJar,
-    login_userinfo: super::oauth_exchange::LoginUserInfo,
+    userinfo: super::oauth_exchange::UserInfo,
     next: Option<String>,
 ) -> Response {
     let attrs = ResolveAttrs {
         issuer: state.oidc.issuer().to_owned(),
-        sub: login_userinfo.userinfo.sub,
-        email: login_userinfo.userinfo.email.unwrap_or_default(),
-        name: login_userinfo.userinfo.name.unwrap_or_default(),
+        sub: userinfo.sub,
+        email: userinfo.email.unwrap_or_default(),
+        name: userinfo.name.unwrap_or_default(),
     };
     {
         let oidc = &state.config.oidc;

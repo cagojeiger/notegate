@@ -66,7 +66,7 @@ async fn bulk_metadata_flush_is_monotonic_and_idempotent() -> Result<(), Box<dyn
     let session_secret = "metadata-write-session-secret";
     let token_hash = crypto.browser_session_hash(&session_id.to_string(), session_secret)?;
     BrowserSessionRepo::new(db.pool.clone())
-        .insert_local_session(
+        .insert_session(
             InsertBrowserSession {
                 session_id,
                 user_id,

@@ -294,38 +294,6 @@ impl FilesService {
         Ok(crate::files::FileView { node, file })
     }
 
-    pub async fn record_detected_file_media_type(
-        &self,
-        caller_account_id: Uuid,
-        space_id: Uuid,
-        node_id: Uuid,
-        detected_media_type: &str,
-    ) -> ServiceResult<()> {
-        self.authorize(space_id, caller_account_id, FileCommand::Read)
-            .await?;
-        self.store
-            .set_detected_file_media_type(space_id, node_id, detected_media_type)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn record_detected_file_media_types(
-        &self,
-        caller_account_id: Uuid,
-        space_id: Uuid,
-        detected_media_types: &[(Uuid, String)],
-    ) -> ServiceResult<()> {
-        if detected_media_types.is_empty() {
-            return Ok(());
-        }
-        self.authorize(space_id, caller_account_id, FileCommand::Read)
-            .await?;
-        self.store
-            .set_detected_file_media_types(space_id, detected_media_types)
-            .await?;
-        Ok(())
-    }
-
     /// Replace a text's content (`write`/`save`). Requires write permission.
     ///
     /// [`WriteTarget::Existing`] replaces an existing text (the `create=false`

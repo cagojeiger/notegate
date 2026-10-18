@@ -78,75 +78,19 @@ machine JSON surface used by `notegate-cli`.
 
 ### CI HTTP concurrency smoke
 
-The Browser E2E job runs `deploy/ci/api-load-smoke.mjs` against its disposable
-localhost app and PostgreSQL using the existing Node runtime and seeded identity.
-It exercises sequential reads and 10-reader baselines, then 100 virtual workers
-reading and performing an 80/20 read/write mix (20 requests per worker in each
-100-worker scenario), and 10 writes racing with the same expected hash. It verifies
-final content, exactly one winning write, and one invocation record per completed request with
-Changes linked only to committed writes. Generated documents share one owner/Space.
-Baseline workers pause 100ms after each response; 100-worker scenarios pause 1s
-and distribute writes across workers. No request retries mask failures.
+Browser E2E의 [api-load-smoke.mjs](../../deploy/ci/api-load-smoke.mjs)는 격리된 app/PostgreSQL에서 동시 읽기·쓰기와 동일 hash 경쟁을 검증한다. 문서 최종 상태, 하나의 winning write, 완료 요청별 invocation, committed write만의 Changes 연결을 확인한다. 요청 오류나 내용·이력 불일치는 CI를 실패시킨다. Workload와 latency budget은 script가 소유한다.
 
-The job summary reports p50/p95/p99, paced throughput, duration, client peak
-in-flight requests, attempted/planned counts, request errors and HTTP 429 counts.
-It also separates GET/PUT tails, maxima and requests over one second, matches each
-request to the handler duration in invocation history, and measures existing
-execution/history/completion and pool-acquisition histogram deltas. HTTP time
-minus handler time includes authentication, history persistence, transport and
-client scheduling; it does not isolate history persistence. Pool observations
-include all queries and background work, not one sample per HTTP request.
-The job enables existing metrics and samples PostgreSQL waits every 200ms without
-exporting SQL, credentials or document contents. Request measurements, histogram
-snapshots and sampled waits are retained for seven days in `api-load-diagnostics`,
-including successful runs. Short waits may fall between samples.
-Expected 409 conflicts are excluded from request
-errors; content/history assertions remain separate correctness gates. Failed workers
-stop without retry. Measurements use a closed-loop workload (each worker waits for
-its response and pauses before sending again), so they do not measure maximum RPS.
-Unexpected results, missing/duplicate history, HTTP requests exceeding 10 seconds,
-or scenario p95 at/above 2 seconds fail CI; the step is bounded to 2 minutes.
-The loose latency budget catches large slowdowns. Smaller timing differences are
-diagnostic: the generator, app and database share a runner, and all virtual workers
-use one account/Space/key. This debug-build test does not establish production
-capacity, multi-user isolation, or support for 100 independent users.
+Job summary와 `api-load-diagnostics` artifact에서 latency, paced throughput, 실제 in-flight, handler/history/completion 및 pool 관측을 확인한다. SQL·credential·본문은 기록하지 않는다. HTTP 시간과 handler 시간의 차이는 인증·기록·전송·client scheduling을 함께 포함하며 history 비용만을 뜻하지 않는다. Pool 관측에도 background query가 포함되고 짧은 DB wait는 sampling에서 누락될 수 있다.
+
+동일 runner의 debug app/DB와 하나의 account를 사용하는 closed-loop 부하다. 최대 RPS, 독립 사용자 수용량 또는 운영 성능의 증거로 사용하지 않는다.
 
 ### Authenticated browser baseline
 
-`Browser Performance` runs on frontend/backend/Cargo PR changes and manual dispatch. It serves
-the production frontend from the release Rust API, with disposable PostgreSQL and
-MinIO on the GitHub runner. A locally seeded browser session bypasses OAuth login;
-there are no mocked API responses or production credentials. The server runs in
-the default `all` mode, including background work, without induced background load.
+`Browser Performance`는 격리된 PostgreSQL/MinIO와 release API가 제공하는 production frontend를 사용한다. Seed한 browser session으로 OIDC 로그인은 우회하며 API 응답을 mock하지 않는다. 여정·fixture·반복 횟수는 [workbench.spec.ts](../../frontend/web/performance/workbench.spec.ts)가 소유한다.
 
-`frontend/web/performance/workbench.spec.ts` repeats the workbench journey three
-times in fresh 1440×900 Chromium contexts against one warm server/database:
-workspace loading, Files and nested Recent navigation, editor/save, revision diff,
-History tabs/pagination, and trash listing/pagination/details. The fixture has 120
-root documents, three nested folders, an approximately 87KB Markdown document
-(about 600 lines, within the diff's 1,500 combined-line limit),
-55 deleted documents and 55 real API invocations. MCP/CLI/Jobs exercise empty states;
-Changes/API exercise populated histories. Each round adds a saved revision, so the
-database is bounded but not reset between rounds.
+Job summary와 `browser-performance` artifact는 ready time, API 요청, 전송량과 long task를 기록한다. Timing에는 Playwright와 animation-frame 대기가 포함되므로 INP나 정확한 paint 시각이 아니다. Route는 query/ID/header/body를 제외해 기록하고 credential을 담는 raw trace는 수집하지 않는다. 예상하지 않은 HTTP/browser 오류와 잘못 저장된 내용은 실패시킨다.
 
-The job summary and seven-day `browser-performance` artifact retain every sample,
-median/max ready time, counts over one second, API request counts/durations,
-completed resource transfer sizes, and browser long tasks. Timing includes
-Playwright action/assertion overhead followed by two animation frames; it is a
-repeatable lab journey measurement, **not INP or an exact paint timestamp**.
-Requests are attributed to the journey during which they start, including polling;
-resource bytes include completed resources, lazy JavaScript and cache behavior.
-Individual normalized API routes are retained without query strings, identifiers,
-headers or bodies. Raw traces are disabled because they contain session credentials.
-
-Unexpected HTTP/browser errors, missing identities, wrong rendered results and
-incorrect persisted content fail the job; retries are disabled. Timing is initially
-diagnostic, not a merge latency gate. Three samples do not justify p95/p99 or a
-1,000-user capacity claim. Backend request durations here include transport and
-client scheduling, not isolated database time. Mobile hardware, production network,
-OAuth login, search, uploads/downloads, populated MCP/CLI histories, contention
-and background-job saturation require separate measurements. Existing functional
-Browser E2E, HTTP concurrency smoke and Lighthouse checks remain independent.
+이 baseline의 시간은 진단값이다. 적은 반복으로 p95/p99나 운영 수용량을 추정하지 않으며, OAuth 전체 로그인·운영 네트워크·다중 사용자 경합·background 포화는 별도 검증이 필요하다. 기능 E2E, HTTP concurrency smoke와 Lighthouse는 독립 검사다.
 
 ## Resource utilization metrics
 

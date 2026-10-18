@@ -77,6 +77,41 @@ pub async fn insert_legacy_user_account(pool: &PgPool) -> Result<Uuid, sqlx::Err
     Ok(account)
 }
 
+/// Seed the schema 57–59 session writer shape for migration tests.
+#[allow(dead_code)]
+pub async fn insert_pre_marker_removal_session(
+    pool: &PgPool,
+    args: notegate_db::browser_session_repo::InsertBrowserSession<'_>,
+    issuer: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO browser_sessions \
+         (id,user_id,token_prefix,token_hash,hash_key_id,hash_version,validated_until,expires_at,local_session,oidc_issuer) \
+         VALUES ($1,$2,$3,$4,'test-lookup',1,$5,$6,$7,$8)",
+    )
+    .bind(args.session_id)
+    .bind(args.user_id)
+    .bind(args.token_prefix)
+    .bind(args.token_hash)
+    .bind(args.validated_until)
+    .bind(args.expires_at)
+    .bind(issuer.is_some())
+    .bind(issuer)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO audit_events \
+         (owner_user_id,actor_account_id,source,op_type,resource_type,resource_id,metadata) \
+         VALUES ($1,$1,'rest','session.login','browser_session',$2,'{}'::jsonb)",
+    )
+    .bind(args.user_id)
+    .bind(args.session_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await
+}
+
 #[allow(dead_code)]
 pub async fn legacy_space_with_root(
     pool: &PgPool,

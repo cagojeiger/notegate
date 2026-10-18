@@ -15,36 +15,7 @@ NoteGate의 주기적인 전역 수렴 작업은 `notegate-reconciliation` runti
 - 구현은 현재 원본을 다시 읽고 같은 작업을 반복해도 같은 상태로 수렴해야 한다.
 - Runtime은 exactly-once 실행과 업무 transaction을 보장하지 않는다.
 
-```text
-ReconciliationRegistry
-  ├─ text_revisions.retention
-  ├─ system.purge
-  ├─ background_jobs.lease_recovery
-  ├─ background_jobs.history_retention
-  ├─ object_storage.cleanup
-  └─ link_graph.change_collector
-         │
-         ▼
-scheduled lane ── advisory lock ── application adapter ── DB/service operation
-       ▲                                                │
-       └──────── optional bounded continuation ─────────┘
-```
-
-## 코드 경계
-
-```text
-backend/crates/reconciliation/
-  lib.rs       typed contract와 schedule
-  registry.rs  등록, kind 검증, lock namespace
-  runtime.rs   주기, 전역 선점, timeout, shutdown, metric
-
-backend/crates/api/src/reconciliations/
-  mod.rs               application 조립
-  purge.rs             hard purge adapter
-  background_jobs.rs   lease recovery와 history retention adapter
-  object_storage.rs    S3-compatible object cleanup adapter
-  link_graph.rs        변경 수집과 link projection dispatch adapter
-```
+등록된 kind와 실행 조립은 [application reconciliations](../../backend/crates/api/src/reconciliations), 공통 제어는 [reconciliation runtime](../../backend/crates/reconciliation/src)이 소유한다.
 
 Object storage cleanup은 전역 singleton reconciliation으로 실행하지만, provider 호출 전의 행 단위 claim과 `retry_after` lease를 유지한다. 이 안전장치는 롤링 배포 중 worker 간 경합, provider 호출 후 DB 갱신 전 종료, 재시도 backoff를 처리한다. 한 번에 100개를 모두 처리하면 lock을 해제하고 1초 후 다시 선점해 남은 backlog를 이어서 처리한다.
 

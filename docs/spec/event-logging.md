@@ -324,41 +324,7 @@ recursive item.delete
 
 ## Storage shape
 
-Schema는 별도 physical table을 사용한다. `audit_events`는 다음 조회 축을 column으로 둔다.
-
-```text
-common
-  id
-  created_at
-  owner_user_id
-  actor_account_id
-  source
-  op_type
-  metadata
-
-audit_events
-  resource_type
-  resource_id
-```
-
-`file_change_events`는 owner/space/node 조회 축을 column으로 두고 내용 메타데이터는 암호화한다.
-
-```text
-file_change_events
-  id
-  operation_id
-  owner_user_id
-  created_at
-  space_id
-  node_id
-  actor_account_id
-  op_type
-  metadata
-  private_metadata
-  snapshot_id
-```
-
-권장 index와 column type은 `docs/spec/db.md`의 Event history tables가 정본이다.
+Audit은 account/actor와 resource, Changes는 owner/space/node를 조회 축으로 저장한다. 내용 메타데이터는 암호화하고, identifier와 고정 구조 변경 표식만 평문으로 둔다. Physical column과 index는 [DB migrations](../../backend/crates/db/migrations)가 정의하며 저장·암호화 불변식은 [DB 명세](db.md#event-history-tables)를 따른다.
 
 ## Retention and deletion
 
@@ -382,4 +348,4 @@ command_invocations: 90 days
 - `*_revision_cleanup_at`은 정리 시작 가능 시각이며 실제 삭제 증거가 아니다. 조회 실패를 본문 없음으로 바꾸지 않는다. 존재 여부·삭제 기록은 한 DB snapshot에서 metadata만 batch 조회하며 본문 접근 권한을 부여하지 않는다. 기록이 없는 과거 삭제, TRUNCATE, trigger 우회는 사유를 추정하지 않는다.
 - `GET /api/v1/me/file-change-events`는 현재 User의 소유 이력을 Space 삭제 뒤에도 90일 보존 기간 내 조회한다. 선택적 `space_id`, `limit`, `cursor`를 받는다. 외부 Agent 접근과 기존 Space별 권한은 바뀌지 않는다.
 - 소유자를 입증할 수 없는 행은 소유 이력에 노출하지 않는다.
-- Space 영구 삭제는 암호화와 별개로 기존 Changes의 소유자 ID를 최대 100행씩 보존한다. 소유자 미확정 행이 남거나 다른 트랜잭션에서 잠긴 경우 Space 삭제를 다음 회차로 넘긴다. 이후 암호화는 보존된 소유자 ID를 유지한다.
+- Space 영구 삭제는 암호화와 별개로 기존 Changes의 소유자 ID를 최대 100행씩 보존한다. 소유자 미확정 행이 남거나 다른 트랜잭션에서 잠긴 경우 Space 삭제를 다음 회차로 넘긴다.

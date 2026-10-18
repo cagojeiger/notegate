@@ -16,18 +16,13 @@ pub struct UserInfo {
     pub name: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct LoginUserInfo {
-    pub userinfo: UserInfo,
-}
-
 pub(super) async fn exchange_code_for_userinfo(
     oidc: &OidcProvider,
     http: &reqwest::Client,
     code: &str,
     verifier: &str,
     nonce: &str,
-) -> notegate_core::Result<LoginUserInfo> {
+) -> notegate_core::Result<UserInfo> {
     let snapshot = oidc.client_snapshot().await?;
     let client = snapshot.client;
     let http_client = http.clone();
@@ -122,9 +117,7 @@ pub(super) async fn exchange_code_for_userinfo(
             notegate_core::Error::internal(format!("userinfo request failed: {error}"))
         })?;
 
-    Ok(LoginUserInfo {
-        userinfo: into_userinfo(userinfo),
-    })
+    Ok(into_userinfo(userinfo))
 }
 
 fn can_refresh_jwks(error: &ClaimsVerificationError) -> bool {

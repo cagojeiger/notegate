@@ -23,7 +23,7 @@ pub async fn create_browser_session(state: &AppState, user_id: Uuid) -> Result<S
     let prefix = token_prefix(session_id);
     state
         .browser_sessions
-        .insert_local_session(
+        .insert_session(
             InsertBrowserSession {
                 session_id,
                 user_id,
@@ -47,8 +47,7 @@ pub async fn verify_browser_session(state: &AppState, token: &str) -> Result<Cal
         .await
         .map_err(|_| AuthError::Internal)?
         .ok_or(AuthError::InvalidToken)?;
-    if !resolved.local_session
-        || resolved.oidc_issuer.as_deref() != Some(state.oidc.issuer())
+    if resolved.oidc_issuer.as_deref() != Some(state.oidc.issuer())
         || resolved.validated_until <= Utc::now()
     {
         return Err(AuthError::InvalidToken);

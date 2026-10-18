@@ -133,19 +133,19 @@ async fn encrypted_history_cleanup_preserves_rows_and_current_writes() -> TestRe
     let session_hash = crypto.browser_session_hash(&session_id.to_string(), "retained-session")?;
     let prefix = notegate_db::browser_session_repo::token_prefix(session_id);
     let sessions = notegate_db::BrowserSessionRepo::new(db.pool.clone());
-    sessions
-        .insert_local_session(
-            notegate_db::browser_session_repo::InsertBrowserSession {
-                session_id,
-                user_id: owner,
-                token_prefix: &prefix,
-                token_hash: &session_hash,
-                validated_until: now + chrono::Duration::hours(1),
-                expires_at: now + chrono::Duration::days(7),
-            },
-            "https://auth.example.test",
-        )
-        .await?;
+    common::insert_pre_marker_removal_session(
+        &db.pool,
+        notegate_db::browser_session_repo::InsertBrowserSession {
+            session_id,
+            user_id: owner,
+            token_prefix: &prefix,
+            token_hash: &session_hash,
+            validated_until: now + chrono::Duration::hours(1),
+            expires_at: now + chrono::Duration::days(7),
+        },
+        Some("https://auth.example.test"),
+    )
+    .await?;
     let grant = uuid::Uuid::new_v4();
     let access_hash = crypto.oauth_hash("token", "retained-access")?;
     let refresh_hash = crypto.oauth_hash("token", "retained-refresh")?;
@@ -156,7 +156,6 @@ async fn encrypted_history_cleanup_preserves_rows_and_current_writes() -> TestRe
         .bind(&access_hash).bind(&refresh_hash).bind(grant).bind(now+chrono::Duration::minutes(10)).bind(now+chrono::Duration::days(7)).execute(&db.pool).await?;
     let before = snapshot(&db.pool, true).await?;
     db.apply_migration(59).await?;
-    notegate_db::check_readiness(&db.pool).await?;
     assert_eq!(snapshot(&db.pool, true).await?, before);
     assert_eq!(
         sessions

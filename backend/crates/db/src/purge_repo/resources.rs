@@ -296,7 +296,7 @@ async fn purge_space(pool: &PgPool, space_id: Uuid) -> Result<PurgedResources> {
                  ORDER BY agent_id LIMIT $2 FOR UPDATE SKIP LOCKED) \
              DELETE FROM space_agent_connections c USING due WHERE c.space_id = $1 AND c.agent_id = due.agent_id",
         ).bind(space_id).bind(CONNECTION_PURGE_BATCH).execute(&mut *tx).await.map_err(map_sqlx_error)?;
-        // Preserve legacy ownership independently of background encryption.
+        // Preserve Changes ownership before removing the Space.
         // Locked or remaining rows keep the Space alive for the next batch.
         sqlx::query(
             "WITH pending AS (SELECT id FROM file_change_events \

@@ -38,7 +38,7 @@ async fn insert_session(
     let secret = "session-secret";
     let token_hash = crypto.browser_session_hash(&session_id.to_string(), secret)?;
     let prefix = token_prefix(session_id);
-    repo.insert_local_session(
+    repo.insert_session(
         InsertBrowserSession {
             session_id,
             user_id,
@@ -69,7 +69,6 @@ async fn inserted_session_can_be_found_by_hash() -> Result<(), Box<dyn std::erro
         .expect("session should be live");
 
     assert_eq!(found.user_id, user_id);
-    assert!(found.local_session);
     assert_eq!(
         found.oidc_issuer.as_deref(),
         Some("https://auth.example.test")
@@ -234,7 +233,6 @@ async fn dropping_browser_refresh_storage_preserves_sessions_and_owned_data()
         .await?
         .unwrap();
     assert_eq!(caller.account.id, user);
-    assert!(caller.local_session);
     assert_eq!(
         caller.oidc_issuer.as_deref(),
         Some("https://auth.example.test")
@@ -242,7 +240,6 @@ async fn dropping_browser_refresh_storage_preserves_sessions_and_owned_data()
     assert_eq!(caller.validated_until, now + Duration::hours(1));
     let legacy_hash = crypto.browser_session_hash(&legacy_id.to_string(), "existing-session")?;
     let legacy = repo.find_by_token(legacy_id, &legacy_hash).await?.unwrap();
-    assert!(!legacy.local_session);
     assert_eq!(legacy.oidc_issuer, None);
 
     let oauth = OAuthRepo::new(db.pool.clone());
@@ -269,12 +266,6 @@ async fn dropping_browser_refresh_storage_preserves_sessions_and_owned_data()
         )
         .await?;
     assert!(matches!(issued, ExchangeOutcome::Issued(g) if g.id == grant && g.user_id == user));
-    let (new_id, _) = insert_session(&repo, &crypto, user).await?;
-    assert!(repo.revoke_session_for_logout(new_id).await?);
-    assert_eq!(
-        audit_op_types(&db, user).await?,
-        ["session.login", "session.logout"]
-    );
     db.cleanup().await;
     Ok(())
 }

@@ -1289,68 +1289,6 @@ async fn batch_children_returns_ordered_independent_first_pages()
     Ok(())
 }
 
-#[tokio::test]
-async fn detected_preview_media_types_are_recorded_in_one_batch_write()
--> Result<(), Box<dyn std::error::Error>> {
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let ws_repo = SpaceRepo::new(db.pool.clone());
-    let repo = FilesRepo::new(db.pool.clone());
-    let files = FilesService::new(repo.clone());
-    let owner = insert_user_account(
-        &db.pool,
-        "preview-batch-owner",
-        "preview-batch@example.test",
-    )
-    .await?;
-    let (ws, root) = setup_space(&ws_repo, owner, "preview-media-batch").await;
-    let mut detections = Vec::new();
-
-    for (name, media_type) in [("first.bin", "image/png"), ("second.bin", "image/jpeg")] {
-        let upload_id = Uuid::new_v4();
-        let upload = BeginObjectUpload {
-            parent_node_id: root,
-            name: name.to_owned(),
-            byte_len: 8,
-            media_type: "application/octet-stream".to_owned(),
-            original_filename: Some(name.to_owned()),
-            encryption_mode: FileEncryptionMode::None,
-            encryption_metadata: None,
-        };
-        files.prepare_object_upload(owner, ws, &upload).await?;
-        let registration = single_upload_registration(upload_id, format!("objects/{name}"));
-        files
-            .record_registered_object_upload(&registration, owner, ws, &upload)
-            .await?;
-        let uploaded = files
-            .complete_object_upload(owner, ws, upload_id, None, None)
-            .await?;
-        detections.push((uploaded.node.node.id, media_type.to_owned()));
-    }
-
-    files
-        .record_detected_file_media_types(owner, ws, &detections)
-        .await?;
-    let node_ids = detections
-        .iter()
-        .map(|(node_id, _)| *node_id)
-        .collect::<Vec<_>>();
-    let stored = repo.find_files(ws, &node_ids).await?;
-
-    for (node_id, media_type) in detections {
-        assert_eq!(
-            stored
-                .get(&node_id)
-                .and_then(|file| file.detected_media_type.as_deref()),
-            Some(media_type.as_str())
-        );
-    }
-
-    db.cleanup().await;
-    Ok(())
-}
-
 /// Space-wide node list supports kind filtering, keyset pagination, root
 /// exclusion, and rejects cursors reused with a different filter.
 #[tokio::test]

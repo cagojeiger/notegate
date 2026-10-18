@@ -746,7 +746,7 @@ async fn seed_browser_session(
 ) -> Result<Uuid, Box<dyn std::error::Error>> {
     let session_id = Uuid::new_v4();
     let token_hash = crypto.browser_session_hash(&session_id.to_string(), name)?;
-    repo.insert_local_session(
+    repo.insert_session(
         InsertBrowserSession {
             session_id,
             user_id,

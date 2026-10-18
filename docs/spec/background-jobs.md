@@ -21,60 +21,11 @@ Queue가 보장하지 않는 것:
 - 서로 다른 작업 사이의 실행 순서
 - 사용자별 또는 Space별 동시성 정책
 
-## 코드 경계
+## 책임 경계
 
-Queue 상태 머신과 NoteGate 업무 처리는 crate와 application 조립 경계로 나눈다.
+Queue runtime은 전달·lease·retry만 담당하고 업무 payload와 멱등성은 handler가 호출하는 service/DB 계층이 소유한다. 저장된 payload를 현재 type으로 변환할 수 없으면 handler를 실행하지 않고 permanent failure로 종료한다. API는 handler를 등록하며, 전역 고정 주기 작업은 [Reconciliation](reconciliation.md)이 소유한다.
 
-```text
-backend/crates/jobs/                 package: notegate-jobs
-  model.rs                           job, claim, failure model
-  handler.rs                         typed handler contract와 runtime registry
-  queue.rs                           enqueue, claim, heartbeat, state transition
-  worker.rs                          concurrency, lease, retry, timeout runtime
-
-backend/crates/reconciliation/       package: notegate-reconciliation
-  registry.rs                        typed reconciler 등록과 kind 검증
-  runtime.rs                         고정 주기, 전역 선점, timeout과 관측
-
-backend/crates/api/src/background_jobs/
-  mod.rs                             queue consumer와 handler 등록
-  handlers.rs                        Usage 업무 adapter
-backend/crates/api/src/reconciliations/
-  background_jobs.rs                 lease recovery와 history retention adapter
-  purge.rs                           system purge adapter
-backend/crates/api/src/process_runtime.rs
-                                     process mode별 작업 기동, 감시, 종료
-
-backend/crates/db/                   schema, repository, transaction
-  src/link_graph_work_repo/
-    mod.rs                           공개 계약과 수동 요청 흐름
-    collection.rs                    변경 수집, 전체 재색인, 진행 위치 관리
-    targets.rs                       문서별 요청 병합, 상태 조회, 종료 작업 반영
-    dispatch.rs                      큐 용량 확인, 작업 등록, 대상과 작업 연결
-backend/crates/service/              authorization과 업무 흐름
-```
-
-의존 방향은 다음과 같다.
-
-```text
-API 또는 domain transaction
-  └─ notegate-jobs::JobQueue로 작업 등록
-
-notegate-api background runtime
-  ├─ notegate-jobs::Worker로 작업 실행
-  ├─ notegate-reconciliation으로 queue 복구와 정리
-  └─ handler를 통해 db/service 업무 호출
-```
-
-- `notegate-jobs`는 application 업무 개념과 payload schema를 알지 않는다.
-- 전역 실행과 고정 주기 계약은 [Reconciliation](reconciliation.md)을 따른다.
-- API의 `background_jobs` 모듈은 handler를 조립하는 실행 경계이며 업무 규칙을 다시 구현하지 않는다.
-- Registry는 저장된 JSON을 `JobSpec::Payload`로 한 번 변환한다. 변환할 수 없는 payload는 handler를 호출하지 않고 permanent failure로 종료한다.
-- Handler는 typed payload를 받아 완료, 지연 또는 분류된 실패를 queue runtime에 반환한다.
-- 멱등성, stale 판정, 업무 결과 transaction은 handler가 호출하는 db/service 계층이 소유한다.
-- Queue schema와 migration은 database schema 소유권에 따라 `notegate-db`가 관리한다.
-- Link graph work의 내부 모듈은 기존 transaction connection을 공유한다. 변경 처리 위치와 durable target 기록, queue 등록과 대상의 active job 연결을 파일 경계 때문에 별도로 커밋하지 않는다. `collection`은 `targets`와 `dispatch`를 호출하고, `dispatch`는 `targets`의 공통 범위 타입을 사용한다.
-- `all` mode는 HTTP server, queue consumer와 reconciliation runtime을 함께 실행한다. `api`, `worker`, `reconciler` mode는 같은 binary에서 실행 책임을 분리한다.
+Link graph의 checkpoint·durable target 등록과 queue dispatch·active job 연결은 각각 같은 transaction을 사용한다. 모듈 경계가 commit 경계를 만들지 않는다. 구현은 [jobs](../../backend/crates/jobs/src)와 [application 등록](../../backend/crates/api/src/background_jobs)을 따른다.
 
 ## 상태 머신
 
@@ -98,29 +49,7 @@ queued ── claim ──▶ running ── success ──▶ succeeded
 
 `queued`, `running`, `succeeded`, `dead`만 영속 상태다. `ready`, `delayed`, `lease_expired`는 시간 조건을 반영한 관측용 상태다.
 
-## 저장 구조
-
-```text
-background_jobs
-  job_id
-  job_kind
-  payload
-  history_visibility / history_owner_account_id
-  context_kind / context_id / context_label
-  status
-  available_at
-  attempt_count / failure_count / max_attempts
-  claim_token / claimed_by / lease_until
-  last_error_code / last_error_message
-  created_at / updated_at / completed_at
-
-background_job_attempts
-  job_id / attempt_number
-  claim_token / worker_id
-  started_at / finished_at
-  outcome
-  error_code / error_message
-```
+## 이력 보존
 
 작업은 성공하거나 재시도 한도를 소진해도 즉시 삭제하지 않는다. `succeeded`와 `dead` 작업 및 연결된 attempt는 90일 동안 보관한 뒤 짧은 transaction batch로 삭제한다. 한 retention pass는 최대 5초 동안 batch를 반복하고 남은 backlog는 lock을 해제한 뒤 1초 후 이어서 처리한다.
 

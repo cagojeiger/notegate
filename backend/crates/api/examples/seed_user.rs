@@ -172,7 +172,7 @@ async fn create_browser_session(
         validated_until,
         expires_at,
     };
-    repo.insert_local_session(args, &config.oidc.issuer).await?;
+    repo.insert_session(args, &config.oidc.issuer).await?;
 
     Ok(format_token(session_id, &secret))
 }
