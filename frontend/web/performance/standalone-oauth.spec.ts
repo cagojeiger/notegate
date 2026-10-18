@@ -1,6 +1,29 @@
 import { createServer } from "node:http";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function captureAuthViews(page: Page, name: string) {
+  for (const theme of ["light", "dark"] as const) {
+    for (const [device, width, height] of [["desktop", 1440, 900], ["mobile", 390, 844]] as const) {
+      await page.setViewportSize({ width, height });
+      await page.evaluate((value) => localStorage.setItem("notegate.theme", value), theme);
+      await page.reload();
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      if (device === "mobile") {
+        const heights = await page.locator("button:visible, input:visible, summary:visible").evaluateAll(
+          (elements) => elements.map((element) => element.getBoundingClientRect().height)
+        );
+        expect(heights.every((value) => value >= 44)).toBe(true);
+      }
+      await page.screenshot({ path: `test-results/browser-performance/${name}-${theme}-${device}.png`, fullPage: true });
+    }
+  }
+  await page.setViewportSize({ width: 320, height: 844 });
+  for (const summary of await page.locator("summary").all()) await summary.click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+}
 
 test("standalone CLI approval and connection revocation", async ({ browser, playwright, baseURL }) => {
   const session = process.env.NOTEGATE_WEB_E2E_BROWSER_SESSION;
@@ -21,6 +44,7 @@ test("standalone CLI approval and connection revocation", async ({ browser, play
     const approvalPage = await page.goto(device.verification_uri_complete);
     expect(approvalPage?.headers()["content-security-policy"]).toBe("default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
     await expect(page.getByRole("heading", { name: "Connect NoteGate CLI" })).toBeVisible();
+    await captureAuthViews(page, "oauth-device");
     const approvalRequest = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/oauth/device");
     await page.getByRole("button", { name: "Connect CLI", exact: true }).click();
     expect((await (await approvalRequest).allHeaders()).origin).toBe(new URL(baseURL!).origin);
@@ -39,9 +63,11 @@ test("standalone CLI approval and connection revocation", async ({ browser, play
     await page.goto("/oauth/connections");
     await expect(page.getByRole("heading", { name: "Connected applications" })).toBeVisible();
     await expect(page.getByText("NoteGate CLI", { exact: true })).toBeVisible();
+    await captureAuthViews(page, "oauth-connections");
     await page.screenshot({ path: "test-results/browser-performance/oauth-connections.png" });
     await page.getByRole("button", { name: "Revoke connection" }).click();
     await expect(page.getByRole("button", { name: "Revoke connection" })).toHaveCount(0);
+    await expect(page.getByText(/No connected applications/)).toBeVisible();
     const revoked = await request.post("/oauth/token", {
       form: { grant_type: "refresh_token", client_id: metadata.cli_client_id, refresh_token: tokens.refresh_token }
     });
@@ -84,6 +110,7 @@ test("standalone MCP consent follows its registered callback and exchanges the P
     const page = await context.newPage();
     await page.goto(`/oauth/approve?id=${fixture.id}`);
     await expect(page.getByRole("heading", { name: "Connect application" })).toBeVisible();
+    await captureAuthViews(page, "oauth-consent");
     await page.getByRole("button", { name: "Allow access", exact: true }).click();
     await expect(page).toHaveURL(`${callback.origin}/done`);
     expect(returned).toBeDefined();
@@ -107,5 +134,51 @@ test("standalone MCP consent follows its registered callback and exchanges the P
     await context.close();
     await request.dispose();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("CLI consent works without JavaScript and does not depend on browser storage", async ({ browser, playwright, baseURL }) => {
+  const session = process.env.NOTEGATE_WEB_E2E_BROWSER_SESSION;
+  expect(Boolean(session)).toBe(true);
+  const request = await playwright.request.newContext({ baseURL });
+  const context = await browser.newContext({ baseURL, javaScriptEnabled: false });
+  try {
+    await context.addCookies([{ name: "notegate_browser_session", value: session!, url: baseURL!, httpOnly: true, sameSite: "Lax" }]);
+    const metadata = await (await request.get("/.well-known/oauth-authorization-server")).json();
+    const device = await (await request.post("/oauth/device/authorize", {
+      form: { client_id: metadata.cli_client_id, scope: "cli offline_access" }
+    })).json();
+    const page = await context.newPage();
+    await page.goto(device.verification_uri_complete);
+    await expect(page.getByLabel("Code shown in your terminal")).toHaveValue(device.user_code);
+    await page.getByRole("button", { name: "Connect CLI", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Request completed" })).toBeVisible();
+    const response = await request.post("/oauth/token", {
+      form: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", client_id: metadata.cli_client_id, device_code: device.device_code }
+    });
+    expect(response.status()).toBe(200);
+    const tokens = await response.json();
+    expect((await request.post("/oauth/revoke", {
+      form: { client_id: metadata.cli_client_id, token: tokens.refresh_token }
+    })).status()).toBe(200);
+  } finally {
+    await context.close();
+    await request.dispose();
+  }
+});
+
+test("authentication theme remains usable when browser storage is unavailable", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, colorScheme: "dark" });
+  try {
+    await context.addInitScript(() => {
+      Object.defineProperty(window, "localStorage", { get() { throw new DOMException("Unavailable", "SecurityError"); } });
+    });
+    const page = await context.newPage();
+    await page.goto("/auth/success");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await page.getByRole("button", { name: "Use light theme", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  } finally {
+    await context.close();
   }
 });

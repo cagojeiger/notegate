@@ -15,11 +15,12 @@ button, summary { cursor: pointer; }
 }
 .auth-shell { width: min(100%, 680px); margin: auto; padding: 40px 20px; }
 .auth-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
-.auth-brand { display: inline-flex; align-items: center; gap: 8px; color: var(--ng-text); font-size: 20px; font-weight: 600; text-decoration: none; }
+.auth-brand { display: inline-flex; align-items: center; gap: 8px; min-height: var(--ng-min-target-size); color: var(--ng-text); font-size: 20px; font-weight: 600; text-decoration: none; }
 .auth-brand span, .auth-brand svg { display: block; width: 36px; height: 36px; }
 .auth-card { min-width: 0; padding: 28px; border: 1px solid var(--ng-border); border-radius: 16px; background: var(--ng-surface); box-shadow: var(--ng-focus-shadow); }
 h1 { margin: 0 0 20px; font-size: 24px; line-height: 1.3; letter-spacing: -0.02em; }
 h2 { margin: 0; font-size: 15px; line-height: 1.5; }
+h1, h2 { overflow-wrap: anywhere; }
 p { margin: 12px 0; }
 .auth-account, .auth-note, .auth-footer, dt { color: var(--ng-muted); }
 .auth-account { padding-bottom: 16px; border-bottom: 1px solid var(--ng-seam); }
@@ -67,6 +68,7 @@ input {
 .auth-badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .auth-badge { padding: 2px 8px; border: 1px solid var(--ng-border); border-radius: 4px; color: var(--ng-muted); }
 .auth-footer { margin-top: 24px; text-align: center; }
+.auth-footer a { display: inline-flex; align-items: center; min-height: max(40px, var(--ng-min-target-size)); }
 .auth-empty { padding: 24px 0; text-align: center; color: var(--ng-muted); }
 @media (max-width: 767px) {
   .auth-shell { padding: 24px 16px; }

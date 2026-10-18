@@ -96,6 +96,10 @@ Palette, typography, 상태 표시, 접근성은 [DESIGN.md](../../DESIGN.md)가
 
 제품·접근성 결정은 [DESIGN.md](../../DESIGN.md)를 따른다.
 
+인증 승인·CLI Device Flow·Connected applications·로그인 결과 화면은 서버 HTML로 제공하며 같은 `theme.css` 토큰·브랜드 심볼·`notegate.theme` 설정을 사용한다. 테마 스크립트는 표시만 담당하고 승인·거절·연결 해제는 JavaScript 없이도 동작하는 서버 폼으로 처리한다. 연결 대상과 권한은 먼저 보여주고 상세 식별자는 접는다.
+
+History의 Audit은 OAuth 연결 생성·폐기와 로그인 제공자 연결을 읽을 수 있는 이름과 사유로 표시한다. 기존 이벤트와 보관 정책은 유지한다.
+
 ## Tests
 
 ```text

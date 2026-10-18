@@ -43,7 +43,7 @@ export function AuditEventsPanel() {
                   </div>
                   <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted">
                     <span className="truncate" title={event.resource_id ?? undefined}>{target}</span>
-                    {detail ? <><span className="shrink-0" aria-hidden="true">·</span><span className="shrink-0">{detail}</span></> : null}
+                    {detail ? <><span className="shrink-0" aria-hidden="true">·</span><span className="min-w-0 truncate" title={detail}>{detail}</span></> : null}
                     <span className="shrink-0" aria-hidden="true">·</span>
                     <span className="truncate" title={event.actor_account_id ?? undefined}>{actor}</span>
                   </div>

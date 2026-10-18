@@ -35,6 +35,7 @@ const AUDIT_TARGET_LABELS: Record<string, string> = {
   agent: "Agent",
   api_key: "API key",
   browser_session: "Browser session",
+  oauth_grant: "Application connection",
   node: "Item",
   storage_object: "Stored file",
   text_revision: "Document version",
@@ -47,6 +48,9 @@ const AUDIT_ACTIONS: Record<string, string> = {
   "session.login": "Signed in",
   "session.logout": "Signed out",
   "session.revoke": "Session ended",
+  "oauth.approve": "Connected application",
+  "oauth.revoke": "Disconnected application",
+  "identity.link": "Linked sign-in provider",
   "space.create": "Created a space",
   "space.update": "Updated a space",
   "space.delete": "Deleted a space",
@@ -71,6 +75,14 @@ const REVISION_DELETION_REASONS: Record<string, string> = {
   checkpoint_expired: "Checkpoint retention expired",
   resource_purge: "Permanent document deletion cleanup",
   unknown: "Reason not recorded"
+};
+
+const AUTH_REASONS: Record<string, string> = {
+  refresh_reuse: "Refresh token reuse detected",
+  code_reuse: "Authorization code reuse detected",
+  client_revoked: "Revoked by application",
+  user_revoked: "Revoked by you",
+  operator_import: "Linked by operator"
 };
 
 export function formatEventTime(value: string): string {
@@ -155,6 +167,12 @@ export function formatAuditTarget(event: AuditEvent): string {
 }
 
 export function formatAuditDetail(event: AuditEvent): string | null {
+  if ((event.op_type === "oauth.revoke" || event.op_type === "identity.link") && typeof event.metadata.reason === "string") {
+    const reason = AUTH_REASONS[event.metadata.reason] ?? event.metadata.reason.replace(/_/g, " ");
+    return event.op_type === "identity.link" && typeof event.metadata.issuer === "string"
+      ? `${reason} · ${event.metadata.issuer}`
+      : reason;
+  }
   if (event.op_type === "text_revision.delete") {
     const reason = event.metadata.reason;
     return typeof reason === "string" ? REVISION_DELETION_REASONS[reason] ?? reason : "Reason not recorded";

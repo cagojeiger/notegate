@@ -81,7 +81,7 @@ pub(super) fn browser_page(
     response
 }
 
-pub(super) fn document(title: &str, body: &str) -> String {
+fn document(title: &str, body: &str) -> String {
     let title = escape_html(title);
     let symbol = SYMBOL.replace("#000000", "currentColor");
     format!(

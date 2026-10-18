@@ -1,5 +1,6 @@
 //! Public-client OAuth endpoints. Only registered CIMD redirects receive codes.
 mod clients;
+mod pages;
 pub(crate) use clients::ClientRegistry;
 
 use axum::extract::{Query, State};
@@ -18,7 +19,6 @@ use uuid::Uuid;
 
 use super::oauth_flow::hardened_cookie;
 use super::origin::has_trusted_browser_origin;
-use super::page::escape_html;
 use super::session::{BROWSER_SESSION_COOKIE, verify_browser_session};
 use crate::state::AppState;
 
@@ -152,24 +152,11 @@ async fn consent(
         Ok(auth) => auth,
         Err(error) => return oauth_error(error),
     };
-    let name = escape_html(&auth.client_name);
-    let client = escape_html(&auth.client_id);
-    let resource = escape_html(&auth.resource);
-    let scope = escape_html(&auth.scope);
-    let account = escape_html(&caller.account.display_name);
     let redirect = match url::Url::parse(&auth.redirect_uri) {
         Ok(redirect) => redirect,
         Err(_) => return oauth_error("server_error"),
     };
-    page(
-        "Connect application",
-        &format!(
-            "<p>Signed in as <strong>{account}</strong>.</p><p><strong>{name}</strong> requests access to your NoteGate documents in Spaces with MCP &amp; API access enabled, subject to existing permissions.</p><p>Client: <code>{client}</code><br>Redirect: <code>{}</code><br>Resource: <code>{resource}</code><br>Scopes: <code>{scope}</code></p><p>If the redirect is localhost or a loopback IP, only continue if you started this login in an application on this device.</p><p>Offline access lets this application reconnect until its grant expires or you revoke it.</p><form method=post action=/oauth/approve><input type=hidden name=id value=\"{}\"><button name=decision value=approve>Allow access</button> <button name=decision value=deny>Deny</button></form>",
-            escape_html(&auth.redirect_uri),
-            auth.id
-        ),
-        Some(&redirect),
-    )
+    pages::consent(&auth, &caller.account.display_name, &redirect)
 }
 
 async fn bound_authorization(
@@ -498,15 +485,7 @@ async fn device_page(
     let Some(caller) = recent_user(&state, &jar).await else {
         return login_redirect(&next);
     };
-    page(
-        "Connect NoteGate CLI",
-        &format!(
-            "<p>Signed in as <strong>{}</strong>.</p><p>Only approve a code displayed by a NoteGate CLI login you started. This permits reading and changing documents in enabled Spaces and offline access.</p><form method=post action=/oauth/device><label>Code shown in your terminal <input name=user_code maxlength=32 required autocomplete=off value=\"{}\"></label><button name=decision value=approve>Connect CLI</button> <button name=decision value=deny>Deny</button></form>",
-            escape_html(&caller.account.display_name),
-            escape_html(&code)
-        ),
-        None,
-    )
+    pages::device(&caller.account.display_name, &code)
 }
 async fn device_approve(
     State(state): State<AppState>,
@@ -556,16 +535,7 @@ async fn connections(State(state): State<AppState>, jar: CookieJar) -> Response 
         .list_grants(caller.account_id(), Utc::now())
         .await
     {
-        Ok(grants) => {
-            let mut body = String::from(
-                "<p>Revoking a connection immediately disables its access and refresh tokens.</p><ul>",
-            );
-            for grant in grants {
-                body.push_str(&format!("<li><strong>{}</strong> <code>{}</code><br>{}<form method=post action=/oauth/connections/revoke><input type=hidden name=id value=\"{}\"><button>Revoke connection</button></form></li>",escape_html(&grant.client_name),escape_html(&grant.client_id),escape_html(&grant.scope),grant.id));
-            }
-            body.push_str("</ul><p><a href=/ >Back to NoteGate</a></p>");
-            page("Connected applications", &body, None)
-        }
+        Ok(grants) => pages::connections(&caller.account.display_name, &grants),
         Err(_) => oauth_error("server_error"),
     }
 }
