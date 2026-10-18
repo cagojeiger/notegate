@@ -94,9 +94,9 @@ async fn removing_session_marker_preserves_tokens_issuers_and_owned_data() -> Te
     let access = crypto.oauth_hash("token", "retained-access")?;
     let refresh = crypto.oauth_hash("token", "retained-refresh")?;
     sqlx::query(
-        "INSERT INTO oauth_grants(id,user_id,client_id,client_name,resource,scope,expires_at,idle_expires_at) \
-         VALUES ($1,$2,'notegate-cli','NoteGate CLI',$3,'cli offline_access',$4,$4)",
-    ).bind(grant).bind(owner).bind(resource).bind(now + Duration::days(7)).execute(&db.pool).await?;
+        "INSERT INTO oauth_grants(id,user_id,client_id,client_name,resource,scope,created_at,expires_at,idle_expires_at) \
+         VALUES ($1,$2,'notegate-cli','NoteGate CLI',$3,'cli offline_access',$4,$5,$5)",
+    ).bind(grant).bind(owner).bind(resource).bind(now).bind(now + Duration::days(7)).execute(&db.pool).await?;
     sqlx::query(
         "INSERT INTO oauth_credentials(token_hash,hash_key_id,hash_version,grant_id,kind,expires_at) \
          VALUES ($1,'test-lookup',1,$3,'access',$4),($2,'test-lookup',1,$3,'refresh',$5)",
