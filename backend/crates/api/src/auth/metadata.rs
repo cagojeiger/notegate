@@ -164,11 +164,8 @@ mod tests {
             lookup_root_secret: SecretString::from(
                 "test-lookup-root-secret-32-bytes-long".to_owned(),
             ),
-            lookup_verify_0_key_id: None,
-            lookup_verify_0_secret: None,
 
             browser_session_max_ttl: Duration::from_secs(30 * 86_400),
-            openapi_enabled: false,
             metrics_enabled: false,
             web_dist_dir: None,
             s3: crate::state::test_s3_config(),

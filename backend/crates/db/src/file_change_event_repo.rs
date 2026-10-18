@@ -24,9 +24,6 @@ impl ChangeHistoryRepo {
     pub fn new(pool: PgPool, crypto: PiiCrypto) -> Self {
         Self { pool, crypto }
     }
-    pub async fn encrypt_legacy_metadata(&self) -> Result<u64> {
-        encrypt_legacy(&self.pool, &self.crypto).await
-    }
     pub async fn list_by_owner(
         &self,
         owner: Uuid,
@@ -135,50 +132,20 @@ fn protect_metadata(
 fn open_metadata(
     crypto: &PiiCrypto,
     space: Uuid,
-    id: Option<Uuid>,
+    id: Uuid,
     mut metadata: Value,
-    private: Option<Value>,
+    private: Value,
 ) -> Result<Value> {
-    if let Some(private) = private {
-        let id = id.ok_or_else(|| Error::internal("encrypted history has no snapshot identity"))?;
-        let encrypted: EncryptedHistoryValue = serde_json::from_value(private)
-            .map_err(|_| Error::internal("invalid encrypted change metadata"))?;
-        let plaintext = crypto.decrypt_history(&binding(space, id), &encrypted)?;
-        let values: serde_json::Map<String, Value> = serde_json::from_str(&plaintext)
-            .map_err(|_| Error::internal("invalid change metadata payload"))?;
-        metadata
-            .as_object_mut()
-            .ok_or_else(|| Error::internal("invalid change metadata"))?
-            .extend(values);
-    }
+    let encrypted: EncryptedHistoryValue = serde_json::from_value(private)
+        .map_err(|_| Error::internal("invalid encrypted change metadata"))?;
+    let plaintext = crypto.decrypt_history(&binding(space, id), &encrypted)?;
+    let values: serde_json::Map<String, Value> = serde_json::from_str(&plaintext)
+        .map_err(|_| Error::internal("invalid change metadata payload"))?;
+    metadata
+        .as_object_mut()
+        .ok_or_else(|| Error::internal("invalid change metadata"))?
+        .extend(values);
     Ok(metadata)
-}
-
-/// Encrypt legacy rows in short transactions; no plaintext snapshot is copied elsewhere.
-pub(crate) async fn encrypt_legacy(pool: &PgPool, crypto: &PiiCrypto) -> Result<u64> {
-    let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
-    let rows: Vec<(i64, Uuid, Value)> = sqlx::query_as(
-        "SELECT id, space_id, metadata FROM file_change_events WHERE private_metadata IS NULL \
-         ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED",
-    )
-    .fetch_all(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?;
-    let count = rows.len() as u64;
-    for (id, space, metadata) in rows {
-        let snapshot_id = Uuid::new_v4();
-        let (metadata, private) = protect_metadata(crypto, space, snapshot_id, metadata)?;
-        sqlx::query("UPDATE file_change_events e SET metadata=$2, private_metadata=$3, snapshot_id=$4, owner_user_id=COALESCE(owner_user_id, (SELECT s.owner_user_id FROM spaces s WHERE s.id=e.space_id)) WHERE id=$1")
-            .bind(id)
-            .bind(metadata)
-            .bind(private)
-            .bind(snapshot_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
-    }
-    tx.commit().await.map_err(map_sqlx_error)?;
-    Ok(count)
 }
 
 /// List file-change events for `space_id` (optionally scoped to `node_id`),
@@ -320,8 +287,8 @@ struct FileChangeEventRow {
     actor_account_id: Option<Uuid>,
     op_type: String,
     metadata: Value,
-    private_metadata: Option<Value>,
-    snapshot_id: Option<Uuid>,
+    private_metadata: Value,
+    snapshot_id: Uuid,
 }
 
 fn decode_rows(

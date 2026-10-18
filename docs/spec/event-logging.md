@@ -80,7 +80,7 @@ file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 
 `input`과 `response`는 실제 실행/응답 객체와 분리된 저장 전용 복사본이다. Tool/op별 allowlist는 purpose, target/path, 구조적 flag/count/hash처럼 분석에 필요한 값만 유지한다. Text `content`, patch/edit 문자열과 `diff`, grep 일치 줄, 검색어, 모든 cursor, 원본 파일명과 암호화 metadata, multipart ETag, presigned URL/header, PII와 자유 형식 오류 문구는 `{"_redacted":true,"category":"..."}` marker로 대체한다. 알려지지 않은 field의 이름과 값은 저장하지 않고 `_omitted_field_count`만 남긴다. 각 snapshot은 redaction 후 256 KiB를 넘으면 전체를 크기 marker로 대체한다.
 
-저장할 때 `purpose`, `space_name`, redacted `input`/`response`는 한 암호화 envelope로 묶는다. 소유자 ID와 snapshot UUID를 AEAD에 바인딩하며, 조회 시 소유권으로 먼저 필터링한 뒤 복호화한다. 식별자, 시간, 호출 경로, tool/op, 결과 및 오류 코드는 조회를 위해 평문으로 유지한다. 기존 평문 행은 `history.encryption` Reconciler가 최대 100행씩 이관하며, 이관 중에는 기존 형식도 읽는다. 암호화 오류를 평문 fallback으로 숨기지 않는다.
+저장할 때 `purpose`, `space_name`, redacted `input`/`response`는 한 암호화 envelope로 묶는다. 소유자 ID와 snapshot UUID를 AEAD에 바인딩하며, 조회 시 소유권으로 먼저 필터링한 뒤 복호화한다. 식별자, 시간, 호출 경로, tool/op, 결과 및 오류 코드는 조회를 위해 평문으로 유지한다. 암호화 오류를 평문 fallback으로 숨기지 않는다.
 
 MCP `response`는 protocol `ErrorData` 또는 `structured_content`에서 만들며 RMCP가 같은 JSON을 복제하는 wire `content[].text`와 `_meta`는 저장하지 않는다. CLI response와 구조화 오류는 같은 저장 전용 JSON 정책으로 정규화한다. Sequence tool은 한 invocation row만 만들고 commands/results에 재귀 redaction을 적용하며 내부 command별 행은 만들지 않는다. Response snapshot이 없는 행은 `response=NULL`이고 모든 행은 90일 retention을 따른다. 호출 이력 조회용 MCP/CLI command는 없으며 user browser의 History > MCP, CLI, API에서 자기 소유 범위만 조회한다.
 
@@ -381,5 +381,5 @@ command_invocations: 90 days
 - 목록의 `before_revision_status`/`after_revision_status`는 실제 본문을 우선 확인한다. 있으면 `current`/`retained`, 없고 삭제 기록이 있으면 `deleted`, 둘 다 없으면 `unavailable`이다. `*_revision_deleted_at`/`*_revision_deletion_reason`은 확인된 기록만 반환한다. 본문과 삭제 기록이 동시에 있으면 본문 상태를 유지하고 `*_revision_deletion_conflict=true`로 표시한다.
 - `*_revision_cleanup_at`은 정리 시작 가능 시각이며 실제 삭제 증거가 아니다. 조회 실패를 본문 없음으로 바꾸지 않는다. 존재 여부·삭제 기록은 한 DB snapshot에서 metadata만 batch 조회하며 본문 접근 권한을 부여하지 않는다. 기록이 없는 과거 삭제, TRUNCATE, trigger 우회는 사유를 추정하지 않는다.
 - `GET /api/v1/me/file-change-events`는 현재 User의 소유 이력을 Space 삭제 뒤에도 90일 보존 기간 내 조회한다. 선택적 `space_id`, `limit`, `cursor`를 받는다. 외부 Agent 접근과 기존 Space별 권한은 바뀌지 않는다.
-- 기존 plaintext Changes는 `history.encryption` Reconciler가 최대 100행씩 암호화한다. 이관 중에는 이전 형식도 읽는다. 이미 삭제된 Space의 소유자를 입증할 수 없는 과거 행은 소유 이력에 노출하지 않는다.
+- 소유자를 입증할 수 없는 행은 소유 이력에 노출하지 않는다.
 - Space 영구 삭제는 암호화와 별개로 기존 Changes의 소유자 ID를 최대 100행씩 보존한다. 소유자 미확정 행이 남거나 다른 트랜잭션에서 잠긴 경우 Space 삭제를 다음 회차로 넘긴다. 이후 암호화는 보존된 소유자 ID를 유지한다.

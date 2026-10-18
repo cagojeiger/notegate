@@ -16,7 +16,7 @@ external_identities(issuer, subject_hash, user_id)
 - users.tier는 `NOTEGATE_DEFAULT_USER_TIER` 값으로 설정한다.
 - 첫 space는 user가 명시적으로 생성한다.
 - 재로그인은 PII ciphertext/hash만 갱신하고 space/agent/key를 만들지 않는다.
-- 외부 신원은 `issuer + sub`로 구분한다. 기존 issuer의 legacy user는 재로그인 시 같은 account ID로 연결하며, email로 다른 계정을 합치지 않는다.
+- 외부 신원은 `issuer + sub`로 구분한다. 검증된 신원으로 같은 account ID를 조회하며, email로 다른 계정을 합치지 않는다.
 
 ### User 삭제
 
@@ -230,7 +230,6 @@ browser_sessions.user_id=existing local user_id
 browser_sessions.local_session=true
 browser_sessions.oidc_issuer=verified upstream issuer
 browser_sessions.token_hash=HMAC(session token)
-browser_sessions.refresh_token_*=encrypted empty compatibility envelope
 browser_sessions.validated_until=min(now()+24h, expires_at)
 browser_sessions.expires_at=now()+configured absolute lifetime (default 30d)
 ```

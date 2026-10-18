@@ -15,7 +15,7 @@
 ## Root key domains
 
 ```text
-ENC_ROOT     PII, OAuth state, 서버 관리 Text와 세션 호환 envelope 암호화용
+ENC_ROOT     PII, OAuth state, 서버 관리 Text와 이력 암호화용
 LOOKUP_ROOT  provider/email/API key/browser session lookup HMAC, session signing과 internal search signing용
 ```
 

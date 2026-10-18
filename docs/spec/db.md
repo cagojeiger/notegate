@@ -9,200 +9,36 @@ Migration은 forward-only로 운영한다.
 - `all`과 `api` process는 startup에서 pending migration을 적용한다.
 - `worker`, `reconciler`와 `search` process는 현재 binary가 아는 migration의 적용 여부와 checksum을
   read-only로 검증한다.
-- Rolling deployment용 migration은 배포 중 공존하는 binary가 사용할 compatibility view나 default를
-  포함하고 회귀 테스트로 검증한다.
+- 호환되지 않는 schema 변경은 구 API·worker·reconciler를 모두 중지한 뒤 적용한다. 이전 이미지만 다시 실행하지 않는다.
+- Migration 59 전에는 v0.1.112에서 history encryption을 완료하고 복구 가능한 백업을 확인한다. 평문 Changes·호출 payload·수정 사유가 남아 있으면 DDL 전에 중단한다.
 - Migration이 포함된 release는 forward fix로 복구한다.
 - Schema 복원이 필요한 rollback은 배포 전에 검증한 database restore 절차로 수행한다.
 
-## Entity overview
-
-```text
-crypto_key_epochs
-accounts
-users
-external_identities
-agents
-api_keys
-audit_events
-file_change_events
-command_invocations
-spaces
-space_usage
-space_storage_usage
-background_jobs
-background_job_attempts
-space_agent_connections
-nodes
-text_objects
-file_objects
-object_storage_objects
-```
-
 ## Security tables
-
-```text
-crypto_key_epochs
-  key_id text pk
-  domain text check ('enc','lookup')
-  status text check ('active','verify_only','revoked')
-  verify_tag text not null
-  version int not null
-  created_at timestamptz
-  activated_at timestamptz null
-  retired_at timestamptz null
-  revoked_at timestamptz null
-```
 
 Domain마다 active epoch는 하나다. `verify_tag`는 root key 원문 저장 없이 설정과 DB registry 일치를 검증한다.
 
-Security DB 제약:
-
-```text
-crypto_key_epochs.key_id: 1..127자이며 첫 글자는 영문/숫자, 이후 영문/숫자/`.`/`_`/`-`
-crypto_key_epochs.revoked_at: status='revoked'이면 non-NULL, 아니면 NULL
-```
-
 ## Actor tables
 
-```text
-accounts
-  id uuid pk
-  kind text check ('user','agent')
-  display_name_ciphertext bytea null
-  display_name_nonce bytea null
-  display_name_enc_key_id text null
-  display_name_enc_version int null
-  is_active bool
-  deleted_at timestamptz null
-  deleted_by_account_id uuid null references accounts(id)
-  created_at timestamptz
-  updated_at timestamptz
-```
-
 `accounts`는 인증과 attribution의 공통 actor다.
-
-```text
-users
-  id uuid pk references accounts(id) on delete cascade
-  email_ciphertext bytea null
-  email_nonce bytea null
-  email_enc_key_id text null
-  email_enc_version int null
-  email_hash text null
-  email_hash_key_id text null
-  email_hash_version int null
-  tier text not null default 'tier0'
-  anonymized_at timestamptz null
-```
-
-```text
-external_identities
-  user_id uuid not null references users(id) on delete cascade
-  issuer text not null
-  subject_hash text not null
-  subject_hash_key_id text not null references crypto_key_epochs(key_id)
-  subject_hash_version int not null
-  created_at timestamptz not null default now()
-  primary key (issuer, subject_hash)
-  index (user_id)
-```
 
 외부 신원은 검증된 `issuer`와 subject의 HMAC으로 찾는다. Email이 같아도 계정을 자동 연결하지 않는다.
 조회와 저장은 `external_identities` 한 경로를 사용하며, 최초 로그인은 issuer-scoped hash로
 transaction lock을 잡는다. Primary key는 동일 신원의 중복 소유자를 차단한다.
 삭제 보류 계정의 연결도 retention 동안 유지하고 purge가 PII와 함께 제거한다.
-`issuer`는 1..2048자다. Migration 58은 미익명화 계정과 기존 원래 issuer의 연결을
-검증한 뒤 구형 users subject hash 3개 컬럼과 issuer binding을 제거한다.
-미연결 계정이 있으면 migration을 중단한다. 계정 ID와 소유권·이력·현재 세션은 변경하지 않는다.
 
-```text
-agents
-  id uuid pk references accounts(id) on delete cascade
-  owner_user_id uuid not null references users(id)
-  name text not null
-  created_at timestamptz
-```
 
 Agent는 user가 관리한다. Agent name은 제품 메타데이터이며 PII 저장소로 사용하지 않는다.
 
-Actor DB 제약:
-
-```text
-agents.name: 1..63자이며 trim 후 빈 문자열이면 안 됨
-accounts.display_name_*: 암호화 display-name 필드는 모두 NULL이거나 모두 non-NULL
-accounts.deleted_*: deleted_at과 deleted_by_account_id는 모두 NULL이거나 모두 non-NULL
-users.email_enc_*: email 암호화 필드는 모두 NULL이거나 모두 non-NULL
-users.email_hash_*: email lookup hash 필드는 모두 NULL이거나 모두 non-NULL
-users.tier: 'tier0' 또는 'system_max'. Application은 신규 user 생성 시 `NOTEGATE_DEFAULT_USER_TIER` 값을 명시적으로 저장한다. DB default `tier0`는 직접 SQL 삽입을 위한 fallback이다.
-```
-
 ## Credential table
-
-```text
-api_keys
-  id uuid pk
-  account_id uuid not null references accounts(id) on delete cascade -- 이 key로 인증되는 account
-  created_by_user_id uuid not null references users(id)   -- 이 key를 만든 user
-  name text not null
-  token_prefix text not null
-  token_hash text not null unique
-  hash_key_id text not null references crypto_key_epochs(key_id)
-  hash_version int not null
-  scopes text[] not null default '{}'
-  created_at timestamptz
-  last_used_at timestamptz null
-  expires_at timestamptz not null
-  revoked_at timestamptz null
-  revoked_by_user_id uuid null references users(id)
-  revoked_reason text null
-  rotated_from_key_id uuid null references api_keys(id)
-```
 
 평문 token은 저장하지 않는다. `scopes`는 빈 배열만 허용한다.
 
-Credential DB 제약:
-
-```text
-api_keys.name: 1..63자이며 trim 후 빈 문자열이면 안 됨
-api_keys.scopes: cardinality(scopes) = 0
-api_keys.revoked_*: revoked_at, revoked_by_user_id, revoked_reason은 모두 NULL이거나 모두 non-NULL
-api_keys.account_id: Agent account만 참조할 수 있으며 DB trigger가 신규 User-owned key를 거부함
-```
-
 ## Browser session table
-
-```text
-browser_sessions
-  id uuid pk
-  user_id uuid not null references users(id) on delete cascade
-  token_prefix text not null
-  token_hash text not null unique
-  hash_key_id text not null references crypto_key_epochs(key_id)
-  hash_version int not null
-  local_session boolean not null default false
-  oidc_issuer text null -- local_session=true일 때만 필수
-  validated_until timestamptz not null
-  expires_at timestamptz not null
-  last_used_at timestamptz null
-  revoked_at timestamptz null
-  revoked_reason text null
-  created_at timestamptz
-  updated_at timestamptz
-```
 
 Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. 신규 세션은 `local_session=true`와 검증한 `oidc_issuer`를 저장한다. 외부 token과 refresh 상태는 보관하지 않는다.
 
-Browser session DB 제약:
-
-```text
-browser_sessions.local_session = (browser_sessions.oidc_issuer IS NOT NULL)
-browser_sessions.validated_until <= browser_sessions.expires_at
-browser_sessions.revoked_reason: revoked_at이 NULL이면 NULL
-```
-
 ## Local OAuth tables
-
-0056 migration은 독립 모드의 인증 상태를 추가한다. 모드가 꺼져 있으면 새 OAuth endpoint는 등록하지 않는다.
 
 | 테이블 | 책임·핵심 연결 |
 |---|---|
@@ -218,36 +54,7 @@ Bearer token·code·PKCE verifier 원문은 평문 DB 필드에 남기지 않는
 
 Event history table은 현재 상태의 source of truth가 아니다. 성공한 domain mutation의 append-only snapshot history다. Actor, owner, target id는 product row를 직접 소유하지 않는 identifier snapshot이며 cascading foreign key로 다루지 않는다. `actor_account_id`는 mutation caller이고, `owner_user_id`는 audit event가 속한 user-owned product scope다. Audit event의 primary target은 `resource_type`/`resource_id`이고, file change event의 primary target은 `space_id`/`node_id`다. Secondary target id는 `metadata`에 둔다.
 
-```text
-audit_events
-  id bigserial pk
-  operation_id uuid null
-  created_at timestamptz not null default now()
-  owner_user_id uuid null
-  actor_account_id uuid null
-  source text not null check ('rest','mcp','system')
-  op_type text not null
-  resource_type text not null
-  resource_id uuid null
-  metadata jsonb not null default '{}'
-```
-
 `audit_events`는 account, browser session, credential, agent, space, connection 관리 변경과 node/Space DB 정리 완료를 기록한다. 완료 기록은 원본 삭제와 같은 transaction에 저장하며 리소스 삭제 뒤에도 identifier snapshot으로 180일 보존한다. `object.delete`는 별도로 S3 삭제 acknowledgement를 기록한다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
-
-```text
-file_change_events
-  id bigserial pk
-  operation_id uuid null
-  created_at timestamptz not null default now()
-  owner_user_id uuid null
-  space_id uuid not null
-  node_id uuid null
-  actor_account_id uuid null
-  op_type text not null
-  metadata jsonb not null default '{}'
-  private_metadata jsonb null
-  snapshot_id uuid null
-```
 
 `file_change_events`는 space 안의 파일/폴더/문서 변경을 기록하며 space 전체 조회와 node별 조회를 위한 index를 둔다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
@@ -255,90 +62,11 @@ file_change_events
 
 `command_invocations`는 domain event와 분리된 MCP·CLI·외부 API v2 실행 이력이다. 저장 대상과 redaction, 크기 제한, retention 계약은 `docs/spec/event-logging.md`가 소유한다.
 
-```text
-command_invocations
-  id bigserial pk
-  invocation_id uuid null unique
-  snapshot_id uuid null
-  private_payload jsonb null
-  created_at timestamptz not null default now()
-  owner_user_id uuid not null
-  actor_account_id uuid not null
-  caller_kind text check ('user','agent')
-  surface text check ('mcp','cli','api')
-  tool text not null
-  op text null
-  purpose text null
-  space_name text null
-  input jsonb not null check object
-  response jsonb null check object
-  outcome text check ('success','error')
-  error_code text null
-  duration_ms bigint not null check >= 0
-```
+호출 기록의 문서 관련 필드는 `private_payload`에 암호화해서 저장하고 조회 시 복호화한다. `invocation_id`는 Changes와의 논리적 연결이고 retention 또는 기록 실패로 연결 대상이 없을 수 있어 FK를 두지 않는다.
 
-새 호출 기록의 문서 관련 필드는 `private_payload`에 암호화해서 저장한다. 호환용 `purpose`/`space_name`/`response`는 NULL, `input`은 빈 object이며 조회 시 복호화한 값을 반환한다. `invocation_id`는 Changes와의 논리적 연결이고 retention 또는 기록 실패로 연결 대상이 없을 수 있어 FK를 두지 않는다.
-
-DB는 기록 경계에서 발생한 실패도 저장할 수 있도록 `purpose`, `op`, `response`에 NULL을 허용한다. `surface`는 서버가 판정한 호출 경계이며 client 신원을 뜻하지 않는다. Column별 의미와 정규화 규칙은 `docs/spec/event-logging.md`를 따른다.
-
-Event history DB 제약:
-
-```text
-audit_events.source: 'rest', 'mcp', 'system'
-metadata: JSON object
-command_invocations.surface: 'mcp', 'cli', 'api'
-command_invocations.input: JSON object
-command_invocations.response: NULL 또는 JSON object
-created_at: DB timestamp 기준
-```
-
-권장 index:
-
-```text
-audit_events_owner_time_idx(owner_user_id, created_at desc, id desc)
-audit_events_actor_time_idx(actor_account_id, created_at desc, id desc)
-audit_events_resource_time_idx(resource_type, resource_id, created_at desc, id desc)
-audit_events_retention_idx(created_at)
-audit_events_operation_idx(owner_user_id, operation_id) where operation_id is not null
-
-file_change_events_space_time_idx(space_id, created_at desc, id desc)
-file_change_events_node_time_idx(space_id, node_id, created_at desc, id desc)
-file_change_events_space_id_idx(space_id, id)
-file_change_events_actor_time_idx(actor_account_id, created_at desc, id desc)
-file_change_events_retention_idx(created_at)
-file_change_events_operation_idx(space_id, operation_id) where operation_id is not null
-file_change_events_owner_time_idx(owner_user_id, created_at desc, id desc) where owner_user_id is not null
-file_change_events_unencrypted_idx(id) where private_metadata is null
-
-command_invocations_owner_surface_time_idx(owner_user_id, surface, created_at desc, id desc)
-command_invocations_actor_time_idx(actor_account_id, created_at desc, id desc)
-command_invocations_retention_idx(created_at)
-command_invocations_invocation_id_idx(invocation_id) unique where invocation_id is not null
-command_invocations_unencrypted_idx(id) where private_payload is null
-```
+기록 경계에서 발생한 실패도 저장할 수 있도록 `op`와 암호화 payload의 `purpose`·`response`는 생략할 수 있다. `surface`는 서버가 판정한 호출 경계이며 client 신원을 뜻하지 않는다. Column별 의미와 정규화 규칙은 `docs/spec/event-logging.md`를 따른다.
 
 ## Space and connection tables
-
-```text
-spaces
-  id uuid pk
-  owner_user_id uuid not null references users(id)
-  name text not null
-  sort_order int not null default 0
-  navigation_pinned_at timestamptz null
-  user_mcp_enabled_at timestamptz null
-  default_external_access_enabled bool not null default true
-  default_text_encryption_enabled bool not null default false
-  created_at timestamptz
-  updated_at timestamptz
-  deleted_at timestamptz null
-  deleted_by_user_id uuid null references users(id)
-  purge_after timestamptz null
-  trash_recoverable bool not null default false
-  deletion_operation_id uuid null
-  purge_requested_at timestamptz null
-  purge_last_attempt_at timestamptz null
-```
 
 Live space name은 `(owner_user_id, name)` 기준 unique다. Space name은 1~63자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, `:`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다. Space 목록 기본 정렬은 `(sort_order, name, id)`다. 서비스 생성 경로는 새 space를 `max(owner live sort_order)+1000`으로 만들어 기본적으로 목록 끝에 추가한다. `navigation_pinned_at`은 탐색 영역 고정 상태이고 `user_mcp_enabled_at`은 User MCP 권한 상태이며 서로 독립적이다. `deleted_at`, `deleted_by_user_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.
 
@@ -346,103 +74,15 @@ Live space name은 `(owner_user_id, name)` 기준 unique다. Space name은 1~63�
 
 `trash_recoverable`은 해당 Space 삭제가 휴지통 복원 보존 정책을 지원하는지 표시한다. 현재 복원이 가능한지는 만료 시각, 영구 삭제 요청, 파일 원장 상태와 현재 제한을 별도로 검증한다.
 
-```text
-space_usage
-  space_id uuid pk references spaces(id) on delete cascade
-  live_node_count bigint not null default 1 check >= 1
-  live_text_bytes bigint not null default 0 check >= 0
-  live_file_bytes bigint not null default 0 check >= 0
-  reconciled_at timestamptz not null
-```
-
 `space_usage`는 활성 항목 수와 활성 본문 bytes를 보관한다. Byte quota는 `space_storage_usage`의 보관량을 사용한다. Root node는 `live_node_count`에 포함한다. Space 생성은 root node와 usage row를 같은 transaction에서 만든다. File-tree 변경은 예상 delta를 검증하고 source row와 counter를 같은 transaction에서 갱신한다. 정확한 계산과 복구 기준은 `usage-and-quotas.md`를 따른다.
 
-```text
-space_storage_usage
-  space_id uuid pk -- no FK
-  owner_user_id uuid not null -- immutable ownership, no FK
-  text_bytes bigint not null check >= 0
-  file_bytes bigint not null check >= 0
-```
-
-이름/본문 없이 소유자와 용량만 저장한다. Text source 및 object 상태 trigger가 갱신하며 Space 제거 뒤 S3 삭제가 끝날 때까지 유지한다. Byte가 0이고 Space와 nonterminal object 참조가 없으면 bounded history cleanup에서 제거한다.
-
-
-```text
-background_jobs
-  job_id uuid pk
-  job_kind text not null
-  payload jsonb not null
-  history_visibility text check ('hidden','visible')
-  history_owner_account_id uuid null
-  context_kind text null
-  context_id uuid null
-  context_label text null
-  status text check ('queued','running','succeeded','dead')
-  available_at timestamptz not null
-  attempt_count integer not null
-  failure_count integer not null
-  max_attempts integer not null
-  claim_token uuid null
-  claimed_by text null
-  lease_until timestamptz null
-  last_error_code text null
-  last_error_message text null
-  created_at / updated_at timestamptz not null
-  completed_at timestamptz null
-
-background_job_attempts
-  job_id uuid references background_jobs(job_id) on delete cascade
-  attempt_number integer
-  claim_token uuid unique
-  worker_id text
-  started_at timestamptz
-  finished_at timestamptz null
-  outcome text null
-  error_code / error_message text null
-  primary key (job_id, attempt_number)
-```
+`space_storage_usage`는 이름/본문 없이 소유자와 용량만 저장한다. Text source 및 object 상태 trigger가 갱신하며 Space 제거 뒤 S3 삭제가 끝날 때까지 유지한다. Byte가 0이고 Space와 nonterminal object 참조가 없으면 bounded history cleanup에서 제거한다.
 
 `background_jobs`는 지연 가능한 내부 작업의 원장이다. `queued`와 `running`은 `completed_at=NULL`, terminal 상태는 claim 정보가 없고 `completed_at`이 있어야 한다. 각 claim은 append-only attempt 한 개를 만들며 defer, lease 만료, timeout, panic, 취소, retryable/permanent failure를 구분한다. `attempt_count`는 실행 상한을 소비하는 전체 실행 이력이고 `failure_count`는 오류 관측값이다. Queue의 전달 보장은 at-least-once이고 terminal 행은 90일 뒤 bounded batch로 삭제한다. 상세 상태 전이는 `background-jobs.md`를 따른다.
-
-```text
-space_agent_connections
-  space_id uuid not null references spaces(id) on delete cascade
-  agent_id uuid not null references agents(id) on delete cascade
-  permission text not null check ('read','write')
-  connected_by_user_id uuid not null references users(id)
-  connected_at timestamptz
-  disconnected_at timestamptz null
-  disconnected_by_user_id uuid null references users(id)
-  primary key (space_id, agent_id)
-```
 
 Connection은 agent 전용이다. User-to-user membership은 제공하지 않는다. `disconnected_at`, `disconnected_by_user_id`는 모두 NULL이거나 모두 non-NULL이다. 같은 owner user 안의 live space와 active agent만 연결하는 규칙은 connection repository transaction에서 검사한다.
 
 ## Tree and content tables
-
-```text
-nodes
-  id uuid pk
-  space_id uuid not null references spaces(id) on delete cascade
-  parent_id uuid null
-  name text not null
-  kind text not null check ('folder','text','file')
-  sort_order int not null default 0
-  metadata jsonb not null default '{}'
-  external_access_enabled bool not null default true
-  write_locked bool not null default false
-  created_by_account_id uuid not null references accounts(id)
-  updated_by_account_id uuid not null references accounts(id)
-  deleted_by_account_id uuid null references accounts(id)
-  created_at timestamptz
-  updated_at timestamptz
-  deleted_at timestamptz null
-  purge_after timestamptz null
-  deletion_target_node_id uuid null
-  deletion_operation_id uuid null
-  purge_requested_at timestamptz null
-```
 
 - `(parent_id, space_id)`는 `nodes(id, space_id)`를 참조하는 composite FK다(`UNIQUE (id, space_id)`로 보장). parent는 항상 같은 space 안에 있다.
 - Root는 `parent_id IS NULL`, `name='/'`, `kind='folder'`, `deleted_at IS NULL`인 node다.
@@ -455,99 +95,15 @@ nodes
 - Full path는 저장하지 않는다.
 - Create, rename, move, copy, file attach는 DB mutation transaction 안에서 최종 derived path의 depth와 byte 상한을 다시 검사한다. Folder subtree를 옮기거나 복사할 때는 모든 live descendant를 포함한다.
 
-```text
-text_objects
-  node_id uuid pk
-  space_id uuid not null references spaces(id) on delete cascade
-  storage_format text not null check ('plain','encrypted')
-  content_text text null
-  encrypted_payload jsonb null
-  at_rest_encryption text not null check ('none','server')
-  content_ciphertext bytea null
-  content_nonce bytea null
-  content_enc_key_id text null references crypto_key_epochs(key_id)
-  content_enc_version int null
-  content_sha256 text not null
-  byte_len bigint not null check 0..1048576
-  line_count int not null check 0..5000
-  media_type text not null
-  encoding text not null default 'utf-8' check = 'utf-8'
-  created_by_account_id uuid not null references accounts(id)
-  updated_by_account_id uuid not null references accounts(id)
-  created_at timestamptz
-  updated_at timestamptz
-```
-
-```text
-file_objects
-  node_id uuid pk
-  space_id uuid not null references spaces(id) on delete cascade
-  object_key text not null
-  media_type text not null
-  detected_media_type text null
-  byte_len bigint not null check 0..107374182400
-  original_filename text null
-  encryption_mode text not null check ('none','client')
-  encryption_metadata jsonb null
-  uploaded_at timestamptz
-```
-
 `File` metadata는 `file_objects`에 저장하고 실제 bytes는 S3 호환 저장소에 저장한다. NoteGate는 외부에 노출하지 않는 `object_key`만 저장한다. `media_type`은 client 선언값이고 `detected_media_type`은 object bytes에서 감지한 값이다. `NULL`은 아직 감지하지 못한 상태다.
 
 Space content quota는 `space_storage_usage.text_bytes`와 `file_bytes`로 독립 검사한다. 휴지통 Text와 attached/delete_pending object bytes를 포함하며 DB/S3 완료 transaction이 용량을 반환한다. 과거 revision 본문은 별도 예산이다.
-
-```text
-object_storage_objects
-  id uuid pk
-  object_key text unique not null
-  space_id/parent_node_id/node_id/requested_by_account_id uuid null
-  usage_space_id uuid null -- immutable accounting scope, no FK
-  name/declared_byte_len/media_type/encryption metadata
-  upload_mode text check ('single','multipart')
-  multipart_upload_id text null
-  multipart_part_size bigint null
-  state text check ('uploading','attached','expire_pending','expired','delete_pending','deleted')
-  last_activity_at/retry_count/retry_after/last_error_code
-  created_at/attached_at/delete_requested_at/deleted_at
-  deletion_operation_id uuid null
-```
 
 `object_storage_objects`는 업로드 연결과 물리 삭제 재시도를 위한 운영 원장이다. Node/Space soft delete는 현재 본문과 연결된 object를 30일 보존한다. 보관 기간 만료 또는 사용자 영구 삭제 요청 이후 hard purge가 object를 `delete_pending`으로 전환한 뒤 semantic rows를 제거한다. Purge는 객체 원장의 `deletion_operation_id`에 원래 node 삭제 ID(없으면 Space 삭제 ID)를 복사한다. 원장은 Node/Space purge 뒤에도 남도록 참조 FK가 `ON DELETE SET NULL`이며, `expired`/`deleted` 이력은 cluster-singleton purge가 180일 뒤 bounded batch로 삭제한다. Retention 조회는 terminal state와 `COALESCE(deleted_at, last_activity_at)` 순서의 partial index를 사용한다. `expire_pending`과 `delete_pending`은 S3 삭제 실패를 재시도하는 중간 상태다.
 
 `usage_space_id`는 최초 Space ID를 보존하고 FK가 NULL이 되어도 유지한다. 이미 소속이 끊긴 legacy object는 NULL이다. S3 삭제 성공 후 `deleted` 전환, 저장 용량 감소, `object.delete` receipt를 하나의 transaction으로 처리한다. Provider 내부 disk GC는 이 완료 기준에 포함하지 않는다.
 
-Content FK invariant:
-
-```text
-DB FK: text_objects/file_objects row -> matching nodes(id, space_id) ON DELETE CASCADE
-DB CHECK: file_objects.byte_len <= 107374182400
-DB CHECK: client-encrypted file_objects.detected_media_type IS NULL
-DB FK: file_objects.object_key -> object_storage_objects.object_key
-DB CHECK: file_objects.object_key IS NOT NULL
-Service transaction: object attach는 node, file_objects, usage counter, file change event, 원장 상태를 함께 commit
-```
-
 File content encryption은 client-side only다.
-
-```text
-encryption_mode='none'   -> encryption_metadata IS NULL
-encryption_mode='client' -> encryption_metadata JSON object, bytes는 클라이언트 암호문
-```
-
-Text 저장 invariant:
-
-```text
-storage_format='plain', at_rest_encryption='none'
-  -> content_text IS NOT NULL, encrypted_payload와 content 암호화 필드는 NULL
-storage_format='plain', at_rest_encryption='server'
-  -> content_text와 encrypted_payload는 NULL, content 암호화 필드는 모두 non-NULL
-storage_format='encrypted'
-  -> at_rest_encryption='none', content_text와 content 암호화 필드는 NULL,
-     encrypted_payload는 JSON object
-byte_len                  -> 0..1048576
-line_count                -> 0..5000
-encoding                  -> 'utf-8'만 허용
-```
 
 Text 암호화 정책:
 
@@ -559,13 +115,6 @@ Text 암호화 정책:
 - encrypted Text의 `content_sha256`, `byte_len`은 서버 canonical JSON serialization 기준이고 `line_count=0`이다.
 - `at_rest_encryption` 변경과 기존 plain Text 본문 변환은 같은 transaction에서 처리한다.
 - `at_rest_encryption`은 서버 관리 암호화의 유일한 Text 저장 상태다.
-
-Node-content invariant:
-
-```text
-text_objects row -> matching nodes.kind='text'
-file_objects row -> matching nodes.kind='file'
-```
 
 DB trigger는 content row가 올바른 node kind에만 붙도록 보장한다. Folder는 content row를 만들지 않는다. Text 생성/쓰기는 service transaction에서 node와 text_objects row를 함께 만든다.
 

@@ -184,7 +184,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, S
              updated_by_account_id = $14, updated_at = now(), \
              revision_id = $15, revision_written_at = $16, revision_author_id = $14, \
              revision_group_id = $17, revision_group_started_at = $18, \
-             revision_session_id = $19, revision_source = $20, revision_purpose = NULL, revision_private_purpose = $21 \
+             revision_session_id = $19, revision_source = $20, revision_private_purpose = $21 \
          WHERE space_id = $1 AND node_id = $2 RETURNING {SAVED_TEXT_COLUMNS}"
     )))
     .bind(space_id)

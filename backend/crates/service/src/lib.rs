@@ -11,7 +11,6 @@ pub mod audit_events;
 pub mod background_jobs;
 pub mod command_invocations;
 pub mod connections;
-pub mod cursor;
 pub mod error;
 pub mod files;
 pub mod history;

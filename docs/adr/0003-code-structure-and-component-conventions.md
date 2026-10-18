@@ -42,32 +42,12 @@ api transport adapters ──▶ api commands ──┬─▶ service ──▶ 
 (api는 조립을 위해 db/model도 직접 참조 가능)
 ```
 
-- db는 service나 search를 의존하지 않는다.
-- model은 여러 레이어가 함께 쓰는 순수 데이터 타입과 command/view/cursor DTO를 둔다.
-- text는 다른 내부 크레이트에 의존하지 않는 순수 텍스트 엔진이다. 줄 경계·내용 통계·편집·구문
-  검사를 담당한다. model은 text의 편집 입력 타입을 재노출하고, service와 search는 text를 직접 호출한다.
-- 텍스트 엔진 오류의 서비스 오류 변환, 저장 DTO 변환, 권한·quota·읽기 제한은 service에 둔다.
-- media는 내부 크레이트에 의존하지 않는 바이트 기반 파일 형식 판별과 DOCX 검증을 담당한다.
-  ZIP/XML 제한과 거부 사유는 media에, S3 읽기·동시 실행 제한·로그·미리보기 정책과 DTO는 api에 둔다.
-- command는 transport-neutral 입력, 허용 operation, JSON Schema, recovery와 오류 계약을 소유한다.
-  허용 operation은 한 선언에서 schema와 runtime 검증 값으로 파생한다. 입력 경계에서는 알 수 없는
-  값을 구조화된 `invalid_input` 응답으로 변환할 수 있도록 raw string을 유지한다.
-- service는 DB repository 위의 비즈니스 규칙·권한 체크·validation·domain command orchestration을 담당한다.
-- search는 concrete `FilesRepo` 위에서 `find`/`grep` 권한 확인과 실행, matcher, decrypted body cache, admission과 search telemetry를 소유한다. API application state에는 search client만 두고, 실행 runtime은 public listener와 분리된 private HTTP server state가 소유한다. 같은 image의 `search` process mode로 deployment boundary를 분리할 수 있다. 일반 file-tree 조회인 `tree`는 service의 files 영역에 둔다.
-- api의 `commands`는 인증된 request context, 공통 input validation과 application dispatch를 담당한다.
-  Command HTTP와 MCP는 인증·protocol envelope·transport error mapping만 소유하고 같은 command 실행기를
-  호출한다. S3·AuthGate 같은 외부 provider adapter와 service command를 조합하는 application workflow는
-  각 handler에 중복하지 않고 api의 공용 모듈에 둔다.
-- 공용 업로드 흐름은 전체 `AppState` 대신 함수별로 필요한 `FilesService`, `ObjectStorage`,
-  `DocxValidationAdmission` 참조를 받는다. 채널별 파일 서비스 선택은 transport adapter에 둔다.
-- 파일 쓰기의 출처·편집 세션·호출 ID·변경 이유는 `FileMutationContext`로 함께 전달한다.
-  인증된 actor와 접근 권한은 이 문맥과 별개다. 복원은 revision에 `restore`를 기록하고 Changes에는
-  실제 호출 경로를 유지한다. 새로운 채널 문맥은 이전 요청의 호출 ID나 변경 이유를 이어받지 않는다.
-- 텍스트 쓰기는 본문 없는 `SavedText` 메타데이터를 반환하고, service는 이를 `TextWriteResult`로
-  구성한다. 본문 조회는 `TextObject`를 사용한다. 본문·이전 버전·용량·Changes는 기존처럼 하나의
-  쓰기 트랜잭션에서 커밋하며, 저장 응답을 만들기 위한 본문 반환·복호화는 하지 않는다.
-- cli는 command 입력 타입과 생성 schema를 직접 재사용하되 api 구현 crate에는 의존하지 않는다.
-  인증 facade, OAuth protocol 처리, credential persistence와 URL 보안 정책은 CLI 내부 책임으로 유지한다.
+- DB는 PostgreSQL로 고정하며 service와 search는 concrete repository를 사용한다.
+- 순수 텍스트·미디어 처리는 transport와 DB에서 분리한다. 권한·quota·transaction orchestration은 service가 소유한다.
+- Command schema·validation·recovery는 command가 소유하고 CLI는 API 구현에 의존하지 않는다.
+- MCP와 HTTP adapter는 인증·protocol/error mapping만 담당하고 같은 command 실행기를 호출한다.
+- Search 실행·cache·admission은 private listener가 소유하며 public API에는 client만 둔다.
+- 파일 변경 문맥의 출처·편집 세션·호출 ID는 인증된 actor·권한과 별개다. 새 요청에 이전 문맥을 이어받지 않는다.
 
 ### 4. 구조 컨벤션 (보조)
 
@@ -82,20 +62,6 @@ api transport adapters ──▶ api commands ──┬─▶ service ──▶ 
 
 ## 근거
 
-- trait은 실제 다형성이나 교체 가능성이 있을 때만 비용을 정당화한다. PostgreSQL 고정 + 단일 구현에서
-  store trait은 concrete repo의 그림자 인터페이스가 되고, 제네릭·mock·async-trait 보일러플레이트만 늘린다.
-- DB 제약·trigger·recursive CTE·transaction race는 mock이 정확히 흉내내기 어렵다. 따라서 핵심
-  lifecycle/search/permission은 실제 Postgres 통합테스트가 신뢰도 높다.
-- 순수 로직을 순수 함수로 분리하면 mock 없이도 빠른 유닛테스트가 된다. 테스트성을 잃는 게 아니라
-  올바른 레이어로 옮기는 것이다.
-- 테스트 속도 비용은 추상화 부재가 아니라 테스트 셋업(마이그레이션-per-test)에서 온다. 따라서
-  추상화가 아니라 인프라로 해결하는 것이 커버리지 손실 없이 맞다.
-
-## 결과
-
-- service store trait과 mock store 테스트는 두지 않는다.
-- 순수 함수(content/patch/policy/validation/cursor/pagination)는 유닛테스트로 검증한다.
-- repo 자체 동작은 db 통합 테스트, files/search/permissions/lifecycle 같은 end-to-end 성격은
-  service 통합 테스트로 둔다.
-- 테스트 속도 최적화는 테스트 인프라 레벨에서 한다.
-- 다형성 seam은 실제 runtime boundary에만 둔다.
+단일 구현을 감싼 store trait은 교체 가능성을 제공하지 않으면서 interface와 mock을 중복시킨다.
+DB 제약·trigger·recursive CTE·transaction race는 실제 PostgreSQL에서 검증한다. 테스트 속도는
+업무 추상화를 추가하기보다 schema 격리와 CI 인프라로 관리한다.

@@ -1,27 +1,5 @@
 # 개발 가이드
 
-## 저장소 구조
-
-```text
-notegate/
-├─ backend/crates/
-│  ├─ api/                     # Axum server, REST/MCP/auth, static web
-│  ├─ jobs/                    # PostgreSQL job queue와 worker runtime
-│  ├─ media/                   # byte-based media detection와 bounded DOCX validation
-│  ├─ search/                  # find/grep 실행, matcher, body cache와 search telemetry
-│  ├─ service/                 # business logic과 command semantics
-│  ├─ db/                      # sqlx pool, repository, migration
-│  ├─ model/                   # shared domain type
-│  ├─ core/                    # config, limit, validation, shared error
-│  └─ text/                    # pure text metrics, logical lines, edits, syntax checks
-├─ frontend/web/               # React dashboard
-├─ deploy/
-│  ├─ docker/web.Dockerfile
-│  ├─ nginx/notegate.conf
-│  └─ observability/
-└─ docker-compose.yml
-```
-
 ## 로컬 개발
 
 Dashboard와 API를 분리해 실행한다.
@@ -176,6 +154,8 @@ Encryption과 lookup root secret은 각각 32 bytes 이상이어야 한다. API�
 User MCP 연결은 `${NOTEGATE_PUBLIC_URL}/auth/login`에서 Google 로그인을 마친 뒤 `/mcp`로 연결한다. Agent MCP는 `ngk_v2_` Agent key만 허용하며 OAuth bearer token을 받지 않는다.
 
 ## 검증
+
+화면 변경은 desktop·tablet·mobile의 light/dark, 320 CSS px reflow와 키보드 조작을 확인한다. 순수 로직은 단위 테스트, 실제 layout·상호작용·세션은 Playwright로 검증한다. Screenshot만으로 동작을 판정하지 않는다.
 
 ```sh
 make fmt

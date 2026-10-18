@@ -696,12 +696,13 @@ async fn item_settings_changes_do_not_delay_link_collection()
     .await?;
 
     sqlx::query(
-        "INSERT INTO file_change_events (space_id, op_type, metadata) \
+        "INSERT INTO file_change_events (space_id, op_type, metadata, snapshot_id, private_metadata) \
          VALUES ($1, 'item.update', \
-                 '{\"name_changed\": false, \"write_lock_changed\": true}'::jsonb)",
+                 '{\"name_changed\": false, \"write_lock_changed\": true}'::jsonb, '00000000-0000-0000-0000-000000000000'::uuid, $2)",
     )
     .bind(space_id)
-    .execute(&db.pool)
+    .bind(common::empty_change_metadata(space_id))
+        .execute(&db.pool)
     .await?;
     let has_pending_state: bool = sqlx::query_scalar(
         "SELECT EXISTS( \
@@ -716,11 +717,12 @@ async fn item_settings_changes_do_not_delay_link_collection()
     assert!(!has_pending_state);
 
     sqlx::query(
-        "INSERT INTO file_change_events (space_id, op_type, metadata) \
-         VALUES ($1, 'item.update', '{\"name_changed\": true}'::jsonb)",
+        "INSERT INTO file_change_events (space_id, op_type, metadata, snapshot_id, private_metadata) \
+         VALUES ($1, 'item.update', '{\"name_changed\": true}'::jsonb, '00000000-0000-0000-0000-000000000000'::uuid, $2)",
     )
     .bind(space_id)
-    .execute(&db.pool)
+    .bind(common::empty_change_metadata(space_id))
+        .execute(&db.pool)
     .await?;
     let relevant: (Option<chrono::DateTime<chrono::Utc>>, Option<i64>) = sqlx::query_as(
         "SELECT available_at, pending_since_event_id \
@@ -758,20 +760,22 @@ async fn incremental_rebuild_does_not_pull_new_events_across_its_quiet_boundary(
     clear_projection_work(&db.pool, space_id).await?;
 
     sqlx::query(
-        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata) \
-         SELECT $1, $2, 'text.write', '{}'::jsonb FROM generate_series(1, 500)",
+        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata, snapshot_id, private_metadata) \
+         SELECT $1, $2, 'text.write', '{}'::jsonb, '00000000-0000-0000-0000-000000000000'::uuid, $3 FROM generate_series(1, 500)",
     )
     .bind(space_id)
     .bind(source.id)
-    .execute(&db.pool)
+    .bind(common::empty_change_metadata(space_id))
+        .execute(&db.pool)
     .await?;
     let event_window_id: i64 = sqlx::query_scalar(
-        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata) \
-         VALUES ($1, $2, 'item.move', '{}'::jsonb) RETURNING id",
+        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata, snapshot_id, private_metadata) \
+         VALUES ($1, $2, 'item.move', '{}'::jsonb, '00000000-0000-0000-0000-000000000000'::uuid, $3) RETURNING id",
     )
     .bind(space_id)
     .bind(source.id)
-    .fetch_one(&db.pool)
+    .bind(common::empty_change_metadata(space_id))
+        .fetch_one(&db.pool)
     .await?;
 
     assert!(matches!(
@@ -792,12 +796,13 @@ async fn incremental_rebuild_does_not_pull_new_events_across_its_quiet_boundary(
     assert_eq!(stored_window_id, Some(event_window_id));
 
     let next_event_id: i64 = sqlx::query_scalar(
-        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata) \
-         VALUES ($1, $2, 'text.write', '{}'::jsonb) RETURNING id",
+        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata, snapshot_id, private_metadata) \
+         VALUES ($1, $2, 'text.write', '{}'::jsonb, '00000000-0000-0000-0000-000000000000'::uuid, $3) RETURNING id",
     )
     .bind(space_id)
     .bind(source.id)
-    .fetch_one(&db.pool)
+    .bind(common::empty_change_metadata(space_id))
+        .fetch_one(&db.pool)
     .await?;
     assert!(matches!(
         work.collect_changes().await?,
@@ -1341,12 +1346,13 @@ async fn a_full_scan_absorbs_the_remaining_event_backlog() -> Result<(), Box<dyn
     clear_projection_work(&db.pool, space_id).await?;
 
     sqlx::query(
-        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata) \
-         SELECT $1, $2, 'folder.create', '{}'::jsonb FROM generate_series(1, 501)",
+        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata, snapshot_id, private_metadata) \
+         SELECT $1, $2, 'folder.create', '{}'::jsonb, '00000000-0000-0000-0000-000000000000'::uuid, $3 FROM generate_series(1, 501)",
     )
     .bind(space_id)
     .bind(source.id)
-    .execute(&db.pool)
+    .bind(common::empty_change_metadata(space_id))
+        .execute(&db.pool)
     .await?;
 
     assert!(matches!(
@@ -1396,10 +1402,11 @@ async fn event_committed_after_an_idle_transition_restores_pending_state()
     let writer_pool = db.pool.clone();
     let writer = tokio::spawn(async move {
         sqlx::query(
-            "INSERT INTO file_change_events (space_id, op_type, metadata) \
-             VALUES ($1, 'text.write', '{}'::jsonb)",
+            "INSERT INTO file_change_events (space_id, op_type, metadata, snapshot_id, private_metadata) \
+             VALUES ($1, 'text.write', '{}'::jsonb, '00000000-0000-0000-0000-000000000000'::uuid, $2)",
         )
         .bind(space_id)
+        .bind(common::empty_change_metadata(space_id))
         .execute(&writer_pool)
         .await
     });
@@ -2166,12 +2173,13 @@ async fn collected_events_for_already_purged_nodes_are_ignored()
     .await?;
 
     sqlx::query(
-        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata) \
-         VALUES ($1, $2, 'text.write', '{}'::jsonb)",
+        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata, snapshot_id, private_metadata) \
+         VALUES ($1, $2, 'text.write', '{}'::jsonb, '00000000-0000-0000-0000-000000000000'::uuid, $3)",
     )
     .bind(space_id)
     .bind(Uuid::new_v4())
-    .execute(&db.pool)
+    .bind(common::empty_change_metadata(space_id))
+        .execute(&db.pool)
     .await?;
 
     assert!(matches!(
@@ -2473,12 +2481,13 @@ async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_cha
     .fetch_one(&db.pool)
     .await?;
     sqlx::query(
-        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata) \
-         VALUES ($1, $2, 'text.write', '{}'::jsonb)",
+        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata, snapshot_id, private_metadata) \
+         VALUES ($1, $2, 'text.write', '{}'::jsonb, '00000000-0000-0000-0000-000000000000'::uuid, $3)",
     )
     .bind(space_id)
     .bind(changed_node_id)
-    .execute(&db.pool)
+    .bind(common::empty_change_metadata(space_id))
+        .execute(&db.pool)
     .await?;
 
     assert!(matches!(
@@ -2618,12 +2627,13 @@ async fn manual_reindex_does_not_restart_an_active_full_scan()
     .fetch_one(&db.pool)
     .await?;
     sqlx::query(
-        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata) \
-         VALUES ($1, $2, 'text.write', '{}'::jsonb)",
+        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata, snapshot_id, private_metadata) \
+         VALUES ($1, $2, 'text.write', '{}'::jsonb, '00000000-0000-0000-0000-000000000000'::uuid, $3)",
     )
     .bind(space_id)
     .bind(changed_node_id)
-    .execute(&db.pool)
+    .bind(common::empty_change_metadata(space_id))
+        .execute(&db.pool)
     .await?;
 
     assert_eq!(

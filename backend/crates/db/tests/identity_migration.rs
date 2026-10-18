@@ -377,8 +377,7 @@ async fn identity_migration_preserves_ownership_pii_documents_sessions_and_oauth
         'grants',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM oauth_grants t), \
         'credentials',(SELECT jsonb_agg(to_jsonb(t) ORDER BY token_hash) FROM oauth_credentials t))";
     let before: serde_json::Value = sqlx::query_scalar(snapshot).fetch_one(&db.pool).await?;
-    notegate_db::run_migrations(&db.pool).await?;
-    notegate_db::check_readiness(&db.pool).await?;
+    db.apply_migration(58).await?;
     let after: serde_json::Value = sqlx::query_scalar(snapshot).fetch_one(&db.pool).await?;
     assert_eq!(after, before);
     let removed: (i64, i64) = sqlx::query_as(

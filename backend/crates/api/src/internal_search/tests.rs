@@ -13,8 +13,8 @@ use serde_json::Value;
 use tower::ServiceExt as _;
 
 use super::auth::{
-    BOUND_RESPONSE_SIGNATURE_HEADER, InternalSearchAuth, REQUEST_SIGNATURE_HEADER,
-    RESPONSE_SIGNATURE_HEADER, RequestBinding, TIMESTAMP_HEADER,
+    BOUND_RESPONSE_SIGNATURE_HEADER, InternalSearchAuth, REQUEST_SIGNATURE_HEADER, RequestBinding,
+    TIMESTAMP_HEADER,
 };
 use super::loopback_base_url;
 use super::{FIND_PATH, RequestDeadline, SearchClient, SearchServerState};
@@ -160,12 +160,12 @@ async fn search_app_rejects_unauthorized_search_and_exposes_only_control_plane()
             )
             .await?;
         assert_eq!(response.status(), status);
-        let legacy_signature = response
-            .headers()
-            .get(RESPONSE_SIGNATURE_HEADER)
-            .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| std::io::Error::other("expected legacy signed error response"))?
-            .to_owned();
+        assert!(
+            response
+                .headers()
+                .get("x-notegate-internal-response-signature")
+                .is_none()
+        );
         let bound_signature = response
             .headers()
             .get(BOUND_RESPONSE_SIGNATURE_HEADER)
@@ -173,13 +173,6 @@ async fn search_app_rejects_unauthorized_search_and_exposes_only_control_plane()
             .ok_or_else(|| std::io::Error::other("expected request-bound error response"))?
             .to_owned();
         let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
-        assert!(auth.verify_response(
-            timestamp,
-            status.as_u16(),
-            FIND_PATH,
-            &body,
-            &legacy_signature,
-        ));
         assert!(auth.verify_bound_response(
             &binding,
             status.as_u16(),

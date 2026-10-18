@@ -35,7 +35,6 @@ Private HMAC 계약:
 - Request: timestamp + method + path + 정확한 body bytes, clock skew 최대 60초.
 - Response: request timestamp + status + path + request canonical bytes의 SHA-256 digest + response body를 v2 HMAC으로 서명한다. 성공과 인증된 오류 응답에 같은 규칙을 적용한다.
 - API는 `x-notegate-internal-bound-response-signature`를 반드시 검증한다. 같은 초의 다른 caller·Space·query 응답도 거부하며, 새 서명이 없거나 일치하지 않으면 `search_unavailable`이다.
-- Search는 이전 API와의 순차 배포를 위해 기존 `x-notegate-internal-response-signature`(timestamp + status + path + body)도 반환한다. 새 API는 기존 서명으로 fallback하지 않는다.
 - 동일 timestamp·method·path·body의 재전송을 구분하는 nonce는 없다. 요청 내용의 결합을 보장하며, 호출별 replay 방지를 보장하지 않는다.
 - Key: LOOKUP root에서 session과 다른 purpose label로 파생.
 - 서명은 service authentication/integrity를 보장한다. Transport confidentiality와 `/metrics` 접근 제한은 TLS 또는 cluster network policy가 담당한다.
@@ -64,7 +63,7 @@ Deadline은 ingress에서 한 번 설정한 30초를 monotonic clock으로 계�
 
 선택 필드는 **Search 배포 → readiness 확인 → API 배포** 순서로 활성화한다. 날짜 조건을 생략한 요청도 지원한다.
 
-응답 서명도 분리 운영에서는 **Search 전체 교체 → readiness 확인 → API 교체** 순서로 배포한다. 이전 Search는 새 서명이 없어 새 API와 호환되지 않는다. 롤백은 **API → Search** 순서로 진행한다. 기존 요청·서명 계약은 유지하고 새 응답 헤더를 추가하므로 route는 `/internal/v1`을 유지한다.
+분리 운영의 API와 Search는 같은 release를 사용한다.
 
 API client는 서명된 status/body가 모순되거나 성공 status가 `200 OK`가 아니면 `search_unavailable`로 처리한다.
 

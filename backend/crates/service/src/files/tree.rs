@@ -199,7 +199,7 @@ impl FilesService {
                 after: None,
             }]),
             Some(raw) => {
-                let cursor: TreeCursor = crate::cursor::decode(raw)?;
+                let cursor: TreeCursor = notegate_core::cursor::decode(raw)?;
                 if cursor.version != 1
                     || cursor.command != "tree"
                     || cursor.fingerprint != fingerprint
@@ -221,7 +221,7 @@ impl FilesService {
         if stack.is_empty() {
             return Ok(None);
         }
-        crate::cursor::encode(&TreeCursor {
+        notegate_core::cursor::encode(&TreeCursor {
             version: 1,
             command: "tree".to_owned(),
             fingerprint,

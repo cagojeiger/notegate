@@ -61,8 +61,8 @@ impl From<notegate_core::validation::ValidationError> for ServiceError {
     }
 }
 
-impl From<crate::cursor::CursorError> for ServiceError {
-    fn from(_error: crate::cursor::CursorError) -> Self {
+impl From<notegate_core::cursor::CursorError> for ServiceError {
+    fn from(_error: notegate_core::cursor::CursorError) -> Self {
         Self::InvalidInput("invalid cursor".to_owned())
     }
 }

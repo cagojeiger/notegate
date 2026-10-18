@@ -85,11 +85,8 @@ fn test_config() -> Arc<Config> {
         enc_root_secret: SecretString::from("test-enc-root-secret-32-bytes-long".to_owned()),
         lookup_root_key_id: "test-lookup".to_owned(),
         lookup_root_secret: SecretString::from("test-lookup-root-secret-32-bytes-long".to_owned()),
-        lookup_verify_0_key_id: None,
-        lookup_verify_0_secret: None,
 
         browser_session_max_ttl: Duration::from_secs(30 * 86_400),
-        openapi_enabled: false,
         metrics_enabled: false,
         web_dist_dir: None,
         s3: crate::state::test_s3_config(),
@@ -119,7 +116,7 @@ fn state_from_config(db: &TestDb, config: Arc<Config>) -> crate::state::AppState
         &config.lookup_root_secret,
     )
     .expect("derive test crypto");
-    notegate_service::cursor::configure_signing_key(security.session_signing_key())
+    notegate_core::cursor::configure_signing_key(security.session_signing_key())
         .expect("configure cursor signing key");
     let oidc = Arc::new(OidcProvider::new(&config, reqwest::Client::new()));
     crate::state::AppState::new(
