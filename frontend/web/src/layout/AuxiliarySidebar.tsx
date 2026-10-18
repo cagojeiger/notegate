@@ -189,7 +189,7 @@ export function AuxiliarySidebar({
               <p className="text-xs text-muted">Choose something from Files to manage its settings.</p>
             )}
           </PanelSection>
-          <details className="group border-b border-seam p-3">
+          <details open className="group border-b border-seam p-3">
             <summary className="flex cursor-pointer list-none items-center justify-between outline-none focus-visible:ring-2 focus-visible:ring-primary/45 [&::-webkit-details-marker]:hidden">
               <span className="text-xs font-semibold uppercase tracking-wide text-muted">System details</span>
               <ChevronRight

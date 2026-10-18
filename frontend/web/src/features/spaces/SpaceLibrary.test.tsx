@@ -193,6 +193,29 @@ describe("SpaceLibrary", () => {
     expect(onCreateSpace).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps creation focus when the Space list gains an item", () => {
+    const props = {
+      spaces,
+      activeSpace: spaces[0],
+      canCreateSpace: true,
+      isMobile: false,
+      usagePollingEnabled: true,
+      inspectorOpen: false,
+      onOpenInspector: vi.fn(),
+      onCloseInspector: vi.fn(),
+      onOpenSpace: vi.fn(),
+      onCreateSpace: vi.fn()
+    };
+    const view = render(<SpaceLibrary {...props} />);
+    const create = screen.getByRole("button", { name: "Create space" });
+    create.focus();
+
+    view.rerender(<SpaceLibrary {...props} spaces={[...spaces, makeSpace({ id: "new-space", name: "New space" })]} />);
+
+    expect(screen.getByRole("button", { name: "Create space" })).toBe(create);
+    expect(create).toHaveFocus();
+  });
+
   it.each([false, true])("hides creation without permission (empty: %s)", (empty) => {
     renderLibrary({ spaces: empty ? [] : spaces, canCreateSpace: false });
 
