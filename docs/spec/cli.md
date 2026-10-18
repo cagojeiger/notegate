@@ -154,8 +154,8 @@ notegate-cli manage --help
 기본 timeout은 30초이며 `--timeout-seconds` 또는 `NOTEGATE_TIMEOUT_SECONDS`로 1~300초 사이에서 설정한다. 입력은 1 MiB, 응답은 8 MiB로 제한한다.
 
 ```json
-{"event":"verification_required","verification_uri":"https://authgate.project-jelly.io/device","verification_uri_complete":"https://authgate.project-jelly.io/device?user_code=BCDF-GHKM","user_code":"BCDF-GHKM","expires_in":300,"interval":5}
-{"event":"login_succeeded","base_url":"http://localhost:9191","issuer":"https://authgate.project-jelly.io","client_id":"notegate-cli-local","expires_at":1787530000}
+{"event":"verification_required","verification_uri":"https://notegate.project-jelly.io/oauth/device","verification_uri_complete":"https://notegate.project-jelly.io/oauth/device?user_code=BCDF-GHKM","user_code":"BCDF-GHKM","expires_in":300,"interval":5}
+{"event":"login_succeeded","base_url":"https://notegate.project-jelly.io","issuer":"https://notegate.project-jelly.io","client_id":"notegate-cli","expires_at":1787530000}
 ```
 
 ## 보안과 복구 세부 계약

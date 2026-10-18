@@ -206,7 +206,7 @@ browser_sessions
   updated_at timestamptz
 ```
 
-Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. 호환 모드에서 `refresh_token_*` 필드는 authgate refresh token을 암호화 저장한다. 독립 모드는 `local_session=true`와 검증한 `oidc_issuer`를 저장하고, refresh 필드에는 빈 값을 암호화한 호환 envelope만 둔다. 외부 token은 보관하지 않는다.
+Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. 신규 세션은 `local_session=true`와 검증한 `oidc_issuer`를 저장하고, refresh 필드에는 빈 값을 암호화한 호환 envelope만 둔다. 외부 token은 보관하지 않는다.
 
 Browser session DB 제약:
 

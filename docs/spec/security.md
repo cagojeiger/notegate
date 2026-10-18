@@ -60,15 +60,13 @@ token_hash      = HMAC(API_KEY_SUBKEY, "api-key:v1:" || key_id || ":" || secret)
 ```text
 session plaintext = ngs_v1_{session_id}_{secret}
 session_hash      = HMAC(SESSION_TOKEN_SUBKEY, "browser-session:v1:" || session_id || ":" || secret)
-refresh_token     = AEAD_ENCRYPT(ENC_SUBKEY, authgate_refresh_token, aad)
+refresh_token     = AEAD_ENCRYPT(ENC_SUBKEY, "", aad) -- schema compatibility only
 ```
 
 - Browser session token plaintext는 HttpOnly cookie에만 들어간다.
 - DB에는 `token_hash`, `hash_key_id`, `hash_version`, `token_prefix`만 저장한다.
-- 호환 모드에서만 AuthGate refresh token을 `browser_sessions.refresh_token_*` 컬럼에 암호화 저장한다. 독립 모드는 외부 token을 보관하지 않고 issuer에 연결한 로컬 세션을 사용한다.
-- Refresh token은 AuthGate token endpoint에 제출할 때만 복호화한다.
-- Refresh 응답에 새 refresh token이 있으면 기존 encrypted refresh token을 교체한다.
-- Refresh 응답의 subject가 기존 user와 다르면 local browser session을 revoke하고 401로 처리한다.
+- 신규 세션은 외부 token을 보관하지 않고 issuer에 연결한 로컬 세션을 사용한다. 기존 refresh 컬럼에는 빈 값을 암호화한 호환 envelope만 둔다.
+- 로컬 인증 기간(24시간)이 끝나면 재로그인하며 외부 refresh token으로 갱신하지 않는다.
 - FE는 refresh token과 browser session token 원문을 JavaScript storage에 저장하지 않는다.
 
 ## Local OAuth credentials
