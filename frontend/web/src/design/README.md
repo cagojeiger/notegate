@@ -58,6 +58,7 @@ Prefer `shared/ui` instead of repeating:
 - Workbench preserves at least 320px for the editor area, clamps displayed sidebar widths without rewriting preferred widths, and overlays the Inspector when docked minimum widths no longer fit.
 - Text editor headers collapse secondary controls by pane width and keep those actions in the existing More actions menu, including structured preview/source switching.
 - GitLab-inspired theme colors remain separate from the VS Code-inspired workbench composition.
+- Space Library creation is the final plus card in the grid, outside Space counts and reordering. Its header reserves room for future view tabs; the rail keeps its quick-create action.
 - Reader outer gutters use the same responsive spacing for Markdown and plain text; document typography remains independent from workbench density.
 - Data consumers distinguish loading, empty, error, and ready states. Failed reads offer retry instead of presenting missing data as an empty list or a permission value.
 - Verify shared changes in light/dark, mobile/touch, narrow desktop, and keyboard flows. Screenshot artifacts show appearance; geometry and behavior assertions verify contracts.

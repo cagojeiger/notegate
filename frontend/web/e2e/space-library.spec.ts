@@ -23,7 +23,7 @@ test("Space Library keeps its Linux CI desktop light appearance", async ({ page 
   await page.goto("/");
   await page.getByRole("button", { name: "Open space library" }).click();
 
-  await expect(page.getByRole("list", { name: "All spaces" }).getByRole("listitem")).toHaveCount(4);
+  await expect(page.getByRole("list", { name: "All spaces" }).getByRole("listitem")).toHaveCount(5);
   await expect(page.getByRole("progressbar", { name: "Files usage" })).toBeVisible();
   await expect(page.locator("footer").getByText("ready", { exact: true })).toBeVisible();
   await expect(page).toHaveScreenshot("space-library-light-desktop.png", {
@@ -54,6 +54,28 @@ test("long Korean Space names stay within the mobile card", async ({ page }) => 
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
 
+test("an empty library creates its first Space from the plus card", async ({ page }) => {
+  await mockSpaceLibraryApi(page, []);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open space library" }).click();
+
+  await expect(page.getByRole("heading", { name: "Spaces 0" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No spaces yet" })).toBeVisible();
+  await page.getByRole("list", { name: "All spaces" }).getByRole("button", { name: "Create space" }).click();
+  await expect(page.getByRole("dialog", { name: "New space" }).getByLabel("Space name")).toBeFocused();
+});
+
+test("a caller without creation permission sees only the existing Space cards", async ({ page }) => {
+  await mockSpaceLibraryApi(page, initialSpaces, false);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open space library" }).click();
+
+  await expect(page.getByRole("heading", { name: "Spaces 4" })).toBeVisible();
+  await expect(page.getByRole("list", { name: "All spaces" }).getByRole("listitem")).toHaveCount(4);
+  await expect(page.getByRole("button", { name: "Create space" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add space" })).toHaveCount(0);
+});
+
 test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -63,7 +85,7 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
 
   const grid = page.getByRole("list", { name: "All spaces" });
   await expect(grid).toBeVisible();
-  await expect(grid.getByRole("listitem")).toHaveCount(4);
+  await expect(grid.getByRole("listitem")).toHaveCount(5);
   await expect(page.getByRole("heading", { name: "Spaces 4" })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Space navigation" })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Space inspector" })).toBeVisible();
@@ -100,7 +122,7 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   await inspectorToggle.click();
   await expect(page.getByText("Space Inspector", { exact: true })).toBeHidden();
   await expect.poll(async () => {
-    const boxes = await grid.getByRole("listitem").evaluateAll((items) => items.map((item) => item.getBoundingClientRect().y));
+    const boxes = await grid.getByRole("listitem").filter({ has: page.getByRole("button", { name: /^Inspect / }) }).evaluateAll((items) => items.map((item) => item.getBoundingClientRect().y));
     return new Set(boxes).size;
   }).toBe(1);
   const expandedWidths = await grid.getByRole("listitem").evaluateAll((items) => items.map((item) => item.getBoundingClientRect().width));
@@ -309,11 +331,23 @@ for (const viewport of [
     await page.getByRole("button", { name: "Open space library" }).click();
 
     const items = page.getByRole("list", { name: "All spaces" }).getByRole("listitem");
-    await expect(items).toHaveCount(4);
+    await expect(items).toHaveCount(5);
     const boxes = await items.evaluateAll((elements) => elements.map((element) => {
       const box = element.getBoundingClientRect();
       return { x: box.x, y: box.y };
     }));
+
+    const create = items.last().getByRole("button", { name: "Create space", exact: true });
+    const [firstCardBox, createCardBox] = await Promise.all([items.first().boundingBox(), create.boundingBox()]);
+    expect(createCardBox?.width).toBe(firstCardBox?.width);
+    expect(createCardBox?.height).toBe(firstCardBox?.height);
+    await create.scrollIntoViewIfNeeded();
+    await create.focus();
+    await page.keyboard.press("Enter");
+    const createDialog = page.getByRole("dialog", { name: "New space" });
+    await expect(createDialog.getByLabel("Space name")).toBeFocused();
+    await createDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(create).toBeFocused();
 
     if (viewport.columns === 2) {
       expect(boxes[0].y).toBe(boxes[1].y);
@@ -335,7 +369,7 @@ for (const viewport of [
   });
 }
 
-async function mockSpaceLibraryApi(page: Page, initial = initialSpaces) {
+async function mockSpaceLibraryApi(page: Page, initial = initialSpaces, canCreateSpace = true) {
   let spaces = initial.map((item) => ({ ...item }));
   let patchCount = 0;
   let linkReindexRequests = 0;
@@ -345,7 +379,10 @@ async function mockSpaceLibraryApi(page: Page, initial = initialSpaces) {
     const request = route.request();
     const url = new URL(request.url());
 
-    if (url.pathname === "/api/v1/me") return respond(route, me);
+    if (url.pathname === "/api/v1/me") return respond(route, {
+      ...me,
+      capabilities: { ...me.capabilities, can_create_space: canCreateSpace }
+    });
     const linkIndexMatch = url.pathname.match(/^\/api\/v1\/spaces\/([^/]+)\/link-index$/);
     if (linkIndexMatch) {
       const pending = pendingLinkIndexes.has(linkIndexMatch[1]);
@@ -441,9 +478,9 @@ async function respond(
 }
 
 async function cardNames(grid: ReturnType<Page["getByRole"]>) {
-  return grid.getByRole("listitem").evaluateAll((items) => items.map((item) => {
+  return grid.getByRole("listitem").evaluateAll((items) => items.flatMap((item) => {
     const inspect = item.querySelector<HTMLButtonElement>('button[aria-label^="Inspect "]');
-    return inspect?.getAttribute("aria-label")?.replace(/^Inspect /, "") ?? "";
+    return inspect ? [inspect.getAttribute("aria-label")!.replace(/^Inspect /, "")] : [];
   }));
 }
 

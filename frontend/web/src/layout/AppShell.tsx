@@ -211,6 +211,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
               <SpaceLibrary
                 spaces={workbench.spaces}
                 activeSpace={workbench.activeSpace}
+                canCreateSpace={workbench.canCreateSpace && !recordingActive}
                 isMobile={workbench.isMobile}
                 usagePollingEnabled={!statusUsageEnabled}
                 inspectorOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
