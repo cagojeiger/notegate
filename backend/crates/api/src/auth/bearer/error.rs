@@ -28,8 +28,6 @@ pub enum AuthError {
     NotRegistered,
     #[error("user is inactive")]
     Inactive,
-    #[error("auth service temporarily unavailable")]
-    Unavailable,
     #[error("upstream/internal failure")]
     Internal,
 }
@@ -74,22 +72,13 @@ pub(crate) fn auth_error_response(
 
 pub fn shared_scoped_challenge_header(config: &notegate_core::Config) -> HeaderValue {
     let meta = protected_resource_metadata_url(&config.resource_url);
-    if config.oidc.is_some() {
-        HeaderValue::from_str(&format!(
-            "Bearer resource_metadata=\"{}\", scope=\"mcp offline_access\"",
-            meta.full_url
-        ))
-        .unwrap_or_else(|_| HeaderValue::from_static("Bearer"))
-    } else {
-        scoped_challenge_header(&meta.full_url)
-    }
+    scoped_challenge_header(&meta.full_url)
 }
 
 pub fn status_for_error(error: &AuthError) -> StatusCode {
     match error {
         AuthError::MissingToken | AuthError::InvalidToken => StatusCode::UNAUTHORIZED,
         AuthError::NotRegistered | AuthError::Inactive => StatusCode::FORBIDDEN,
-        AuthError::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
         AuthError::Internal => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -98,7 +87,6 @@ fn log_auth_denied(code: &'static str, status: StatusCode, error: &AuthError) {
     let status = status.as_u16();
     match error {
         AuthError::MissingToken => tracing::debug!(event = "auth.denied", error = code, status),
-        AuthError::Unavailable => tracing::warn!(event = "auth.denied", error = code, status),
         AuthError::Internal => tracing::error!(event = "auth.denied", error = code, status),
         AuthError::InvalidToken | AuthError::NotRegistered | AuthError::Inactive => {
             tracing::warn!(event = "auth.denied", error = code, status);
@@ -120,7 +108,6 @@ fn code_for_error(error: &AuthError) -> &'static str {
         AuthError::InvalidToken => "invalid_token",
         AuthError::NotRegistered => "not_registered",
         AuthError::Inactive => "inactive_account",
-        AuthError::Unavailable => "auth_unavailable",
         AuthError::Internal => "internal_error",
     }
 }
@@ -133,7 +120,6 @@ fn message_for_error(error: &AuthError) -> &'static str {
             "This account is authenticated but not registered in NoteGate yet. Open login_url once, then retry the request."
         }
         AuthError::Inactive => "inactive account",
-        AuthError::Unavailable => "auth service temporarily unavailable",
         AuthError::Internal => "internal server error",
     }
 }

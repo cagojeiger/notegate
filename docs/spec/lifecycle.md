@@ -224,47 +224,16 @@ Rotation은 같은 account에 새 key를 만들고 old key를 같은 transaction
 
 ## Browser session
 
-### 생성
-
-Browser login callback은 authgate authorization-code + PKCE exchange 결과에서 refresh token을 요구한다.
+OIDC authorization code + S256 PKCE 로그인에서 확인한 계정에 NoteGate 로컬 세션을 발급한다. 외부 refresh token을 요구하거나 저장하지 않는다. [REST 인증](rest/auth.md)이 로그인·검증 계약의 기준이다.
 
 ```text
-browser_sessions.user_id=user_id
+browser_sessions.user_id=existing local user_id
+browser_sessions.local_session=true
+browser_sessions.oidc_issuer=verified upstream issuer
 browser_sessions.token_hash=HMAC(session token)
-browser_sessions.refresh_token_*=encrypted authgate refresh token
-browser_sessions.validated_until=now()+1h
-browser_sessions.expires_at=now()+30d
+browser_sessions.refresh_token_*=encrypted empty compatibility envelope
+browser_sessions.validated_until=min(now()+24h, expires_at)
+browser_sessions.expires_at=now()+configured absolute lifetime (default 30d)
 ```
 
-- Browser session token 원문은 HttpOnly cookie에만 발급한다.
-- Refresh token은 browser client에 노출하지 않고 서버가 암호화 저장한다.
-- AuthGate는 refresh token의 canonical state를 관리한다. NoteGate는 브라우저 세션 갱신을 위해 발급받은 값을 보관한다.
-
-### 갱신
-
-요청의 browser session이 `validated_until`을 넘으면 NoteGate는 저장된 refresh token으로 authgate refresh-token grant를 호출한다.
-
-```text
-success:
-  validated_until=now()+1h
-  last_refreshed_at=now()
-  refresh_token_* 교체 -- authgate가 rotated refresh token을 반환한 경우
-
-invalid_grant/sub mismatch:
-  revoked_at=now()
-  revoked_reason='refresh_failed'
-  request returns 401
-
-transient authgate/userinfo failure:
-  refresh_token_* 교체 -- token exchange 후 userinfo가 실패했고 rotated refresh token을 받은 경우
-  refresh_started_at=NULL
-  refresh_claim_id=NULL
-  validated_until unchanged
-  request returns 503
-```
-
-`expires_at`은 absolute lifetime이다. 30일이 지나면 refresh를 시도하지 않고 재로그인을 요구한다.
-
-### Logout/revoke
-
-Logout은 local `browser_sessions` row를 revoke하고 browser session cookie를 만료시킨다. 저장된 refresh token은 authgate revoke endpoint에 best-effort로 revoke 요청한다.
+요청마다 계정 활성 상태·철회·issuer·로컬 인증 기간·absolute expiry를 확인한다. 기간이 끝나면 401로 재로그인을 요구하며 외부 refresh 호출은 하지 않는다. Logout은 로컬 세션을 revoke한 뒤 HttpOnly cookie를 만료시키고, 감사 기록을 남긴다.

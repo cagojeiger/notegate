@@ -15,7 +15,7 @@ Text       plain UTF-8 또는 client-side encrypted payload content object.
 File       binary/object content. Text content operation과 grep 대상이 아니다.
 Connection Agent와 Space 사이의 연결. permission은 read 또는 write다.
 API key    Agent account로 인증되는 bearer credential.
-Browser session  Browser UI용 HttpOnly cookie session. AuthGate refresh token으로 server-side 갱신된다.
+Browser session  OIDC 로그인 후 NoteGate가 발급하는 HttpOnly cookie session. 24시간 로컬 인증 기간이 끝나면 재로그인한다.
 Metadata   Node에 붙는 시스템 관리 JSON object. content가 아니며 외부 caller에게 읽기 전용이다.
 Markdown frontmatter  Markdown Text content 맨 앞의 YAML properties block. Node metadata와 별도다.
 ```

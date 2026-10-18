@@ -89,9 +89,6 @@ pulldown-cmark = { version = "0.13", default-features = false }
 clap = { version = "4", features = ["derive", "env"] }
 
 # Auth / OAuth / MCP
-aliri = { version = "0.6.4", default-features = false, features = ["rsa"] }
-aliri_oauth2 = { version = "0.10.2", default-features = false, features = ["rsa", "reqwest", "tokio", "rustls-tls"] }
-aliri_clock = "0.1.0"
 jsonwebtoken = { version = "11", default-features = false, features = ["use_pem", "rust_crypto"] }
 openidconnect = { version = "4.0.1", default-features = true }
 reqwest = { version = "0.13", default-features = false, features = ["form", "json", "rustls"] }

@@ -4,10 +4,9 @@ NoteGate는 password login API를 두지 않는다. 브라우저의 신원 확�
 
 ## 모드와 계정 연결
 
-- `oidc` 설정: 외부 OIDC 로그인 + 로컬 브라우저 세션 + NoteGate OAuth 서버.
-- `oidc` 미설정: 기존 AuthGate 브라우저 refresh 및 MCP·CLI JWT 호환 모드.
+`oidc.issuer`와 `oidc.client_id`는 필수다. 외부 OIDC 로그인 + 로컬 브라우저 세션 + NoteGate OAuth 서버만 사용한다.
 
-로컬 계정 ID와 Space·문서·이력 소유권은 유지한다. 신원은 검증된 `issuer + sub` HMAC으로 조회하며 email로 연결하지 않는다. 기존 subject hash는 `authgate_url`로 한 번 고정한 원래 issuer에만 허용한다. 독립 모드에서 이 값은 기존 신원 연결용이며 외부 토큰 검증·갱신 URL로 사용하지 않는다. 기존 hash가 남은 DB에 issuer binding이 없으면 해당 값을 지정하기 전 startup을 거부한다.
+로컬 계정 ID와 Space·문서·이력 소유권은 유지한다. 신원은 검증된 `issuer + sub` HMAC으로 조회하며 email로 연결하지 않는다. 기존 subject hash는 `legacy_identity_issuer`로 한 번 고정한 원래 issuer에만 허용한다. 이 값은 기존 신원 연결용이며 외부 토큰 검증·갱신 URL로 사용하지 않는다. 기존 hash가 남은 DB에 issuer binding이 없으면 해당 값을 지정하기 전 startup을 거부한다.
 
 현재 AuthGate를 OIDC 공급자로 유지하면 같은 subject로 기존 계정에 연결된다. 다른 공급자로 전환할 때는 검증된 `account_id / issuer / subject` 매핑을 operator 전용 `import_identities` example로 원자적으로 가져온다. 충돌은 전체 rollback하며, mapping 원문은 비밀 자료로 취급한다. `oidc.allow_signup`은 기본 `false`다. 연결이 끝난 후에만 신규 가입을 열 수 있다.
 
@@ -68,7 +67,7 @@ Settings → Account의 **Manage connected applications**는 `/oauth/connections
 
 ## Discovery와 경계
 
-`/.well-known/oauth-authorization-server`는 독립 모드에서 NoteGate issuer·authorize/token/revoke/Device endpoint·S256·CIMD·RFC 9207 issuer 응답 지원·`mcp`, `cli`, `offline_access` scope를 게시한다. 자체 OIDC ID token/JWKS를 제공하는 서버는 아니다.
+`/.well-known/oauth-authorization-server`는 NoteGate issuer·authorize/token/revoke/Device endpoint·S256·CIMD·RFC 9207 issuer 응답 지원·`mcp`, `cli`, `offline_access` scope를 게시한다. 자체 OIDC ID token/JWKS를 제공하는 서버는 아니다.
 
 `/.well-known/oauth-protected-resource[/mcp]`는 MCP resource와 NoteGate authorization server를 게시한다. MCP 401 challenge도 같은 metadata와 MCP scope를 가리킨다.
 
@@ -78,10 +77,12 @@ Settings → Account의 **Manage connected applications**는 `/oauth/connections
 - `/cli`: CLI resource용 user OAuth bearer만 허용.
 - Swagger는 브라우저 세션으로 열지만 실제 V2 호출에는 별도 Agent key가 필요하다.
 
-독립 모드의 auth endpoint는 IP별 10 req/s, burst 30 제한을 공유하며 기존 전체 ingress 제한도 적용한다. 일반 문서 API 요청에는 이 추가 auth 제한을 적용하지 않는다.
+Auth endpoint는 IP별 10 req/s, burst 30 제한을 공유하며 기존 전체 ingress 제한도 적용한다. 일반 문서 API 요청에는 이 추가 auth 제한을 적용하지 않는다.
 
-## 호환 모드
+## 배포 설정
 
-`oidc`가 없으면 기존 AuthGate OAuth 설정을 사용한다. 브라우저 로그인은 `offline_access`를 요청하고 외부 refresh token을 암호화 보관한다. 로컬 validation lease는 기본 1시간, absolute lifetime은 기본 30일이다. 갱신은 기존 claim/rotation/revoke 절차를 따르며 transient 실패는 retry 가능한 503, 영구 실패는 revoke 후 401이다. Logout의 외부 revoke는 best effort다.
+`oidc` 설정이 없으면 startup을 거부한다. 구형 `authgate_url`, `oauth_client_id`, `mcp_oauth_client_id`, `jwks_cache_ttl_secs`, `browser_session_ttl_secs`는 제거했으므로 배포 환경에서도 삭제해야 한다. 기존 로컬 세션·OAuth grant·계정 연결·이력과 DB schema는 보존한다. 구형 AuthGate bearer와 refresh 기반 브라우저 세션은 허용하지 않는다.
 
-MCP·CLI는 이 모드에서만 AuthGate JWT/JWKS를 검증한다. 두 경로가 JWKS cache를 공유하며 초기·unknown-kid 조회의 완료 시점부터 5초 동안 재조회를 억제한다. 브라우저 OIDC discovery cache는 1시간이며 콜백의 키 갱신은 code를 재교환하지 않는다. 두 모드의 브라우저 세션은 섞어 사용하지 않는다. 독립 모드 전환 시 기존 브라우저와 MCP·CLI 연결은 재로그인이 필요하다. CLI는 두 모드의 scope discovery를 지원하는 버전으로 먼저 갱신한다. 서버·CLI를 호환 모드로 배포한 뒤 전체 인스턴스의 설정을 일관되게 전환하며, 같은 endpoint에 서로 다른 인증 모드를 섞어 두지 않는다.
+`legacy_identity_issuer`는 기존 계정의 원래 issuer를 처음 고정할 때만 사용한다. DB에 binding이 있으면 생략할 수 있다. 로그인 제공자를 바꿀 때 이 binding을 덮어쓰지 않는다.
+
+OIDC discovery cache는 1시간이며 콜백의 서명 키 갱신은 authorization code를 재교환하지 않는다. 로그인 시 ID token의 issuer·audience·서명·nonce·최근 auth_time과 userinfo subject를 검증한다.

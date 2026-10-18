@@ -36,9 +36,6 @@ metrics-exporter-prometheus.workspace = true
 dotenvy.workspace = true
 anyhow.workspace = true
 
-aliri.workspace = true
-aliri_oauth2.workspace = true
-aliri_clock.workspace = true
 openidconnect.workspace = true
 reqwest.workspace = true
 aws-sdk-s3.workspace = true

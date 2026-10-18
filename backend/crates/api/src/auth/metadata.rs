@@ -39,7 +39,7 @@ fn split_origin_and_path(value: &str) -> (&str, &str) {
 
 pub fn scoped_challenge_header(meta_url: &str) -> HeaderValue {
     HeaderValue::from_str(&format!(
-        "Bearer resource_metadata=\"{meta_url}\", scope=\"openid offline_access\""
+        "Bearer resource_metadata=\"{meta_url}\", scope=\"mcp offline_access\""
     ))
     .unwrap_or_else(|_error| HeaderValue::from_static("Bearer"))
 }
@@ -57,8 +57,6 @@ pub struct AuthorizationServerMetadata {
     code_challenge_methods_supported: Vec<&'static str>,
     scopes_supported: Vec<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    client_id_metadata_text_supported: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     client_id_metadata_document_supported: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     authorization_response_iss_parameter_supported: Option<bool>,
@@ -72,10 +70,6 @@ pub struct ProtectedResourceMetadata {
     authorization_servers: Vec<String>,
     scopes_supported: Vec<&'static str>,
     bearer_methods_supported: Vec<&'static str>,
-    /// Static public OAuth client id registered for MCP clients in authgate.
-    /// This is an extension field; generic clients may ignore it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mcp_client_id: Option<String>,
 }
 
 pub async fn authorization_server_metadata(
@@ -85,21 +79,10 @@ pub async fn authorization_server_metadata(
 }
 
 pub fn authorization_server_metadata_for_config(config: &Config) -> AuthorizationServerMetadata {
-    let standalone = config.oidc.is_some();
-    let issuer = if standalone {
-        &config.notegate_public_url
-    } else {
-        &config.authgate_url
-    }
-    .trim_end_matches('/')
-    .to_owned();
+    let issuer = config.notegate_public_url.trim_end_matches('/').to_owned();
     AuthorizationServerMetadata {
         issuer: issuer.clone(),
-        authorization_endpoint: if standalone {
-            format!("{issuer}/oauth/authorize")
-        } else {
-            format!("{issuer}/authorize")
-        },
+        authorization_endpoint: format!("{issuer}/oauth/authorize"),
         token_endpoint: format!("{issuer}/oauth/token"),
         revocation_endpoint: format!("{issuer}/oauth/revoke"),
         device_authorization_endpoint: format!("{issuer}/oauth/device/authorize"),
@@ -109,20 +92,11 @@ pub fn authorization_server_metadata_for_config(config: &Config) -> Authorizatio
             "refresh_token",
             "urn:ietf:params:oauth:grant-type:device_code",
         ],
-        token_endpoint_auth_methods_supported: if standalone {
-            vec!["none"]
-        } else {
-            vec!["none", "client_secret_basic", "client_secret_post"]
-        },
+        token_endpoint_auth_methods_supported: vec!["none"],
         code_challenge_methods_supported: vec!["S256"],
-        scopes_supported: if standalone {
-            vec!["mcp", "cli", "offline_access"]
-        } else {
-            vec!["openid", "profile", "email", "offline_access"]
-        },
-        client_id_metadata_text_supported: (!standalone).then_some(true),
-        client_id_metadata_document_supported: standalone.then_some(true),
-        authorization_response_iss_parameter_supported: standalone.then_some(true),
+        scopes_supported: vec!["mcp", "cli", "offline_access"],
+        client_id_metadata_document_supported: Some(true),
+        authorization_response_iss_parameter_supported: Some(true),
         cli_client_id: config.cli_oauth_client_id.clone(),
     }
 }
@@ -136,21 +110,9 @@ pub async fn protected_resource_metadata(
 pub fn protected_resource_metadata_for_config(config: &Config) -> ProtectedResourceMetadata {
     ProtectedResourceMetadata {
         resource: config.resource_url.clone(),
-        authorization_servers: vec![if config.oidc.is_some() {
-            config.notegate_public_url.clone()
-        } else {
-            config.authgate_url.clone()
-        }],
-        scopes_supported: if config.oidc.is_some() {
-            vec!["mcp", "offline_access"]
-        } else {
-            vec!["openid", "profile", "email", "offline_access"]
-        },
+        authorization_servers: vec![config.notegate_public_url.clone()],
+        scopes_supported: vec!["mcp", "offline_access"],
         bearer_methods_supported: vec!["header"],
-        mcp_client_id: config
-            .oidc
-            .is_none()
-            .then(|| config.mcp_oauth_client_id.clone()),
     }
 }
 
@@ -184,15 +146,19 @@ mod tests {
             read_database_url: None,
             read_db_max_connections: 10,
             background_jobs: notegate_core::BackgroundJobsConfig::default(),
-            oidc: None,
-            authgate_url: "https://auth.example.test".to_owned(),
+            oidc: notegate_core::config::OidcLoginConfig {
+                issuer: "https://auth.example.test".to_owned(),
+                client_id: "notegate-web".to_owned(),
+                client_secret: None,
+                allow_signup: false,
+            },
+            legacy_identity_issuer: "https://auth.example.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),
-            oauth_client_id: "notegate-web".to_owned(),
-            mcp_oauth_client_id: "notegate-mcp".to_owned(),
+
             cli_oauth_client_id: "notegate-cli-local".to_owned(),
             oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
             resource_url: "http://localhost:9191/mcp".to_owned(),
-            jwks_cache_ttl: Duration::from_secs(300),
+
             enc_root_key_id: "test-enc".to_owned(),
             enc_root_secret: SecretString::from("test-enc-root-secret-32-bytes-long".to_owned()),
             lookup_root_key_id: "test-lookup".to_owned(),
@@ -201,7 +167,7 @@ mod tests {
             ),
             lookup_verify_0_key_id: None,
             lookup_verify_0_secret: None,
-            browser_session_ttl: Duration::from_secs(3600),
+
             browser_session_max_ttl: Duration::from_secs(30 * 86_400),
             openapi_enabled: false,
             metrics_enabled: false,
@@ -236,24 +202,21 @@ mod tests {
     }
 
     #[test]
-    fn authorization_server_metadata_matches_authgate_endpoints() {
+    fn authorization_server_metadata_advertises_notegate_not_upstream() {
         let metadata = authorization_server_metadata_for_config(&config());
-        assert_eq!(metadata.issuer, "https://auth.example.test");
+        assert_eq!(metadata.issuer, "http://localhost:9191");
         assert_eq!(
             metadata.authorization_endpoint,
-            "https://auth.example.test/authorize"
+            "http://localhost:9191/oauth/authorize"
         );
-        assert_eq!(
-            metadata.token_endpoint,
-            "https://auth.example.test/oauth/token"
-        );
+        assert_eq!(metadata.token_endpoint, "http://localhost:9191/oauth/token");
         assert_eq!(
             metadata.revocation_endpoint,
-            "https://auth.example.test/oauth/revoke"
+            "http://localhost:9191/oauth/revoke"
         );
         assert_eq!(
             metadata.device_authorization_endpoint,
-            "https://auth.example.test/oauth/device/authorize"
+            "http://localhost:9191/oauth/device/authorize"
         );
         assert_eq!(metadata.response_types_supported, vec!["code"]);
         assert_eq!(
@@ -264,12 +227,13 @@ mod tests {
                 "urn:ietf:params:oauth:grant-type:device_code"
             ]
         );
-        assert_eq!(
-            metadata.token_endpoint_auth_methods_supported,
-            vec!["none", "client_secret_basic", "client_secret_post"]
-        );
+        assert_eq!(metadata.token_endpoint_auth_methods_supported, vec!["none"]);
         assert_eq!(metadata.code_challenge_methods_supported, vec!["S256"]);
-        assert_eq!(metadata.client_id_metadata_text_supported, Some(true));
+        assert_eq!(metadata.client_id_metadata_document_supported, Some(true));
+        assert_eq!(
+            metadata.scopes_supported,
+            vec!["mcp", "cli", "offline_access"]
+        );
         assert_eq!(metadata.cli_client_id, "notegate-cli-local");
         let json = serde_json::to_value(metadata).expect("metadata serializes");
         assert_eq!(json["cli_client_id"], "notegate-cli-local");
@@ -283,6 +247,6 @@ mod tests {
         let value = header.to_str().unwrap_or_default();
         assert!(value.starts_with("Bearer "));
         assert!(value.contains("resource_metadata="));
-        assert!(value.contains("scope=\"openid offline_access\""));
+        assert!(value.contains("scope=\"mcp offline_access\""));
     }
 }

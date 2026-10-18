@@ -25,7 +25,6 @@ use crate::object_storage::ObjectStorage;
 use crate::observability::MetricsHandle;
 
 use crate::admission::DocxValidationAdmission;
-use crate::auth::jwt::JwtAuthority;
 use crate::auth::oidc::OidcProvider;
 use crate::metadata_write_behind::MetadataWriteBuffer;
 
@@ -96,7 +95,6 @@ impl ControlPlaneState {
 pub struct AppState {
     pub db: PgPool,
     pub config: Arc<Config>,
-    pub jwt: Arc<JwtAuthority>,
     pub oidc: Arc<OidcProvider>,
     pub resolver: Arc<dyn CallerResolver>,
     pub http: reqwest::Client,
@@ -131,7 +129,6 @@ impl AppState {
     pub fn new(
         db: PgPool,
         config: Arc<Config>,
-        jwt: Arc<JwtAuthority>,
         oidc: Arc<OidcProvider>,
         resolver: Arc<dyn CallerResolver>,
         http: reqwest::Client,
@@ -145,28 +142,26 @@ impl AppState {
             config.search_body_cache,
             config.metrics_enabled,
         ));
-        Self::build(db, config, jwt, oidc, resolver, http, pii_crypto, search)
+        Self::build(db, config, oidc, resolver, http, pii_crypto, search)
     }
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_search_client(
         db: PgPool,
         config: Arc<Config>,
-        jwt: Arc<JwtAuthority>,
         oidc: Arc<OidcProvider>,
         resolver: Arc<dyn CallerResolver>,
         http: reqwest::Client,
         pii_crypto: PiiCrypto,
         search: SearchClient,
     ) -> Self {
-        Self::build(db, config, jwt, oidc, resolver, http, pii_crypto, search)
+        Self::build(db, config, oidc, resolver, http, pii_crypto, search)
     }
 
     #[allow(clippy::too_many_arguments)]
     fn build(
         db: PgPool,
         config: Arc<Config>,
-        jwt: Arc<JwtAuthority>,
         oidc: Arc<OidcProvider>,
         resolver: Arc<dyn CallerResolver>,
         http: reqwest::Client,
@@ -222,7 +217,6 @@ impl AppState {
             oauth_clients: crate::auth::authorization_server::ClientRegistry::new(),
             db,
             config,
-            jwt,
             oidc,
             resolver,
             http,

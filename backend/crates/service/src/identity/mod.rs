@@ -84,18 +84,6 @@ impl Resolver {
         caller_from_user(account, user, Channel::Browser)
     }
 
-    /// Resolve an MCP bearer for an already-registered user account.
-    pub async fn resolve_mcp(&self, attrs: ResolveAttrs) -> Result<Caller, IdentityError> {
-        self.resolve_registered_user(&attrs.issuer, &attrs.sub, Channel::Mcp)
-            .await
-    }
-
-    /// Resolve a Command API OAuth bearer for an already-registered user account.
-    pub async fn resolve_command_user(&self, attrs: ResolveAttrs) -> Result<Caller, IdentityError> {
-        self.resolve_registered_user(&attrs.issuer, &attrs.sub, Channel::Api)
-            .await
-    }
-
     /// Resolve an Agent API key on the given channel.
     pub async fn resolve_agent_api_key(
         &self,
@@ -121,17 +109,6 @@ impl Resolver {
             identity: CallerIdentity::Agent(agent),
             channel,
         })
-    }
-
-    async fn resolve_registered_user(
-        &self,
-        issuer: &str,
-        sub: &str,
-        channel: Channel,
-    ) -> Result<Caller, IdentityError> {
-        let resolved = self.users.find_user_by_identity(issuer, sub).await?;
-        let (account, user) = resolved.ok_or(IdentityError::NotRegistered)?;
-        caller_from_user(account, user, channel)
     }
 }
 

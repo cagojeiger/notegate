@@ -28,7 +28,6 @@ use serde_json::Value;
 use tower::ServiceExt as _;
 use uuid::Uuid;
 
-use crate::auth::jwt::JwtAuthority;
 use crate::auth::oidc::OidcProvider;
 use crate::identity::{CallerResolver, IdentityError};
 
@@ -46,20 +45,6 @@ impl CallerResolver for UnusedResolver {
     fn resolve_browser_session_user(
         &self,
         _user_id: Uuid,
-    ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
-        Box::pin(async { Err(IdentityError::NotRegistered) })
-    }
-
-    fn resolve_mcp(
-        &self,
-        _attrs: ResolveAttrs,
-    ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
-        Box::pin(async { Err(IdentityError::NotRegistered) })
-    }
-
-    fn resolve_command_user(
-        &self,
-        _attrs: ResolveAttrs,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
         Box::pin(async { Err(IdentityError::NotRegistered) })
     }
@@ -84,22 +69,26 @@ fn test_config() -> Arc<Config> {
         read_database_url: None,
         read_db_max_connections: 1,
         background_jobs: notegate_core::BackgroundJobsConfig::default(),
-        oidc: None,
-        authgate_url: "https://auth.example.test".to_owned(),
+        oidc: notegate_core::config::OidcLoginConfig {
+            issuer: "https://auth.example.test".to_owned(),
+            client_id: "notegate-web".to_owned(),
+            client_secret: None,
+            allow_signup: false,
+        },
+        legacy_identity_issuer: "https://auth.example.test".to_owned(),
         notegate_public_url: "http://localhost:9191".to_owned(),
-        oauth_client_id: "notegate-web".to_owned(),
-        mcp_oauth_client_id: "notegate-mcp".to_owned(),
+
         cli_oauth_client_id: "notegate-cli-local".to_owned(),
         oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
         resource_url: "https://api.example.test".to_owned(),
-        jwks_cache_ttl: Duration::from_secs(300),
+
         enc_root_key_id: "test-enc".to_owned(),
         enc_root_secret: SecretString::from("test-enc-root-secret-32-bytes-long".to_owned()),
         lookup_root_key_id: "test-lookup".to_owned(),
         lookup_root_secret: SecretString::from("test-lookup-root-secret-32-bytes-long".to_owned()),
         lookup_verify_0_key_id: None,
         lookup_verify_0_secret: None,
-        browser_session_ttl: Duration::from_secs(3600),
+
         browser_session_max_ttl: Duration::from_secs(30 * 86_400),
         openapi_enabled: false,
         metrics_enabled: false,
@@ -133,12 +122,10 @@ fn state_from_config(db: &TestDb, config: Arc<Config>) -> crate::state::AppState
     .expect("derive test crypto");
     notegate_service::cursor::configure_signing_key(security.session_signing_key())
         .expect("configure cursor signing key");
-    let jwt = Arc::new(JwtAuthority::from_jwks(&config, aliri::Jwks::default()));
     let oidc = Arc::new(OidcProvider::new(&config, reqwest::Client::new()));
     crate::state::AppState::new(
         db.pool.clone(),
         config,
-        jwt,
         oidc,
         Arc::new(UnusedResolver),
         reqwest::Client::new(),

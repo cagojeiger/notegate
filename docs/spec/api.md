@@ -51,7 +51,7 @@ MCP는 인증된 request에서 context를 한 번 만들고 공통 command 실�
 
 ## Identity mapping
 
-AuthGate browser login·MCP OAuth·device flow는 User, `ngk_v2_` key는 active Agent account로 resolve한다. Browser는 opaque session cookie를 사용하고 BE가 암호화 저장한 refresh token으로 갱신한다.
+OIDC browser login·NoteGate MCP OAuth·Device Flow는 User, `ngk_v2_` key는 active Agent account로 resolve한다. Browser는 issuer에 연결된 NoteGate opaque session cookie를 사용하고 로컬 인증 기간이 끝나면 재로그인한다.
 
 | Route | 허용 credential |
 |---|---|

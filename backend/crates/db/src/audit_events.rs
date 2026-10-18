@@ -200,29 +200,6 @@ pub(crate) async fn session_logged_out(
     .await
 }
 
-fn session_revoked_payload(reason: &str) -> (&'static str, Value) {
-    ("session.revoke", json!({ "reason": reason }))
-}
-
-pub(crate) async fn session_revoked(
-    tx: &mut PgConnection,
-    user_id: Uuid,
-    session_id: Uuid,
-    reason: &str,
-) -> Result<()> {
-    let (op_type, metadata) = session_revoked_payload(reason);
-    event(
-        tx,
-        AuditContext::rest(user_id),
-        user_id,
-        op_type,
-        "browser_session",
-        Some(session_id),
-        metadata,
-    )
-    .await
-}
-
 fn space_created_payload() -> (&'static str, Value) {
     ("space.create", json!({}))
 }
@@ -681,10 +658,6 @@ mod tests {
         assert_eq!(account_created_payload(), ("account.create", json!({})));
         assert_eq!(session_logged_in_payload(), ("session.login", json!({})));
         assert_eq!(session_logged_out_payload(), ("session.logout", json!({})));
-        assert_eq!(
-            session_revoked_payload("refresh_failed"),
-            ("session.revoke", json!({ "reason": "refresh_failed" }))
-        );
     }
 
     #[test]

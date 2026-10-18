@@ -10,7 +10,7 @@
 
 | Credential | Caller | 검증 기준 |
 |---|---|---|
-| AuthGate Device Flow의 User OAuth access token | User | `aud=NOTEGATE_CLI_OAUTH_CLIENT_ID` |
+| NoteGate Device Flow의 User OAuth access token | User | CLI resource + `cli` scope |
 | Agent가 소유한 `ngk_v2_` API key | Agent | active key와 account |
 
 ```http

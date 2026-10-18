@@ -44,20 +44,15 @@ notegate-cli auth login
 export NOTEGATE_API_KEY='ngk_v2_...'
 ```
 
-- `auth login`은 NoteGate의 `/.well-known/oauth-authorization-server`에서 production AuthGate endpoint와 환경별 `cli_client_id`를 discovery한 뒤 RFC 8628 Device Flow를 시작한다.
-- 로컬 NoteGate는 `notegate-cli-local`, 운영 NoteGate는 `notegate-cli` client를 광고하므로 같은 production AuthGate 계정을 사용해도 token audience와 저장 credential이 분리된다.
+- `auth login`은 NoteGate의 `/.well-known/oauth-authorization-server`에서 NoteGate OAuth endpoint와 환경별 `cli_client_id`를 discovery한 뒤 RFC 8628 Device Flow를 시작한다.
+- 로컬 NoteGate는 `notegate-cli-local`, 운영 NoteGate는 `notegate-cli` client를 광고하므로 같은 AuthGate 로그인 계정을 사용해도 NoteGate origin과 CLI resource별 credential이 분리된다.
 - `NOTEGATE_API_KEY`는 Agent가 소유한 `ngk_v2_` key여야 하며, 설정되어 있으면 일반 command에서 User credential보다 항상 우선한다.
 - API key는 shell history와 process list 노출을 막기 위해 command-line option으로 받지 않는다.
 - 기본 NoteGate origin은 `https://notegate.project-jelly.io`다. 다른 배포나 로컬 서버는 `NOTEGATE_BASE_URL` 또는 `--base-url`로 지정한다.
 - 연결 우선순위는 `--base-url` > `NOTEGATE_BASE_URL` > 기본 운영 origin이다.
 - 원격 origin은 HTTPS만 허용한다. 로컬 개발용 HTTP는 `localhost`와 loopback IP에서만 허용한다.
 
-진단용으로만 metadata discovery를 우회할 수 있다. 두 환경 변수를 반드시 함께 설정해야 한다.
-
-```sh
-export NOTEGATE_AUTHGATE_URL='https://authgate.project-jelly.io'
-export NOTEGATE_CLI_CLIENT_ID='notegate-cli-local'
-```
+구형 서버의 기존 credential CLI는 NoteGate origin의 OAuth metadata만 사용한다. 외부 issuer와 구형 `openid` scope fallback은 허용하지 않는다. 구형 제공자의 저장 credential은 사용·갱신하지 않으며, `auth logout`은 해당 로컬 credential만 지운다.
 
 ## User 인증 명령
 
@@ -154,8 +149,8 @@ notegate-cli manage --help
 기본 timeout은 30초이며 `--timeout-seconds` 또는 `NOTEGATE_TIMEOUT_SECONDS`로 1~300초 사이에서 설정한다. 입력은 1 MiB, 응답은 8 MiB로 제한한다.
 
 ```json
-{"event":"verification_required","verification_uri":"https://authgate.project-jelly.io/device","verification_uri_complete":"https://authgate.project-jelly.io/device?user_code=BCDF-GHKM","user_code":"BCDF-GHKM","expires_in":300,"interval":5}
-{"event":"login_succeeded","base_url":"http://localhost:9191","issuer":"https://authgate.project-jelly.io","client_id":"notegate-cli-local","expires_at":1787530000}
+{"event":"verification_required","verification_uri":"https://notegate.project-jelly.io/oauth/device","verification_uri_complete":"https://notegate.project-jelly.io/oauth/device?user_code=BCDF-GHKM","user_code":"BCDF-GHKM","expires_in":300,"interval":5}
+{"event":"login_succeeded","base_url":"https://notegate.project-jelly.io","issuer":"https://notegate.project-jelly.io","client_id":"notegate-cli","expires_at":1787530000}
 ```
 
 ## 보안과 복구 세부 계약
@@ -169,4 +164,4 @@ notegate-cli manage --help
 - refresh 응답이 timeout, body 손상, 성공 응답 저장 실패 또는 `invalid_grant` 외 OAuth 오류로 불명확하면 자동 재시도하지 않는다. credential을 안전 상태로 표시하거나 삭제하고 `auth login`을 요구한다.
 - 같은 OAuth client의 인증 작업이 lock을 보유하면 `auth login`은 retryable `login_in_progress`를 반환한다. 작업 종료 뒤 `auth status`로 결과를 확인한다.
 - Refresh 결과가 불명확한 상태라면 `auth login`이 같은 credential lock 아래에서 local bundle과 marker를 삭제하고 새 Device Flow를 시작한다. 해당 refresh token은 revoke/refresh 요청에 다시 보내지 않는다.
-- 새 login credential의 keychain write 뒤 profile index commit과 보상 삭제가 모두 실패하면 `credential_store_state_unknown`을 반환한다. 이때 위의 explicit AuthGate URL/client ID 두 override를 설정한 `auth logout`으로 issuer+client key를 직접 정리한 뒤 다시 로그인한다.
+- 새 login credential의 keychain write 뒤 profile index commit과 보상 삭제가 모두 실패하면 `credential_store_state_unknown`을 반환한다. NoteGate에서 연결을 철회하고 로컬 `notegate-cli` keychain entry를 정리한 뒤 다시 로그인한다.

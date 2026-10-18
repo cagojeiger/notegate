@@ -4,7 +4,6 @@ pub mod bearer;
 #[cfg(test)]
 mod bearer_tests;
 mod browser_session;
-pub mod jwt;
 pub mod metadata;
 pub mod oauth;
 mod oauth_exchange;

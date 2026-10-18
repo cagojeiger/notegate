@@ -47,7 +47,7 @@
 | Logout | `POST /auth/logout` → session reset → AuthScreen |
 | `/me` 503 `auth_unavailable` | Session 유지, 일시 장애/재시도 표시 |
 
-Session refresh는 BE가 처리한다. FE는 refresh token을 저장하거나 refresh endpoint를 직접 호출하지 않는다.
+Browser session은 BE에서 검증한다. 로컬 인증 기간이 끝나면 재로그인하며 FE는 refresh token을 저장하거나 refresh endpoint를 호출하지 않는다.
 
 ## Space
 

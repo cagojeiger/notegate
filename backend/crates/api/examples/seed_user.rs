@@ -36,9 +36,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         crypto.clone(),
         config.default_user_tier,
     );
-    if !config.authgate_url.is_empty() {
+    if !config.legacy_identity_issuer.is_empty() {
         account_repo
-            .ensure_legacy_identity_issuer(&config.authgate_url)
+            .ensure_legacy_identity_issuer(&config.legacy_identity_issuer)
             .await?;
     }
     // Optional CI suffix creates independent identities without changing existing seeds.
@@ -69,10 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let (account, _user) = account_repo
         .upsert_user_by_identity(&ResolveAttrs {
-            issuer: config
-                .oidc
-                .as_ref()
-                .map_or_else(|| config.authgate_url.clone(), |o| o.issuer.clone()),
+            issuer: config.oidc.issuer.clone(),
             sub,
             email,
             name,
@@ -110,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("ACCOUNT_ID={}", account.id);
     println!("AGENT_API_KEY={}", agent_key.token);
     println!("BROWSER_SESSION={browser_session}");
-    if config.oidc.is_some() {
+    {
         let fixture = create_oauth_consent(&config, &pool, &crypto).await?;
         println!("OAUTH_CONSENT_FIXTURE={fixture}");
     }
@@ -165,10 +162,9 @@ async fn create_browser_session(
     let session_id = Uuid::new_v4();
     let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let token_hash = crypto.browser_session_hash(&session_id.to_string(), &secret)?;
-    let refresh_token =
-        crypto.encrypt_browser_refresh_token(&session_id.to_string(), "e2e-refresh-token")?;
+    let refresh_token = crypto.encrypt_browser_refresh_token(&session_id.to_string(), "")?;
     let now = Utc::now();
-    let validated_until = now + chrono::Duration::from_std(config.browser_session_ttl)?;
+    let validated_until = now + chrono::Duration::days(1);
     let expires_at = now + chrono::Duration::from_std(config.browser_session_max_ttl)?;
     let token_prefix = token_prefix(session_id);
 
@@ -185,11 +181,7 @@ async fn create_browser_session(
         validated_until,
         expires_at,
     };
-    if let Some(oidc) = &config.oidc {
-        repo.insert_local_session(args, &oidc.issuer).await?;
-    } else {
-        repo.insert_session(args).await?;
-    }
+    repo.insert_local_session(args, &config.oidc.issuer).await?;
 
     Ok(format_token(session_id, &secret))
 }
