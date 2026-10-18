@@ -118,25 +118,16 @@ async fn encrypted_history_cleanup_preserves_rows_and_current_writes() -> TestRe
     let history = files.list_text_revisions(space, node.id, 10, None).await?;
     let revision = history.revisions.first().ok_or("missing revision")?.id;
     let commands = CommandInvocationRepo::new(db.pool.clone());
-    commands
-        .insert(NewCommandInvocation {
-            invocation_id: None,
-            owner_user_id: owner,
-            actor_account_id: owner,
-            caller_kind: "user",
-            surface: "cli",
-            tool: "read",
-            op: Some("spaces"),
-            purpose: Some("Preserve this invocation"),
-            space_name: None,
-            input: &json!({"op":"spaces"}),
-            response: Some(&json!({"ok":true})),
-            outcome: "success",
-            error_code: None,
-            duration_ms: 1,
-        })
-        .await?;
     let crypto = notegate_core::security::PiiCrypto::test();
+    let snapshot_id = uuid::Uuid::new_v4();
+    let payload = json!({"purpose":"Preserve this invocation", "space_name":null,
+        "input":{"op":"spaces"}, "response":{"ok":true}});
+    let encrypted = serde_json::to_value(crypto.encrypt_history(
+        &format!("invocations/{owner}/{snapshot_id}"),
+        &payload.to_string(),
+    )?)?;
+    sqlx::query("INSERT INTO command_invocations(owner_user_id,actor_account_id,caller_kind,surface,tool,op,input,outcome,duration_ms,snapshot_id,private_payload) VALUES ($1,$1,'user','cli','read','spaces','{}'::jsonb,'success',1,$2,$3)")
+        .bind(owner).bind(snapshot_id).bind(encrypted).execute(&db.pool).await?;
     let now = chrono::Utc::now();
     let session_id = uuid::Uuid::new_v4();
     let session_hash = crypto.browser_session_hash(&session_id.to_string(), "retained-session")?;
@@ -216,6 +207,31 @@ async fn encrypted_history_cleanup_preserves_rows_and_current_writes() -> TestRe
             .purpose
             .as_deref(),
         Some("Preserve this invocation")
+    );
+    commands
+        .insert(NewCommandInvocation {
+            invocation_id: None,
+            owner_user_id: owner,
+            actor_account_id: owner,
+            caller_kind: "user",
+            surface: "cli",
+            tool: "read",
+            op: Some("spaces"),
+            purpose: Some("Preserve this invocation"),
+            space_name: None,
+            input: &json!({"op":"spaces"}),
+            response: Some(&json!({"ok":true})),
+            outcome: "success",
+            error_code: None,
+            duration_ms: 1,
+        })
+        .await?;
+    assert_eq!(
+        commands
+            .list_by_owner(owner, CommandInvocationSurface::Cli, 10, None)
+            .await?
+            .len(),
+        2
     );
     files
         .save_text_content(
