@@ -220,31 +220,30 @@ pub struct Config {
     /// In-process durable background job consumer.
     #[serde(default)]
     pub background_jobs: BackgroundJobsConfig,
-    /// Base URL for authgate, with trailing slash trimmed.
+    /// Original issuer binding for pre-OIDC account IDs; never used for bearer validation.
     #[serde(default)]
     pub authgate_url: String,
-    /// Local sessions and OAuth grants. `authgate_url` only binds legacy identities in this mode.
-    #[serde(default)]
-    pub oidc: Option<OidcLoginConfig>,
+    /// Upstream login provider. NoteGate always owns browser sessions and MCP/CLI grants.
+    pub oidc: OidcLoginConfig,
     /// Public URL for notegate as seen by browsers/MCP clients, with trailing slash trimmed.
     #[serde(rename = "public_url")]
     pub notegate_public_url: String,
-    /// Public browser OAuth client id registered in authgate.
+    /// Deprecated deployment input, accepted during configuration migration; unused.
     #[serde(default)]
     pub oauth_client_id: String,
-    /// Public MCP OAuth client id registered in authgate.
+    /// Deprecated deployment input, accepted during configuration migration; unused.
     #[serde(default)]
     pub mcp_oauth_client_id: String,
-    /// Public CLI OAuth client id registered in authgate.
+    /// First-party public CLI client ID served by NoteGate OAuth metadata.
     #[serde(default)]
     pub cli_oauth_client_id: String,
-    /// Exact redirect URL registered in authgate.
+    /// Exact browser callback registered with the OIDC provider.
     #[serde(default)]
     pub oauth_redirect_url: String,
     /// MCP resource/audience URL, with trailing slash trimmed.
     #[serde(default)]
     pub resource_url: String,
-    /// Shared JWKS cache TTL.
+    /// Deprecated legacy bearer cache input; unused by OIDC discovery.
     #[serde(
         rename = "jwks_cache_ttl_secs",
         deserialize_with = "duration_from_secs"
@@ -262,7 +261,7 @@ pub struct Config {
     pub lookup_verify_0_key_id: Option<String>,
     /// Optional verify-only LOOKUP root secret for provider subject migration.
     pub lookup_verify_0_secret: Option<SecretString>,
-    /// Browser session local validation lease.
+    /// Deprecated upstream refresh lease input; local sessions require login after 24 hours.
     #[serde(
         rename = "browser_session_ttl_secs",
         deserialize_with = "duration_from_secs"
@@ -336,12 +335,11 @@ impl Validate for Config {
             );
         }
         validate_background_jobs(self, &mut errors);
-        if (self.oidc.is_none() || !self.authgate_url.is_empty())
-            && validate_http_url_value(&self.authgate_url).is_err()
-        {
+        if !self.authgate_url.is_empty() && validate_http_url_value(&self.authgate_url).is_err() {
             errors.add("authgate_url", ValidationError::new("http_url"));
         }
-        if let Some(oidc) = &self.oidc {
+        {
+            let oidc = &self.oidc;
             let secure = secure_oauth_url(&oidc.issuer).is_some();
             let public = secure_oauth_url(&self.notegate_public_url)
                 .filter(|u| matches!(u.path(), "" | "/"));
@@ -367,12 +365,6 @@ impl Validate for Config {
         }
         if validate_http_url_value(&self.notegate_public_url).is_err() {
             errors.add("notegate_public_url", ValidationError::new("http_url"));
-        }
-        if self.oidc.is_none() && self.oauth_client_id.is_empty() {
-            errors.add("oauth_client_id", ValidationError::new("length"));
-        }
-        if self.oidc.is_none() && self.mcp_oauth_client_id.is_empty() {
-            errors.add("mcp_oauth_client_id", ValidationError::new("length"));
         }
         if self.cli_oauth_client_id.is_empty() {
             errors.add("cli_oauth_client_id", ValidationError::new("length"));
@@ -892,7 +884,12 @@ mod tests {
             read_database_url: None,
             read_db_max_connections: 10,
             background_jobs: BackgroundJobsConfig::default(),
-            oidc: None,
+            oidc: super::OidcLoginConfig {
+                issuer: "https://auth.test".to_owned(),
+                client_id: "notegate-web".to_owned(),
+                client_secret: None,
+                allow_signup: false,
+            },
             authgate_url: "https://auth.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),
             oauth_client_id: "notegate-web".to_owned(),
@@ -935,6 +932,14 @@ mod tests {
 
     fn test_env(vars: &[(&str, &str)]) -> Environment {
         let mut values = HashMap::from([
+            (
+                "NOTEGATE_OIDC__ISSUER".to_owned(),
+                "https://auth.env".to_owned(),
+            ),
+            (
+                "NOTEGATE_OIDC__CLIENT_ID".to_owned(),
+                "notegate-web".to_owned(),
+            ),
             (
                 "NOTEGATE_S3__ENDPOINT".to_owned(),
                 "http://localhost:9000".to_owned(),
@@ -1439,14 +1444,39 @@ mod tests {
         Ok(())
     }
     #[test]
+    fn legacy_configuration_cannot_enable_an_authentication_fallback() -> crate::Result<()> {
+        let env = test_env(&[
+            ("NOTEGATE_DATABASE_URL", "postgres://env"),
+            ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
+            ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
+            ("NOTEGATE_OAUTH_CLIENT_ID", "old-browser"),
+            ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "old-mcp"),
+            ("NOTEGATE_OIDC__ISSUER", ""),
+            ("NOTEGATE_OIDC__CLIENT_ID", ""),
+            ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
+            (
+                "NOTEGATE_ENC_ROOT_SECRET",
+                "env-enc-root-secret-32-bytes-long",
+            ),
+            ("NOTEGATE_LOOKUP_ROOT_KEY_ID", "env-lookup"),
+            (
+                "NOTEGATE_LOOKUP_ROOT_SECRET",
+                "env-lookup-root-secret-32-bytes-long",
+            ),
+        ]);
+        assert!(load_from_sources(false, env).is_err());
+        Ok(())
+    }
+
+    #[test]
     fn standalone_config_can_use_authgate_without_legacy_bearer_settings() {
         let mut config = valid_config();
-        config.oidc = Some(super::OidcLoginConfig {
+        config.oidc = super::OidcLoginConfig {
             issuer: config.authgate_url.clone(),
             client_id: config.oauth_client_id.clone(),
             client_secret: None,
             allow_signup: false,
-        });
+        };
         config.authgate_url.clear();
         config.oauth_client_id.clear();
         config.mcp_oauth_client_id.clear();
@@ -1460,7 +1490,7 @@ mod tests {
             "https://user:password@example.test",
             "https://example.test#fragment",
         ] {
-            config.oidc.as_mut().unwrap().issuer = bad.to_owned();
+            config.oidc.issuer = bad.to_owned();
             assert!(config.validate().is_err());
         }
     }
@@ -1468,12 +1498,12 @@ mod tests {
     #[test]
     fn standalone_authorization_server_requires_secure_origin_and_own_callback() {
         let mut config = valid_config();
-        config.oidc = Some(super::OidcLoginConfig {
+        config.oidc = super::OidcLoginConfig {
             issuer: config.authgate_url.clone(),
             client_id: config.oauth_client_id.clone(),
             client_secret: None,
             allow_signup: false,
-        });
+        };
         for bad in [
             "http://public.example.test",
             "https://example.test/path",

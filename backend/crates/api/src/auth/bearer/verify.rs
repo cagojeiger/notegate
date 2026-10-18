@@ -4,49 +4,25 @@ use crate::auth::bearer::{AuthError, map_identity_error};
 use crate::state::AppState;
 
 pub async fn verify_bearer_mcp(state: &AppState, token: &str) -> Result<Caller, AuthError> {
-    if state.config.oidc.is_some() {
-        return verify_local(
-            state,
-            token,
-            &state.config.resource_url,
-            "mcp",
-            notegate_model::Channel::Mcp,
-        )
-        .await;
-    }
-    let resource = state.config.resource_url.trim_end_matches('/');
-    let resource_with_slash = format!("{resource}/");
-    let attrs = state
-        .jwt
-        .verify_for_audiences(token, &[resource, &resource_with_slash])
-        .await?;
-    state
-        .resolver
-        .resolve_mcp(attrs)
-        .await
-        .map_err(map_identity_error)
+    verify_local(
+        state,
+        token,
+        &state.config.resource_url,
+        "mcp",
+        notegate_model::Channel::Mcp,
+    )
+    .await
 }
 
 pub async fn verify_bearer_command(state: &AppState, token: &str) -> Result<Caller, AuthError> {
-    if state.config.oidc.is_some() {
-        return verify_local(
-            state,
-            token,
-            &format!("{}/cli", state.config.notegate_public_url),
-            "cli",
-            notegate_model::Channel::Api,
-        )
-        .await;
-    }
-    let attrs = state
-        .jwt
-        .verify_for_audiences(token, &[&state.config.cli_oauth_client_id])
-        .await?;
-    state
-        .resolver
-        .resolve_command_user(attrs)
-        .await
-        .map_err(map_identity_error)
+    verify_local(
+        state,
+        token,
+        &format!("{}/cli", state.config.notegate_public_url),
+        "cli",
+        notegate_model::Channel::Api,
+    )
+    .await
 }
 
 async fn verify_local(

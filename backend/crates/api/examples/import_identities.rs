@@ -11,10 +11,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::load()?;
     let bytes = std::fs::read(path)?;
     let links: Vec<IdentityLink> = serde_json::from_slice(&bytes)?;
-    if links
-        .iter()
-        .any(|l| Some(l.issuer.as_str()) != config.oidc.as_ref().map(|o| o.issuer.as_str()))
-    {
+    if links.iter().any(|l| l.issuer != config.oidc.issuer) {
         anyhow::bail!("all mappings must use the configured standalone issuer");
     }
     let pool = sqlx::postgres::PgPoolOptions::new()

@@ -141,7 +141,6 @@ pub(crate) async fn run() -> anyhow::Result<()> {
             }
             SearchClientTarget::Disabled => internal_search::SearchClient::disabled(),
         };
-        let jwks_url = format!("{}/keys", config.authgate_url);
         // The db-backed identity resolver resolves users and API-key owners.
         let account_repo = notegate_db::AccountRepo::with_crypto_and_default_user_tier(
             pool.clone(),
@@ -165,12 +164,10 @@ pub(crate) async fn run() -> anyhow::Result<()> {
             api_key_repo,
             pii_crypto.clone(),
         );
-        let jwt = Arc::new(auth::jwt::JwtAuthority::from_url(&config, jwks_url));
         let oidc = Arc::new(auth::oidc::OidcProvider::new(&config, http.clone()));
         let mut state = AppState::new_with_search_client(
             pool.clone(),
             config.clone(),
-            jwt,
             oidc,
             Arc::new(resolver),
             http,

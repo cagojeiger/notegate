@@ -74,15 +74,7 @@ pub(crate) fn auth_error_response(
 
 pub fn shared_scoped_challenge_header(config: &notegate_core::Config) -> HeaderValue {
     let meta = protected_resource_metadata_url(&config.resource_url);
-    if config.oidc.is_some() {
-        HeaderValue::from_str(&format!(
-            "Bearer resource_metadata=\"{}\", scope=\"mcp offline_access\"",
-            meta.full_url
-        ))
-        .unwrap_or_else(|_| HeaderValue::from_static("Bearer"))
-    } else {
-        scoped_challenge_header(&meta.full_url)
-    }
+    scoped_challenge_header(&meta.full_url)
 }
 
 pub fn status_for_error(error: &AuthError) -> StatusCode {

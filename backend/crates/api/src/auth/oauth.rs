@@ -5,13 +5,8 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::Cookie;
 use serde::Deserialize;
-use subtle::ConstantTimeEq;
 
-use crate::auth::oauth_exchange::exchange_code_for_userinfo;
-use crate::auth::oauth_flow::{
-    LOGIN_NEXT_COOKIE, LOGIN_NONCE_COOKIE, LOGIN_STATE_COOKIE, LOGIN_VERIFIER_COOKIE,
-    clear_flow_cookies, flow_cookie, hardened_cookie, new_login_flow,
-};
+use crate::auth::oauth_flow::hardened_cookie;
 use crate::auth::origin::has_trusted_browser_origin;
 use crate::auth::page::html_page;
 use crate::auth::session::{
@@ -38,46 +33,7 @@ pub async fn login(
     jar: CookieJar,
     Query(query): Query<LoginQuery>,
 ) -> Response {
-    if state.config.oidc.is_some() {
-        return super::standalone_login::login(&state, jar, sanitize_next(query.next.as_deref()))
-            .await;
-    }
-    let login_flow = match new_login_flow(&state.oidc).await {
-        Ok(flow) => flow,
-        Err(error) => {
-            tracing::error!(event = "oauth.login_flow_failed", %error);
-            return html_page(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Login failed",
-                "internal error",
-            );
-        }
-    };
-    let next = sanitize_next(query.next.as_deref());
-    let mut jar = jar
-        .add(flow_cookie(
-            LOGIN_STATE_COOKIE,
-            login_flow.csrf_state,
-            state.config.secure_cookies,
-        ))
-        .add(flow_cookie(
-            LOGIN_VERIFIER_COOKIE,
-            login_flow.pkce_verifier,
-            state.config.secure_cookies,
-        ))
-        .add(flow_cookie(
-            LOGIN_NONCE_COOKIE,
-            login_flow.nonce,
-            state.config.secure_cookies,
-        ));
-    if let Some(next) = next {
-        jar = jar.add(flow_cookie(
-            LOGIN_NEXT_COOKIE,
-            next,
-            state.config.secure_cookies,
-        ));
-    }
-    (jar, Redirect::temporary(&login_flow.redirect_url)).into_response()
+    super::standalone_login::login(&state, jar, sanitize_next(query.next.as_deref())).await
 }
 
 pub async fn callback(
@@ -85,106 +41,7 @@ pub async fn callback(
     jar: CookieJar,
     Query(query): Query<CallbackQuery>,
 ) -> Response {
-    if state.config.oidc.is_some() {
-        return super::standalone_login::callback(
-            &state,
-            jar,
-            query.code,
-            query.state,
-            query.error,
-        )
-        .await;
-    }
-    let cookie_state = jar
-        .get(LOGIN_STATE_COOKIE)
-        .map(|cookie| cookie.value().to_owned());
-    let cookie_verifier = jar
-        .get(LOGIN_VERIFIER_COOKIE)
-        .map(|cookie| cookie.value().to_owned());
-    let cookie_nonce = jar
-        .get(LOGIN_NONCE_COOKIE)
-        .map(|cookie| cookie.value().to_owned());
-    let next = jar
-        .get(LOGIN_NEXT_COOKIE)
-        .and_then(|cookie| sanitize_next(Some(cookie.value())));
-    let jar = clear_flow_cookies(jar, state.config.secure_cookies);
-
-    if query.error.is_some() {
-        return (
-            jar,
-            html_page(
-                StatusCode::BAD_REQUEST,
-                "Login error",
-                "authorization failed",
-            ),
-        )
-            .into_response();
-    }
-
-    let (Some(code), Some(query_state)) = (query.code.as_deref(), query.state.as_deref()) else {
-        return (
-            jar,
-            html_page(
-                StatusCode::BAD_REQUEST,
-                "Login error",
-                "missing code or state",
-            ),
-        )
-            .into_response();
-    };
-
-    let Some(cookie_state) = cookie_state else {
-        return (
-            jar,
-            html_page(StatusCode::BAD_REQUEST, "Login error", "state mismatch"),
-        )
-            .into_response();
-    };
-    if cookie_state
-        .as_bytes()
-        .ct_eq(query_state.as_bytes())
-        .unwrap_u8()
-        != 1
-    {
-        return (
-            jar,
-            html_page(StatusCode::BAD_REQUEST, "Login error", "state mismatch"),
-        )
-            .into_response();
-    }
-
-    let Some(verifier) = cookie_verifier.filter(|value| !value.is_empty()) else {
-        return (
-            jar,
-            html_page(StatusCode::BAD_REQUEST, "Login error", "missing verifier"),
-        )
-            .into_response();
-    };
-    let Some(nonce) = cookie_nonce.filter(|value| !value.is_empty()) else {
-        return (
-            jar,
-            html_page(StatusCode::BAD_REQUEST, "Login error", "missing nonce"),
-        )
-            .into_response();
-    };
-
-    let login_userinfo =
-        match exchange_code_for_userinfo(&state.oidc, &state.http, code, &verifier, &nonce).await {
-            Ok(userinfo) => userinfo,
-            Err(error) => {
-                tracing::warn!(event = "oauth.exchange_failed", %error);
-                return (
-                    jar,
-                    html_page(
-                        StatusCode::BAD_GATEWAY,
-                        "Login error",
-                        "authorization exchange failed",
-                    ),
-                )
-                    .into_response();
-            }
-        };
-    complete_login(&state, jar, login_userinfo, next).await
+    super::standalone_login::callback(&state, jar, query.code, query.state, query.error).await
 }
 
 pub(super) async fn complete_login(
@@ -199,7 +56,8 @@ pub(super) async fn complete_login(
         email: login_userinfo.userinfo.email.unwrap_or_default(),
         name: login_userinfo.userinfo.name.unwrap_or_default(),
     };
-    if let Some(oidc) = &state.config.oidc {
+    {
+        let oidc = &state.config.oidc;
         match state
             .accounts
             .find_user_id_by_identity(&attrs.issuer, &attrs.sub)
@@ -232,13 +90,7 @@ pub(super) async fn complete_login(
     }
     match state.resolver.resolve_browser(attrs).await {
         Ok(caller) => {
-            let session = match create_browser_session(
-                state,
-                caller.account_id(),
-                &login_userinfo.refresh_token,
-            )
-            .await
-            {
+            let session = match create_browser_session(state, caller.account_id()).await {
                 Ok(session) => session,
                 Err(error) => {
                     tracing::error!(event = "oauth.session_failed", %error);
@@ -349,20 +201,14 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar, headers: Head
             .into_response();
     }
 
-    let refresh_token = revoke_browser_session_for_logout(
+    if let Err(error) = revoke_browser_session_for_logout(
         &state,
         jar.get(BROWSER_SESSION_COOKIE).map(|cookie| cookie.value()),
     )
-    .await;
-    let refresh_token = match refresh_token {
-        Ok(refresh_token) => refresh_token,
-        Err(error) => {
-            tracing::error!(event = "oauth.logout_local_revoke_failed", %error);
-            return ApiError::internal("logout failed").into_response();
-        }
-    };
-    if let Some(refresh_token) = refresh_token {
-        revoke_authgate_refresh_token(&state, &refresh_token).await;
+    .await
+    {
+        tracing::error!(event = "oauth.logout_local_revoke_failed", %error);
+        return ApiError::internal("logout failed").into_response();
     }
     (
         jar.add(expired_browser_session_cookie(state.config.secure_cookies)),
@@ -395,37 +241,12 @@ fn expired_browser_session_cookie(secure: bool) -> Cookie<'static> {
     hardened_cookie(BROWSER_SESSION_COOKIE, String::new(), 0, secure)
 }
 
-async fn revoke_authgate_refresh_token(state: &AppState, refresh_token: &str) {
-    let revoke_url = format!("{}/oauth/revoke", state.config.authgate_url);
-    let form = [
-        ("token", refresh_token),
-        ("token_type_hint", "refresh_token"),
-        ("client_id", state.config.oauth_client_id.as_str()),
-    ];
-    match state.http.post(revoke_url).form(&form).send().await {
-        Ok(response) if response.status().is_success() => {}
-        Ok(response) => {
-            tracing::warn!(
-                event = "oauth.refresh_token_revoke_failed",
-                status = response.status().as_u16()
-            );
-        }
-        Err(error) => {
-            tracing::warn!(event = "oauth.refresh_token_revoke_failed", %error);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use axum::extract::Query;
-    use axum::http::header::{COOKIE, SET_COOKIE};
-    use axum::http::{HeaderMap, HeaderValue, Uri};
-    use axum::response::IntoResponse;
-    use axum_extra::extract::CookieJar;
+    use axum::http::Uri;
 
     use super::{LoginQuery, login_complete_html, login_complete_script, sanitize_next};
-    use crate::auth::oauth_flow::{LOGIN_NEXT_COOKIE, flow_cookie};
 
     #[test]
     fn login_complete_page_uses_same_origin_external_script() {
@@ -477,8 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_next_checks_decoded_login_query_and_callback_cookie()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn sanitize_next_checks_decoded_login_query() -> Result<(), Box<dyn std::error::Error>> {
         for (encoded, expected) in [
             ("%2F%09%2Fevil.test", None),
             ("%2F%0A%2Fevil.test", None),
@@ -493,23 +313,6 @@ mod tests {
             let Query(query) = Query::<LoginQuery>::try_from_uri(&uri)?;
             let next = query.next.ok_or("missing decoded next query")?;
             assert_eq!(sanitize_next(Some(&next)).as_deref(), expected);
-
-            // Also reject cookies issued before this validation was added.
-            let response = CookieJar::new()
-                .add(flow_cookie(LOGIN_NEXT_COOKIE, next.clone(), true))
-                .into_response();
-            let set_cookie = response
-                .headers()
-                .get(SET_COOKIE)
-                .ok_or("missing next cookie")?
-                .to_str()?;
-            let cookie_header = set_cookie.split(';').next().ok_or("missing cookie pair")?;
-            let mut headers = HeaderMap::new();
-            headers.insert(COOKIE, HeaderValue::from_str(cookie_header)?);
-            let jar = CookieJar::from_headers(&headers);
-            let cookie = jar.get(LOGIN_NEXT_COOKIE).ok_or("missing decoded cookie")?;
-            assert_eq!(cookie.value(), next);
-            assert_eq!(sanitize_next(Some(cookie.value())).as_deref(), expected);
         }
         Ok(())
     }

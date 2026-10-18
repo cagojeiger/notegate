@@ -228,6 +228,7 @@ fn sign_token(
         "aud": CLIENT_ID,
         "sub": SUBJECT,
         "iat": now,
+        "auth_time": now,
         "exp": now + 300,
         "nonce": NONCE,
         "at_hash": URL_SAFE_NO_PAD.encode(&digest[..16]),
@@ -264,7 +265,6 @@ async fn valid_cached_callback_does_not_fetch_metadata_or_jwks() {
     let result = login(&oidc, &http).await.expect("cached ID token verifies");
 
     assert_eq!(result.userinfo.sub, SUBJECT);
-    assert_eq!(result.refresh_token, "test-refresh-token");
     assert_eq!(mock.counts(), (1, 1, 1, 1));
 }
 
@@ -538,7 +538,12 @@ fn config(issuer: &str) -> notegate_core::Config {
         read_database_url: None,
         read_db_max_connections: 1,
         background_jobs: notegate_core::BackgroundJobsConfig::default(),
-        oidc: None,
+        oidc: notegate_core::config::OidcLoginConfig {
+            issuer: issuer.to_owned(),
+            client_id: CLIENT_ID.to_owned(),
+            client_secret: None,
+            allow_signup: false,
+        },
         authgate_url: issuer.to_owned(),
         notegate_public_url: "http://localhost:9191".to_owned(),
         oauth_client_id: CLIENT_ID.to_owned(),
@@ -638,8 +643,8 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
     mock.state.omit_refresh.store(true, Ordering::SeqCst);
     let mut state = crate::auth::bearer_tests::standalone_state(&db)?;
     let mut config = (*state.config).clone();
-    config.oidc.as_mut().unwrap().issuer = mock.issuer.clone();
-    config.oidc.as_mut().unwrap().client_secret = None;
+    config.oidc.issuer = mock.issuer.clone();
+    config.oidc.client_secret = None;
     state.config = Arc::new(config);
     state.oidc = Arc::new(OidcProvider::new(&state.config, state.http.clone()));
     // This simulates AuthGate remaining the same standards-based upstream provider.
@@ -658,6 +663,13 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
         .await?
         .0
         .id;
+    // Simulate a pre-OIDC account: only the original subject hash is present.
+    sqlx::query("DELETE FROM external_identities WHERE user_id=$1")
+        .bind(owner)
+        .execute(&db.pool)
+        .await?;
+    sqlx::query("INSERT INTO audit_events (actor_account_id, action, target_type, target_id) VALUES ($1, 'test.before_oidc', 'account', $1)")
+        .bind(owner).execute(&db.pool).await?;
     let router = Router::new()
         .route("/auth/login", get(crate::auth::oauth::login))
         .route("/auth/callback", get(crate::auth::oauth::callback))
@@ -741,6 +753,21 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
         .unwrap();
     let caller = crate::auth::session::verify_browser_session(&state, session).await?;
     assert_eq!(caller.account_id(), owner);
+    let preserved: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE actor_account_id=$1 AND action='test.before_oidc'",
+    )
+    .bind(owner)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(preserved, 1);
+    assert_eq!(
+        state
+            .accounts
+            .find_user_id_by_identity(&mock.issuer, SUBJECT)
+            .await?,
+        Some(owner)
+    );
+
     let form = mock.state.last_token_form.read().await;
     assert!(!form.contains_key("client_secret"));
     assert_eq!(
@@ -796,7 +823,7 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
     // A valid signed identity from a different issuer cannot silently create a duplicate account.
     let mut denied_state = state.clone();
     let mut denied_config = (*state.config).clone();
-    denied_config.oidc.as_mut().unwrap().allow_signup = false;
+    denied_config.oidc.allow_signup = false;
     denied_state.config = Arc::new(denied_config);
     let denied = crate::auth::oauth::complete_login(
         &denied_state,
@@ -807,7 +834,6 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
                 email: Some("test@example.test".to_owned()),
                 name: Some("Duplicate".to_owned()),
             },
-            refresh_token: String::new(),
         },
         None,
     )
@@ -823,17 +849,19 @@ async fn standalone_confidential_oidc_requires_recent_auth_time_and_not_a_refres
     let mock = MockProvider::start().await;
     mock.state.omit_refresh.store(true, Ordering::SeqCst);
     let mut config = config(&mock.issuer);
-    config.oidc = Some(notegate_core::config::OidcLoginConfig {
+    config.oidc = notegate_core::config::OidcLoginConfig {
         issuer: mock.issuer.clone(),
         client_id: CLIENT_ID.to_owned(),
         client_secret: Some(SecretString::from("test-client-secret".to_owned())),
         allow_signup: false,
-    });
+    };
     let http = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .expect("client");
     let oidc = OidcProvider::new(&config, http.clone());
+    mock.set_token(KEY_A, "key-a", json!({"auth_time": null}), Algorithm::RS256)
+        .await;
     assert!(
         exchange_code_for_userinfo(&oidc, &http, "code", "verifier", NONCE)
             .await
@@ -861,7 +889,7 @@ async fn standalone_confidential_oidc_requires_recent_auth_time_and_not_a_refres
     let result = exchange_code_for_userinfo(&oidc, &http, "code", "verifier", NONCE)
         .await
         .expect("fresh confidential OIDC");
-    assert!(result.refresh_token.is_empty());
+    assert_eq!(result.userinfo.sub, SUBJECT);
     assert_eq!(
         mock.state.last_token_form.read().await["client_secret"],
         "test-client-secret"

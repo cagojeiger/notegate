@@ -44,15 +44,15 @@ notegate-cli auth login
 export NOTEGATE_API_KEY='ngk_v2_...'
 ```
 
-- `auth login`은 NoteGate의 `/.well-known/oauth-authorization-server`에서 production AuthGate endpoint와 환경별 `cli_client_id`를 discovery한 뒤 RFC 8628 Device Flow를 시작한다.
-- 로컬 NoteGate는 `notegate-cli-local`, 운영 NoteGate는 `notegate-cli` client를 광고하므로 같은 production AuthGate 계정을 사용해도 token audience와 저장 credential이 분리된다.
+- `auth login`은 NoteGate의 `/.well-known/oauth-authorization-server`에서 NoteGate OAuth endpoint와 환경별 `cli_client_id`를 discovery한 뒤 RFC 8628 Device Flow를 시작한다.
+- 로컬 NoteGate는 `notegate-cli-local`, 운영 NoteGate는 `notegate-cli` client를 광고하므로 같은 AuthGate 로그인 계정을 사용해도 NoteGate origin과 CLI resource별 credential이 분리된다.
 - `NOTEGATE_API_KEY`는 Agent가 소유한 `ngk_v2_` key여야 하며, 설정되어 있으면 일반 command에서 User credential보다 항상 우선한다.
 - API key는 shell history와 process list 노출을 막기 위해 command-line option으로 받지 않는다.
 - 기본 NoteGate origin은 `https://notegate.project-jelly.io`다. 다른 배포나 로컬 서버는 `NOTEGATE_BASE_URL` 또는 `--base-url`로 지정한다.
 - 연결 우선순위는 `--base-url` > `NOTEGATE_BASE_URL` > 기본 운영 origin이다.
 - 원격 origin은 HTTPS만 허용한다. 로컬 개발용 HTTP는 `localhost`와 loopback IP에서만 허용한다.
 
-진단용으로만 metadata discovery를 우회할 수 있다. 두 환경 변수를 반드시 함께 설정해야 한다.
+구형 서버의 기존 credential 진단용으로만 metadata discovery를 우회할 수 있다. 현재 서버의 새 로그인은 기본 discovery를 사용한다. 두 환경 변수를 반드시 함께 설정해야 한다.
 
 ```sh
 export NOTEGATE_AUTHGATE_URL='https://authgate.project-jelly.io'

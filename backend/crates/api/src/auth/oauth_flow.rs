@@ -1,16 +1,9 @@
-use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use openidconnect::core::CoreAuthenticationFlow;
 use openidconnect::{CsrfToken, Nonce, PkceCodeChallenge, Scope};
 use time::Duration as CookieDuration;
 
 use crate::auth::oidc::OidcProvider;
-
-pub(super) const LOGIN_STATE_COOKIE: &str = "notegate_login_state";
-pub(super) const LOGIN_VERIFIER_COOKIE: &str = "notegate_login_verifier";
-pub(super) const LOGIN_NONCE_COOKIE: &str = "notegate_login_nonce";
-pub(super) const LOGIN_NEXT_COOKIE: &str = "notegate_login_next";
-const FLOW_COOKIE_MAX_AGE_SECS: i64 = 300;
 
 pub(super) struct LoginFlow {
     pub redirect_url: String,
@@ -22,29 +15,18 @@ pub(super) struct LoginFlow {
 pub(super) async fn new_login_flow(oidc: &OidcProvider) -> notegate_core::Result<LoginFlow> {
     let client = oidc.client().await?;
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
-    let standalone = oidc.is_standalone();
     let builder = client
         .authorize_url(
             CoreAuthenticationFlow::AuthorizationCode,
-            move || {
-                if standalone {
-                    CsrfToken::new(uuid::Uuid::new_v4().to_string())
-                } else {
-                    CsrfToken::new_random()
-                }
-            },
+            || CsrfToken::new(uuid::Uuid::new_v4().to_string()),
             Nonce::new_random,
         )
         .add_scope(Scope::new("profile".to_owned()))
         .add_scope(Scope::new("email".to_owned()))
         .set_pkce_challenge(pkce_challenge);
-    let builder = if oidc.is_standalone() {
-        builder
-            .add_extra_param("max_age", "0")
-            .add_extra_param("claims", r#"{"id_token":{"auth_time":{"essential":true}}}"#)
-    } else {
-        builder.add_scope(Scope::new("offline_access".to_owned()))
-    };
+    let builder = builder
+        .add_extra_param("max_age", "0")
+        .add_extra_param("claims", r#"{"id_token":{"auth_time":{"essential":true}}}"#);
     let (redirect_url, csrf_state, nonce) = builder.url();
 
     Ok(LoginFlow {
@@ -72,70 +54,22 @@ pub(super) fn hardened_cookie(
         .build()
 }
 
-pub(super) fn flow_cookie(name: &'static str, value: String, secure: bool) -> Cookie<'static> {
-    hardened_cookie(name, value, FLOW_COOKIE_MAX_AGE_SECS, secure)
-}
-
-pub(super) fn clear_flow_cookies(jar: CookieJar, secure: bool) -> CookieJar {
-    jar.add(expired_cookie(LOGIN_STATE_COOKIE, secure))
-        .add(expired_cookie(LOGIN_VERIFIER_COOKIE, secure))
-        .add(expired_cookie(LOGIN_NONCE_COOKIE, secure))
-        .add(expired_cookie(LOGIN_NEXT_COOKIE, secure))
-}
-
-fn expired_cookie(name: &'static str, secure: bool) -> Cookie<'static> {
-    hardened_cookie(name, String::new(), 0, secure)
-}
-
 #[cfg(test)]
 mod tests {
-    #![allow(
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::indexing_slicing,
-        clippy::panic,
-        clippy::unwrap_in_result
-    )]
-    use axum_extra::extract::CookieJar;
-    use axum_extra::extract::cookie::SameSite;
-    use time::Duration as CookieDuration;
-
-    use super::{
-        LOGIN_NEXT_COOKIE, LOGIN_NONCE_COOKIE, LOGIN_STATE_COOKIE, LOGIN_VERIFIER_COOKIE,
-        clear_flow_cookies, flow_cookie,
-    };
-
     #[test]
-    fn flow_cookie_is_hardened_with_max_age() {
-        let cookie = flow_cookie(LOGIN_STATE_COOKIE, "value".to_owned(), true);
-        assert_eq!(cookie.name(), LOGIN_STATE_COOKIE);
-        assert_eq!(cookie.value(), "value");
-        assert_eq!(cookie.http_only(), Some(true));
-        assert_eq!(cookie.secure(), Some(true));
-        assert_eq!(cookie.same_site(), Some(SameSite::Lax));
-        assert_eq!(cookie.path(), Some("/"));
-        assert_eq!(cookie.max_age(), Some(CookieDuration::seconds(300)));
-    }
-
-    #[test]
-    fn insecure_flow_cookie_drops_secure_flag() {
-        let cookie = flow_cookie(LOGIN_STATE_COOKIE, "value".to_owned(), false);
-        assert_eq!(cookie.secure(), Some(false));
-    }
-
-    #[test]
-    fn clear_flow_cookies_expires_every_login_cookie() -> Result<(), Box<dyn std::error::Error>> {
-        let jar = clear_flow_cookies(CookieJar::new(), true);
-        for name in [
-            LOGIN_STATE_COOKIE,
-            LOGIN_VERIFIER_COOKIE,
-            LOGIN_NONCE_COOKIE,
-            LOGIN_NEXT_COOKIE,
-        ] {
-            let cookie = jar.get(name).ok_or("expired cookie missing from jar")?;
-            assert_eq!(cookie.value(), "");
-            assert_eq!(cookie.max_age(), Some(CookieDuration::seconds(0)));
+    fn auth_cookies_are_hardened_and_expiration_is_explicit() {
+        for secure in [true, false] {
+            for age in [0, 300] {
+                let cookie = super::hardened_cookie("test", "value".to_owned(), age, secure);
+                assert_eq!(cookie.http_only(), Some(true));
+                assert_eq!(cookie.secure(), Some(secure));
+                assert_eq!(
+                    cookie.same_site(),
+                    Some(axum_extra::extract::cookie::SameSite::Lax)
+                );
+                assert_eq!(cookie.path(), Some("/"));
+                assert_eq!(cookie.max_age(), Some(time::Duration::seconds(age)));
+            }
         }
-        Ok(())
     }
 }
