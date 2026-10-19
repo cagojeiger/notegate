@@ -221,7 +221,7 @@ function SortableSpaceCard({
             onClick={onSelect}
             aria-pressed={selected}
           >
-            <span className="sr-only">Inspect </span>
+            <span className="sr-only">Inspect</span>{" "}
             <span data-space-name className="block truncate font-semibold">{space.name}</span>{" "}
             <span className="mt-0.5 block truncate text-xs text-muted">
               {usage
