@@ -172,7 +172,12 @@ fn data_plane_routes(state: AppState) -> Router<AppState> {
         ..DataPlaneLimits::default()
     };
     let browser_v1 = apply_rate_limit(
-        Router::new().nest("/api", rest_api_routes(state.clone())),
+        Router::new()
+            .nest("/api", rest_api_routes(state.clone()))
+            .route(
+                "/auth/session/activity",
+                post(crate::auth::session::activity),
+            ),
         limits.rate_limits.browser_v1,
     );
     let agent_apis = apply_rate_limit(
@@ -362,10 +367,6 @@ fn auth_routes() -> Router<AppState> {
         .route("/auth/success", get(success))
         .route("/auth/login-complete.js", get(success_script))
         .route("/auth/logout", post(logout))
-        .route(
-            "/auth/session/activity",
-            post(crate::auth::session::activity),
-        )
 }
 
 fn metadata_routes(state: &AppState) -> Router<AppState> {

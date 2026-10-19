@@ -2062,3 +2062,61 @@ async fn browser_activity_requires_live_cookie_and_same_origin_without_reauthent
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn activity_uses_browser_capacity_without_consuming_login_or_logout_capacity()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut state = state(ResolverMode::Registered(true))?;
+    let mut config = (*state.config).clone();
+    config.http_rate_limits.browser_v1 = notegate_core::HttpRateLimitConfig {
+        requests_per_second: 1,
+        burst: 1,
+    };
+    state.config = Arc::new(config);
+    let router = crate::routes::app(state);
+    for attempt in 0..31 {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/session/activity")
+                    .header(header::ORIGIN, "https://api.example.test")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(
+            response.status(),
+            if attempt == 0 {
+                StatusCode::UNAUTHORIZED
+            } else {
+                StatusCode::TOO_MANY_REQUESTS
+            }
+        );
+    }
+    let read = router
+        .clone()
+        .oneshot(Request::builder().uri("/api/v1/me").body(Body::empty())?)
+        .await?;
+    assert_eq!(read.status(), StatusCode::TOO_MANY_REQUESTS);
+    let login_page = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/auth/success")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(login_page.status(), StatusCode::OK);
+    let logout = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .header(header::ORIGIN, "https://api.example.test")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(logout.status(), StatusCode::SEE_OTHER);
+    Ok(())
+}
