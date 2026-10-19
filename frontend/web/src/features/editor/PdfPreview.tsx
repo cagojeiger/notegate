@@ -101,6 +101,7 @@ export function PdfPreview({
         tabIndex={0}
       >
         <Document
+          suspense={false}
           className="min-h-full"
           file={url}
           options={PDF_LOAD_OPTIONS}
