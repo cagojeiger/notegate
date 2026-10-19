@@ -1,6 +1,6 @@
 //! Permission gate for file-tree commands.
 //!
-//! `read` permission allows list/stat/read/find/grep. `write` permission also
+//! `read` permission allows list/stat/read. `write` permission also
 //! allows mutation commands.
 
 use notegate_model::Permission;
@@ -12,8 +12,6 @@ pub enum FileCommand {
     Ls,
     Stat,
     Read,
-    Find,
-    Grep,
     Mkdir,
     Touch,
     Write,
@@ -46,8 +44,6 @@ impl FileCommand {
             Self::Ls => "ls",
             Self::Stat => "stat",
             Self::Read => "read",
-            Self::Find => "find",
-            Self::Grep => "grep",
             Self::Mkdir => "mkdir",
             Self::Touch => "touch",
             Self::Write => "write",
@@ -84,7 +80,6 @@ mod tests {
     fn read_permission_cannot_mutate() {
         assert!(allowed(Permission::Read, FileCommand::Ls));
         assert!(allowed(Permission::Read, FileCommand::Read));
-        assert!(allowed(Permission::Read, FileCommand::Find));
         assert!(!allowed(Permission::Read, FileCommand::Write));
         assert!(!allowed(Permission::Read, FileCommand::Append));
         assert!(!allowed(Permission::Read, FileCommand::Rm));

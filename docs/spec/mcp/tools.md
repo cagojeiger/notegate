@@ -33,22 +33,7 @@ Caller identity, capability, 실행 중인 `server_version`을 반환한다. Spa
 
 Read-only tool이다.
 
-```ts
-type ReadInput = {
-  purpose: string
-  op: "spaces" | "ls" | "tree" | "stat" | "read" | "changes"
-  target?: string
-  name?: string
-  depth?: number
-  limit?: number
-  cursor?: string
-  direction?: "older" | "newer"
-  start_line?: number
-  max_lines?: number
-  max_bytes?: number
-  if_none_match_sha256?: string
-}
-```
+입력 필드·필수 여부·schema는 [ReadInput](../../../backend/crates/command/src/input.rs)를 따른다.
 
 - `op=spaces`: 접근 가능한 Space 목록을 반환한다. `name`이 있으면 exact, case-sensitive name으로 조회한다.
 - `op=ls`: `target` folder의 direct children을 반환한다.
@@ -116,25 +101,7 @@ Node summary의 `write_locked`는 대상에 직접 설정된 잠금, `effective_
 
 Read-only search tool이다.
 
-```ts
-type SearchInput = {
-  purpose: string
-  op: "find" | "grep"
-  target: string
-  q: string
-  kind?: "folder" | "text" | "file"
-  match?: string
-  lines?: "none" | "first" | "all"
-  include?: string[]
-  exclude?: string[]
-  created_from?: string // inclusive RFC 3339 timestamp with timezone
-  created_to?: string   // exclusive RFC 3339 timestamp with timezone
-  updated_from?: string // inclusive last node-change timestamp
-  updated_to?: string   // exclusive last node-change timestamp
-  limit?: number
-  cursor?: string
-}
-```
+입력 필드·필수 여부·schema는 [SearchInput](../../../backend/crates/command/src/input.rs)를 따른다.
 
 - `op=find`: node name을 검색한다. `match`는 `contains`(기본), `regex`, `glob`이다.
 - `op=grep`: plain Text content를 검색한다. `match`는 `literal`(기본), `regex`이다.
@@ -160,33 +127,7 @@ Traversal, cursor, memory budget은 [`../search.md`](../search.md)를 따른다.
 
 Plain Text content를 생성하거나 수정한다. Folder 이동/삭제는 하지 않는다.
 
-```ts
-type WriteInput = {
-  purpose: string
-  op: "write" | "append" | "patch" | "edit"
-  target: string
-  content?: string
-  edits?: Array<PatchEdit | LineEditInput>
-  create?: boolean
-  ensure_newline?: boolean
-  expected_sha256?: string
-}
-
-type PatchEdit = {
-  old_text: string
-  new_text: string
-  mode?: "unique" | "first" | "all"
-  expected_count?: number
-}
-
-type LineEditInput = {
-  op: "insert_before_line" | "insert_after_line" | "replace_lines" | "delete_lines"
-  line?: number
-  start_line?: number
-  end_line?: number
-  content?: string
-}
-```
+입력 필드·필수 여부·schema는 [WriteInput](../../../backend/crates/command/src/input.rs)를 따른다.
 
 - `op=write`: 전체 content replacement다. 없으면 `create=true`가 필요하다.
 - `op=append`: EOF append다. `ensure_newline=true`이면 기존 content가 비어 있지 않고 newline으로 끝나지 않을 때 content 앞에 newline을 넣는다.
@@ -200,17 +141,7 @@ type LineEditInput = {
 
 Space 내부의 tree/location을 변경한다. Space lifecycle은 제공하지 않는다.
 
-```ts
-type ManageInput = {
-  purpose: string
-  op: "mkdir" | "mv" | "cp" | "rm"
-  target?: string
-  source?: string
-  destination?: string
-  parents?: boolean
-  recursive?: boolean
-}
-```
+입력 필드·필수 여부·schema는 [ManageInput](../../../backend/crates/command/src/input.rs)를 따른다.
 
 - `op=mkdir`: `target` folder를 만든다. `parents=true`이면 `mkdir -p`처럼 missing parent를 생성한다.
 - `op=mv`: `source` node를 `destination`으로 이동/rename한다. 같은 Space 안에서만 가능하다.
@@ -225,12 +156,7 @@ Space root(`<space>:/`)는 `op=mkdir, parents=true`의 idempotent target으로�
 
 한 File target의 5분짜리 presigned GET URL을 반환한다.
 
-```ts
-type FileDownloadInput = {
-  purpose: string
-  target: string
-}
-```
+입력 필드·필수 여부·schema는 [FileDownloadInput](../../../backend/crates/command/src/input.rs)를 따른다.
 
 File bytes는 MCP payload를 통과하지 않는다. Caller는 `next_action.kind=http_download`의 `transfer_field`를 따라 로컬에서 다운로드하고 URL이나 header를 로그·문서에 저장하지 않는다.
 
@@ -238,21 +164,7 @@ File bytes는 MCP payload를 통과하지 않는다. Caller는 `next_action.kind
 
 S3 호환 저장소로 직접 업로드하는 lifecycle을 제공한다.
 
-```ts
-type FileUploadInput = {
-  purpose: string
-  op: "begin_upload" | "prepare_parts" | "complete_upload" | "abort_upload"
-  target?: string
-  byte_len?: number
-  media_type?: string
-  original_filename?: string
-  encryption_mode?: "none" | "client"
-  encryption_metadata?: object
-  upload_id?: string
-  part_numbers?: number[]
-  completed_parts?: { part_number: number, etag: string }[]
-}
-```
+입력 필드·필수 여부·schema는 [FileUploadInput](../../../backend/crates/command/src/input.rs)를 따른다.
 
 - `begin_upload`: target과 byte length를 검증하고 upload handle을 만든다.
 - `prepare_parts`: 최대 16개 multipart part URL과 `max_concurrency`를 반환한다.
@@ -282,29 +194,13 @@ File tool은 외부 HTTP 전송 사이에 caller 작업이 필요하므로 seque
 
 `read`와 `search` command만 받는다. 최대 4개를 병렬 실행하고 모든 성공·실패 결과를 입력 index 순서로 반환한다.
 
-```ts
-type RunReadSequenceInput = {
-  purpose: string
-  commands: Array<
-    | ({ tool: "read" } & Omit<ReadInput, "purpose">)
-    | ({ tool: "search" } & Omit<SearchInput, "purpose">)
-  >
-}
-```
+입력 필드·필수 여부·schema는 [RunReadSequenceInput](../../../backend/crates/command/src/sequence.rs)를 따른다.
 
 ### `run_write_sequence`
 
 `write`와 `manage` command만 받는다. 입력 순서대로 한 번에 하나씩 실행하며 첫 runtime 실패에서 중단한다. 완료된 mutation은 유지되고 실행하지 않은 command 수는 `skipped`로 반환된다.
 
-```ts
-type RunWriteSequenceInput = {
-  purpose: string
-  commands: Array<
-    | ({ tool: "write" } & Omit<WriteInput, "purpose">)
-    | ({ tool: "manage" } & Omit<ManageInput, "purpose">)
-  >
-}
-```
+입력 필드·필수 여부·schema는 [RunWriteSequenceInput](../../../backend/crates/command/src/sequence.rs)를 따른다.
 
 공통 runtime 응답은 다음 형태다.
 

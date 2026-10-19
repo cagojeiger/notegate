@@ -547,18 +547,6 @@ impl FilesService {
         Ok(CopyResult { node, counts })
     }
 
-    /// Read a node's metadata object. Requires read permission.
-    pub async fn read_metadata(
-        &self,
-        caller_account_id: Uuid,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> ServiceResult<Value> {
-        self.authorize(space_id, caller_account_id, FileCommand::Stat)
-            .await?;
-        Ok(self.load_node(space_id, node_id).await?.metadata)
-    }
-
     /// Move or rename a node (`mv`). Requires write permission.
     pub async fn move_node(
         &self,

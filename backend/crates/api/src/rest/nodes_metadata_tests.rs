@@ -8,7 +8,8 @@ use uuid::Uuid;
 use crate::rest::test_support::{caller_and_space, get_json, json_request, rest_app, state};
 
 #[tokio::test]
-async fn node_metadata_is_read_only_over_rest() -> Result<(), Box<dyn std::error::Error>> {
+async fn node_metadata_is_read_through_node_without_a_separate_endpoint()
+-> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -34,11 +35,16 @@ async fn node_metadata_is_read_only_over_rest() -> Result<(), Box<dyn std::error
     )?;
     let uri = format!("/v1/spaces/{space_id}/nodes/{node_id}/metadata");
 
-    let (status, metadata) = get_json(rest_app(state.clone(), caller.clone()), uri.clone()).await?;
+    let (status, metadata) = get_json(
+        rest_app(state.clone(), caller.clone()),
+        format!("/v1/spaces/{space_id}/nodes/{node_id}"),
+    )
+    .await?;
     assert_eq!(status, StatusCode::OK, "{metadata}");
-    assert_eq!(metadata, json!({ "metadata": {} }));
+    assert_eq!(metadata.get("metadata"), Some(&json!({})));
 
     for (method, body) in [
+        ("GET", json!({})),
         ("PUT", json!({ "metadata": { "source": "user" } })),
         ("PATCH", json!({ "patch": { "source": "user" } })),
     ] {
@@ -49,7 +55,7 @@ async fn node_metadata_is_read_only_over_rest() -> Result<(), Box<dyn std::error
             body,
         )
         .await?;
-        assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED, "{response}");
+        assert_eq!(status, StatusCode::NOT_FOUND, "{response}");
     }
 
     db.cleanup().await;

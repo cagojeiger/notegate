@@ -1239,8 +1239,16 @@ mod tests {
             .expect("preflight errors");
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0]["index"], 1);
-        let stat =
-            tools::files::stat(&state, &parts, "rest-test:/should-not-exist.md".to_owned()).await;
+        let stat = tools::unified::read(
+            &state,
+            &parts,
+            Parameters(serde_json::from_value(serde_json::json!({
+                "purpose": "Verify sequence effects",
+                "op": "stat",
+                "target": "rest-test:/should-not-exist.md"
+            }))?),
+        )
+        .await;
         assert!(stat.is_err(), "the earlier write must not have run");
 
         db.cleanup().await;
@@ -1296,8 +1304,16 @@ mod tests {
                 .as_str()
                 .is_some_and(|message| message.contains("invalid json syntax in config.json"))
         );
-        let stat =
-            tools::files::stat(&state, &parts, "rest-test:/should-not-exist.md".to_owned()).await;
+        let stat = tools::unified::read(
+            &state,
+            &parts,
+            Parameters(serde_json::from_value(serde_json::json!({
+                "purpose": "Verify sequence effects",
+                "op": "stat",
+                "target": "rest-test:/should-not-exist.md"
+            }))?),
+        )
+        .await;
         assert!(stat.is_err(), "the earlier write must not have run");
 
         db.cleanup().await;
@@ -1353,7 +1369,16 @@ mod tests {
             assert_eq!(data["executed"], false);
             assert_eq!(data["errors"].as_array().map(Vec::len), Some(1));
             assert_eq!(data["errors"][0]["index"], 1);
-            let stat = tools::files::stat(&state, &parts, created_target).await;
+            let stat = tools::unified::read(
+                &state,
+                &parts,
+                Parameters(serde_json::from_value(serde_json::json!({
+                    "purpose": "Verify sequence effects",
+                    "op": "stat",
+                    "target": created_target
+                }))?),
+            )
+            .await;
             assert!(stat.is_err(), "the earlier write must not have run");
         }
 
@@ -1407,14 +1432,30 @@ mod tests {
         assert_eq!(result["failed"], 1);
         assert_eq!(result["skipped"], 1);
         assert!(
-            tools::files::stat(&state, &parts, "rest-test:/completed.md".to_owned())
-                .await
-                .is_ok()
+            tools::unified::read(
+                &state,
+                &parts,
+                Parameters(serde_json::from_value(serde_json::json!({
+                    "purpose": "Verify sequence effects",
+                    "op": "stat",
+                    "target": "rest-test:/completed.md"
+                }))?),
+            )
+            .await
+            .is_ok()
         );
         assert!(
-            tools::files::stat(&state, &parts, "rest-test:/skipped.md".to_owned())
-                .await
-                .is_err()
+            tools::unified::read(
+                &state,
+                &parts,
+                Parameters(serde_json::from_value(serde_json::json!({
+                    "purpose": "Verify sequence effects",
+                    "op": "stat",
+                    "target": "rest-test:/skipped.md"
+                }))?),
+            )
+            .await
+            .is_err()
         );
 
         db.cleanup().await;
