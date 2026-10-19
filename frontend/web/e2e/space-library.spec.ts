@@ -42,7 +42,7 @@ test("long Korean Space names stay within the mobile card", async ({ page }) => 
 
   const card = page.getByRole("list", { name: "All spaces" }).getByRole("listitem");
   const inspect = card.getByRole("button", { name: `Inspect ${name}` });
-  const title = inspect.locator("span").first();
+  const title = inspect.locator("[data-space-name]");
   await expect(inspect).toBeVisible();
   expect(await title.evaluate((element) => {
     const style = getComputedStyle(element);
