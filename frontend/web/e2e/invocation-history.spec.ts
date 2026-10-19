@@ -40,6 +40,15 @@ for (const viewport of [
       const historyRequests: URL[] = [];
       await routeJsonApi(page, (url) => {
         if (url.pathname === "/api/v1/me") return { account: { id: "user-1", kind: "user", display_name: "User" }, user: { email: "user@example.com" }, capabilities: { can_create_space: true, can_manage_agents: true } };
+        if (url.pathname === "/api/v1/me/sessions") return { sessions: [{
+          id: "current-session", current: true, client_environment: "Chrome on Linux",
+          created_at: "2026-10-11T13:00:00Z", last_used_at: "2026-10-11T14:00:00Z",
+          idle_expires_at: "2026-10-25T14:00:00Z", expires_at: "2026-11-10T13:00:00Z"
+        }] };
+        if (url.pathname === "/api/v1/me/oauth-grants") return { grants: [
+          { id: "cli-grant", client_name: "NoteGate CLI", kind: "cli", client_environment: "NoteGate CLI on macOS", created_at: "2026-10-11T13:00:00Z", last_token_at: "2026-10-11T14:00:00Z", idle_expires_at: "2026-10-18T14:00:00Z", expires_at: "2026-11-10T13:00:00Z", offline_access: true },
+          { id: "mcp-grant", client_name: "Remote MCP", kind: "mcp", client_environment: null, created_at: "2026-10-11T13:00:00Z", last_token_at: null, idle_expires_at: "2026-10-18T14:00:00Z", expires_at: "2026-11-10T13:00:00Z", offline_access: true }
+        ] };
         if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
         if (url.pathname === "/api/v1/spaces") return { spaces: [space], page: emptyPage };
         if (url.pathname.endsWith("/children")) return { parent: { id: space.root_node_id, path: "/" }, children: [], page: emptyPage };
@@ -130,6 +139,11 @@ for (const viewport of [
       const settingsBounds = await settings.boundingBox();
       for (const tab of ["Account", "Agents", "General"]) {
         await settings.getByRole("tab", { name: tab, exact: true }).click();
+        if (tab === "Account") {
+          await expect(settings.getByText("Chrome on Linux · This session", { exact: true })).toBeAttached();
+          await expect(settings.getByText("NoteGate CLI · CLI", { exact: true })).toBeAttached();
+          await expect(settings.getByText("Remote MCP · MCP", { exact: true })).toBeAttached();
+        }
         if (tab === "Agents") {
           await expect(settings.getByRole("button", { name: "Toggle Agent 29 details", exact: true })).toBeAttached();
           await settings.getByRole("button", { name: "Toggle Agent 29 details", exact: true }).scrollIntoViewIfNeeded();
