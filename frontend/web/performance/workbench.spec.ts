@@ -217,7 +217,7 @@ test("authenticated workbench performance baseline", async ({ browser, playwrigh
           await expect(trash.getByRole("list", { name: "Deleted items" }).locator("li")).toHaveCount(fixture.trashItems);
         });
         await measure("trash-select-details", async () => {
-          await trash.getByRole("button", { name: "Select deleted-0.md", exact: true }).click();
+          await trash.getByRole("button", { name: /^Select deleted-0\.md\b/ }).click();
           await expect(trash.getByRole("region", { name: "Details for deleted-0.md" })).toBeVisible();
           await expect(trash.getByRole("button", { name: "Restore deleted-0.md", exact: true })).toBeEnabled();
         });

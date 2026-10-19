@@ -76,11 +76,11 @@ test("lazily opens revision comparison and restores with the reviewed current ha
   const bounds = await dialog.boundingBox();
   await expect(dialog.getByText("MTU: 1500", { exact: true })).toBeVisible();
   await expect(dialog.getByText("MTU: 1450", { exact: true })).toBeVisible();
-  await expect(dialog.getByLabel("Change reason")).toContainText(revision.purpose);
+  await expect(dialog.locator("summary")).toContainText(revision.purpose);
   await dialog.getByRole("button", { name: "Current saved version", exact: true }).click();
   await expect(dialog.getByRole("tab", { name: "Full version" })).toHaveAttribute("aria-selected", "true");
   await expect(dialog.getByRole("tab", { name: "Compare changes" })).toBeDisabled();
-  await expect(dialog.getByLabel("Change reason")).toContainText("Correct MTU to 1450");
+  await expect(dialog.locator("summary")).toContainText("Correct MTU to 1450");
   await dialog.getByRole("button", { name: /Edited via MCP/ }).click();
   await dialog.getByRole("tab", { name: "Full version" }).click();
   await expect(dialog.getByRole("heading", { name: "Network", exact: true })).toBeVisible();
@@ -239,8 +239,8 @@ test("small phones keep long reasons and restore controls usable and return focu
   const comparison = dialog.getByLabel("Version comparison", { exact: true });
   await expect(comparison).toBeVisible();
   const bounds = await dialog.boundingBox();
-  await expect(dialog.getByLabel("Change reason")).toContainText(purpose);
-  const reason = dialog.getByLabel("Change reason");
+  await expect(dialog.locator("summary")).toContainText(purpose);
+  const reason = dialog.locator("summary");
   await reason.click();
   await expect(reason.locator("..")).toHaveAttribute("open", "");
   await expect(reason.locator("..").locator("p")).toHaveText(purpose);
@@ -336,10 +336,10 @@ for (const mobile of [false, true]) {
       await expect(dialog.getByRole("status", { name: "Change 1 of 2", exact: true })).toBeVisible();
       await expect(dialog.getByRole("button", { name: "Previous change" })).toBeDisabled();
       await expect(dialog.getByText(mobile ? "Selected → current saved (cumulative)" : /Cumulative comparison:/)).toBeVisible();
-      await expect(dialog.getByLabel("Change reason")).toContainText("Save reason:");
+      await expect(dialog.locator("summary")).toContainText("Save reason:");
       await expect(dialog.getByText(/Restores the entire selected version/)).toBeVisible();
       if (mobile) {
-        await expect(dialog.getByRole("button", { name: "Choose saved version" })).toHaveAttribute("aria-expanded", "false");
+        await expect(dialog.getByRole("button", { name: /^Choose saved version(?:$|:)/ })).toHaveAttribute("aria-expanded", "false");
         expect((await comparison.boundingBox())!.height).toBeGreaterThan(260);
         await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeInViewport({ ratio: 1 });
       }
@@ -409,7 +409,7 @@ test("switching versions resets expanded context and distinguishes saves within 
   await expect(dialog.getByRole("status", { name: "Change 1 of 2", exact: true })).toBeVisible();
   await expect(comparison.getByText("Updated Line 81", { exact: true })).toBeInViewport();
   await expect(comparison.getByText("Line 2", { exact: true })).toHaveCount(0);
-  await expect(dialog.getByLabel("Change reason")).toContainText(older.purpose);
+  await expect(dialog.locator("summary")).toContainText(older.purpose);
 });
 
 for (const colorScheme of ["dark", "light"] as const) {
@@ -421,7 +421,7 @@ for (const colorScheme of ["dark", "light"] as const) {
     await page.getByRole("button", { name: "More actions", exact: true }).first().click();
     await page.getByRole("menu", { name: "Editor actions" }).getByRole("menuitem", { name: "Version history", exact: true }).click();
     const dialog = page.getByRole("dialog");
-    const picker = dialog.getByRole("button", { name: "Choose saved version", exact: true });
+    const picker = dialog.getByRole("button", { name: /^Choose saved version(?:$|:)/ });
     const comparison = dialog.getByRole("region", { name: "Version comparison", exact: true });
     await expect(page.locator("html")).toHaveAttribute("data-theme", colorScheme);
     await expect(comparison.getByText(after[60], { exact: true })).toBeInViewport();
