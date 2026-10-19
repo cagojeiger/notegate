@@ -112,7 +112,7 @@ for (const viewport of [
     await pdfPreview.getByRole("button", { name: "Next page" }).click();
     await expect(pageInput).toHaveValue("2");
     await pdfPreview.getByRole("button", { name: "Zoom in" }).click();
-    await expect(pdfPreview.getByRole("button", { name: "Reset zoom" })).toHaveText("125%");
+    await expect(pdfPreview.getByRole("button", { name: "Reset zoom: 125%", exact: true })).toHaveText("125%");
     await expectNoAccessibilityViolations(page);
 
     if (viewport.mobile) {
@@ -136,6 +136,28 @@ for (const viewport of [
     await expectDocxFlowFitsViewport(docxFrame);
   });
 }
+
+test("an invalid PDF falls back to file details without breaking the workbench", async ({ page }) => {
+  await mockFilePreviewApi(page);
+  await page.route("http://storage.test/preview-document.pdf", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/pdf",
+      headers: { "Access-Control-Allow-Origin": "*" },
+      body: "not a PDF"
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: pdfNode.name }).first().click();
+
+  const details = page.locator("[data-file-detail-scroll]");
+  await expect(details.getByText("PDF cannot be displayed", { exact: true })).toBeVisible();
+  await expect(page.locator("[data-pdf-preview]")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Download", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: imageNode.name }).first().click();
+  await expect(page.getByRole("img", { name: imageNode.name })).toBeVisible();
+});
 
 test("mobile Inspector details remain scrollable on a short viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 640 });

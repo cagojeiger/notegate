@@ -96,26 +96,24 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
           <ul aria-label="Deleted items" className="relative max-h-[24dvh] space-y-1 overflow-y-auto overscroll-contain empty:hidden md:min-h-0 md:max-h-none md:flex-1">
             {items.map((item) => {
               const key = `${item.kind}:${item.id}`;
-              const itemDescriptionId = `${descriptionId}-${key}`;
               const ItemIcon = itemAppearance[item.kind].icon;
               return (
                 <li key={key}>
                   <button
                     type="button"
-                    aria-label={`Select ${item.name}`}
-                    aria-describedby={itemDescriptionId}
                     aria-pressed={selected === item}
                     disabled={mutation.isPending || !!confirmation}
                     onClick={() => { mutation.reset(); setNotice(null); setSelectedKey(key); }}
                     className={`flex w-full items-start gap-2 rounded-workbench border-l-2 px-2 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-not-allowed ${selected === item ? "border-[var(--ng-active-border)] bg-[var(--ng-selection)]" : "border-transparent hover:bg-[var(--ng-hover)]"}`}
                   >
+                    <span className="sr-only">Select</span>{" "}
                     <ItemIcon size={16} aria-hidden="true" className={`mt-0.5 ${selected === item ? "text-primary" : "text-muted"}`} />
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-baseline justify-between gap-2"><span className="truncate font-medium" title={item.name}>{item.name}</span><time dateTime={item.deleted_at} title={`Deleted ${new Date(item.deleted_at).toLocaleString()}`} className="shrink-0 text-xs text-muted">{new Date(item.deleted_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time></span>
-                      <span id={itemDescriptionId} className="mt-1 block text-xs text-muted">
-                        <span className="block truncate font-mono" title={`${item.space_name} · ${item.path}`}>{item.space_name} · {item.path}</span>
-                        <span className="sr-only">Deleted {new Date(item.deleted_at).toLocaleString()}. </span>
+                      <span className="flex items-baseline justify-between gap-2"><span className="truncate font-medium" title={item.name}>{item.name}</span>{" "}<time dateTime={item.deleted_at} title={`Deleted ${new Date(item.deleted_at).toLocaleString()}`} className="shrink-0 text-xs text-muted">{new Date(item.deleted_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time></span>{" "}
+                      <span className="mt-1 block text-xs text-muted">
+                        <span className="block truncate font-mono" title={`${item.space_name} · ${item.path}`}>{item.space_name} · {item.path}</span>{" "}
                         {item.deletion_pending ? <span className="mt-1 flex items-center gap-1"><Clock3 size={12} aria-hidden="true" />Deletion queued</span> : !item.recoverable ? <span className="mt-1 flex items-center gap-1 text-warning"><CircleAlert size={12} aria-hidden="true" />Restore unavailable</span> : <span className="sr-only">Recoverable</span>}
+                        {" "}<span className="sr-only">Deleted {new Date(item.deleted_at).toLocaleString()}.</span>
                       </span>
                     </span>
                   </button>
@@ -157,7 +155,7 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
                 </Card>
               ) : null}
               <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-seam pt-4">
-                <Button variant="ghost" size="sm" data-trash-purge disabled={mutation.isPending || selected.deletion_pending} aria-label={`Permanently delete ${selected.name}`} onClick={() => { mutation.reset(); setNotice(null); setConfirmation(selected); }}>Delete permanently…</Button>
+                <Button variant="ghost" size="sm" data-trash-purge disabled={mutation.isPending || selected.deletion_pending} aria-label={`Permanently delete ${selected.name}`} onClick={() => { mutation.reset(); setNotice(null); setConfirmation(selected); }}>Permanently delete</Button>
                 <Button size="sm" disabled={mutation.isPending || selected.deletion_pending || !selected.recoverable} aria-label={`Restore ${selected.name}`} onClick={() => { setNotice(null); mutation.mutate({ item: selected, action: "restore" }); }}><RotateCcw size={14} aria-hidden="true" />{mutation.isPending && mutation.variables?.action === "restore" ? "Restoring…" : "Restore"}</Button>
               </div>
             </section>

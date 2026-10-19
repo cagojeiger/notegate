@@ -8,7 +8,7 @@
 #
 # We use Debian instead of Alpine to avoid musl-specific surprises and to keep
 # Rust crate builds close to the runtime libc.
-FROM rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e AS chef
+FROM rust:1.99.1-bookworm@sha256:e12566d5abc17a0da741628782cdb504b68b8961f5bfcf677936bf3e8b32de29 AS chef
 
 WORKDIR /app
 # Native toolchain for crates with C build scripts, plus certificates for Cargo HTTPS.

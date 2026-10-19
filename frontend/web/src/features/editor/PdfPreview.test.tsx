@@ -132,23 +132,23 @@ describe("PdfPreview", () => {
     expect(pdfMock.page?.width).toBe(768);
     fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
     expect(pdfMock.page?.width).toBe(960);
-    expect(screen.getByRole("button", { name: "Reset zoom" })).toHaveTextContent("125%");
+    expect(screen.getByRole("button", { name: "Reset zoom: 125%" })).toHaveTextContent("125%");
 
-    fireEvent.click(screen.getByRole("button", { name: "Reset zoom" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset zoom: 125%" }));
     expect(pdfMock.page?.width).toBe(768);
-    expect(screen.getByRole("button", { name: "Reset zoom" })).toHaveTextContent("100%");
+    expect(screen.getByRole("button", { name: "Reset zoom: 100%" })).toHaveTextContent("100%");
 
     fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
     fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
     expect(pdfMock.page?.width).toBe(384);
-    expect(screen.getByRole("button", { name: "Reset zoom" })).toHaveTextContent("50%");
+    expect(screen.getByRole("button", { name: "Reset zoom: 50%" })).toHaveTextContent("50%");
     expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled();
 
     for (let index = 0; index < 6; index += 1) {
       fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
     }
     expect(pdfMock.page?.width).toBe(1536);
-    expect(screen.getByRole("button", { name: "Reset zoom" })).toHaveTextContent("200%");
+    expect(screen.getByRole("button", { name: "Reset zoom: 200%" })).toHaveTextContent("200%");
     expect(screen.getByRole("button", { name: "Zoom in" })).toBeDisabled();
   });
 

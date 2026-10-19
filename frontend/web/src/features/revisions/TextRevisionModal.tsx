@@ -32,6 +32,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
   const conflict = restore.error instanceof ApiError && restore.error.status === 409;
   const blocked = !canRestore || dirty || saving || !selected || !body.isSuccess || body.isFetching || !baseline.isSuccess || baseline.isFetching || !plainCurrent || list.isError || restore.isPending || externalChange || conflict || unchanged;
   const showingCurrent = selectedId === "current";
+  const versionLabel = showingCurrent ? "Current saved version" : selected ? `${formatTime(selected.written_at)} · ${sourceLabel(selected.source)}` : "Choose saved version";
   const head = list.data?.pages[0]?.current;
   const purpose = showingCurrent ? (head?.content_sha256 === current?.content_sha256 ? head?.purpose : null) : selected?.purpose;
 
@@ -73,8 +74,8 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
       </div>
     }>
       <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
-        <button ref={versionPicker} type="button" aria-label="Choose saved version" aria-controls={versionsId} aria-expanded={versionsOpen} disabled={restore.isPending} onClick={() => setVersionsOpen(!versionsOpen)} className="flex min-h-workbench-control shrink-0 items-center justify-between gap-2 rounded-workbench border border-border-strong bg-surface px-3 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary/45 md:hidden">
-          <span>{showingCurrent ? "Current saved version" : selected ? <>{formatTime(selected.written_at)} · {sourceLabel(selected.source)}</> : "Choose saved version"}</span>
+        <button ref={versionPicker} type="button" aria-label={versionLabel === "Choose saved version" ? versionLabel : `Choose saved version: ${versionLabel}`} aria-controls={versionsId} aria-expanded={versionsOpen} disabled={restore.isPending} onClick={() => setVersionsOpen(!versionsOpen)} className="flex min-h-workbench-control shrink-0 items-center justify-between gap-2 rounded-workbench border border-border-strong bg-surface px-3 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary/45 md:hidden">
+          <span>{versionLabel}</span>
           <ChevronDown size={16} aria-hidden="true" className={`shrink-0 ${versionsOpen ? "rotate-180" : ""}`} />
         </button>
         <nav id={versionsId} aria-label="Saved versions" className={`${versionsOpen ? "flex" : "hidden"} max-h-36 shrink-0 flex-col gap-1 overflow-y-auto border-b border-seam pb-2 md:flex md:max-h-none md:w-48 md:border-b-0 md:border-r md:pb-0 md:pr-3`}>
@@ -97,7 +98,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
         <section aria-label="Version content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
           <Tabs items={[{ id: "diff", label: "Compare changes", disabled: showingCurrent }, { id: "full", label: "Full version" }]} value={showingCurrent ? "full" : view} onChange={setView} label="Version view" />
           <details key={showingCurrent ? "current" : selected?.id} className="mb-2 shrink-0 text-sm text-muted">
-            <summary aria-label="Change reason" className="cursor-pointer list-inside truncate"><span className="font-medium">Save reason:</span> {purpose ?? "Not recorded"}</summary>
+            <summary className="cursor-pointer list-inside truncate"><span className="font-medium">Save reason:</span> {purpose ?? "Not recorded"}</summary>
             <p className="mt-1 whitespace-pre-wrap break-words">{purpose ?? "Not recorded"}</p>
             {selected && plainCurrent ? <dl className="mt-2 text-xs md:hidden"><dt>Selected version saved</dt><dd>{formatTime(selected.written_at)}</dd><dt>Current version saved</dt><dd>{formatTime(plainCurrent.updated_at)}</dd></dl> : null}
           </details>
