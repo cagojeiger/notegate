@@ -169,6 +169,7 @@ async fn create_browser_session(
     let repo =
         BrowserSessionRepo::with_lookup_key(pool.clone(), crypto.lookup_key_id(), crypto.version());
     let args = InsertBrowserSession {
+        client_environment: None,
         session_id,
         user_id,
         token_prefix: &token_prefix,

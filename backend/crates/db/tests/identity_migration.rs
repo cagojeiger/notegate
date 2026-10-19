@@ -339,6 +339,7 @@ async fn identity_migration_preserves_ownership_pii_documents_sessions_and_oauth
     common::insert_pre_marker_removal_session(
         &db.pool,
         InsertBrowserSession {
+            client_environment: None,
             session_id,
             user_id: owner,
             token_prefix: &prefix,

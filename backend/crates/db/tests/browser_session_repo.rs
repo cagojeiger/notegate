@@ -40,6 +40,7 @@ async fn insert_session(
     let prefix = token_prefix(session_id);
     repo.insert_session(
         InsertBrowserSession {
+            client_environment: None,
             session_id,
             user_id,
             token_prefix: &prefix,
@@ -82,6 +83,33 @@ async fn inserted_session_can_be_found_by_hash() -> Result<(), Box<dyn std::erro
     assert_eq!(resolved.account.display_name, "user-browser-user");
     assert_eq!(resolved.user.email.as_deref(), Some("browser@example.test"));
     assert_eq!(audit_op_types(&db, user_id).await?, ["session.login"]);
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn bulk_browser_revocation_rolls_back_when_audit_cannot_be_recorded()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(&db.pool, "revoke-owner", "owner@example.test").await?;
+    let repo = BrowserSessionRepo::new(db.pool.clone());
+    let crypto = PiiCrypto::test();
+    let (first, first_hash) = insert_session(&repo, &crypto, owner).await?;
+    let (second, second_hash) = insert_session(&repo, &crypto, owner).await?;
+    sqlx::query("ALTER TABLE audit_events ADD CONSTRAINT test_revoke_audit CHECK(op_type<>'session.revoke') NOT VALID").execute(&db.pool).await?;
+    assert!(repo.revoke_owned_sessions(owner, None, None).await.is_err());
+    assert!(repo.find_live_by_token(first, &first_hash).await?.is_some());
+    assert!(
+        repo.find_live_by_token(second, &second_hash)
+            .await?
+            .is_some()
+    );
+    assert_eq!(
+        audit_op_types(&db, owner).await?,
+        ["session.login", "session.login"]
+    );
     db.cleanup().await;
     Ok(())
 }
@@ -411,6 +439,7 @@ async fn dropping_browser_refresh_storage_preserves_sessions_and_owned_data()
             resource,
             None,
             &CredentialIssue {
+                client_environment: None,
                 access_hash: "new-access-hash",
                 refresh_hash: Some("new-refresh-hash"),
                 key_id: crypto.lookup_key_id(),

@@ -68,6 +68,7 @@ async fn bulk_metadata_flush_is_monotonic_and_idempotent() -> Result<(), Box<dyn
     BrowserSessionRepo::new(db.pool.clone())
         .insert_session(
             InsertBrowserSession {
+                client_environment: None,
                 session_id,
                 user_id,
                 token_prefix: &token_prefix(session_id),

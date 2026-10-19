@@ -75,7 +75,7 @@ async fn device_http_flow_rejects_csrf_and_uses_own_tokens_without_authgate()
     };
     let state = standalone_state(&db)?;
     let user = owner(&state).await;
-    let session = create_browser_session(&state, user).await?;
+    let session = create_browser_session(&state, user, None).await?;
     let cookie = format!("{BROWSER_SESSION_COOKIE}={session}");
     let router = app(state.clone());
     let device = body(
@@ -199,7 +199,7 @@ async fn authorization_consent_is_bound_single_use_and_explicit()
     };
     let state = standalone_state(&db)?;
     let user = owner(&state).await;
-    let session = create_browser_session(&state, user).await?;
+    let session = create_browser_session(&state, user, None).await?;
     let id = Uuid::new_v4();
     let flow_secret = "flow-browser-secret";
     let verifier = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGH";
@@ -346,7 +346,7 @@ async fn authorization_consent_is_bound_single_use_and_explicit()
         .id;
     let other_cookie = format!(
         "{BROWSER_SESSION_COOKIE}={}",
-        create_browser_session(&state, other).await?
+        create_browser_session(&state, other, None).await?
     );
     post(
         &router,
@@ -398,7 +398,7 @@ async fn local_sessions_reject_old_issuer_and_expire_without_upstream_refresh()
     };
     let state = standalone_state(&db)?;
     let user = owner(&state).await;
-    let session = create_browser_session(&state, user).await?;
+    let session = create_browser_session(&state, user, None).await?;
     assert_eq!(
         crate::auth::session::verify_browser_session(&state, &session)
             .await?

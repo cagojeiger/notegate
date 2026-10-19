@@ -66,6 +66,7 @@ session_hash      = HMAC(SESSION_TOKEN_SUBKEY, "browser-session:v1:" || session_
 - 신규 세션은 외부 token이나 refresh 상태를 보관하지 않고 issuer에 연결한 로컬 세션을 사용한다.
 - 세션은 미사용 14일·절대 최대 30일로 제한한다. Same-origin 전경 활동으로 미사용 만료만 연장하며 만료·철회는 DB에서 판정한다. 세션 연장은 최근 로그인 확인을 대신하지 않으며 외부 refresh token을 저장하지 않는다.
 - FE는 refresh token과 browser session token 원문을 JavaScript storage에 저장하지 않는다.
+- 로그인 환경은 User-Agent에서 추출한 브라우저·OS 표시만 보관한다. 이 값은 인증에 사용하지 않으며 raw User-Agent·IP·위치·장비 지문을 저장하지 않는다. 사용자 본인의 세션만 조회·철회할 수 있다.
 
 ## Local OAuth credentials
 

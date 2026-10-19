@@ -40,8 +40,19 @@ pub async fn callback(
     State(state): State<AppState>,
     jar: CookieJar,
     Query(query): Query<CallbackQuery>,
+    headers: HeaderMap,
 ) -> Response {
-    super::standalone_login::callback(&state, jar, query.code, query.state, query.error).await
+    super::standalone_login::callback(
+        &state,
+        jar,
+        query.code,
+        query.state,
+        query.error,
+        headers
+            .get(axum::http::header::USER_AGENT)
+            .and_then(|value| value.to_str().ok()),
+    )
+    .await
 }
 
 pub(super) async fn complete_login(
@@ -49,6 +60,7 @@ pub(super) async fn complete_login(
     jar: CookieJar,
     userinfo: super::oauth_exchange::UserInfo,
     next: Option<String>,
+    user_agent: Option<&str>,
 ) -> Response {
     let attrs = ResolveAttrs {
         issuer: state.oidc.issuer().to_owned(),
@@ -90,7 +102,8 @@ pub(super) async fn complete_login(
     }
     match state.resolver.resolve_browser(attrs).await {
         Ok(caller) => {
-            let session = match create_browser_session(state, caller.account_id()).await {
+            let session = match create_browser_session(state, caller.account_id(), user_agent).await
+            {
                 Ok(session) => session,
                 Err(error) => {
                     tracing::error!(event = "oauth.session_failed", %error);
@@ -227,7 +240,7 @@ fn browser_session_cookie(state: &AppState, value: String) -> Cookie<'static> {
     )
 }
 
-fn expired_browser_session_cookie(secure: bool) -> Cookie<'static> {
+pub(crate) fn expired_browser_session_cookie(secure: bool) -> Cookie<'static> {
     hardened_cookie(BROWSER_SESSION_COOKIE, String::new(), 0, secure)
 }
 

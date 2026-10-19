@@ -725,8 +725,13 @@ fn revocation_failed() -> CliError {
     )
 }
 
-fn user_agent() -> &'static str {
-    concat!("notegate-cli/", env!("CARGO_PKG_VERSION"))
+fn user_agent() -> String {
+    format!(
+        "notegate-cli/{} ({}; {})",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    )
 }
 
 #[cfg(unix)]

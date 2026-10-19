@@ -748,6 +748,7 @@ async fn seed_browser_session(
     let token_hash = crypto.browser_session_hash(&session_id.to_string(), name)?;
     repo.insert_session(
         InsertBrowserSession {
+            client_environment: None,
             session_id,
             user_id,
             token_prefix: "ngs_v1_test",

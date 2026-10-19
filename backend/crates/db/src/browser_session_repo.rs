@@ -43,8 +43,8 @@ impl BrowserSessionRepo {
         let row = sqlx::query_as::<_, BrowserSessionRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO browser_sessions \
              (id, user_id, token_prefix, token_hash, hash_key_id, hash_version, \
-              idle_expires_at, expires_at, oidc_issuer) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+              idle_expires_at, expires_at, oidc_issuer, client_environment) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
              RETURNING {BROWSER_SESSION_RETURNING_COLUMNS}"
         )))
         .bind(args.session_id)
@@ -56,10 +56,17 @@ impl BrowserSessionRepo {
         .bind(args.idle_expires_at)
         .bind(args.expires_at)
         .bind(issuer)
+        .bind(args.client_environment)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        audit_events::session_logged_in(&mut tx, args.user_id, args.session_id).await?;
+        audit_events::session_logged_in(
+            &mut tx,
+            args.user_id,
+            args.session_id,
+            args.client_environment,
+        )
+        .await?;
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(BrowserSession::from(row))
     }
@@ -136,6 +143,19 @@ impl BrowserSessionRepo {
 
     pub async fn revoke_session_for_logout(&self, session_id: Uuid) -> Result<bool> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let owner: Option<Uuid> =
+            sqlx::query_scalar("SELECT user_id FROM browser_sessions WHERE id=$1")
+                .bind(session_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(map_sqlx_error)?;
+        if let Some(owner) = owner {
+            sqlx::query("SELECT id FROM accounts WHERE id=$1 FOR UPDATE")
+                .bind(owner)
+                .execute(&mut *tx)
+                .await
+                .map_err(map_sqlx_error)?;
+        }
         let user_id = sqlx::query_scalar::<_, Uuid>(
             "UPDATE browser_sessions \
              SET revoked_at = now(), revoked_reason = 'logout', updated_at = now() \
@@ -164,7 +184,7 @@ impl BrowserSessionRepo {
             "UPDATE browser_sessions bs \
              SET idle_expires_at = LEAST(bs.expires_at, GREATEST(bs.idle_expires_at, \
                      clock_timestamp() + make_interval(days => $4::int))), \
-                 updated_at = clock_timestamp() \
+                 last_used_at = clock_timestamp(), updated_at = clock_timestamp() \
              FROM accounts a JOIN users u ON u.id = a.id \
              WHERE bs.id = $1 AND bs.token_hash = $2 AND bs.oidc_issuer = $3 \
                AND bs.user_id = a.id AND a.kind = 'user' AND {active} \
@@ -180,6 +200,63 @@ impl BrowserSessionRepo {
         .map_err(map_sqlx_error)?;
         Ok(result.rows_affected() == 1)
     }
+
+    pub async fn list_owned_live(
+        &self,
+        user_id: Uuid,
+        issuer: &str,
+    ) -> Result<Vec<BrowserSessionSummary>> {
+        let live = live_browser_session_predicate("");
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT id, client_environment, created_at, last_used_at, idle_expires_at, expires_at \
+             FROM browser_sessions WHERE user_id=$1 AND oidc_issuer=$2 AND {live} \
+             ORDER BY created_at DESC, id DESC LIMIT 100"
+        )))
+        .bind(user_id)
+        .bind(issuer)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)
+    }
+
+    pub async fn revoke_owned_sessions(
+        &self,
+        user_id: Uuid,
+        session_id: Option<Uuid>,
+        except_session_id: Option<Uuid>,
+    ) -> Result<u64> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        sqlx::query("SELECT id FROM accounts WHERE id=$1 FOR UPDATE")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        let ids: Vec<Uuid> = sqlx::query_scalar(
+            "WITH targets AS (SELECT id FROM browser_sessions \
+             WHERE user_id=$1 AND revoked_at IS NULL \
+               AND ($2::uuid IS NULL OR id=$2) AND ($3::uuid IS NULL OR id<>$3) \
+             ORDER BY id FOR UPDATE) \
+             UPDATE browser_sessions bs SET revoked_at=now(), revoked_reason='user_revoked', updated_at=now() \
+             FROM targets WHERE bs.id=targets.id RETURNING bs.id"
+        )
+        .bind(user_id).bind(session_id).bind(except_session_id)
+        .fetch_all(&mut *tx).await.map_err(map_sqlx_error)?;
+        for id in &ids {
+            audit_events::session_revoked(&mut tx, user_id, *id).await?;
+        }
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(ids.len() as u64)
+    }
+}
+
+#[derive(Debug, FromRow)]
+pub struct BrowserSessionSummary {
+    pub id: Uuid,
+    pub client_environment: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub idle_expires_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -197,6 +274,7 @@ pub struct InsertBrowserSession<'a> {
     pub user_id: Uuid,
     pub token_prefix: &'a str,
     pub token_hash: &'a str,
+    pub client_environment: Option<&'a str>,
     pub idle_expires_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
 }

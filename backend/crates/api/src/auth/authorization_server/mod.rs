@@ -323,7 +323,20 @@ async fn token(
             (Some(code), Some(redirect), Some(verifier)) => {
                 state
                     .oauth
-                    .exchange_code(&code, &form.client_id, &resource, &redirect, &verifier, now)
+                    .exchange_code(
+                        &code,
+                        &form.client_id,
+                        &resource,
+                        &redirect,
+                        &verifier,
+                        now,
+                        super::session::client_environment(
+                            headers
+                                .get(header::USER_AGENT)
+                                .and_then(|h| h.to_str().ok()),
+                        )
+                        .as_deref(),
+                    )
                     .await
             }
             _ => return oauth_error("invalid_request"),
@@ -350,7 +363,18 @@ async fn token(
                 Some(code) => {
                     state
                         .oauth
-                        .poll_device(&code, &form.client_id, &resource, now)
+                        .poll_device(
+                            &code,
+                            &form.client_id,
+                            &resource,
+                            now,
+                            super::session::client_environment(
+                                headers
+                                    .get(header::USER_AGENT)
+                                    .and_then(|h| h.to_str().ok()),
+                            )
+                            .as_deref(),
+                        )
                         .await
                 }
                 None => return oauth_error("invalid_request"),

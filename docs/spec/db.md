@@ -39,13 +39,15 @@ Agent는 user가 관리한다. Agent name은 제품 메타데이터이며 PII �
 
 Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. 신규 세션은 검증한 `oidc_issuer`에 연결한다. Issuer가 없거나 현재 설정과 다르면 인증을 거부한다. 외부 token과 refresh 상태는 보관하지 않는다. `idle_expires_at`은 미사용 만료이며 `expires_at`은 연장할 수 없는 절대 만료다. 기존 `validated_until`은 migration 61에서 값 변경 없이 이름을 바꾼다.
 
+`client_environment`는 nullable 브라우저·OS 표시다. `created_at`·`last_used_at`·두 만료와 함께 사용자 세션 관리에 사용한다. Raw User-Agent·IP·장비 지문을 저장하지 않는다.
+
 ## Local OAuth tables
 
 | 테이블 | 책임·핵심 연결 |
 |---|---|
 | `oidc_login_flows` | 5분짜리 OIDC state; browser cookie HMAC, issuer, 암호화된 PKCE/nonce/next |
 | `oauth_authorizations` | browser-bound 동의 요청과 1회용 code; client/resource/redirect/S256 challenge 및 nullable 승인 user ID |
-| `oauth_grants` | user FK, client/resource/scope, absolute/idle expiry, revoked_at; 사용자당 활성 100개 |
+| `oauth_grants` | user FK, client/resource/scope, absolute/idle expiry, revoked_at, nullable client_environment·last_token_at; 사용자당 활성 100개 |
 | `oauth_credentials` | access/refresh HMAC PK와 key epoch; grant FK `ON DELETE CASCADE`, expires_at, consumed_at |
 | `oauth_device_codes` | device/user-code HMAC, CLI client/resource/scope, 승인 user FK, polling·거절·소비 상태 |
 

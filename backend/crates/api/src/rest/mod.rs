@@ -7,6 +7,7 @@ pub mod files;
 pub mod link_graph;
 pub mod me;
 pub mod nodes;
+pub mod sessions;
 pub mod spaces;
 pub mod text;
 pub mod text_revisions;

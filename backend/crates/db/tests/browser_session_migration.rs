@@ -42,7 +42,9 @@ async fn snapshot(pool: &PgPool) -> TestResult<Value> {
              FROM (SELECT {value} AS value FROM {table} t) s"
         )))
         .bind(if table == "browser_sessions" {
-            vec!["local_session"]
+            vec!["local_session", "client_environment"]
+        } else if table == "oauth_grants" {
+            vec!["client_environment", "last_token_at"]
         } else {
             vec![]
         })
@@ -84,6 +86,7 @@ async fn removing_session_marker_preserves_tokens_issuers_and_owned_data() -> Te
         insert_pre_marker_removal_session(
             &db.pool,
             InsertBrowserSession {
+                client_environment: None,
                 session_id: id,
                 user_id: owner,
                 token_prefix: &token_prefix(id),
@@ -120,6 +123,12 @@ async fn removing_session_marker_preserves_tokens_issuers_and_owned_data() -> Te
     assert_eq!(retired, (0, 0));
     db.apply_migration(61).await?;
     assert_eq!(snapshot(&db.pool).await?, before);
+    let unknown: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM browser_sessions WHERE client_environment IS NOT NULL",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(unknown, 0);
     notegate_db::check_readiness(&db.pool).await?;
     let sessions = BrowserSessionRepo::new(db.pool.clone());
     for (id, expected_issuer) in [(current, Some(issuer)), (unbound, None)] {
@@ -142,6 +151,7 @@ async fn removing_session_marker_preserves_tokens_issuers_and_owned_data() -> Te
     sessions
         .insert_session(
             InsertBrowserSession {
+                client_environment: None,
                 session_id: id,
                 user_id: owner,
                 token_prefix: &token_prefix(id),

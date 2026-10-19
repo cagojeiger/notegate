@@ -136,6 +136,7 @@ async fn encrypted_history_cleanup_preserves_rows_and_current_writes() -> TestRe
     common::insert_pre_marker_removal_session(
         &db.pool,
         notegate_db::browser_session_repo::InsertBrowserSession {
+            client_environment: None,
             session_id,
             user_id: owner,
             token_prefix: &prefix,

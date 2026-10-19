@@ -68,6 +68,13 @@ pub struct PublicApiDoc;
 #[openapi(
     paths(
         rest::me::get_me,
+        rest::sessions::list,
+        rest::sessions::revoke_one,
+        rest::sessions::revoke_others,
+        rest::sessions::revoke_all,
+        rest::sessions::list_grants,
+        rest::sessions::revoke_grant,
+        rest::sessions::revoke_grants,
         rest::me::get_usage,
         rest::events::list_audit_events,
         rest::events::list_command_invocations,
