@@ -73,7 +73,7 @@ Settings → Account에서 브라우저 세션과 CLI·MCP OAuth 연결을 각�
 
 | Endpoint | 동작 |
 |---|---|
-| `GET /api/v1/me/sessions` | 현재 세션 표시와 최근 활성 브라우저 세션 최대 100개 |
+| `GET /api/v1/me/sessions` | 현재 세션을 항상 포함하고 나머지는 최신순으로 활성 세션 최대 100개 |
 | `DELETE /api/v1/me/sessions/{id}` | 소유한 세션 하나 종료; 현재 세션이면 cookie도 제거 |
 | `DELETE /api/v1/me/sessions/others` | 현재 세션을 제외한 모든 브라우저 세션 종료 |
 | `DELETE /api/v1/me/sessions` | 현재 세션을 포함한 모든 브라우저 세션 종료 |

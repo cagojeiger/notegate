@@ -205,15 +205,17 @@ impl BrowserSessionRepo {
         &self,
         user_id: Uuid,
         issuer: &str,
+        current_session_id: Uuid,
     ) -> Result<Vec<BrowserSessionSummary>> {
         let live = live_browser_session_predicate("");
         sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT id, client_environment, created_at, last_used_at, idle_expires_at, expires_at \
              FROM browser_sessions WHERE user_id=$1 AND oidc_issuer=$2 AND {live} \
-             ORDER BY created_at DESC, id DESC LIMIT 100"
+             ORDER BY (id=$3) DESC, created_at DESC, id DESC LIMIT 100"
         )))
         .bind(user_id)
         .bind(issuer)
+        .bind(current_session_id)
         .fetch_all(&self.pool)
         .await
         .map_err(map_sqlx_error)

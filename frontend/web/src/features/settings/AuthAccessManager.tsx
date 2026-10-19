@@ -46,7 +46,7 @@ export function AuthAccessManager({ onSignOut }: { onSignOut: () => void }) {
       ) : null}
 
       <section>
-        <SectionHeader title="Browser sessions" description="Latest 100 active sessions. Environment labels are reported by the client; they do not identify a physical device." />
+        <SectionHeader title="Browser sessions" description="Up to 100 active sessions, including this one. Environment labels are reported by the client; they do not identify a physical device." />
         {sessions.isLoading ? <p className="text-sm text-muted">Loading sessions…</p> : sessions.isError ? (
           <div><p role="alert">Could not load browser sessions.</p><Button secondary onClick={() => { void sessions.refetch(); }}>Retry sessions</Button></div>
         ) : (

@@ -69,7 +69,7 @@ pub(crate) async fn list(
     let current = current_id(&jar)?;
     let sessions = state
         .browser_sessions
-        .list_owned_live(caller.account_id(), state.oidc.issuer())
+        .list_owned_live(caller.account_id(), state.oidc.issuer(), current)
         .await?
         .into_iter()
         .map(|session| SessionOut {

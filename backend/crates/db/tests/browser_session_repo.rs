@@ -115,6 +115,42 @@ async fn bulk_browser_revocation_rolls_back_when_audit_cannot_be_recorded()
 }
 
 #[tokio::test]
+async fn capped_session_inventory_always_includes_the_current_session()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(&db.pool, "inventory-owner", "owner@example.test").await?;
+    let repo = BrowserSessionRepo::new(db.pool.clone());
+    let crypto = PiiCrypto::test();
+    let (current, hash) = insert_session(&repo, &crypto, owner).await?;
+    sqlx::query("UPDATE browser_sessions SET created_at=now()-interval '3 days' WHERE id=$1")
+        .bind(current)
+        .execute(&db.pool)
+        .await?;
+    sqlx::query("INSERT INTO browser_sessions(id,user_id,token_prefix,token_hash,hash_key_id,hash_version,oidc_issuer,idle_expires_at,expires_at) \
+        SELECT id,$1,'ngs_v1_'||id::text,md5(id::text),'test-lookup',1,'https://auth.example.test',now()+interval '1 hour',now()+interval '15 days' \
+        FROM (SELECT gen_random_uuid() AS id FROM generate_series(1,100)) s")
+        .bind(owner).execute(&db.pool).await?;
+    assert!(
+        repo.renew_idle_expiry(current, &hash, "https://auth.example.test")
+            .await?
+    );
+    let sessions = repo
+        .list_owned_live(owner, "https://auth.example.test", current)
+        .await?;
+    assert_eq!(sessions.len(), 100);
+    assert_eq!(sessions.first().map(|s| s.id), Some(current));
+    let total: i64 = sqlx::query_scalar("SELECT count(*) FROM browser_sessions WHERE user_id=$1")
+        .bind(owner)
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(total, 101);
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn revoked_or_inactive_sessions_are_not_live() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
