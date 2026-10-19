@@ -57,6 +57,7 @@ impl OAuthService {
         Self { store, crypto }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn exchange_code(
         &self,
         code: &str,
@@ -65,6 +66,7 @@ impl OAuthService {
         redirect: &str,
         verifier: &str,
         now: DateTime<Utc>,
+        environment: Option<&str>,
     ) -> Result<TokenOutcome> {
         if !(43..=128).contains(&verifier.len())
             || !verifier
@@ -74,7 +76,8 @@ impl OAuthService {
             return Ok(TokenOutcome::Rejected("invalid_grant"));
         }
         let tokens = self.tokens()?;
-        let issue = self.issue(&tokens, now);
+        let mut issue = self.issue(&tokens, now);
+        issue.client_environment = environment;
         let outcome = self
             .store
             .exchange_code(
@@ -191,9 +194,11 @@ impl OAuthService {
         client: &str,
         resource: &str,
         now: DateTime<Utc>,
+        environment: Option<&str>,
     ) -> Result<TokenOutcome> {
         let tokens = self.tokens()?;
-        let issue = self.issue(&tokens, now);
+        let mut issue = self.issue(&tokens, now);
+        issue.client_environment = environment;
         let outcome = self
             .store
             .poll_device(
@@ -246,6 +251,7 @@ impl OAuthService {
 
     fn issue<'a>(&'a self, tokens: &'a Tokens, now: DateTime<Utc>) -> CredentialIssue<'a> {
         CredentialIssue {
+            client_environment: None,
             access_hash: &tokens.access_hash,
             refresh_hash: Some(&tokens.refresh_hash),
             key_id: self.crypto.lookup_key_id(),
