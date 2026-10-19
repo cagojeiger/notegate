@@ -11,19 +11,7 @@ Quota에 포함되는 live usage의 의미, counter 갱신, 분산 reconciliatio
 
 ## HTTP safety limits
 
-```text
-request_body_max_bytes = 2097152      # 2 MiB JSON/body 기본 상한
-server_timeout_seconds = 30
-control_plane_timeout_seconds = 5      # /health, /ready 등 control-plane 요청
-rate_limit_ingress_per_process = 500/second, burst 750
-rate_limit_browser_v1_per_process = 300/second, burst 450
-rate_limit_public_v2_per_process = 300/second, burst 450
-rate_limit_user_mcp_per_process = 300/second, burst 450
-rate_limit_agent_mcp_v2_per_process = 300/second, burst 450
-find_max_in_flight_per_process = 20
-grep_max_in_flight_per_process = 10
-grep_max_executing_per_process = 2
-```
+HTTP 상한과 기본 bucket은 [limits](../../backend/crates/core/src/limits.rs), 환경 설정과 검증은 [Config](../../backend/crates/core/src/config.rs)를 따른다.
 
 Ingress limit은 auth, metadata, OpenAPI, `/api/v1`, `/api/v2`, `/mcp`, `/mcp/v2`를 함께 보호한다.
 Browser V1, Public V2, User MCP, Agent MCP V2에는 독립적인 process-local bucket을 추가로 적용한다. 한
@@ -49,9 +37,7 @@ NOTEGATE_HTTP_RATE_LIMITS__MCP_V2__BURST
 replica가 여러 개면 cluster 전체 허용량은 pod별 상한의 합으로 증가한다. Cluster-wide rate
 limit은 ingress/gateway에서 별도로 적용한다.
 
-`find`의 21번째 요청과 `grep`의 11번째 요청은 대기시키지 않고 즉시 거부한다. 허용된 grep
-요청 중 본문 조회·복호화·matching은 최대 2개만 동시에 실행한다. `/health`, `/ready`는
-rate limit 대상에서 제외한다.
+검색의 in-flight 상한 초과는 대기시키지 않고 거부한다. `/health`, `/ready`는 rate limit 대상에서 제외한다.
 
 ## Best-effort metadata write-behind
 
@@ -71,57 +57,11 @@ metric으로 남긴다. 이 값들은 인증이나 content의 source of truth가
 
 ## Account and credential limits
 
-System hard max:
+Account·credential·이름 상한은 [limits](../../backend/crates/core/src/limits.rs)를 따른다.
 
-```text
-spaces_per_user_max = 20 live spaces per user
-agents_per_user_max = 50 active agents per user
-connections_per_space_max = 50 active agent connections per space
-connected_spaces_per_agent_max = 100 live spaces per agent
-agent_api_keys_per_account_max = 5 live agent keys
-agent_api_key_max_ttl_days = 365
-api_key_name_max_chars = 63
-agent_name_max_chars = 63
-oauth_provider_sub_max_chars = 255
-user_display_name_max_chars = 128
-user_email_max_chars = 254
-space_name_max_chars = 63
-space_name_forbidden = '/', ':', control chars, leading/trailing whitespace, '.', '..'
-node_name_max_chars = 128
-node_name_forbidden = '/', control chars, leading/trailing whitespace, '.', '..'
-```
+Tier별 quota는 [UserTier::quota](../../backend/crates/core/src/tier.rs)를 따른다.
 
-
-User tier quotas:
-
-```text
-tier0
-  spaces_per_user = 1
-  agents_per_user = 3
-  connections_per_space = 5
-  connected_spaces_per_agent = 5
-  space_max_text_bytes = 134217728       # 128 MiB live Text content per space
-  space_max_file_bytes = 134217728       # 128 MiB live File content per space
-  space_max_nodes = 2000
-  folder_max_children = 200
-
-system_max
-  spaces_per_user = 20
-  agents_per_user = 50
-  connections_per_space = 50
-  connected_spaces_per_agent = 100
-  space_max_text_bytes = 1073741824      # 1 GiB
-  space_max_file_bytes = 107374182400    # 100 GiB
-  space_max_nodes = 25000
-  folder_max_children = 1000
-```
-
-Tier feature:
-
-```text
-tier0       text_encryption = false, write_lock = false
-system_max  text_encryption = true,  write_lock = true
-```
+Tier별 capability는 [UserTier::features](../../backend/crates/core/src/tier.rs)를 따른다.
 
 `text_encryption`과 `write_lock`은 Space owner tier에서 계산한다. Agent caller의 tier는 연결된 Space의 기능을 바꾸지 않는다.
 
@@ -129,48 +69,13 @@ API key 개수와 TTL, 요청 크기, node/content 단위 제한은 security/pro
 
 ## Tree and content limits
 
-아래 값은 `system_max`와 동일한 system hard max다. 실제 사용량은 user tier quota가 더 낮을 수 있다.
+Tree·content의 system hard max는 `system_max` quota와 같다. 실제 사용량은 user tier quota가 더 낮을 수 있다.
 
-```text
-Space-level limits
-  space_max_text_bytes = 1073741824      # 1 GiB live Text content per space
-  space_max_file_bytes = 107374182400    # 100 GiB live File content per space
-  space_max_nodes = 25000                # live folder/text/file nodes per space
-  max_tree_depth = 7                     # segments below root
-  max_path_bytes = 903                   # derived path byte upper bound
-  folder_max_children = 1000             # live direct children per folder
-
-Node/content-level limits
-  node_name_max_chars = 128
-  text_max_bytes = 1048576               # 1 MiB per text object
-  text_max_lines = 5000                  # lines per text object
-  file_max_bytes = 107374182400          # 100 GiB per file product hard max
-  browser_file_max_bytes = 10737418240   # 10 GiB per browser upload
-  single_put_max_bytes = 104857600       # 100 MiB presigned PUT threshold
-  node_metadata_max_bytes = 16384        # 16 KiB per node metadata object
-  node_metadata_max_depth = 4
-  node_metadata_key_max_chars = 64
-  node_metadata_string_max_chars = 2048
-```
+Tree·content·metadata 상한은 [limits와 Limits](../../backend/crates/core/src/limits.rs)를 따른다.
 
 `space_max_text_bytes`와 `space_max_file_bytes`는 독립 quota다. 휴지통 bytes도 quota에 포함한다. Text는 DB 삭제 commit, File은 S3 삭제 acknowledgement를 기록하는 transaction에서 반환한다. Soft delete는 30일 보관하며 영구 삭제 요청 또는 만료 후 비동기 정리를 시작한다. 집계 기준은 `usage-and-quotas.md`를 따른다.
 
-Object upload 상한:
-
-| 항목 | 값 |
-|---|---:|
-| REST/browser | 10 GiB |
-| 제품/MCP File hard max | 100 GiB |
-| Single PUT | 100 MiB 이하 |
-| Multipart part | 64 MiB |
-| Multipart part 수 | 10000 |
-| Part URL batch | 16 |
-| Part 전송 동시성 | 4 |
-| Browser 동시 File upload | 2 |
-| Account별 `uploading` + `expire_pending` | 16 |
-| REST/browser presigned URL | 15분 |
-| MCP/Public V2 presigned URL | 5분 |
-| API activity가 없는 upload 만료 | 2시간 |
+Upload의 제품·브라우저 상한은 [limits](../../backend/crates/core/src/limits.rs), multipart와 URL batch는 [upload flow](../../backend/crates/api/src/object_upload_flow.rs)와 [object storage](../../backend/crates/api/src/object_storage.rs), 브라우저 동시성은 [UploadProvider](../../frontend/web/src/features/uploads/UploadProvider.tsx)를 따른다.
 
 Multipart 호환 검증 대상은 MinIO다. S3 provider는 incomplete multipart 자동 abort 정책을 제공해야 한다.
 
@@ -224,94 +129,14 @@ Node/content-level
 
 ## Pagination defaults
 
-```text
-spaces_default_limit = 50
-spaces_max_limit = 100
-agents_default_limit = 100
-agents_max_limit = 100
-connections_default_limit = 100
-connections_max_limit = 100
-children_default_limit = 100
-children_max_limit = 200
-nodes_default_limit = 50
-nodes_max_limit = 100
-read_default_max_lines = 200
-read_max_lines = 5000
-read_default_max_bytes = 65536          # 64 KiB
-read_max_bytes = 1048576                # 1 MiB
-find_default_limit = 50
-grep_default_limit = 20
-search_max_limit = 100
-search_query_max_chars = 256
-search_children_page_max = 200
-search_candidate_page_max = 1000
-search_node_scan_max = 1000            # node summaries inspected per request
-grep_scan_budget_bytes = 8388608       # 8 MiB content bytes per request
-search_glob_patterns_max = 32          # include/exclude list length per request
-search_glob_pattern_max_chars = 256    # one include/exclude glob pattern
-search_response_target_bytes = 262144  # 256 KiB response target
-search_body_cache_max_bytes = 134217728 # 128 MiB per process; 0 disables
-search_body_cache_ttl_secs = 1800       # 30 minutes from insertion
-search_body_cache_tti_secs = 300        # 5 minutes from last hit
-api_keys_default_limit = 50
-api_keys_max_limit = 100
-```
+목록·본문·검색의 기본값과 상한은 [limits](../../backend/crates/core/src/limits.rs)를 따른다.
 
 목록 API는 여러 row를 반환하면 opaque cursor pagination을 제공한다. 내부 구현은 resource hard limit에 따라 DB keyset 또는 bounded in-memory pagination을 사용할 수 있다.
 
 ## Search limits
 
-이 문서는 위 표의 숫자 제한만 소유한다. DFS 순회, cursor, scan 중단, `has_more`, Rust matcher와 복호화 본문 cache의 동작은 [`search.md`](./search.md)가 정본이다.
-
-## Storage sizing guideline
-
-1만 user 기준 `system_max` hard-limit worst case는 다음과 같다. File bytes는 object storage, Text와 metadata는 PostgreSQL에 저장한다. `tier0`만 사용하면 content worst case는 user당 256 MiB다.
-
-```text
-spaces_per_user_max = 20
-space_max_text_bytes = 1 GiB
-space_max_file_bytes = 100 GiB
-worst_case_text_per_user = 20 GiB
-worst_case_file_per_user = 2000 GiB
-worst_case_logical_content_per_user = 2020 GiB (~1.97 TiB)
-worst_case_logical_content_10000_users = ~19.3 PiB
-
-tier0_logical_content_per_user = 256 MiB
-tier0_logical_content_10000_users = 2.5 TiB
-```
-
-운영 sizing은 평균 사용률을 별도로 가정한다. PostgreSQL은 Text와 metadata를, object storage는 File과 완료 전 upload 및 삭제 재시도 중인 object를 기준으로 각각 산정한다. PostgreSQL physical estimate는 row overhead, index, TOAST, WAL, dead tuple, vacuum과 backup 여유를 포함한다.
+숫자 제한의 정본은 위에 연결한 코드다. DFS 순회, cursor, scan 중단, `has_more`, Rust matcher와 복호화 본문 cache의 동작은 [`search.md`](./search.md)가 정본이다.
 
 ## Purge limits
 
-```text
-purge_interval_minutes = 1
-purge_timeout_seconds = 120
-purge_resource_pass_budget_seconds = 30
-purge_space_batch_timeout_seconds = 15
-purge_statement_timeout_seconds = 10
-purge_lock_timeout_seconds = 2
-deleted_space_retention_days = 30
-deleted_node_retention_days = 30
-account_deletion_retention_days = 15
-subtree_delete_max_nodes = 1000
-api_key_retention_days = 30
-object_storage_history_retention_days = 180
-audit_event_retention_days = 180
-file_change_event_retention_days = 90
-command_invocation_retention_days = 90
-purge_batch_spaces = 10
-purge_batch_nodes_per_space = 100
-purge_batch_text_revisions_per_space = 100
-purge_batch_object_node_links_per_space = 100
-purge_batch_object_space_links_per_space = 100
-purge_batch_link_refs_per_direction_per_space = 1000
-purge_batch_connections_per_space = 100
-purge_batch_orphan_link_projections = 1000
-purge_batch_accounts = 100
-purge_batch_api_keys = 1000
-purge_batch_object_storage_history = 1000
-purge_batch_audit_events = 1000
-purge_batch_file_change_events = 1000
-purge_batch_command_invocations = 1000
-```
+주기와 전체 timeout은 [purge 등록](../../backend/crates/api/src/reconciliations/purge.rs), batch와 DB timeout은 [purge repository](../../backend/crates/db/src/purge_repo), 보존 기간은 [limits](../../backend/crates/core/src/limits.rs)를 따른다.

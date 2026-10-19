@@ -1,6 +1,6 @@
 # Usage and quotas
 
-이 문서는 현재 사용량을 계산하고 quota를 적용하는 계약의 정본이다. Tier별 숫자는 `performance-limits.md`, DB 구조는 `db.md`, REST 응답은 `rest/identity.md`와 `rest/spaces.md`를 따른다.
+이 문서는 현재 사용량을 계산하고 quota를 적용하는 계약의 정본이다. Tier별 quota는 [UserTier](../../backend/crates/core/src/tier.rs), DB 구조는 `db.md`, REST 응답은 `rest/identity.md`와 `rest/spaces.md`를 따른다.
 
 ## General model
 

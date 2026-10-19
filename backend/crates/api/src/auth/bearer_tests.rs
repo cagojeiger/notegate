@@ -15,7 +15,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::header::{
     ACCEPT, CACHE_CONTROL, CONTENT_TYPE, LOCATION, SET_COOKIE, WWW_AUTHENTICATE,
 };
-use axum::http::{Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use notegate_db::{AccountRepo, browser_session_repo::format_token, test_support::TestDb};
@@ -301,7 +301,7 @@ async fn valid_browser_session(
         name: "Session User".to_owned(),
     })
     .await?;
-    Ok(create_browser_session(state, account.id).await?)
+    Ok(create_browser_session(state, account.id, None).await?)
 }
 
 async fn local_access(
@@ -310,6 +310,17 @@ async fn local_access(
     resource: &str,
     scope: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    Ok(local_tokens(state, user_id, resource, scope)
+        .await?
+        .access_token)
+}
+
+async fn local_tokens(
+    state: &AppState,
+    user_id: Uuid,
+    resource: &str,
+    scope: &str,
+) -> Result<notegate_service::oauth::TokenResponse, Box<dyn std::error::Error>> {
     let now = Utc::now();
     let code = Uuid::new_v4().to_string();
     let id = Uuid::new_v4();
@@ -361,10 +372,11 @@ async fn local_access(
             "http://127.0.0.1/callback",
             "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGH",
             now,
+            None,
         )
         .await?;
     match tokens {
-        notegate_service::oauth::TokenOutcome::Issued(tokens) => Ok(tokens.access_token),
+        notegate_service::oauth::TokenOutcome::Issued(tokens) => Ok(tokens),
         _ => Err("local grant was not issued".into()),
     }
 }
@@ -391,6 +403,458 @@ fn token(
         &claims,
         &EncodingKey::from_rsa_pem(KEY.as_bytes())?,
     )?)
+}
+
+#[tokio::test]
+async fn session_management_is_owner_scoped_and_revokes_browser_cli_and_mcp_access()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = standalone_state(&db)?;
+    let current = valid_browser_session(&db, &state).await?;
+    let owner = verify_browser_session(&state, &current).await?.account_id();
+    let remote = create_browser_session(&state, owner, Some("Android Chrome/130")).await?;
+    let (remote_id, remote_secret) =
+        notegate_db::browser_session_repo::parse_token(&remote).unwrap();
+    let remote_hash = state
+        .security
+        .browser_session_hash(&remote_id.to_string(), remote_secret)?;
+    let stranger = state
+        .accounts
+        .upsert_user_by_identity(&ResolveAttrs {
+            issuer: state.oidc.issuer().into(),
+            sub: "management-stranger".into(),
+            email: "stranger@example.test".into(),
+            name: "Other user".into(),
+        })
+        .await?
+        .0
+        .id;
+    let stranger_session = create_browser_session(&state, stranger, None).await?;
+    let stranger_id = notegate_db::browser_session_repo::parse_token(&stranger_session)
+        .unwrap()
+        .0;
+    let cli_resource = format!("{}/cli", state.config.notegate_public_url);
+    let cli = local_tokens(&state, owner, &cli_resource, "cli offline_access").await?;
+    let mcp = local_tokens(
+        &state,
+        owner,
+        &state.config.resource_url,
+        "mcp offline_access",
+    )
+    .await?;
+    let stranger_mcp = local_tokens(
+        &state,
+        stranger,
+        &state.config.resource_url,
+        "mcp offline_access",
+    )
+    .await?;
+    let router = crate::routes::app(state.clone());
+    let request = |method: &str, path: &str| {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header(
+                header::COOKIE,
+                format!("{BROWSER_SESSION_COOKIE}={current}"),
+            )
+            .header(header::ORIGIN, state.config.notegate_public_url.as_str())
+            .body(Body::empty())
+    };
+    let mcp_request = || {
+        Request::builder()
+            .method("POST")
+            .uri("/mcp")
+            .header(header::HOST, "localhost")
+            .header(ACCEPT, "application/json, text/event-stream")
+            .header(CONTENT_TYPE, "application/json")
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", mcp.access_token),
+            )
+            .body(Body::from(MCP_INITIALIZE_REQUEST))
+    };
+    let cli_call = || {
+        cli_request()
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", cli.access_token),
+            )
+            .body(cli_body("me", json!({})))
+    };
+    assert_eq!(
+        router.clone().oneshot(mcp_request()?).await?.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        router.clone().oneshot(cli_call()?).await?.status(),
+        StatusCode::OK
+    );
+
+    let response = router
+        .clone()
+        .oneshot(request("GET", "/api/v1/me/sessions")?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[CACHE_CONTROL], "private, no-store");
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), 32_000).await?)?;
+    let sessions = body["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 2);
+    assert_eq!(sessions.iter().filter(|s| s["current"] == true).count(), 1);
+    assert!(
+        sessions
+            .iter()
+            .any(|s| s["client_environment"] == "Chrome on Android")
+    );
+    for session in sessions {
+        assert!(session.get("token_hash").is_none());
+        assert!(session.get("token_prefix").is_none());
+    }
+    for (path, method) in [
+        ("/api/v1/me/sessions", "GET"),
+        ("/api/v1/me/oauth-grants", "GET"),
+        ("/api/v1/me/sessions/others", "DELETE"),
+    ] {
+        let denied = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {}", mcp.access_token),
+                    )
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+    }
+    let rejected = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v1/me/sessions")
+                .header(
+                    header::COOKIE,
+                    format!("{BROWSER_SESSION_COOKIE}={current}"),
+                )
+                .header(header::ORIGIN, "https://untrusted.example.test")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(rejected.status(), StatusCode::FORBIDDEN);
+    let rejected = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v1/me/oauth-grants")
+                .header(
+                    header::COOKIE,
+                    format!("{BROWSER_SESSION_COOKIE}={current}"),
+                )
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(rejected.status(), StatusCode::FORBIDDEN);
+
+    let foreign = format!("/api/v1/me/sessions/{stranger_id}");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request("DELETE", &foreign)?)
+            .await?
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    verify_browser_session(&state, &stranger_session).await?;
+    let path = format!("/api/v1/me/sessions/{remote_id}");
+    for _ in 0..2 {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request("DELETE", &path)?)
+                .await?
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+    }
+    assert!(verify_browser_session(&state, &remote).await.is_err());
+    assert!(
+        !state
+            .browser_sessions
+            .renew_idle_expiry(remote_id, &remote_hash, state.oidc.issuer())
+            .await?
+    );
+    let revokes: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE resource_id=$1 AND op_type='session.revoke'",
+    )
+    .bind(remote_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(revokes, 1);
+    let another = create_browser_session(&state, owner, None).await?;
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request("DELETE", "/api/v1/me/sessions/others")?)
+            .await?
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(verify_browser_session(&state, &another).await.is_err());
+    verify_browser_session(&state, &current).await?;
+
+    let response = router
+        .clone()
+        .oneshot(request("GET", "/api/v1/me/oauth-grants")?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[CACHE_CONTROL], "private, no-store");
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), 32_000).await?)?;
+    let grants = body["grants"].as_array().unwrap();
+    assert_eq!(grants.len(), 2);
+    let cli_id = grants.iter().find(|g| g["kind"] == "cli").unwrap()["id"]
+        .as_str()
+        .unwrap();
+    assert!(
+        grants
+            .iter()
+            .all(|g| g["offline_access"] == true && g.get("access_token").is_none())
+    );
+    let stranger_grant = state.oauth.store.list_grants(stranger, Utc::now()).await?[0].id;
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(
+                "DELETE",
+                &format!("/api/v1/me/oauth-grants/{stranger_grant}")
+            )?)
+            .await?
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(
+                "DELETE",
+                &format!("/api/v1/me/oauth-grants/{cli_id}")
+            )?)
+            .await?
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        state
+            .oauth
+            .access_user(&cli.access_token, &cli_resource, "cli", Utc::now())
+            .await?,
+        None
+    );
+    assert_eq!(
+        router.clone().oneshot(cli_call()?).await?.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert!(matches!(
+        state
+            .oauth
+            .refresh(
+                cli.refresh_token.as_deref().unwrap(),
+                "test-client",
+                &cli_resource,
+                Utc::now()
+            )
+            .await?,
+        notegate_service::oauth::TokenOutcome::Rejected("invalid_grant")
+    ));
+    assert_eq!(
+        state
+            .oauth
+            .access_user(
+                &mcp.access_token,
+                &state.config.resource_url,
+                "mcp",
+                Utc::now()
+            )
+            .await?,
+        Some(owner)
+    );
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request("DELETE", "/api/v1/me/oauth-grants?kind=mcp")?)
+            .await?
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        state
+            .oauth
+            .access_user(
+                &mcp.access_token,
+                &state.config.resource_url,
+                "mcp",
+                Utc::now()
+            )
+            .await?,
+        None
+    );
+    assert_eq!(
+        router.clone().oneshot(mcp_request()?).await?.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert!(matches!(
+        state
+            .oauth
+            .refresh(
+                mcp.refresh_token.as_deref().unwrap(),
+                "test-client",
+                &state.config.resource_url,
+                Utc::now()
+            )
+            .await?,
+        notegate_service::oauth::TokenOutcome::Rejected("invalid_grant")
+    ));
+    assert_eq!(
+        state
+            .oauth
+            .access_user(
+                &stranger_mcp.access_token,
+                &state.config.resource_url,
+                "mcp",
+                Utc::now()
+            )
+            .await?,
+        Some(stranger)
+    );
+    verify_browser_session(&state, &current).await?;
+    let response = router
+        .clone()
+        .oneshot(request("DELETE", "/api/v1/me/sessions")?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert!(
+        response
+            .headers()
+            .get_all(SET_COOKIE)
+            .iter()
+            .any(|h| h.to_str().unwrap().contains("Max-Age=0"))
+    );
+    assert!(verify_browser_session(&state, &current).await.is_err());
+    verify_browser_session(&state, &stranger_session).await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn bulk_oauth_revocation_requires_a_kind_and_preserves_other_connection_types()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = standalone_state(&db)?;
+    let browser = valid_browser_session(&db, &state).await?;
+    let owner = verify_browser_session(&state, &browser).await?.account_id();
+    let cli_resource = format!("{}/cli", state.config.notegate_public_url);
+    let router = crate::routes::app(state.clone());
+    let request = |path: &str| {
+        Request::builder()
+            .method("DELETE")
+            .uri(path)
+            .header(
+                header::COOKIE,
+                format!("{BROWSER_SESSION_COOKIE}={browser}"),
+            )
+            .header(header::ORIGIN, state.config.notegate_public_url.as_str())
+            .body(Body::empty())
+    };
+    for kind in ["cli", "mcp"] {
+        let cli = local_tokens(&state, owner, &cli_resource, "cli offline_access").await?;
+        let mcp = local_tokens(
+            &state,
+            owner,
+            &state.config.resource_url,
+            "mcp offline_access",
+        )
+        .await?;
+        for path in [
+            "/api/v1/me/oauth-grants",
+            "/api/v1/me/oauth-grants?kind=unknown",
+            "/api/v1/me/oauth-grants?kind=",
+        ] {
+            assert_eq!(
+                router.clone().oneshot(request(path)?).await?.status(),
+                StatusCode::BAD_REQUEST
+            );
+        }
+        for (scope, resource, tokens) in [
+            ("cli", cli_resource.as_str(), &cli),
+            ("mcp", state.config.resource_url.as_str(), &mcp),
+        ] {
+            assert_eq!(
+                state
+                    .oauth
+                    .access_user(&tokens.access_token, resource, scope, Utc::now())
+                    .await?,
+                Some(owner)
+            );
+        }
+        let path = format!("/api/v1/me/oauth-grants?kind={kind}");
+        for _ in 0..2 {
+            assert_eq!(
+                router.clone().oneshot(request(&path)?).await?.status(),
+                StatusCode::NO_CONTENT
+            );
+        }
+        for (scope, resource, tokens) in [
+            ("cli", cli_resource.as_str(), &cli),
+            ("mcp", state.config.resource_url.as_str(), &mcp),
+        ] {
+            let revoked = scope == kind;
+            assert_eq!(
+                state
+                    .oauth
+                    .access_user(&tokens.access_token, resource, scope, Utc::now())
+                    .await?,
+                if revoked { None } else { Some(owner) }
+            );
+            let refreshed = state
+                .oauth
+                .refresh(
+                    tokens.refresh_token.as_deref().unwrap(),
+                    "test-client",
+                    resource,
+                    Utc::now(),
+                )
+                .await?;
+            if revoked {
+                assert!(matches!(
+                    refreshed,
+                    notegate_service::oauth::TokenOutcome::Rejected("invalid_grant")
+                ));
+            } else {
+                assert!(matches!(
+                    refreshed,
+                    notegate_service::oauth::TokenOutcome::Issued(_)
+                ));
+            }
+        }
+        verify_browser_session(&state, &browser).await?;
+    }
+    let revocations: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE owner_user_id=$1 AND op_type='oauth.revoke'",
+    )
+    .bind(owner)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(revocations, 3);
+    db.cleanup().await;
+    Ok(())
 }
 
 fn future_exp() -> usize {
@@ -1053,7 +1517,7 @@ async fn issuer_scoped_identity_resolves_one_user_across_auth_channels()
         account.id
     );
     let cli_token = local_access(&state, account.id, "http://localhost:9191/cli", "cli").await?;
-    let session = create_browser_session(&state, account.id).await?;
+    let session = create_browser_session(&state, account.id, None).await?;
     let app = crate::routes::app(state.clone());
     for request in [
         cli_request()
@@ -1795,24 +2259,31 @@ async fn session_marker_migration_preserves_authentication_decisions()
         .bind(issuer.is_some()).bind(issuer).bind(case).execute(&db.pool).await?;
         tokens.push((case, format_token(id, "retained-secret")));
     }
-    for migrated in [false, true] {
-        if migrated {
-            db.apply_migration(60).await?;
-        }
-        for (case, token) in &tokens {
-            match verify_browser_session(&state, token).await {
-                Ok(caller) => {
-                    assert_eq!(*case, "current");
-                    assert_eq!(caller.account_id(), owner.id);
-                }
-                Err(error) => {
-                    assert_ne!(*case, "current", "migrated={migrated}, {error:?}");
-                    assert!(matches!(error, AuthError::InvalidToken));
-                }
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM browser_sessions WHERE oidc_issuer=$1 \
+         AND revoked_at IS NULL AND validated_until>now() AND expires_at>now()",
+        )
+        .bind(state.oidc.issuer())
+        .fetch_one(&db.pool)
+        .await?,
+        1
+    );
+    db.apply_migration(60).await?;
+    db.apply_migration(61).await?;
+    for (case, token) in &tokens {
+        match verify_browser_session(&state, token).await {
+            Ok(caller) => {
+                assert_eq!(*case, "current");
+                assert_eq!(caller.account_id(), owner.id);
+            }
+            Err(error) => {
+                assert_ne!(*case, "current", "{error:?}");
+                assert!(matches!(error, AuthError::InvalidToken));
             }
         }
     }
-    let fresh = create_browser_session(&state, owner.id).await?;
+    let fresh = create_browser_session(&state, owner.id, None).await?;
     assert_eq!(
         verify_browser_session(&state, &fresh).await?.account_id(),
         owner.id
@@ -1907,3 +2378,209 @@ pub(super) fn standalone_state(db: &TestDb) -> Result<AppState, Box<dyn std::err
 
 #[path = "standalone_tests.rs"]
 mod standalone;
+
+#[tokio::test]
+async fn browser_activity_requires_live_cookie_and_same_origin_without_reauthenticating()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_pool(
+        ResolverMode::Registered(true),
+        "https://api.example.test",
+        db.pool.clone(),
+    )?;
+    let token = valid_browser_session(&db, &state).await?;
+    let (id, _) =
+        notegate_db::browser_session_repo::parse_token(&token).ok_or("invalid fixture")?;
+    let (initial_idle, absolute): (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) =
+        sqlx::query_as("SELECT idle_expires_at,expires_at FROM browser_sessions WHERE id=$1")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert!(
+        initial_idle
+            > chrono::Utc::now() + chrono::Duration::days(14) - chrono::Duration::seconds(5)
+    );
+    assert!(initial_idle <= absolute);
+    sqlx::query("UPDATE browser_sessions SET idle_expires_at=now()+interval '1 hour' WHERE id=$1")
+        .bind(id)
+        .execute(&db.pool)
+        .await?;
+    let before: serde_json::Value =
+        sqlx::query_scalar("SELECT to_jsonb(t) FROM browser_sessions t WHERE id=$1")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await?;
+    let router = crate::routes::app(state.clone());
+    for (origin, credential, authorization, status) in [
+        (None, true, false, StatusCode::FORBIDDEN),
+        (
+            Some("https://attacker.test"),
+            true,
+            false,
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            Some("https://api.example.test"),
+            false,
+            false,
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            Some("https://api.example.test"),
+            true,
+            true,
+            StatusCode::UNAUTHORIZED,
+        ),
+    ] {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/auth/session/activity");
+        if let Some(origin) = origin {
+            request = request.header(header::ORIGIN, origin);
+        }
+        if credential {
+            request = request.header(header::COOKIE, format!("{BROWSER_SESSION_COOKIE}={token}"));
+        }
+        if authorization {
+            request = request.header(header::AUTHORIZATION, "Bearer rejected");
+        }
+        let response = router.clone().oneshot(request.body(Body::empty())?).await?;
+        assert_eq!(response.status(), status);
+    }
+    assert_eq!(
+        sqlx::query_scalar::<_, serde_json::Value>(
+            "SELECT to_jsonb(t) FROM browser_sessions t WHERE id=$1"
+        )
+        .bind(id)
+        .fetch_one(&db.pool)
+        .await?,
+        before
+    );
+    verify_browser_session(&state, &token).await?;
+    assert_eq!(
+        sqlx::query_scalar::<_, serde_json::Value>(
+            "SELECT to_jsonb(idle_expires_at) FROM browser_sessions WHERE id=$1"
+        )
+        .bind(id)
+        .fetch_one(&db.pool)
+        .await?,
+        before["idle_expires_at"]
+    );
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/session/activity")
+                .header(header::ORIGIN, "https://api.example.test")
+                .header(header::COOKIE, format!("{BROWSER_SESSION_COOKIE}={token}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        response.headers()[header::CACHE_CONTROL],
+        "private, no-store"
+    );
+    assert!(!response.headers().contains_key(header::SET_COOKIE));
+    let after: serde_json::Value =
+        sqlx::query_scalar("SELECT to_jsonb(t) FROM browser_sessions t WHERE id=$1")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await?;
+    for field in [
+        "id",
+        "user_id",
+        "token_hash",
+        "hash_key_id",
+        "hash_version",
+        "oidc_issuer",
+        "created_at",
+        "expires_at",
+    ] {
+        assert_eq!(after[field], before[field], "{field}");
+    }
+    assert_ne!(after["idle_expires_at"], before["idle_expires_at"]);
+    for reason in ["idle", "absolute", "issuer", "revoked"] {
+        sqlx::query("UPDATE browser_sessions SET \
+          idle_expires_at=CASE WHEN $2 IN ('idle','absolute') THEN now() ELSE now()+interval '1 hour' END, \
+          expires_at=CASE WHEN $2='absolute' THEN now() ELSE now()+interval '1 day' END, \
+          oidc_issuer=CASE WHEN $2='issuer' THEN 'https://other.test' ELSE $3 END, \
+          revoked_at=CASE WHEN $2='revoked' THEN now() ELSE NULL END WHERE id=$1")
+          .bind(id).bind(reason).bind(state.oidc.issuer()).execute(&db.pool).await?;
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/session/activity")
+                    .header(header::ORIGIN, "https://api.example.test")
+                    .header(header::COOKIE, format!("{BROWSER_SESSION_COOKIE}={token}"))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{reason}");
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn activity_uses_browser_capacity_without_consuming_login_or_logout_capacity()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut state = state(ResolverMode::Registered(true))?;
+    let mut config = (*state.config).clone();
+    config.http_rate_limits.browser_v1 = notegate_core::HttpRateLimitConfig {
+        requests_per_second: 1,
+        burst: 1,
+    };
+    state.config = Arc::new(config);
+    let router = crate::routes::app(state);
+    for attempt in 0..31 {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/session/activity")
+                    .header(header::ORIGIN, "https://api.example.test")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(
+            response.status(),
+            if attempt == 0 {
+                StatusCode::UNAUTHORIZED
+            } else {
+                StatusCode::TOO_MANY_REQUESTS
+            }
+        );
+    }
+    let read = router
+        .clone()
+        .oneshot(Request::builder().uri("/api/v1/me").body(Body::empty())?)
+        .await?;
+    assert_eq!(read.status(), StatusCode::TOO_MANY_REQUESTS);
+    let login_page = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/auth/success")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(login_page.status(), StatusCode::OK);
+    let logout = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .header(header::ORIGIN, "https://api.example.test")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(logout.status(), StatusCode::SEE_OTHER);
+    Ok(())
+}

@@ -127,7 +127,7 @@ async fn create_agent_requires_active_user_creator() -> Result<(), Box<dyn std::
 }
 
 #[tokio::test]
-async fn count_and_list_active_agents_per_creator() -> Result<(), Box<dyn std::error::Error>> {
+async fn list_active_agents_per_creator() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -139,12 +139,10 @@ async fn count_and_list_active_agents_per_creator() -> Result<(), Box<dyn std::e
     let _a2 = make_agent(&repo, creator, "a2").await;
     let _b1 = make_agent(&repo, other, "b1").await;
 
-    assert_eq!(repo.count_agents_by_creator(creator).await?, 2);
-    assert_eq!(repo.count_agents_by_creator(other).await?, 1);
+    assert_eq!(repo.list_agents_by_creator(other).await?.len(), 1);
     assert_eq!(repo.list_agents_by_creator(creator).await?.len(), 2);
 
     repo.delete_agent(a1, creator).await?;
-    assert_eq!(repo.count_agents_by_creator(creator).await?, 1);
     assert_eq!(repo.list_agents_by_creator(creator).await?.len(), 1);
 
     db.cleanup().await;

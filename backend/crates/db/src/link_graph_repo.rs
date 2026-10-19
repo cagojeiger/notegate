@@ -81,10 +81,6 @@ impl LinkGraphRepo {
         Self { pool }
     }
 
-    pub async fn state(&self, space_id: Uuid, source_node_id: Uuid) -> Result<NodeLinkGraphState> {
-        Ok(self.node_state_row(space_id, source_node_id).await?.into())
-    }
-
     pub async fn node_read_model(
         &self,
         space_id: Uuid,

@@ -156,16 +156,20 @@ pub(crate) async fn account_created(tx: &mut PgConnection, account_id: Uuid) -> 
     .await
 }
 
-fn session_logged_in_payload() -> (&'static str, Value) {
-    ("session.login", json!({}))
+fn session_logged_in_payload(environment: Option<&str>) -> (&'static str, Value) {
+    (
+        "session.login",
+        environment.map_or_else(|| json!({}), |value| json!({"client_environment": value})),
+    )
 }
 
 pub(crate) async fn session_logged_in(
     tx: &mut PgConnection,
     user_id: Uuid,
     session_id: Uuid,
+    environment: Option<&str>,
 ) -> Result<()> {
-    let (op_type, metadata) = session_logged_in_payload();
+    let (op_type, metadata) = session_logged_in_payload(environment);
     event(
         tx,
         AuditContext::rest(user_id),
@@ -174,6 +178,23 @@ pub(crate) async fn session_logged_in(
         "browser_session",
         Some(session_id),
         metadata,
+    )
+    .await
+}
+
+pub(crate) async fn session_revoked(
+    tx: &mut PgConnection,
+    user_id: Uuid,
+    session_id: Uuid,
+) -> Result<()> {
+    event(
+        tx,
+        AuditContext::rest(user_id),
+        user_id,
+        "session.revoke",
+        "browser_session",
+        Some(session_id),
+        json!({"reason": "user_revoked"}),
     )
     .await
 }
@@ -571,13 +592,16 @@ pub(crate) async fn trash_purge_requested(
 }
 
 pub(crate) enum OAuthGrantEvent<'a> {
-    Approved,
+    Approved(Option<&'a str>),
     Revoked(&'a str),
 }
 
 fn oauth_grant_payload(change: OAuthGrantEvent<'_>) -> (&'static str, Value) {
     match change {
-        OAuthGrantEvent::Approved => ("oauth.approve", json!({})),
+        OAuthGrantEvent::Approved(environment) => (
+            "oauth.approve",
+            environment.map_or_else(|| json!({}), |value| json!({"client_environment": value})),
+        ),
         OAuthGrantEvent::Revoked(reason) => ("oauth.revoke", json!({"reason":reason})),
     }
 }
@@ -637,7 +661,7 @@ mod tests {
     #[test]
     fn oauth_audit_payloads_contain_only_structural_allowlisted_fields() {
         assert_eq!(
-            oauth_grant_payload(OAuthGrantEvent::Approved),
+            oauth_grant_payload(OAuthGrantEvent::Approved(None)),
             ("oauth.approve", json!({}))
         );
         assert_eq!(
@@ -656,7 +680,10 @@ mod tests {
     #[test]
     fn account_and_session_events_build_expected_payloads() {
         assert_eq!(account_created_payload(), ("account.create", json!({})));
-        assert_eq!(session_logged_in_payload(), ("session.login", json!({})));
+        assert_eq!(
+            session_logged_in_payload(None),
+            ("session.login", json!({}))
+        );
         assert_eq!(session_logged_out_payload(), ("session.logout", json!({})));
     }
 

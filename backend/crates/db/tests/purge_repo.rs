@@ -748,11 +748,12 @@ async fn seed_browser_session(
     let token_hash = crypto.browser_session_hash(&session_id.to_string(), name)?;
     repo.insert_session(
         InsertBrowserSession {
+            client_environment: None,
             session_id,
             user_id,
             token_prefix: "ngs_v1_test",
             token_hash: &token_hash,
-            validated_until: chrono::Utc::now() + chrono::Duration::hours(1),
+            idle_expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
             expires_at: chrono::Utc::now() + chrono::Duration::days(15),
         },
         "https://auth.example.test",
@@ -841,6 +842,11 @@ async fn purge_deletes_long_dead_browser_sessions_only() -> Result<(), Box<dyn s
     let old_revoked = seed_browser_session(&repo, &crypto, user, "old-revoked").await?;
     let old_expired = seed_browser_session(&repo, &crypto, user, "old-expired").await?;
     let recent_revoked = seed_browser_session(&repo, &crypto, user, "recent-revoked").await?;
+    let old_idle = seed_browser_session(&repo, &crypto, user, "old-idle").await?;
+    sqlx::query("UPDATE browser_sessions SET idle_expires_at=now()-interval '40 days' WHERE id=$1")
+        .bind(old_idle)
+        .execute(&db.pool)
+        .await?;
 
     sqlx::query(
         "UPDATE browser_sessions SET revoked_at = now() - interval '40 days', \
@@ -851,7 +857,7 @@ async fn purge_deletes_long_dead_browser_sessions_only() -> Result<(), Box<dyn s
     .await?;
     sqlx::query(
         "UPDATE browser_sessions SET expires_at = now() - interval '40 days', \
-         validated_until = now() - interval '40 days' WHERE id = $1",
+         idle_expires_at = now() - interval '40 days' WHERE id = $1",
     )
     .bind(old_expired)
     .execute(&db.pool)
@@ -866,8 +872,8 @@ async fn purge_deletes_long_dead_browser_sessions_only() -> Result<(), Box<dyn s
 
     let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
     assert_eq!(
-        run.browser_sessions_deleted, 2,
-        "only the two long-dead sessions purge"
+        run.browser_sessions_deleted, 3,
+        "only long-dead revoked, absolute-expired and idle-expired sessions purge"
     );
 
     let remaining: Vec<Uuid> =
@@ -883,6 +889,7 @@ async fn purge_deletes_long_dead_browser_sessions_only() -> Result<(), Box<dyn s
     );
     assert!(!remaining.contains(&old_revoked));
     assert!(!remaining.contains(&old_expired));
+    assert!(!remaining.contains(&old_idle));
 
     db.cleanup().await;
     Ok(())

@@ -647,32 +647,33 @@ async fn search_runtime_uses_replica_content_but_primary_access_policy()
 async fn mcp_find_and_grep(
     state: &crate::state::AppState,
     parts: &Parts,
-) -> Result<(Value, Value), rmcp::ErrorData> {
-    let find = crate::mcp::tools::search::find(
+) -> Result<(Value, Value), Box<dyn std::error::Error>> {
+    let find_input = serde_json::from_value(serde_json::json!({
+        "purpose": "Verify search transport",
+        "op": "find",
+        "target": "rest-test:/",
+        "q": "search note",
+        "limit": 10
+    }))?;
+    let grep_input = serde_json::from_value(serde_json::json!({
+        "purpose": "Verify search transport",
+        "op": "grep",
+        "target": "rest-test:/",
+        "q": "needle",
+        "lines": "first",
+        "limit": 10
+    }))?;
+    let find = crate::mcp::tools::unified::search(
         state,
         parts,
-        "rest-test:/".to_owned(),
-        "search note".to_owned(),
-        None,
-        None,
-        None,
-        None,
-        Some(10),
-        None,
+        rmcp::handler::server::wrapper::Parameters(find_input),
     )
     .await?
     .0;
-    let grep = crate::mcp::tools::search::grep(
+    let grep = crate::mcp::tools::unified::search(
         state,
         parts,
-        "rest-test:/".to_owned(),
-        "needle".to_owned(),
-        None,
-        Some("first".to_owned()),
-        None,
-        None,
-        Some(10),
-        None,
+        rmcp::handler::server::wrapper::Parameters(grep_input),
     )
     .await?
     .0;

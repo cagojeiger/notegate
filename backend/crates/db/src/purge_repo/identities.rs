@@ -89,9 +89,9 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
 
     let browser_sessions_deleted: i64 = sqlx::query(
         "WITH dead AS ( \
-             SELECT id, LEAST(COALESCE(revoked_at, expires_at), expires_at) AS dead_at \
+             SELECT id, LEAST(revoked_at, idle_expires_at, expires_at) AS dead_at \
              FROM browser_sessions \
-             WHERE revoked_at IS NOT NULL OR expires_at <= now() \
+             WHERE revoked_at IS NOT NULL OR expires_at <= now() OR idle_expires_at <= now() \
          ), due AS ( \
              SELECT id FROM dead \
              WHERE dead_at + make_interval(days => $1::int) <= now() \

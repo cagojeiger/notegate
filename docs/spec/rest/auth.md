@@ -25,7 +25,11 @@ GET /auth/login?next=<내부 경로>
 
 `max_age=0`과 `auth_time`을 요청하며, 검증된 `auth_time`이 현재 시각과 60초를 초과해 차이 나면 거부한다. 공급자의 재인증 정책이 적용되며, 이것이 특정 MFA 수행을 보장한다는 의미는 아니다. 외부 access/refresh token은 로컬 세션에 보관하지 않는다.
 
-세션은 issuer에 연결된다. 활성 계정·철회·absolute expiry와 24시간 로컬 인증 기간을 요청마다 확인한다. 기간이 끝나면 OIDC 로그인으로 돌아가며 외부 refresh 호출은 하지 않는다. Cookie의 최대 수명은 기존 설정(기본 30일)을 따른다. 사용 시각은 기존 write-behind 관측 metadata로만 사용한다.
+세션은 issuer에 연결된다. 활성 계정·철회·`idle_expires_at`·절대 만료 `expires_at`을 요청마다 확인한다. 신규 세션은 미사용 14일, 절대 수명은 설정값(기본·최대 30일)이다. HttpOnly cookie는 절대 만료까지 유지하며, 서버의 미사용 만료가 먼저 오면 401로 OIDC 재로그인을 요구한다. 외부 refresh token은 요구하거나 저장하지 않는다.
+
+`POST /auth/session/activity`는 same-origin Origin/Referer와 유효한 browser cookie를 요구하며 bearer는 거부한다. DB에서 계정 활성·issuer·철회·두 만료를 확인하고 `idle_expires_at`만 현재 시각 + 14일과 절대 만료 중 이른 값까지 연장한다. 응답은 `204`, `private, no-store`이며 token·cookie·`created_at`은 바꾸지 않는다. 따라서 OAuth 연결 승인에 필요한 최근 5분 내 로그인은 세션 연장으로 충족되지 않는다. 만료·철회된 세션은 연장하지 않는다.
+
+Web은 인증된 페이지를 표시하거나 다시 보이게 할 때와 전경의 입력·스크롤 시 탭당 분당 최대 한 번 활동을 기록한다. `/me`나 문서 동기화·백그라운드 조회 자체는 만료를 연장하지 않는다. 활동 UPDATE는 `last_used_at`도 함께 기록한다. 일반 인증 요청의 사용 관측은 기존 write-behind 경로로 시간당 갱신하며 보안 만료의 근거로 사용하지 않는다.
 
 `POST /auth/logout`은 same-origin Origin/Referer와 로컬 세션을 사용해 해당 세션을 철회한다. 외부 token revoke를 호출하지 않는다. 다른 기기의 OAuth 연결 철회는 별도다.
 
@@ -63,7 +67,26 @@ CLI는 정적으로 설정한 public client ID로 `POST /oauth/device/authorize`
 
 `POST /oauth/token`은 code, refresh, Device grant를 제공한다. Public client 인증 방식은 `none`이며 client secret/HTTP Authorization을 받지 않는다. `POST /oauth/revoke`는 해당 client의 token이 속한 grant를 철회한다. 계정 삭제는 grant도 같은 삭제 트랜잭션에서 철회한다. 만료 판정은 요청 시 수행하고 background purge는 물리 정리만 담당한다.
 
-Settings → Account의 **Manage connected applications**는 `/oauth/connections`로 연결한다. 이 화면에서 현재 사용자의 활성 grant만 표시하고 same-origin POST로 개별 철회한다. 승인·철회 audit에는 사용자·grant ID와 사유만 남기며 credential은 기록하지 않는다.
+## 로그인·연결 관리
+
+Settings → Account에서 브라우저 세션·CLI 연결·MCP 연결을 별도 목록으로 관리한다. CLI와 MCP의 전체 철회도 각각 독립적이며 다른 종류의 연결과 브라우저 세션을 유지한다. Agent API key는 기존 Agents 탭에서 개별 철회한다.
+
+| Endpoint | 동작 |
+|---|---|
+| `GET /api/v1/me/sessions` | 현재 세션을 항상 포함하고 나머지는 최신순으로 활성 세션 최대 100개 |
+| `DELETE /api/v1/me/sessions/{id}` | 소유한 세션 하나 종료; 현재 세션이면 cookie도 제거 |
+| `DELETE /api/v1/me/sessions/others` | 현재 세션을 제외한 모든 브라우저 세션 종료 |
+| `DELETE /api/v1/me/sessions` | 현재 세션을 포함한 모든 브라우저 세션 종료 |
+| `GET /api/v1/me/oauth-grants` | 활성 CLI·MCP 연결, 발급·만료 시각, access/refresh 권한 |
+| `DELETE /api/v1/me/oauth-grants/{id}` | 소유한 연결의 access/refresh token 모두 철회 |
+| `DELETE /api/v1/me/oauth-grants?kind=cli` | 모든 CLI 연결 철회; MCP·브라우저·Agent key는 유지 |
+| `DELETE /api/v1/me/oauth-grants?kind=mcp` | 모든 MCP 연결 철회; CLI·브라우저·Agent key는 유지 |
+
+위 경로는 browser cookie 전용이며 mutation은 same-origin을 요구한다. 일괄 OAuth 철회에는 `kind=cli|mcp`가 필수이며 누락·다른 값은 400으로 거부한다. 다른 계정의 대상을 조회하거나 철회하지 않는다. 철회와 Audit은 같은 transaction으로 commit하며 반복 철회는 Audit을 중복 생성하지 않는다. 세션·grant의 철회는 다음 인증 요청부터 적용하고 이미 실행 중인 작업을 취소하지 않는다. OAuth refresh와 철회는 계정 → grant 순서로 잠가 경합 시 새 토큰이 철회를 우회하지 못한다. `/oauth/connections`의 독립 OAuth 관리 화면도 같은 grant·철회 경로를 사용한다.
+
+새 로그인은 요청의 User-Agent에서 브라우저·OS의 제한된 환경 표시만 추출해 저장한다. CLI는 자신의 OS·architecture를 User-Agent에 보내며, OAuth 연결의 환경은 승인 브라우저가 아니라 token 교환 요청에서 기록한다. Raw User-Agent·IP·정밀 위치·장비 지문은 저장하지 않는다. Client 제공값은 참고 표시이며 인증 근거나 물리 장비 식별자로 사용하지 않는다. 기존 연결의 알 수 없는 환경은 추정하지 않는다. `last_token_at`은 token 발급·refresh 시각이며 MCP 요청별 활동 시각이 아니다. 로그인·OAuth 승인 Audit에는 수집한 환경 표시를, 철회 Audit에는 사유를 기록하며 credential은 남기지 않는다.
+
+브라우저 로그아웃은 NoteGate 세션만 종료한다. CLI·MCP 연결 철회나 외부 OIDC 공급자의 SSO 로그아웃과는 별개다.
 
 ## Discovery와 경계
 
@@ -77,7 +100,7 @@ Settings → Account의 **Manage connected applications**는 `/oauth/connections
 - `/cli`: CLI resource용 user OAuth bearer만 허용.
 - Swagger는 브라우저 세션으로 열지만 실제 V2 호출에는 별도 Agent key가 필요하다.
 
-Auth endpoint는 IP별 10 req/s, burst 30 제한을 공유하며 기존 전체 ingress 제한도 적용한다. 일반 문서 API 요청에는 이 추가 auth 제한을 적용하지 않는다.
+로그인·콜백·로그아웃과 OAuth endpoint는 프로세스별 10 req/s, burst 30 제한을 공유하며 기존 전체 ingress 제한도 적용한다. 일반 문서 API와 `/auth/session/activity`는 별도의 browser V1 제한을 공유하므로 활동 기록이 로그인 제한의 용량을 소모하지 않는다.
 
 ## 설정과 운영
 
@@ -86,3 +109,9 @@ Auth endpoint는 IP별 10 req/s, burst 30 제한을 공유하며 기존 전체 i
 신원 import는 검증된 manifest만 사용하는 offline operator다. API와 worker를 중지한 상태에서 현재 ENC/LOOKUP epoch의 ID·상태·version·verify tag를 확인하고 원자적으로 연결한다. 충돌·잘못된 키·익명화 계정은 거부한다. 삭제 보류 계정을 재활성화하거나 계정·PII·소유권을 변경하지 않으며, 같은 연결을 다시 가져와도 Audit을 중복 기록하지 않는다.
 
 기존 DB 업그레이드는 v0.1.112/schema 58을 기준으로 한다. 그보다 오래된 DB의 사전 신원 연결 절차는 [해당 버전의 업그레이드 안내](https://github.com/cagojeiger/notegate/blob/v0.1.112/docs/spec/rest/auth.md#배포-설정)를 따른다. Schema 변경의 점검 중단·백업·복구 기준은 [DB 배포 계약](../db.md#deployment-and-rollback)을 따른다.
+
+## 세션 스키마 업그레이드
+
+Migration 61은 `validated_until`을 `idle_expires_at`으로 이름을 바꾸고 browser session과 OAuth grant에 nullable 환경 표시, grant에 nullable 최근 token 발급 시각을 추가한다. 기존 session ID·HMAC·issuer·생성 시각·두 만료·철회 상태와 계정·문서·OAuth 연결은 그대로 보존한다. 기존 유효 세션은 첫 활동 시 새 정책으로 연장하며, 이미 만료된 세션은 재로그인이 필요하다. 과거 환경·발급 시각을 backfill하거나 추정하지 않는다.
+
+백업 후 기존 API·worker를 모두 종료한 상태에서 새 binary의 embedded migration을 적용한다. 이전 binary는 바뀐 컬럼을 읽지 못하므로 버전을 섞어 실행하거나 이전 이미지만으로 rollback하지 않는다.
