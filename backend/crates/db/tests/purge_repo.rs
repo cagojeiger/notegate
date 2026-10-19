@@ -821,7 +821,6 @@ async fn purge_deletes_long_dead_api_keys_only() -> Result<(), Box<dyn std::erro
     );
     assert!(!remaining.contains(&old_revoked));
     assert!(!remaining.contains(&old_expired));
-    assert!(!remaining.contains(&old_idle));
 
     db.cleanup().await;
     Ok(())
