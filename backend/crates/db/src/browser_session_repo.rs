@@ -43,7 +43,7 @@ impl BrowserSessionRepo {
         let row = sqlx::query_as::<_, BrowserSessionRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO browser_sessions \
              (id, user_id, token_prefix, token_hash, hash_key_id, hash_version, \
-              validated_until, expires_at, oidc_issuer) \
+              idle_expires_at, expires_at, oidc_issuer) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
              RETURNING {BROWSER_SESSION_RETURNING_COLUMNS}"
         )))
@@ -53,7 +53,7 @@ impl BrowserSessionRepo {
         .bind(args.token_hash)
         .bind(&self.lookup_key_id)
         .bind(self.hash_version)
-        .bind(args.validated_until)
+        .bind(args.idle_expires_at)
         .bind(args.expires_at)
         .bind(issuer)
         .fetch_one(&mut *tx)
@@ -98,7 +98,7 @@ impl BrowserSessionRepo {
         let active = active_account_predicate("a.");
         let row = sqlx::query_as::<_, LiveBrowserSessionCallerRow>(sqlx::AssertSqlSafe(format!(
             "SELECT bs.id AS session_id, \
-                    bs.validated_until AS session_validated_until, bs.oidc_issuer, bs.created_at AS session_created_at, \
+                    bs.idle_expires_at AS session_idle_expires_at, bs.oidc_issuer, bs.created_at AS session_created_at, \
                     {USER_CALLER_COLUMNS} \
              FROM browser_sessions bs \
              JOIN accounts a ON a.id = bs.user_id \
@@ -152,6 +152,34 @@ impl BrowserSessionRepo {
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(user_id.is_some())
     }
+
+    pub async fn renew_idle_expiry(
+        &self,
+        session_id: Uuid,
+        token_hash: &str,
+        issuer: &str,
+    ) -> Result<bool> {
+        let active = active_account_predicate("a.");
+        let result = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE browser_sessions bs \
+             SET idle_expires_at = LEAST(bs.expires_at, GREATEST(bs.idle_expires_at, \
+                     clock_timestamp() + make_interval(days => $4::int))), \
+                 updated_at = clock_timestamp() \
+             FROM accounts a JOIN users u ON u.id = a.id \
+             WHERE bs.id = $1 AND bs.token_hash = $2 AND bs.oidc_issuer = $3 \
+               AND bs.user_id = a.id AND a.kind = 'user' AND {active} \
+               AND bs.revoked_at IS NULL AND bs.expires_at > clock_timestamp() \
+               AND bs.idle_expires_at > clock_timestamp()"
+        )))
+        .bind(session_id)
+        .bind(token_hash)
+        .bind(issuer)
+        .bind(notegate_core::limits::BROWSER_SESSION_IDLE_TTL_DAYS)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected() == 1)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -160,7 +188,7 @@ pub struct BrowserSession {
     pub user_id: Uuid,
     pub oidc_issuer: Option<String>,
     pub created_at: DateTime<Utc>,
-    pub validated_until: DateTime<Utc>,
+    pub idle_expires_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
 }
 
@@ -169,7 +197,7 @@ pub struct InsertBrowserSession<'a> {
     pub user_id: Uuid,
     pub token_prefix: &'a str,
     pub token_hash: &'a str,
-    pub validated_until: DateTime<Utc>,
+    pub idle_expires_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
 }
 
@@ -178,7 +206,7 @@ pub struct LiveBrowserSessionCaller {
     pub session_id: Uuid,
     pub oidc_issuer: Option<String>,
     pub created_at: DateTime<Utc>,
-    pub validated_until: DateTime<Utc>,
+    pub idle_expires_at: DateTime<Utc>,
     pub account: Account,
     pub user: User,
 }
@@ -186,7 +214,7 @@ pub struct LiveBrowserSessionCaller {
 #[derive(Debug, FromRow)]
 struct LiveBrowserSessionCallerRow {
     session_id: Uuid,
-    session_validated_until: DateTime<Utc>,
+    session_idle_expires_at: DateTime<Utc>,
     oidc_issuer: Option<String>,
     session_created_at: DateTime<Utc>,
     #[sqlx(flatten)]
@@ -198,7 +226,7 @@ impl LiveBrowserSessionCallerRow {
         let (account, user) = self.caller.into_parts(crypto)?;
         Ok(LiveBrowserSessionCaller {
             session_id: self.session_id,
-            validated_until: self.session_validated_until,
+            idle_expires_at: self.session_idle_expires_at,
             oidc_issuer: self.oidc_issuer,
             created_at: self.session_created_at,
             account,
@@ -213,7 +241,7 @@ struct BrowserSessionRow {
     user_id: Uuid,
     oidc_issuer: Option<String>,
     created_at: DateTime<Utc>,
-    validated_until: DateTime<Utc>,
+    idle_expires_at: DateTime<Utc>,
     expires_at: DateTime<Utc>,
 }
 
@@ -222,7 +250,7 @@ impl From<BrowserSessionRow> for BrowserSession {
         Self {
             id: row.id,
             user_id: row.user_id,
-            validated_until: row.validated_until,
+            idle_expires_at: row.idle_expires_at,
             oidc_issuer: row.oidc_issuer,
             created_at: row.created_at,
             expires_at: row.expires_at,
@@ -231,14 +259,17 @@ impl From<BrowserSessionRow> for BrowserSession {
 }
 
 fn live_browser_session_predicate(prefix: &str) -> String {
-    format!("{prefix}revoked_at IS NULL AND {prefix}expires_at > now()")
+    format!(
+        "{prefix}revoked_at IS NULL AND {prefix}expires_at > now() \
+         AND {prefix}idle_expires_at > now()"
+    )
 }
 
 const BROWSER_SESSION_RETURNING_COLUMNS: &str = "id, user_id, \
-     validated_until, expires_at, oidc_issuer, created_at";
+     idle_expires_at, expires_at, oidc_issuer, created_at";
 
 const BROWSER_SESSION_SELECT_COLUMNS: &str = "bs.id, bs.user_id, \
-     bs.validated_until, bs.expires_at, bs.oidc_issuer, bs.created_at";
+     bs.idle_expires_at, bs.expires_at, bs.oidc_issuer, bs.created_at";
 
 pub fn token_prefix(session_id: Uuid) -> String {
     format!("ngs_v1_{session_id}")

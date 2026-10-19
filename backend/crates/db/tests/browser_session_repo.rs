@@ -44,7 +44,7 @@ async fn insert_session(
             user_id,
             token_prefix: &prefix,
             token_hash: &token_hash,
-            validated_until: Utc::now() + Duration::hours(1),
+            idle_expires_at: Utc::now() + Duration::hours(1),
             expires_at: Utc::now() + Duration::days(15),
         },
         "https://auth.example.test",
@@ -113,6 +113,160 @@ async fn revoked_or_inactive_sessions_are_not_live() -> Result<(), Box<dyn std::
         repo.find_live_by_token(inactive_id, &inactive_hash)
             .await?
             .is_none()
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn browser_activity_extends_idle_expiry_without_moving_absolute_expiry()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "active-browser", "browser@example.test").await?;
+    let repo = BrowserSessionRepo::new(db.pool.clone());
+    let crypto = PiiCrypto::test();
+    let (id, hash) = insert_session(&repo, &crypto, user).await?;
+    let before = repo
+        .find_by_token(id, &hash)
+        .await?
+        .ok_or("missing session")?;
+    assert!(
+        repo.find_live_caller_by_token(id, &hash, &crypto)
+            .await?
+            .is_some()
+    );
+    assert_eq!(
+        repo.find_by_token(id, &hash)
+            .await?
+            .unwrap()
+            .idle_expires_at,
+        before.idle_expires_at
+    );
+    let now = Utc::now();
+    assert!(
+        repo.renew_idle_expiry(id, &hash, "https://auth.example.test")
+            .await?
+    );
+    let after = repo
+        .find_by_token(id, &hash)
+        .await?
+        .ok_or("missing renewed session")?;
+    assert!(after.idle_expires_at >= now + Duration::days(14));
+    assert!(after.idle_expires_at < Utc::now() + Duration::days(14));
+    assert_eq!(after.created_at, before.created_at);
+    assert_eq!(after.expires_at, before.expires_at);
+    assert_eq!(after.user_id, before.user_id);
+    assert_eq!(audit_op_types(&db, user).await?, ["session.login"]);
+    sqlx::query("UPDATE browser_sessions SET expires_at=now()+interval '1 day', idle_expires_at=now()+interval '1 hour' WHERE id=$1")
+        .bind(id).execute(&db.pool).await?;
+    assert!(
+        repo.renew_idle_expiry(id, &hash, "https://auth.example.test")
+            .await?
+    );
+    let capped = repo.find_by_token(id, &hash).await?.unwrap();
+    assert_eq!(capped.idle_expires_at, capped.expires_at);
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn browser_activity_cannot_revive_expired_revoked_inactive_or_foreign_sessions()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = BrowserSessionRepo::new(db.pool.clone());
+    let crypto = PiiCrypto::test();
+    for case in [
+        "idle", "absolute", "revoked", "inactive", "deleted", "issuer", "hash",
+    ] {
+        let user = insert_user_account(&db.pool, case, "browser@example.test").await?;
+        let (id, hash) = insert_session(&repo, &crypto, user).await?;
+        match case {
+            "idle" => {
+                sqlx::query("UPDATE browser_sessions SET idle_expires_at=now() WHERE id=$1")
+                    .bind(id)
+                    .execute(&db.pool)
+                    .await?;
+            }
+            "absolute" => {
+                sqlx::query("UPDATE browser_sessions SET idle_expires_at=now(), expires_at=now() WHERE id=$1").bind(id).execute(&db.pool).await?;
+            }
+            "revoked" => {
+                repo.revoke_session_for_logout(id).await?;
+            }
+            "inactive" => {
+                sqlx::query("UPDATE accounts SET is_active=false WHERE id=$1")
+                    .bind(user)
+                    .execute(&db.pool)
+                    .await?;
+            }
+            "deleted" => {
+                deactivate_account(&db.pool, user, user).await?;
+            }
+            _ => {}
+        }
+        let before: serde_json::Value =
+            sqlx::query_scalar("SELECT to_jsonb(t) FROM browser_sessions t WHERE id=$1")
+                .bind(id)
+                .fetch_one(&db.pool)
+                .await?;
+        let supplied_hash = if case == "hash" { "wrong-hash" } else { &hash };
+        let issuer = if case == "issuer" {
+            "https://other.test"
+        } else {
+            "https://auth.example.test"
+        };
+        assert!(
+            !repo.renew_idle_expiry(id, supplied_hash, issuer).await?,
+            "{case}"
+        );
+        let after: serde_json::Value =
+            sqlx::query_scalar("SELECT to_jsonb(t) FROM browser_sessions t WHERE id=$1")
+                .bind(id)
+                .fetch_one(&db.pool)
+                .await?;
+        assert_eq!(after, before, "{case}");
+        if !matches!(case, "issuer" | "hash") {
+            assert!(repo.find_live_by_token(id, &hash).await?.is_none());
+            assert!(
+                repo.find_live_caller_by_token(id, &hash, &crypto)
+                    .await?
+                    .is_none()
+            );
+        }
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn concurrent_browser_activity_never_undoes_logout() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "logout-race", "browser@example.test").await?;
+    let repo = BrowserSessionRepo::new(db.pool.clone());
+    let crypto = PiiCrypto::test();
+    let (id, hash) = insert_session(&repo, &crypto, user).await?;
+    let (renewed, revoked) = tokio::join!(
+        repo.renew_idle_expiry(id, &hash, "https://auth.example.test"),
+        repo.revoke_session_for_logout(id),
+    );
+    renewed?;
+    assert!(revoked?);
+    assert!(
+        !repo
+            .renew_idle_expiry(id, &hash, "https://auth.example.test")
+            .await?
+    );
+    assert!(repo.find_live_by_token(id, &hash).await?.is_none());
+    assert_eq!(
+        audit_op_types(&db, user).await?,
+        ["session.login", "session.logout"]
     );
     db.cleanup().await;
     Ok(())
@@ -226,6 +380,9 @@ async fn dropping_browser_refresh_storage_preserves_sessions_and_owned_data()
         0
     );
 
+    for version in 58..=61 {
+        db.apply_migration(version).await?;
+    }
     let repo = BrowserSessionRepo::new(db.pool.clone());
     let hash = crypto.browser_session_hash(&local_id.to_string(), "existing-session")?;
     let caller = repo
@@ -237,7 +394,7 @@ async fn dropping_browser_refresh_storage_preserves_sessions_and_owned_data()
         caller.oidc_issuer.as_deref(),
         Some("https://auth.example.test")
     );
-    assert_eq!(caller.validated_until, now + Duration::hours(1));
+    assert_eq!(caller.idle_expires_at, now + Duration::hours(1));
     let legacy_hash = crypto.browser_session_hash(&legacy_id.to_string(), "existing-session")?;
     let legacy = repo.find_by_token(legacy_id, &legacy_hash).await?.unwrap();
     assert_eq!(legacy.oidc_issuer, None);

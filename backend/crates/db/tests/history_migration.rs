@@ -140,7 +140,7 @@ async fn encrypted_history_cleanup_preserves_rows_and_current_writes() -> TestRe
             user_id: owner,
             token_prefix: &prefix,
             token_hash: &session_hash,
-            validated_until: now + chrono::Duration::hours(1),
+            idle_expires_at: now + chrono::Duration::hours(1),
             expires_at: now + chrono::Duration::days(7),
         },
         Some("https://auth.example.test"),
@@ -157,6 +157,8 @@ async fn encrypted_history_cleanup_preserves_rows_and_current_writes() -> TestRe
     let before = snapshot(&db.pool, true).await?;
     db.apply_migration(59).await?;
     assert_eq!(snapshot(&db.pool, true).await?, before);
+    db.apply_migration(60).await?;
+    db.apply_migration(61).await?;
     assert_eq!(
         sessions
             .find_live_by_token(session_id, &session_hash)

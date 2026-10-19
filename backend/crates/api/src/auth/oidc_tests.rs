@@ -770,8 +770,8 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
         .await?
         .unwrap();
     assert_eq!(stored.oidc_issuer.as_deref(), Some(mock.issuer.as_str()));
-    assert!(stored.validated_until > chrono::Utc::now());
-    assert!(stored.validated_until <= stored.expires_at);
+    assert!(stored.idle_expires_at > chrono::Utc::now());
+    assert!(stored.idle_expires_at <= stored.expires_at);
     let before = mock.counts();
     let replay = router
         .clone()
@@ -785,7 +785,7 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
     assert_eq!(replay.status(), StatusCode::BAD_REQUEST);
     assert_eq!(mock.counts(), before);
     sqlx::query(
-        "UPDATE browser_sessions SET validated_until=now()-interval '1 second' WHERE id=$1",
+        "UPDATE browser_sessions SET idle_expires_at=now()-interval '1 second' WHERE id=$1",
     )
     .bind(id)
     .execute(&db.pool)

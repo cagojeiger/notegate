@@ -31,9 +31,15 @@ async fn snapshot(pool: &PgPool) -> TestResult<Value> {
         "oauth_credentials",
         "crypto_key_epochs",
     ] {
+        let value = if table == "browser_sessions" {
+            "(to_jsonb(t)-$1::text[]-'validated_until') || jsonb_build_object('idle_expires_at', \
+             coalesce(to_jsonb(t)->'idle_expires_at',to_jsonb(t)->'validated_until'))"
+        } else {
+            "to_jsonb(t)-$1::text[]"
+        };
         let rows: Value = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT coalesce(jsonb_agg(value ORDER BY value::text),'[]'::jsonb) \
-             FROM (SELECT to_jsonb(t)-$1::text[] AS value FROM {table} t) s"
+             FROM (SELECT {value} AS value FROM {table} t) s"
         )))
         .bind(if table == "browser_sessions" {
             vec!["local_session"]
@@ -82,7 +88,7 @@ async fn removing_session_marker_preserves_tokens_issuers_and_owned_data() -> Te
                 user_id: owner,
                 token_prefix: &token_prefix(id),
                 token_hash: &hash,
-                validated_until: now + Duration::hours(1),
+                idle_expires_at: now + Duration::hours(1),
                 expires_at: now + Duration::days(7),
             },
             bound,
@@ -112,6 +118,8 @@ async fn removing_session_marker_preserves_tokens_issuers_and_owned_data() -> Te
          (SELECT count(*) FROM pg_constraint WHERE conrelid='browser_sessions'::regclass AND conname='browser_session_issuer')",
     ).fetch_one(&db.pool).await?;
     assert_eq!(retired, (0, 0));
+    db.apply_migration(61).await?;
+    assert_eq!(snapshot(&db.pool).await?, before);
     notegate_db::check_readiness(&db.pool).await?;
     let sessions = BrowserSessionRepo::new(db.pool.clone());
     for (id, expected_issuer) in [(current, Some(issuer)), (unbound, None)] {
@@ -138,7 +146,7 @@ async fn removing_session_marker_preserves_tokens_issuers_and_owned_data() -> Te
                 user_id: owner,
                 token_prefix: &token_prefix(id),
                 token_hash: "new-session-hash",
-                validated_until: now + Duration::hours(1),
+                idle_expires_at: now + Duration::hours(1),
                 expires_at: now + Duration::days(7),
             },
             issuer,
@@ -151,6 +159,52 @@ async fn removing_session_marker_preserves_tokens_issuers_and_owned_data() -> Te
             .fetch_all(&db.pool)
             .await?;
     assert_eq!(events, ["session.login", "session.logout"]);
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn idle_expiry_migration_preserves_expired_and_revoked_sessions() -> TestResult {
+    let Some(db) = TestDb::setup_before(61).await? else {
+        return Ok(());
+    };
+    let (user, _, _) = space_with_root(&db.pool, "idle-migration").await?;
+    let crypto = PiiCrypto::test();
+    let mut sessions = Vec::new();
+    for case in ["live", "idle", "absolute", "revoked", "unbound"] {
+        let id = Uuid::new_v4();
+        let hash = crypto.browser_session_hash(&id.to_string(), "retained-secret")?;
+        sqlx::query("INSERT INTO browser_sessions(id,user_id,token_prefix,token_hash,hash_key_id,hash_version,oidc_issuer,validated_until,expires_at,revoked_at) \
+          VALUES($1,$2,$3,$4,'test-lookup',1,CASE WHEN $5='unbound' THEN NULL ELSE 'https://auth.example.test' END, \
+          CASE WHEN $5 IN ('idle','absolute') THEN now()-interval '1 hour' ELSE now()+interval '1 hour' END, \
+          CASE WHEN $5='absolute' THEN now()-interval '1 second' ELSE now()+interval '7 days' END, \
+          CASE WHEN $5='revoked' THEN now() ELSE NULL END)")
+            .bind(id).bind(user).bind(token_prefix(id)).bind(&hash).bind(case).execute(&db.pool).await?;
+        sessions.push((case, id, hash));
+    }
+    let before = snapshot(&db.pool).await?;
+    db.apply_migration(61).await?;
+    assert_eq!(snapshot(&db.pool).await?, before);
+    let columns: (i64, i64) = sqlx::query_as("SELECT \
+      count(*) FILTER (WHERE column_name='validated_until'),count(*) FILTER (WHERE column_name='idle_expires_at') \
+      FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='browser_sessions'")
+        .fetch_one(&db.pool).await?;
+    assert_eq!(columns, (0, 1));
+    notegate_db::check_readiness(&db.pool).await?;
+    let repo = BrowserSessionRepo::new(db.pool.clone());
+    for (case, id, hash) in sessions {
+        assert_eq!(
+            repo.renew_idle_expiry(id, &hash, "https://auth.example.test")
+                .await?,
+            case == "live",
+            "{case}"
+        );
+        let retained = repo
+            .find_by_token(id, &hash)
+            .await?
+            .ok_or("session row lost")?;
+        assert_eq!(retained.user_id, user);
+    }
     db.cleanup().await;
     Ok(())
 }

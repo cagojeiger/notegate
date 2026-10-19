@@ -414,7 +414,7 @@ async fn local_sessions_reject_old_issuer_and_expire_without_upstream_refresh()
             .await
             .is_err()
     );
-    sqlx::query("UPDATE browser_sessions SET oidc_issuer=$2,validated_until=now()-interval '1 second' WHERE user_id=$1").bind(user).bind(state.oidc.issuer()).execute(&db.pool).await?;
+    sqlx::query("UPDATE browser_sessions SET oidc_issuer=$2,idle_expires_at=now()-interval '1 second' WHERE user_id=$1").bind(user).bind(state.oidc.issuer()).execute(&db.pool).await?;
     assert!(
         crate::auth::session::verify_browser_session(&state, &session)
             .await

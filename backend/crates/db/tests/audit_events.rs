@@ -81,7 +81,7 @@ async fn insert_browser_session(
             user_id,
             token_prefix: "ngs_v1_test",
             token_hash: &token_hash,
-            validated_until: chrono::Utc::now() + chrono::Duration::hours(1),
+            idle_expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
             expires_at: chrono::Utc::now() + chrono::Duration::days(15),
         },
         "https://auth.example.test",

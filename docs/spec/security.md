@@ -64,7 +64,7 @@ session_hash      = HMAC(SESSION_TOKEN_SUBKEY, "browser-session:v1:" || session_
 - Browser session token plaintext는 HttpOnly cookie에만 들어간다.
 - DB에는 `token_hash`, `hash_key_id`, `hash_version`, `token_prefix`만 저장한다.
 - 신규 세션은 외부 token이나 refresh 상태를 보관하지 않고 issuer에 연결한 로컬 세션을 사용한다.
-- 로컬 인증 기간(24시간)이 끝나면 재로그인하며 외부 refresh token으로 갱신하지 않는다.
+- 세션은 미사용 14일·절대 최대 30일로 제한한다. Same-origin 전경 활동으로 미사용 만료만 연장하며 만료·철회는 DB에서 판정한다. 세션 연장은 최근 로그인 확인을 대신하지 않으며 외부 refresh token을 저장하지 않는다.
 - FE는 refresh token과 browser session token 원문을 JavaScript storage에 저장하지 않는다.
 
 ## Local OAuth credentials

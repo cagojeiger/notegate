@@ -158,8 +158,12 @@ async fn create_browser_session(
     let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let token_hash = crypto.browser_session_hash(&session_id.to_string(), &secret)?;
     let now = Utc::now();
-    let validated_until = now + chrono::Duration::days(1);
     let expires_at = now + chrono::Duration::from_std(config.browser_session_max_ttl)?;
+    let idle_expires_at = (now
+        + chrono::Duration::days(i64::from(
+            notegate_core::limits::BROWSER_SESSION_IDLE_TTL_DAYS,
+        )))
+    .min(expires_at);
     let token_prefix = token_prefix(session_id);
 
     let repo =
@@ -169,7 +173,7 @@ async fn create_browser_session(
         user_id,
         token_prefix: &token_prefix,
         token_hash: &token_hash,
-        validated_until,
+        idle_expires_at,
         expires_at,
     };
     repo.insert_session(args, &config.oidc.issuer).await?;

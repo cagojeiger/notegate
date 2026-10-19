@@ -362,6 +362,10 @@ fn auth_routes() -> Router<AppState> {
         .route("/auth/success", get(success))
         .route("/auth/login-complete.js", get(success_script))
         .route("/auth/logout", post(logout))
+        .route(
+            "/auth/session/activity",
+            post(crate::auth::session::activity),
+        )
 }
 
 fn metadata_routes(state: &AppState) -> Router<AppState> {

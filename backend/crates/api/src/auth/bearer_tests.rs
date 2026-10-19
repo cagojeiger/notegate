@@ -15,7 +15,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::header::{
     ACCEPT, CACHE_CONTROL, CONTENT_TYPE, LOCATION, SET_COOKIE, WWW_AUTHENTICATE,
 };
-use axum::http::{Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use notegate_db::{AccountRepo, browser_session_repo::format_token, test_support::TestDb};
@@ -1795,20 +1795,27 @@ async fn session_marker_migration_preserves_authentication_decisions()
         .bind(issuer.is_some()).bind(issuer).bind(case).execute(&db.pool).await?;
         tokens.push((case, format_token(id, "retained-secret")));
     }
-    for migrated in [false, true] {
-        if migrated {
-            db.apply_migration(60).await?;
-        }
-        for (case, token) in &tokens {
-            match verify_browser_session(&state, token).await {
-                Ok(caller) => {
-                    assert_eq!(*case, "current");
-                    assert_eq!(caller.account_id(), owner.id);
-                }
-                Err(error) => {
-                    assert_ne!(*case, "current", "migrated={migrated}, {error:?}");
-                    assert!(matches!(error, AuthError::InvalidToken));
-                }
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM browser_sessions WHERE oidc_issuer=$1 \
+         AND revoked_at IS NULL AND validated_until>now() AND expires_at>now()",
+        )
+        .bind(state.oidc.issuer())
+        .fetch_one(&db.pool)
+        .await?,
+        1
+    );
+    db.apply_migration(60).await?;
+    db.apply_migration(61).await?;
+    for (case, token) in &tokens {
+        match verify_browser_session(&state, token).await {
+            Ok(caller) => {
+                assert_eq!(*case, "current");
+                assert_eq!(caller.account_id(), owner.id);
+            }
+            Err(error) => {
+                assert_ne!(*case, "current", "{error:?}");
+                assert!(matches!(error, AuthError::InvalidToken));
             }
         }
     }
@@ -1907,3 +1914,151 @@ pub(super) fn standalone_state(db: &TestDb) -> Result<AppState, Box<dyn std::err
 
 #[path = "standalone_tests.rs"]
 mod standalone;
+
+#[tokio::test]
+async fn browser_activity_requires_live_cookie_and_same_origin_without_reauthenticating()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_pool(
+        ResolverMode::Registered(true),
+        "https://api.example.test",
+        db.pool.clone(),
+    )?;
+    let token = valid_browser_session(&db, &state).await?;
+    let (id, _) =
+        notegate_db::browser_session_repo::parse_token(&token).ok_or("invalid fixture")?;
+    let (initial_idle, absolute): (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) =
+        sqlx::query_as("SELECT idle_expires_at,expires_at FROM browser_sessions WHERE id=$1")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert!(
+        initial_idle
+            > chrono::Utc::now() + chrono::Duration::days(14) - chrono::Duration::seconds(5)
+    );
+    assert!(initial_idle <= absolute);
+    sqlx::query("UPDATE browser_sessions SET idle_expires_at=now()+interval '1 hour' WHERE id=$1")
+        .bind(id)
+        .execute(&db.pool)
+        .await?;
+    let before: serde_json::Value =
+        sqlx::query_scalar("SELECT to_jsonb(t) FROM browser_sessions t WHERE id=$1")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await?;
+    let router = crate::routes::app(state.clone());
+    for (origin, credential, authorization, status) in [
+        (None, true, false, StatusCode::FORBIDDEN),
+        (
+            Some("https://attacker.test"),
+            true,
+            false,
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            Some("https://api.example.test"),
+            false,
+            false,
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            Some("https://api.example.test"),
+            true,
+            true,
+            StatusCode::UNAUTHORIZED,
+        ),
+    ] {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/auth/session/activity");
+        if let Some(origin) = origin {
+            request = request.header(header::ORIGIN, origin);
+        }
+        if credential {
+            request = request.header(header::COOKIE, format!("{BROWSER_SESSION_COOKIE}={token}"));
+        }
+        if authorization {
+            request = request.header(header::AUTHORIZATION, "Bearer rejected");
+        }
+        let response = router.clone().oneshot(request.body(Body::empty())?).await?;
+        assert_eq!(response.status(), status);
+    }
+    assert_eq!(
+        sqlx::query_scalar::<_, serde_json::Value>(
+            "SELECT to_jsonb(t) FROM browser_sessions t WHERE id=$1"
+        )
+        .bind(id)
+        .fetch_one(&db.pool)
+        .await?,
+        before
+    );
+    verify_browser_session(&state, &token).await?;
+    assert_eq!(
+        sqlx::query_scalar::<_, serde_json::Value>(
+            "SELECT to_jsonb(idle_expires_at) FROM browser_sessions WHERE id=$1"
+        )
+        .bind(id)
+        .fetch_one(&db.pool)
+        .await?,
+        before["idle_expires_at"]
+    );
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/session/activity")
+                .header(header::ORIGIN, "https://api.example.test")
+                .header(header::COOKIE, format!("{BROWSER_SESSION_COOKIE}={token}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        response.headers()[header::CACHE_CONTROL],
+        "private, no-store"
+    );
+    assert!(!response.headers().contains_key(header::SET_COOKIE));
+    let after: serde_json::Value =
+        sqlx::query_scalar("SELECT to_jsonb(t) FROM browser_sessions t WHERE id=$1")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await?;
+    for field in [
+        "id",
+        "user_id",
+        "token_hash",
+        "hash_key_id",
+        "hash_version",
+        "oidc_issuer",
+        "created_at",
+        "expires_at",
+    ] {
+        assert_eq!(after[field], before[field], "{field}");
+    }
+    assert_ne!(after["idle_expires_at"], before["idle_expires_at"]);
+    for reason in ["idle", "absolute", "issuer", "revoked"] {
+        sqlx::query("UPDATE browser_sessions SET \
+          idle_expires_at=CASE WHEN $2 IN ('idle','absolute') THEN now() ELSE now()+interval '1 hour' END, \
+          expires_at=CASE WHEN $2='absolute' THEN now() ELSE now()+interval '1 day' END, \
+          oidc_issuer=CASE WHEN $2='issuer' THEN 'https://other.test' ELSE $3 END, \
+          revoked_at=CASE WHEN $2='revoked' THEN now() ELSE NULL END WHERE id=$1")
+          .bind(id).bind(reason).bind(state.oidc.issuer()).execute(&db.pool).await?;
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/session/activity")
+                    .header(header::ORIGIN, "https://api.example.test")
+                    .header(header::COOKIE, format!("{BROWSER_SESSION_COOKIE}={token}"))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{reason}");
+    }
+    db.cleanup().await;
+    Ok(())
+}

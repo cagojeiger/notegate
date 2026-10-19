@@ -72,7 +72,7 @@ async fn bulk_metadata_flush_is_monotonic_and_idempotent() -> Result<(), Box<dyn
                 user_id,
                 token_prefix: &token_prefix(session_id),
                 token_hash: &token_hash,
-                validated_until: Utc::now() + Duration::hours(1),
+                idle_expires_at: Utc::now() + Duration::hours(1),
                 expires_at: Utc::now() + Duration::days(1),
             },
             "https://auth.example.test",

@@ -343,7 +343,7 @@ async fn identity_migration_preserves_ownership_pii_documents_sessions_and_oauth
             user_id: owner,
             token_prefix: &prefix,
             token_hash: &session_hash,
-            validated_until: now + Duration::hours(1),
+            idle_expires_at: now + Duration::hours(1),
             expires_at: now + Duration::days(7),
         },
         Some(ISSUER),
@@ -386,6 +386,9 @@ async fn identity_migration_preserves_ownership_pii_documents_sessions_and_oauth
          (SELECT count(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='legacy_identity_issuer')",
     ).fetch_one(&db.pool).await?;
     assert_eq!(removed, (0, 0));
+    for version in 59..=61 {
+        db.apply_migration(version).await?;
+    }
     let caller = sessions
         .find_live_caller_by_token(session_id, &session_hash, &crypto)
         .await?

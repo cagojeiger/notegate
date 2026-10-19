@@ -37,7 +37,7 @@ Agent는 user가 관리한다. Agent name은 제품 메타데이터이며 PII �
 
 ## Browser session table
 
-Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. 신규 세션은 검증한 `oidc_issuer`에 연결한다. Issuer가 없거나 현재 설정과 다르면 인증을 거부한다. 외부 token과 refresh 상태는 보관하지 않는다.
+Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. 신규 세션은 검증한 `oidc_issuer`에 연결한다. Issuer가 없거나 현재 설정과 다르면 인증을 거부한다. 외부 token과 refresh 상태는 보관하지 않는다. `idle_expires_at`은 미사용 만료이며 `expires_at`은 연장할 수 없는 절대 만료다. 기존 `validated_until`은 migration 61에서 값 변경 없이 이름을 바꾼다.
 
 ## Local OAuth tables
 
