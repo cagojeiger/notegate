@@ -687,7 +687,7 @@ async fn session_management_is_owner_scoped_and_revokes_browser_cli_and_mcp_acce
     assert_eq!(
         router
             .clone()
-            .oneshot(request("DELETE", "/api/v1/me/oauth-grants")?)
+            .oneshot(request("DELETE", "/api/v1/me/oauth-grants?kind=mcp")?)
             .await?
             .status(),
         StatusCode::NO_CONTENT
@@ -747,6 +747,112 @@ async fn session_management_is_owner_scoped_and_revokes_browser_cli_and_mcp_acce
     );
     assert!(verify_browser_session(&state, &current).await.is_err());
     verify_browser_session(&state, &stranger_session).await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn bulk_oauth_revocation_requires_a_kind_and_preserves_other_connection_types()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = standalone_state(&db)?;
+    let browser = valid_browser_session(&db, &state).await?;
+    let owner = verify_browser_session(&state, &browser).await?.account_id();
+    let cli_resource = format!("{}/cli", state.config.notegate_public_url);
+    let router = crate::routes::app(state.clone());
+    let request = |path: &str| {
+        Request::builder()
+            .method("DELETE")
+            .uri(path)
+            .header(
+                header::COOKIE,
+                format!("{BROWSER_SESSION_COOKIE}={browser}"),
+            )
+            .header(header::ORIGIN, state.config.notegate_public_url.as_str())
+            .body(Body::empty())
+    };
+    for kind in ["cli", "mcp"] {
+        let cli = local_tokens(&state, owner, &cli_resource, "cli offline_access").await?;
+        let mcp = local_tokens(
+            &state,
+            owner,
+            &state.config.resource_url,
+            "mcp offline_access",
+        )
+        .await?;
+        for path in [
+            "/api/v1/me/oauth-grants",
+            "/api/v1/me/oauth-grants?kind=unknown",
+            "/api/v1/me/oauth-grants?kind=",
+        ] {
+            assert_eq!(
+                router.clone().oneshot(request(path)?).await?.status(),
+                StatusCode::BAD_REQUEST
+            );
+        }
+        for (scope, resource, tokens) in [
+            ("cli", cli_resource.as_str(), &cli),
+            ("mcp", state.config.resource_url.as_str(), &mcp),
+        ] {
+            assert_eq!(
+                state
+                    .oauth
+                    .access_user(&tokens.access_token, resource, scope, Utc::now())
+                    .await?,
+                Some(owner)
+            );
+        }
+        let path = format!("/api/v1/me/oauth-grants?kind={kind}");
+        for _ in 0..2 {
+            assert_eq!(
+                router.clone().oneshot(request(&path)?).await?.status(),
+                StatusCode::NO_CONTENT
+            );
+        }
+        for (scope, resource, tokens) in [
+            ("cli", cli_resource.as_str(), &cli),
+            ("mcp", state.config.resource_url.as_str(), &mcp),
+        ] {
+            let revoked = scope == kind;
+            assert_eq!(
+                state
+                    .oauth
+                    .access_user(&tokens.access_token, resource, scope, Utc::now())
+                    .await?,
+                if revoked { None } else { Some(owner) }
+            );
+            let refreshed = state
+                .oauth
+                .refresh(
+                    tokens.refresh_token.as_deref().unwrap(),
+                    "test-client",
+                    resource,
+                    Utc::now(),
+                )
+                .await?;
+            if revoked {
+                assert!(matches!(
+                    refreshed,
+                    notegate_service::oauth::TokenOutcome::Rejected("invalid_grant")
+                ));
+            } else {
+                assert!(matches!(
+                    refreshed,
+                    notegate_service::oauth::TokenOutcome::Issued(_)
+                ));
+            }
+        }
+        verify_browser_session(&state, &browser).await?;
+    }
+    let revocations: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE owner_user_id=$1 AND op_type='oauth.revoke'",
+    )
+    .bind(owner)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(revocations, 3);
     db.cleanup().await;
     Ok(())
 }

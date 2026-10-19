@@ -348,12 +348,23 @@ impl OAuthRepo {
         Ok(())
     }
 
-    pub async fn revoke_owned_grants(&self, user: Uuid, now: DateTime<Utc>) -> Result<()> {
+    pub async fn revoke_owned_grants(
+        &self,
+        user: Uuid,
+        scope: &str,
+        now: DateTime<Utc>,
+    ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         lock_grant_owner(&mut tx, user).await?;
         let grants: Vec<OAuthGrant> = sqlx::query_as(
-            "SELECT * FROM oauth_grants WHERE user_id=$1 AND revoked_at IS NULL ORDER BY id FOR UPDATE"
-        ).bind(user).fetch_all(&mut *tx).await.map_err(map_sqlx_error)?;
+            "SELECT * FROM oauth_grants WHERE user_id=$1 AND revoked_at IS NULL \
+             AND $2=ANY(string_to_array(scope,' ')) ORDER BY id FOR UPDATE",
+        )
+        .bind(user)
+        .bind(scope)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
         for grant in grants {
             revoke_grant(&mut tx, &grant, now, "user_revoked").await?;
         }

@@ -155,6 +155,17 @@ for (const viewport of [
         expect(await settings.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
         await expect(settings.getByRole("tablist")).toBeInViewport();
         await expect(settings.getByRole("button", { name: "Close", exact: true })).toBeInViewport();
+        if (tab === "Account") {
+          for (const [kind, client] of [["CLI", "NoteGate CLI"], ["MCP", "Remote MCP"]]) {
+            const connections = settings.getByRole("region", { name: `${kind} connections` });
+            await connections.getByRole("button", { name: `Revoke ${client}`, exact: true }).click();
+            const confirmation = connections.getByRole("group", { name: "Confirm revocation" });
+            await expect(confirmation).toBeFocused();
+            await expect(confirmation.getByRole("button", { name: "Confirm", exact: true })).toBeInViewport();
+            await page.screenshot({ path: `test-results/dialog-auth-${kind.toLowerCase()}-${viewport.name}-${theme}.png` });
+            await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+          }
+        }
       }
     });
   }

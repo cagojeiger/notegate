@@ -172,7 +172,7 @@ async fn connection_management_preserves_environment_and_bulk_revoke_wins_over_r
     );
     let revoke = svc
         .store
-        .revoke_owned_grants(user, t + Duration::seconds(2));
+        .revoke_owned_grants(user, "mcp", t + Duration::seconds(2));
     let (refresh, revoked) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
         tokio::join!(refresh, revoke)
     })
@@ -211,7 +211,7 @@ async fn connection_management_preserves_environment_and_bulk_revoke_wins_over_r
         );
     }
     svc.store
-        .revoke_owned_grants(user, t + Duration::seconds(3))
+        .revoke_owned_grants(user, "mcp", t + Duration::seconds(3))
         .await?;
     let revokes: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_events WHERE resource_id=$1 AND op_type='oauth.revoke'",
@@ -238,7 +238,7 @@ async fn bulk_oauth_revocation_preserves_all_connections_when_audit_fails()
     approved(&db, user, "second", "mcp offline_access", t).await?;
     let second = issued(exchange(&svc, "second", t).await?);
     sqlx::query("ALTER TABLE audit_events ADD CONSTRAINT test_oauth_revoke_audit CHECK(op_type<>'oauth.revoke') NOT VALID").execute(&db.pool).await?;
-    assert!(svc.store.revoke_owned_grants(user, t).await.is_err());
+    assert!(svc.store.revoke_owned_grants(user, "mcp", t).await.is_err());
     for tokens in [&first, &second] {
         assert_eq!(
             svc.access_user(&tokens.access_token, RESOURCE, "mcp", t)

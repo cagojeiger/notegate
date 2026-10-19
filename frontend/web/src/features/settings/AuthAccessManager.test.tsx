@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -24,6 +24,8 @@ function setup(fail = false) {
       requests.push(path);
       if (failed) return new Response(JSON.stringify({ error: { code: "unavailable", message: "Unavailable" } }), { status: 503 });
       if (path.endsWith("/oauth-grants/mcp")) grants = grants.filter((grant) => grant.id !== "mcp");
+      const kind = new URL(path, "https://preview.invalid").searchParams.get("kind");
+      if (kind) grants = grants.filter((grant) => grant.kind !== kind);
       return new Response(null, { status: 204 });
     }
     const body = path.endsWith("/sessions") ? { sessions } : { grants };
@@ -44,8 +46,17 @@ describe("AuthAccessManager", () => {
     expect(screen.getByText("Execution environment not recorded")).toBeInTheDocument();
     expect(screen.getByText(/Access & refresh tokens/)).toBeInTheDocument();
     expect(screen.getByText(/Access token only/)).toBeInTheDocument();
+    const cli = screen.getByRole("region", { name: "CLI connections" });
+    const mcp = screen.getByRole("region", { name: "MCP connections" });
+    expect(within(cli).getByText("NoteGate CLI · CLI")).toBeInTheDocument();
+    expect(within(cli).queryByText("Remote MCP · MCP")).not.toBeInTheDocument();
+    expect(within(mcp).getByText("Remote MCP · MCP")).toBeInTheDocument();
+    expect(within(mcp).queryByText("NoteGate CLI · CLI")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Revoke Remote MCP" }));
     expect(requests).toEqual([]);
+    const confirmation = within(mcp).getByRole("group", { name: "Confirm revocation" });
+    expect(confirmation).toHaveFocus();
+    expect(screen.getByText("Remote MCP · MCP").closest("li")).toContainElement(confirmation);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(requests).toEqual([]);
   });
@@ -57,7 +68,8 @@ describe("AuthAccessManager", () => {
     ["Sign out all browsers", "/api/v1/me/sessions", true],
     ["Revoke NoteGate CLI", "/api/v1/me/oauth-grants/cli", false],
     ["Revoke Remote MCP", "/api/v1/me/oauth-grants/mcp", false],
-    ["Revoke all CLI & MCP connections", "/api/v1/me/oauth-grants", false]
+    ["Revoke all CLI connections", "/api/v1/me/oauth-grants?kind=cli", false],
+    ["Revoke all MCP connections", "/api/v1/me/oauth-grants?kind=mcp", false]
   ] as const)("confirms %s with the correct scope", async (label, path, signsOut) => {
     const { user, requests, onSignOut } = setup();
     await user.click(await screen.findByRole("button", { name: label }));
@@ -66,6 +78,15 @@ describe("AuthAccessManager", () => {
     await waitFor(() => expect(requests).toEqual([path]));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Confirm" })).not.toBeInTheDocument());
     expect(onSignOut).toHaveBeenCalledTimes(signsOut ? 1 : 0);
+  });
+
+  it.each(["CLI", "MCP"])("bulk revocation of %s preserves the other connection list", async (kind) => {
+    const { user, onSignOut } = setup();
+    await user.click(await screen.findByRole("button", { name: `Revoke all ${kind} connections` }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(await screen.findByText(`No active ${kind} connections.`)).toBeInTheDocument();
+    expect(screen.getByText(kind === "CLI" ? "Remote MCP · MCP" : "NoteGate CLI · CLI")).toBeInTheDocument();
+    expect(onSignOut).not.toHaveBeenCalled();
   });
 
   it("preserves the list after a failed revocation and allows an explicit retry", async () => {

@@ -1,11 +1,11 @@
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use axum_extra::extract::CookieJar;
 use chrono::{DateTime, Utc};
 use notegate_model::Caller;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -208,16 +208,35 @@ pub(crate) async fn revoke_grant(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum GrantKind {
+    Cli,
+    Mcp,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct RevokeGrantsQuery {
+    kind: GrantKind,
+}
+
 #[utoipa::path(delete, path="/api/v1/me/oauth-grants", tag="identity",
-    responses((status=204, description="Revoke every CLI and MCP OAuth connection")), security(("browser_session"=[])))]
+    params(("kind"=GrantKind, Query, description="Connection type to revoke")),
+    responses((status=204, description="Revoke every owned OAuth connection of the selected type"),
+        (status=400, description="Missing or invalid connection type")), security(("browser_session"=[])))]
 pub(crate) async fn revoke_grants(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Query(query): Query<RevokeGrantsQuery>,
 ) -> Result<StatusCode, ApiError> {
+    let scope = match query.kind {
+        GrantKind::Cli => "cli",
+        GrantKind::Mcp => "mcp",
+    };
     state
         .oauth
         .store
-        .revoke_owned_grants(caller.account_id(), Utc::now())
+        .revoke_owned_grants(caller.account_id(), scope, Utc::now())
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }

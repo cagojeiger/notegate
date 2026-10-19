@@ -69,7 +69,7 @@ CLI는 정적으로 설정한 public client ID로 `POST /oauth/device/authorize`
 
 ## 로그인·연결 관리
 
-Settings → Account에서 브라우저 세션과 CLI·MCP OAuth 연결을 각각 관리한다. Agent API key는 기존 Agents 탭에서 개별 철회한다.
+Settings → Account에서 브라우저 세션·CLI 연결·MCP 연결을 별도 목록으로 관리한다. CLI와 MCP의 전체 철회도 각각 독립적이며 다른 종류의 연결과 브라우저 세션을 유지한다. Agent API key는 기존 Agents 탭에서 개별 철회한다.
 
 | Endpoint | 동작 |
 |---|---|
@@ -79,9 +79,10 @@ Settings → Account에서 브라우저 세션과 CLI·MCP OAuth 연결을 각�
 | `DELETE /api/v1/me/sessions` | 현재 세션을 포함한 모든 브라우저 세션 종료 |
 | `GET /api/v1/me/oauth-grants` | 활성 CLI·MCP 연결, 발급·만료 시각, access/refresh 권한 |
 | `DELETE /api/v1/me/oauth-grants/{id}` | 소유한 연결의 access/refresh token 모두 철회 |
-| `DELETE /api/v1/me/oauth-grants` | 모든 CLI·MCP 연결 철회; 브라우저·Agent key는 유지 |
+| `DELETE /api/v1/me/oauth-grants?kind=cli` | 모든 CLI 연결 철회; MCP·브라우저·Agent key는 유지 |
+| `DELETE /api/v1/me/oauth-grants?kind=mcp` | 모든 MCP 연결 철회; CLI·브라우저·Agent key는 유지 |
 
-위 경로는 browser cookie 전용이며 mutation은 same-origin을 요구한다. 다른 계정의 대상을 조회하거나 철회하지 않는다. 철회와 Audit은 같은 transaction으로 commit하며 반복 철회는 Audit을 중복 생성하지 않는다. 세션·grant의 철회는 다음 인증 요청부터 적용하고 이미 실행 중인 작업을 취소하지 않는다. OAuth refresh와 철회는 계정 → grant 순서로 잠가 경합 시 새 토큰이 철회를 우회하지 못한다. `/oauth/connections`의 독립 OAuth 관리 화면도 같은 grant·철회 경로를 사용한다.
+위 경로는 browser cookie 전용이며 mutation은 same-origin을 요구한다. 일괄 OAuth 철회에는 `kind=cli|mcp`가 필수이며 누락·다른 값은 400으로 거부한다. 다른 계정의 대상을 조회하거나 철회하지 않는다. 철회와 Audit은 같은 transaction으로 commit하며 반복 철회는 Audit을 중복 생성하지 않는다. 세션·grant의 철회는 다음 인증 요청부터 적용하고 이미 실행 중인 작업을 취소하지 않는다. OAuth refresh와 철회는 계정 → grant 순서로 잠가 경합 시 새 토큰이 철회를 우회하지 못한다. `/oauth/connections`의 독립 OAuth 관리 화면도 같은 grant·철회 경로를 사용한다.
 
 새 로그인은 요청의 User-Agent에서 브라우저·OS의 제한된 환경 표시만 추출해 저장한다. CLI는 자신의 OS·architecture를 User-Agent에 보내며, OAuth 연결의 환경은 승인 브라우저가 아니라 token 교환 요청에서 기록한다. Raw User-Agent·IP·정밀 위치·장비 지문은 저장하지 않는다. Client 제공값은 참고 표시이며 인증 근거나 물리 장비 식별자로 사용하지 않는다. 기존 연결의 알 수 없는 환경은 추정하지 않는다. `last_token_at`은 token 발급·refresh 시각이며 MCP 요청별 활동 시각이 아니다. 로그인·OAuth 승인 Audit에는 수집한 환경 표시를, 철회 Audit에는 사유를 기록하며 credential은 남기지 않는다.
 
