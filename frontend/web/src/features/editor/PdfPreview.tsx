@@ -84,6 +84,7 @@ export function PdfPreview({
     ? Math.max(1, Math.min(MAX_PAGE_WIDTH, containerWidth - PAGE_HORIZONTAL_PADDING))
     : undefined;
   const pageWidth = fittedPageWidth ? fittedPageWidth * zoom : undefined;
+  const zoomPercent = Math.round(zoom * 100);
 
   return (
     <div
@@ -180,13 +181,13 @@ export function PdfPreview({
           </IconButton>
           <button
             type="button"
-            aria-label="Reset zoom"
+            aria-label={`Reset zoom: ${zoomPercent}%`}
             title="Reset zoom"
             disabled={zoom === 1}
             onClick={() => setZoom(1)}
             className="h-7 min-w-11 rounded-md px-1 text-workbench tabular-nums text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-default"
           >
-            {Math.round(zoom * 100)}%
+            {zoomPercent}%
           </button>
           <IconButton
             label="Zoom in"

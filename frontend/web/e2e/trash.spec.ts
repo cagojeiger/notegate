@@ -245,13 +245,13 @@ for (const viewport of [{ name: "short-desktop", width: 900, height: 540 }, { na
       const dialog = page.getByRole("dialog", { name: "Trash" });
       const list = dialog.getByRole("list", { name: "Deleted items" });
       const bounds = await dialog.boundingBox();
-      await dialog.getByRole("button", { name: `Select ${documentName}`, exact: true }).click();
+      await dialog.getByRole("button", { name: `Select ${documentName}` }).click();
       const documentDetails = dialog.getByRole("region", { name: `Details for ${documentName}`, exact: true });
       const scrollArea = viewport.name === "short-desktop" ? documentDetails.locator("..") : dialog.getByRole("region", { name: "Trash contents", exact: true });
       await documentDetails.getByRole("heading", { name: documentName, exact: true }).hover();
       await page.mouse.wheel(0, 1200);
       await expect.poll(() => scrollArea.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-      await dialog.getByRole("button", { name: `Select ${folderName}`, exact: true }).click();
+      await dialog.getByRole("button", { name: `Select ${folderName}` }).click();
       const folderDetails = dialog.getByRole("region", { name: `Details for ${folderName}`, exact: true });
       if (viewport.name === "short-desktop") {
         await expect.soft(folderDetails.getByRole("heading", { name: folderName, exact: true }), "A new selection must reveal its heading").toBeInViewport();

@@ -479,10 +479,7 @@ async function respond(
 }
 
 async function cardNames(grid: ReturnType<Page["getByRole"]>) {
-  return grid.getByRole("listitem").evaluateAll((items) => items.flatMap((item) => {
-    const inspect = item.querySelector<HTMLButtonElement>('button[aria-label^="Inspect "]');
-    return inspect ? [inspect.getAttribute("aria-label")!.replace(/^Inspect /, "")] : [];
-  }));
+  return grid.locator("[data-space-name]").allTextContents();
 }
 
 async function typography(locator: ReturnType<Page["getByRole"]>) {

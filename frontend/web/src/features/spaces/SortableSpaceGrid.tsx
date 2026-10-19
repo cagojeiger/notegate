@@ -220,9 +220,9 @@ function SortableSpaceCard({
             className="min-w-0 flex-1 py-1 text-left outline-none"
             onClick={onSelect}
             aria-pressed={selected}
-            aria-label={`Inspect ${space.name}`}
           >
-            <span className="block truncate font-semibold">{space.name}</span>
+            <span className="sr-only">Inspect </span>
+            <span data-space-name className="block truncate font-semibold">{space.name}</span>{" "}
             <span className="mt-0.5 block truncate text-xs text-muted">
               {usage
                 ? `${usage.items.used.toLocaleString()} items · ${formatBytes(usage.text_bytes.used + usage.file_bytes.used)}`
