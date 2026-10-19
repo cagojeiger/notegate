@@ -101,6 +101,38 @@ jobs:
       - name: Measure command completion and history capture
         run: cargo test --locked -p notegate-api measure_command_completion -- --ignored --nocapture --test-threads=1
 
+  postgres18:
+    name: PostgreSQL 18
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      COMPOSE_PROJECT_NAME: notegate-pg18-${{ github.run_id }}-${{ github.run_attempt }}
+      POSTGRES_PORT: "5433"
+      NOTEGATE_TEST_DATABASE_URL: postgres://notegate:notegate@localhost:5433/notegate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Prepare Compose environment
+        run: cp .env.example .env
+
+      - name: Verify PostgreSQL volume upgrade and persistence
+        run: bash deploy/ci/postgres-upgrade-smoke.sh
+
+      - name: Test database migrations and repositories on PostgreSQL 18
+        run: cargo test --locked -p notegate-db --tests
+
+      - name: Stop Compose
+        if: always()
+        run: |
+          if [[ -f .env ]]; then
+            docker compose -f docker-compose.yml down
+          fi
+
   rust-audit:
     name: Main RustSec Audit
     if: github.event_name == 'push'

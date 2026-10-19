@@ -75,6 +75,13 @@ make up
 
 `web` image는 dashboard와 Rust server를 포함한다. Proxy는 public listener만 `http://localhost:9191`에 노출하고 Compose는 PostgreSQL, MinIO, Prometheus, Grafana와 로컬 bucket 초기화 job을 함께 실행한다. Compose는 `all` mode를 사용하고 private search listener는 container loopback에 유지한다. `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`는 각 replica에 전달된다.
 
+기존 PostgreSQL 17 개발 데이터를 18로 옮길 때는 [major upgrade 절차](https://www.postgresql.org/docs/18/upgrading.html)를 따른다. 기존 `pgdata` 이름을 유지하므로 17 데이터가 있으면 공식 18 entrypoint가 초기화를 거부한다.
+
+1. NoteGate API·worker 등 모든 쓰기를 중단하고, 17 image와 기존 `/var/lib/postgresql/data` mount로 DB를 열어 `pg_dump --format=custom` 백업을 만든다.
+2. 별도 새 18 볼륨에 백업을 복원하고 데이터·역할·확장을 확인한다. 기존 17 볼륨과 백업은 보관한다.
+3. 개인 Compose override의 `volumes.pgdata.name`을 복원한 18 볼륨으로 지정한다. 기본·split stack 모두 `docker compose -f <base-file> -f <override-file>`처럼 같은 override를 명시해 실행한다.
+4. API 준비 상태와 기존 데이터가 확인되면 쓰기를 재개한다. 18에서 쓰기가 발생한 뒤에는 이전 image만 지정해 복구할 수 없으므로 백업 복원과 후속 쓰기 처리를 함께 판단한다.
+
 최종 runtime은 digest로 고정한 `gcr.io/distroless/cc-debian13:nonroot`이며 UID/GID
 `10001:10001`로 실행한다. Rust/Node 빌드 도구는 build stage에만 있고, runtime의 glibc,
 libgcc와 CA 인증서는 Distroless가 제공한다. Runtime에는 shell이나 package manager가
