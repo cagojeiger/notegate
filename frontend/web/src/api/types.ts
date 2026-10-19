@@ -246,10 +246,6 @@ export type CompletedFileUploadPart = {
   etag: string;
 };
 
-export type MetadataResponse = {
-  metadata: Record<string, unknown>;
-};
-
 export type AuditEvent = {
   id: number;
   operation_id?: string | null;

@@ -94,7 +94,7 @@ pub async fn insert_pre_marker_removal_session(
     .bind(args.user_id)
     .bind(args.token_prefix)
     .bind(args.token_hash)
-    .bind(args.validated_until)
+    .bind(args.idle_expires_at)
     .bind(args.expires_at)
     .bind(issuer.is_some())
     .bind(issuer)

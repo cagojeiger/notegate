@@ -15,7 +15,6 @@ POST   /api/v1/spaces/{space_id}/nodes
 PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}
 PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/external-access-policy
 PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/write-lock
-GET    /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 POST   /api/v1/spaces/{space_id}/nodes/{node_id}/move
 DELETE /api/v1/spaces/{space_id}/nodes/{node_id}?recursive=true
 ```
@@ -37,7 +36,6 @@ POST /nodes                     -> RestNode
 PATCH /nodes/{node_id}          -> RestNode
 PUT /nodes/{node_id}/external-access-policy -> RestNode
 PUT /nodes/{node_id}/write-lock    -> RestNode
-GET /nodes/{id}/metadata        -> { metadata: object }
 POST /nodes/{node_id}/move      -> RestNode
 DELETE /nodes/{node_id}         -> 204 No Content
 ```
@@ -211,5 +209,5 @@ Rules:
 
 Access rules:
 
-- `GET /metadata`는 `{ "metadata": {...} }`를 반환한다.
+- Node 조회 응답의 `metadata` 필드로 읽는다.
 - File upload 완료 시의 `node_metadata`는 File Node 생성과 같은 transaction에서 최초 metadata를 기록하는 Browser 전용 예외다. 생성 이후에는 읽기 전용이다.

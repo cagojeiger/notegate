@@ -167,12 +167,13 @@ export function formatAuditTarget(event: AuditEvent): string {
 }
 
 export function formatAuditDetail(event: AuditEvent): string | null {
-  if ((event.op_type === "oauth.revoke" || event.op_type === "identity.link") && typeof event.metadata.reason === "string") {
+  if ((event.op_type === "oauth.revoke" || event.op_type === "session.revoke" || event.op_type === "identity.link") && typeof event.metadata.reason === "string") {
     const reason = AUTH_REASONS[event.metadata.reason] ?? event.metadata.reason.replace(/_/g, " ");
     return event.op_type === "identity.link" && typeof event.metadata.issuer === "string"
       ? `${reason} · ${event.metadata.issuer}`
       : reason;
   }
+  if ((event.op_type === "session.login" || event.op_type === "oauth.approve") && typeof event.metadata.client_environment === "string") return event.metadata.client_environment;
   if (event.op_type === "text_revision.delete") {
     const reason = event.metadata.reason;
     return typeof reason === "string" ? REVISION_DELETION_REASONS[reason] ?? reason : "Reason not recorded";

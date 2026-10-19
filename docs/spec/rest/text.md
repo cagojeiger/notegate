@@ -1,11 +1,10 @@
 # REST Text
 
-Text는 content node다. plain Text는 read/write/patch 대상이고, encrypted Text는 client-side encrypted payload로 저장/조회한다. 서버 관리 at-rest 암호화는 plain Text의 DB 저장 방식이며 REST content shape를 바꾸지 않는다.
+Text는 content node다. plain Text는 read/write 대상이고, encrypted Text는 client-side encrypted payload로 저장/조회한다. 서버 관리 at-rest 암호화는 plain Text의 DB 저장 방식이며 REST content shape를 바꾸지 않는다.
 
 ```http
 GET   /api/v1/spaces/{space_id}/text/{node_id}?start_line=1&max_lines=200&max_bytes=65536&if_none_match_sha256=...
 PUT   /api/v1/spaces/{space_id}/text/{node_id}
-PATCH /api/v1/spaces/{space_id}/text/{node_id}
 PUT   /api/v1/spaces/{space_id}/text/{node_id}/encryption
 ```
 
@@ -16,7 +15,6 @@ PUT   /api/v1/spaces/{space_id}/text/{node_id}/encryption
 ```ts
 GET   /text/{node_id} -> RestTextReadResponse
 PUT   /text/{node_id} -> { node: NodeRef, text: TextMeta }
-PATCH /text/{node_id} -> { node: NodeRef, text: PatchTextMeta }
 PUT   /text/{node_id}/encryption -> RestNode
 ```
 
@@ -30,12 +28,6 @@ type TextMeta = {
   updated_by: AccountRef
   updated_at: string
 }
-
-type PatchTextMeta = TextMeta & {
-  previous_sha256: string
-  edits_applied: number
-  diff: string
-}
 ```
 
 ## Request body examples
@@ -48,9 +40,6 @@ type PatchTextMeta = TextMeta & {
 {"storage_format":"encrypted","encrypted_payload":{"version":1,"alg":"AES-256-GCM","ciphertext_b64":"..."}}
 ```
 
-```json
-{"expected_sha256":"...","edits":[{"old_text":"hello","new_text":"hi","mode":"unique","expected_count":1}]}
-```
 
 ## GET rules
 
@@ -60,7 +49,7 @@ type PatchTextMeta = TextMeta & {
 - `if_none_match_sha256`이 저장된 content hash와 일치하면 content body 대신 `unchanged=true` 응답을 반환한다. 해시 비교와 본문 선택은 같은 SQL snapshot에서 수행하며, 일치하면 본문 전송과 서버 복호화를 생략한다. Space/Node 접근 검증과 응답 metadata는 유지한다.
 - Markdown Text의 leading YAML frontmatter는 content 그대로 반환한다. 서버는 frontmatter를 Node `metadata`로 해석하지 않는다.
 
-## PUT/PATCH rules
+## PUT rules
 
 - `node_id`는 `nodes.kind='text'`여야 한다.
 - `storage_format`은 `plain` 또는 `encrypted`다. 생략하면 `plain`이다.
@@ -69,10 +58,7 @@ type PatchTextMeta = TextMeta & {
 - `.md`/`.markdown` Text의 leading YAML frontmatter는 Markdown content convention이다. 저장 시 frontmatter를 제거하거나 Node `metadata`에 동기화하지 않는다.
 - encrypted payload는 JSON object이며 서버가 복호화하지 않는다.
 - `PUT`은 plain/encrypted 전체 교체를 수행한다.
-- `PATCH`는 plain Text 전용 string replacement 방식이다. 기본 `mode`는 `unique`이며 각 `old_text`는 정확히 한 번만 매칭되어야 한다. `first`와 `all` mode를 명시할 수 있다.
-- `expected_count`가 있으면 현재 match 수와 일치해야 한다.
 - `expected_sha256`이 있으면 저장된 content hash와 일치해야 한다.
-- encrypted Text는 patch 대상이 아니다.
 
 ## Server-managed encryption
 

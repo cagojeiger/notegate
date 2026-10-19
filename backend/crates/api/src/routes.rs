@@ -172,7 +172,12 @@ fn data_plane_routes(state: AppState) -> Router<AppState> {
         ..DataPlaneLimits::default()
     };
     let browser_v1 = apply_rate_limit(
-        Router::new().nest("/api", rest_api_routes(state.clone())),
+        Router::new()
+            .nest("/api", rest_api_routes(state.clone()))
+            .route(
+                "/auth/session/activity",
+                post(crate::auth::session::activity),
+            ),
         limits.rate_limits.browser_v1,
     );
     let agent_apis = apply_rate_limit(
@@ -393,6 +398,7 @@ async fn oauth_metadata_not_found() -> StatusCode {
 fn rest_api_routes(state: AppState) -> Router<AppState> {
     Router::new()
         .merge(crate::rest::me::routes())
+        .merge(crate::rest::sessions::routes())
         .merge(crate::rest::events::routes())
         .merge(crate::rest::spaces::routes())
         .merge(crate::rest::nodes::routes())

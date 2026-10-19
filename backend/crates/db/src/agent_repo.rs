@@ -184,19 +184,6 @@ impl AgentRepo {
         Ok(rows.into_iter().map(Agent::from).collect())
     }
 
-    pub async fn count_agents_by_creator(&self, creator_account_id: Uuid) -> Result<usize> {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM agents a \
-             JOIN accounts acc ON acc.id = a.id \
-             WHERE a.owner_user_id = $1 AND acc.is_active = true AND acc.deleted_at IS NULL",
-        )
-        .bind(creator_account_id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        crate::to_usize(count, "agent")
-    }
-
     pub async fn find_active_agent_by_creator(
         &self,
         agent_id: Uuid,

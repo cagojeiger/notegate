@@ -77,11 +77,12 @@ async fn insert_browser_session(
     let token_hash = crypto.browser_session_hash(&session_id.to_string(), name)?;
     repo.insert_session(
         InsertBrowserSession {
+            client_environment: None,
             session_id,
             user_id,
             token_prefix: "ngs_v1_test",
             token_hash: &token_hash,
-            validated_until: chrono::Utc::now() + chrono::Duration::hours(1),
+            idle_expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
             expires_at: chrono::Utc::now() + chrono::Duration::days(15),
         },
         "https://auth.example.test",

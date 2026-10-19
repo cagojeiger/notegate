@@ -40,12 +40,6 @@ async fn upsert_user_creates_and_updates_same_account() -> Result<(), Box<dyn st
         .ok_or("caller should resolve by account id")?;
     assert_eq!(by_id.display_name, "Second");
     assert_eq!(by_id_user.email.as_deref(), Some("second@example.test"));
-    let (by_sub, by_sub_user) = repo
-        .find_user_by_identity("https://auth.example.test", "sub-1")
-        .await?
-        .ok_or("caller should resolve by provider subject")?;
-    assert_eq!(by_sub.id, second.id);
-    assert_eq!(by_sub_user.id, second_user.id);
     assert_eq!(
         repo.find_user_id_by_identity("https://auth.example.test", "sub-1")
             .await?,

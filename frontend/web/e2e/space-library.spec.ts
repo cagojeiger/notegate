@@ -375,6 +375,7 @@ async function mockSpaceLibraryApi(page: Page, initial = initialSpaces, canCreat
   let linkReindexRequests = 0;
   const pendingLinkIndexes = new Set<string>();
 
+  await page.route("**/auth/session/activity", (route) => route.fulfill({ status: 204 }));
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
