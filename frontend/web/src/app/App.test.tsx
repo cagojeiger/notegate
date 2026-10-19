@@ -66,11 +66,14 @@ describe("App auth boundary", () => {
   });
 
   it("switches back to the login gate when the workbench signs out", async () => {
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify(meResponse()), { status: 200 }))
-      .mockResolvedValue(
-        new Response(JSON.stringify({ error: "unauthorized", kind: "unauthorized", message: "unauthorized" }), { status: 401 })
-      );
+    let checks = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (path === "/auth/session/activity") return new Response(null, { status: 204 });
+      checks += 1;
+      return checks === 1
+        ? new Response(JSON.stringify(meResponse()), { status: 200 })
+        : new Response(JSON.stringify({ error: "unauthorized", kind: "unauthorized", message: "unauthorized" }), { status: 401 });
+    });
 
     render(<App />);
 

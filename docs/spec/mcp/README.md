@@ -63,5 +63,4 @@ REST/dashboard user API가 Space lifecycle, agent와 API key 관리를 담당한
 - caller identity: [`identity.md`](./identity.md)
 - Space scope: [`spaces.md`](./spaces.md)
 - Tool input/output: [`tools.md`](./tools.md)
-- File entry point: [`files.md`](./files.md)
-- Search entry point: [`search.md`](./search.md)
+- Search semantics: [`../search.md`](../search.md)

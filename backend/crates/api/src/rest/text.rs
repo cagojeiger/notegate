@@ -1,12 +1,3 @@
-//! Text category: read / replace / patch UTF-8 text content.
-//!
-//! `GET /text/{node_id}` (bounded range + conditional read), `PUT` to
-//! replace the whole text, `PATCH` to apply exact targeted edits, and
-//! `PUT /text/{node_id}/encryption` to change server-managed encryption. All
-//! delegate to the files service (no live permission ⇒ 404, insufficient
-//! permission ⇒ 403; write and patch require write permission, while encryption
-//! policy requires the Space owner User).
-
 use axum::extract::{Extension, Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -21,16 +12,15 @@ use crate::rest::dto::{AccountRef, NodeOut, NodeRef, attribution_ids};
 use crate::state::AppState;
 
 use notegate_service::files::{
-    Edit as ServiceEdit, FileMutationContext, NodeView, PatchMode, PatchResult, PatchText,
-    ReadResult, ReadText, ReadTextBody, TextWriteResult, UpdateTextEncryption, WriteTarget,
-    WriteText, WriteTextBody,
+    FileMutationContext, NodeView, ReadResult, ReadText, ReadTextBody, TextWriteResult,
+    UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route(
             "/v1/spaces/{space_id}/text/{node_id}",
-            get(read).put(replace).patch(patch),
+            get(read).put(replace),
         )
         .route(
             "/v1/spaces/{space_id}/text/{node_id}/encryption",
@@ -245,26 +235,6 @@ pub(crate) async fn update_encryption(
     Ok(Json(NodeOut::from_view(&view, &refs)))
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
-pub(crate) struct Edit {
-    old_text: String,
-    new_text: String,
-    #[serde(default)]
-    mode: Option<String>,
-    #[serde(default)]
-    expected_count: Option<usize>,
-}
-
-#[derive(Debug, Deserialize, ToSchema)]
-pub(crate) struct PatchBody {
-    edits: Vec<Edit>,
-    #[serde(default)]
-    expected_sha256: Option<String>,
-    /// Optional editing session or AI operation ID; missing means an independent save.
-    #[serde(default)]
-    edit_session_id: Option<Uuid>,
-}
-
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct TextResponse {
     node: NodeRef,
@@ -280,75 +250,6 @@ pub(crate) struct TextMetaOut {
     line_count: i32,
     updated_by: AccountRef,
     updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct PatchResponse {
-    node: NodeRef,
-    text: PatchTextOut,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct PatchTextOut {
-    node_id: Uuid,
-    storage_format: String,
-    content_sha256: String,
-    byte_len: i64,
-    line_count: i32,
-    previous_sha256: String,
-    edits_applied: usize,
-    diff: String,
-    updated_by: AccountRef,
-    updated_at: DateTime<Utc>,
-}
-
-#[utoipa::path(
-    patch,
-    path = "/api/v1/spaces/{space_id}/text/{node_id}",
-    tag = "text",
-    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
-    request_body = PatchBody,
-    responses((status = 200, description = "Patch text", body = PatchResponse)),
-    security(("browser_session" = []))
-)]
-pub(crate) async fn patch(
-    State(state): State<AppState>,
-    Extension(caller): Extension<notegate_model::Caller>,
-    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
-    Json(body): Json<PatchBody>,
-) -> Result<Json<PatchResponse>, ApiError> {
-    let edits = body
-        .edits
-        .into_iter()
-        .map(|edit| {
-            Ok(ServiceEdit {
-                old_text: edit.old_text,
-                new_text: edit.new_text,
-                mode: parse_patch_mode(edit.mode.as_deref())?,
-                expected_count: edit.expected_count,
-            })
-        })
-        .collect::<Result<Vec<_>, ApiError>>()?;
-
-    let result = state
-        .files
-        .clone()
-        .with_mutation_context(FileMutationContext {
-            edit_session_id: body.edit_session_id,
-            ..FileMutationContext::for_channel(caller.channel)
-        })
-        .patch_text(
-            caller.account_id(),
-            space_id,
-            PatchText {
-                node_id,
-                edits,
-                expected_sha256: body.expected_sha256,
-            },
-        )
-        .await?;
-    let updated_by = self_updated_by(&state, &result.node).await?;
-    Ok(Json(patch_response(&result, updated_by)))
 }
 
 /// Resolve the `updated_by` account ref for a node view.
@@ -425,11 +326,6 @@ fn write_body(
     }
 }
 
-fn parse_patch_mode(raw: Option<&str>) -> Result<PatchMode, ApiError> {
-    PatchMode::parse(raw.unwrap_or("unique"))
-        .ok_or_else(|| ApiError::invalid_field("mode must be 'unique', 'first', or 'all'"))
-}
-
 fn text_response(view: &TextWriteResult, updated_by: AccountRef) -> TextResponse {
     TextResponse {
         node: NodeRef::from(&view.node),
@@ -441,24 +337,6 @@ fn text_response(view: &TextWriteResult, updated_by: AccountRef) -> TextResponse
             line_count: view.text.line_count,
             updated_by,
             updated_at: view.text.updated_at,
-        },
-    }
-}
-
-fn patch_response(result: &PatchResult, updated_by: AccountRef) -> PatchResponse {
-    PatchResponse {
-        node: NodeRef::from(&result.node),
-        text: PatchTextOut {
-            node_id: result.text.node_id,
-            storage_format: result.text.storage_format.as_str().to_owned(),
-            content_sha256: result.text.content_sha256.clone(),
-            byte_len: result.text.byte_len,
-            line_count: result.text.line_count,
-            previous_sha256: result.previous_sha256.clone(),
-            edits_applied: result.edits_applied,
-            diff: result.diff.clone(),
-            updated_by,
-            updated_at: result.text.updated_at,
         },
     }
 }
@@ -497,6 +375,14 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED, "{created}");
         let node: Uuid = serde_json::from_value(created["id"].clone())?;
         let uri = format!("/v1/spaces/{space}/text/{node}");
+        let (status, rejected) = json_request(
+            app.clone(),
+            "PATCH",
+            uri.clone(),
+            json!({"edits": [{"old_text": "unchanged", "new_text": "changed"}]}),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED, "{rejected}");
         let (status, before) = get_json(app.clone(), uri.clone()).await?;
         assert_eq!(status, StatusCode::OK, "{before}");
         let hash = before["text"]["content_sha256"]

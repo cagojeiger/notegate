@@ -78,6 +78,7 @@ pub(super) async fn callback(
     code: Option<String>,
     query_state: Option<String>,
     error: Option<String>,
+    user_agent: Option<&str>,
 ) -> Response {
     let Some(id) = query_state.and_then(|s| Uuid::parse_str(&s).ok()) else {
         return invalid();
@@ -126,7 +127,7 @@ pub(super) async fn callback(
                 .into_response();
         }
     };
-    super::oauth::complete_login(state, jar, user, flow.next).await
+    super::oauth::complete_login(state, jar, user, flow.next, user_agent).await
 }
 
 async fn consume(

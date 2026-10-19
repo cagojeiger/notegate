@@ -110,8 +110,145 @@ async fn exchange(
     code: &str,
     time: DateTime<Utc>,
 ) -> notegate_core::Result<TokenOutcome> {
-    svc.exchange_code(code, CLIENT, RESOURCE, REDIRECT, VERIFIER, time)
+    svc.exchange_code(code, CLIENT, RESOURCE, REDIRECT, VERIFIER, time, None)
         .await
+}
+
+#[tokio::test]
+async fn connection_management_preserves_environment_and_bulk_revoke_wins_over_refresh()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "connection-management", "user@test").await?;
+    let svc = service(&db);
+    let t = now();
+    approved(&db, user, "managed", "mcp offline_access", t).await?;
+    let tokens = issued(
+        svc.exchange_code(
+            "managed",
+            CLIENT,
+            RESOURCE,
+            REDIRECT,
+            VERIFIER,
+            t,
+            Some("Firefox on Linux"),
+        )
+        .await?,
+    );
+    let grant = svc.store.list_grants(user, t).await?.remove(0);
+    assert_eq!(
+        grant.client_environment.as_deref(),
+        Some("Firefox on Linux")
+    );
+    assert_eq!(grant.last_token_at, Some(t));
+    let metadata: serde_json::Value = sqlx::query_scalar(
+        "SELECT metadata FROM audit_events WHERE resource_id=$1 AND op_type='oauth.approve'",
+    )
+    .bind(grant.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(metadata["client_environment"], "Firefox on Linux");
+    let refreshed = issued(
+        svc.refresh(
+            tokens.refresh_token.as_deref().unwrap(),
+            CLIENT,
+            RESOURCE,
+            t + Duration::seconds(1),
+        )
+        .await?,
+    );
+    let grant = svc.store.list_grants(user, t).await?.remove(0);
+    assert_eq!(
+        grant.client_environment.as_deref(),
+        Some("Firefox on Linux")
+    );
+    assert_eq!(grant.last_token_at, Some(t + Duration::seconds(1)));
+    let refresh = svc.refresh(
+        refreshed.refresh_token.as_deref().unwrap(),
+        CLIENT,
+        RESOURCE,
+        t + Duration::seconds(2),
+    );
+    let revoke = svc
+        .store
+        .revoke_owned_grants(user, "mcp", t + Duration::seconds(2));
+    let (refresh, revoked) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        tokio::join!(refresh, revoke)
+    })
+    .await?;
+    revoked?;
+    assert_eq!(
+        svc.access_user(
+            &tokens.access_token,
+            RESOURCE,
+            "mcp",
+            t + Duration::seconds(3)
+        )
+        .await?,
+        None
+    );
+    if let TokenOutcome::Issued(tokens) = refresh? {
+        assert_eq!(
+            svc.access_user(
+                &tokens.access_token,
+                RESOURCE,
+                "mcp",
+                t + Duration::seconds(3)
+            )
+            .await?,
+            None
+        );
+        rejected(
+            svc.refresh(
+                tokens.refresh_token.as_deref().unwrap(),
+                CLIENT,
+                RESOURCE,
+                t + Duration::seconds(3),
+            )
+            .await?,
+            "invalid_grant",
+        );
+    }
+    svc.store
+        .revoke_owned_grants(user, "mcp", t + Duration::seconds(3))
+        .await?;
+    let revokes: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE resource_id=$1 AND op_type='oauth.revoke'",
+    )
+    .bind(grant.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(revokes, 1);
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn bulk_oauth_revocation_preserves_all_connections_when_audit_fails()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "bulk-rollback", "user@test").await?;
+    let svc = service(&db);
+    let t = now();
+    approved(&db, user, "first", "mcp offline_access", t).await?;
+    let first = issued(exchange(&svc, "first", t).await?);
+    approved(&db, user, "second", "mcp offline_access", t).await?;
+    let second = issued(exchange(&svc, "second", t).await?);
+    sqlx::query("ALTER TABLE audit_events ADD CONSTRAINT test_oauth_revoke_audit CHECK(op_type<>'oauth.revoke') NOT VALID").execute(&db.pool).await?;
+    assert!(svc.store.revoke_owned_grants(user, "mcp", t).await.is_err());
+    for tokens in [&first, &second] {
+        assert_eq!(
+            svc.access_user(&tokens.access_token, RESOURCE, "mcp", t)
+                .await?,
+            Some(user)
+        );
+    }
+    assert_eq!(svc.store.list_grants(user, t).await?.len(), 2);
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
@@ -137,7 +274,7 @@ async fn authorization_code_is_browser_pkce_client_redirect_and_resource_bound()
         ),
     ] {
         rejected(
-            svc.exchange_code("code", client, resource, redirect, verifier, t)
+            svc.exchange_code("code", client, resource, redirect, verifier, t, None)
                 .await?,
             "invalid_grant",
         );
@@ -381,12 +518,12 @@ async fn device_pending_slowdown_approval_and_single_use() -> Result<(), Box<dyn
         .await?;
     assert_eq!(device.interval, 5);
     rejected(
-        svc.poll_device(&device.device_code, "wrong", resource, t)
+        svc.poll_device(&device.device_code, "wrong", resource, t, None)
             .await?,
         "invalid_grant",
     );
     rejected(
-        svc.poll_device(&device.device_code, "cli", resource, t)
+        svc.poll_device(&device.device_code, "cli", resource, t, None)
             .await?,
         "authorization_pending",
     );
@@ -396,6 +533,7 @@ async fn device_pending_slowdown_approval_and_single_use() -> Result<(), Box<dyn
             "cli",
             resource,
             t + Duration::seconds(1),
+            None,
         )
         .await?,
         "slow_down",
@@ -419,6 +557,7 @@ async fn device_pending_slowdown_approval_and_single_use() -> Result<(), Box<dyn
             "cli",
             resource,
             t + Duration::seconds(11),
+            None,
         )
         .await?,
     );
@@ -438,6 +577,7 @@ async fn device_pending_slowdown_approval_and_single_use() -> Result<(), Box<dyn
             "cli",
             resource,
             t + Duration::seconds(30),
+            None,
         )
         .await?,
         "invalid_grant",
@@ -468,7 +608,7 @@ async fn device_denial_and_expiry_never_issue_tokens() -> Result<(), Box<dyn std
             .await?
     );
     rejected(
-        svc.poll_device(&denied.device_code, "cli", RESOURCE, t)
+        svc.poll_device(&denied.device_code, "cli", RESOURCE, t, None)
             .await?,
         "access_denied",
     );
@@ -491,6 +631,7 @@ async fn device_denial_and_expiry_never_issue_tokens() -> Result<(), Box<dyn std
             "cli",
             RESOURCE,
             t + Duration::seconds(300),
+            None,
         )
         .await?,
         "expired_token",

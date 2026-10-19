@@ -5,6 +5,7 @@ import { ApiError } from "../api/errors";
 import type { Me } from "../api/types";
 import { LoginGate } from "../auth/LoginGate";
 import { useSessionQuery } from "../auth/useAuthQueries";
+import { useBrowserSessionActivity } from "../auth/useBrowserSessionActivity";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
 import { Button } from "../shared/ui";
 import { useUiStore } from "../stores/uiStore";
@@ -50,6 +51,7 @@ function AuthBoundary({
     isLoading: meQuery.isLoading,
     session: me
   });
+  useBrowserSessionActivity(authViewState.kind === "authenticated", onSessionChanged);
 
   if (authViewState.kind === "checking") return <FullScreenStatus label="Checking session" />;
 

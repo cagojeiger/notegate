@@ -4,6 +4,7 @@ import type { Me } from "../../api/types";
 import { Button, Card, SectionHeader } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
 import { EndpointRow } from "./EndpointRow";
+import { AuthAccessManager } from "./AuthAccessManager";
 
 export function AccountTab({ me, onSignOut }: { me: Me | undefined; onSignOut: () => void }) {
   const theme = useUiStore((state) => state.theme);
@@ -33,10 +34,10 @@ export function AccountTab({ me, onSignOut }: { me: Me | undefined; onSignOut: (
         <Card className="space-y-3 text-sm">
           <EndpointRow label="Server URL" value={`${origin}/mcp`} copyLabel="Copy user MCP server URL" />
           <p className="text-xs leading-5 text-muted">Your MCP client opens browser login and requests access as your user account.</p>
-          {me?.oauth_connections_url ? <a href={me.oauth_connections_url} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-4">Manage connected applications</a> : null}
         </Card>
       </section>
 
+      {me?.account.kind === "user" ? <AuthAccessManager onSignOut={onSignOut} /> : null}
       <Button variant="danger" className="w-full" onClick={onSignOut}>Sign out</Button>
     </div>
   );

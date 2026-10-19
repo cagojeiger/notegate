@@ -716,6 +716,7 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
             Request::builder()
                 .uri(&callback)
                 .header(header::COOKIE, &cookie)
+                .header(header::USER_AGENT, "Macintosh Chrome/130 Safari/537")
                 .body(Body::empty())?,
         )
         .await?;
@@ -770,8 +771,16 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
         .await?
         .unwrap();
     assert_eq!(stored.oidc_issuer.as_deref(), Some(mock.issuer.as_str()));
-    assert!(stored.validated_until > chrono::Utc::now());
-    assert!(stored.validated_until <= stored.expires_at);
+    let environment: Option<String> =
+        sqlx::query_scalar("SELECT client_environment FROM browser_sessions WHERE id=$1")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(environment.as_deref(), Some("Chrome on macOS"));
+    let audit_environment: Option<String> = sqlx::query_scalar("SELECT metadata->>'client_environment' FROM audit_events WHERE resource_id=$1 AND op_type='session.login'").bind(id).fetch_one(&db.pool).await?;
+    assert_eq!(audit_environment, environment);
+    assert!(stored.idle_expires_at > chrono::Utc::now());
+    assert!(stored.idle_expires_at <= stored.expires_at);
     let before = mock.counts();
     let replay = router
         .clone()
@@ -785,7 +794,7 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
     assert_eq!(replay.status(), StatusCode::BAD_REQUEST);
     assert_eq!(mock.counts(), before);
     sqlx::query(
-        "UPDATE browser_sessions SET validated_until=now()-interval '1 second' WHERE id=$1",
+        "UPDATE browser_sessions SET idle_expires_at=now()-interval '1 second' WHERE id=$1",
     )
     .bind(id)
     .execute(&db.pool)
@@ -809,6 +818,7 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
             email: Some("test@example.test".to_owned()),
             name: Some("Duplicate".to_owned()),
         },
+        None,
         None,
     )
     .await;
