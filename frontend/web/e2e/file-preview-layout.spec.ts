@@ -112,7 +112,7 @@ for (const viewport of [
     await pdfPreview.getByRole("button", { name: "Next page" }).click();
     await expect(pageInput).toHaveValue("2");
     await pdfPreview.getByRole("button", { name: "Zoom in" }).click();
-    await expect(pdfPreview.getByRole("button", { name: "Reset zoom" })).toHaveText("125%");
+    await expect(pdfPreview.getByRole("button", { name: "Reset zoom: 125%", exact: true })).toHaveText("125%");
     await expectNoAccessibilityViolations(page);
 
     if (viewport.mobile) {

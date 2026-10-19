@@ -38,17 +38,17 @@ describe("TrashModal", () => {
       return response(restored ? [item] : [item, second]);
     });
     show();
-    expect(await screen.findByRole("button", { name: "Select note.md" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Select note.md" })).toHaveAccessibleDescription(/Daily · \/notes\/note.md.*Recoverable/);
+    expect(await screen.findByRole("button", { name: /^Select note\.md\b/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /^Select note\.md\b/ })).toHaveAccessibleName(/Daily · \/notes\/note.md.*Recoverable/);
     expect(screen.queryByRole("button", { name: "Restore second.md" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Select second.md" }));
-    expect(screen.getByRole("button", { name: "Select second.md" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: /^Select second\.md\b/ }));
+    expect(screen.getByRole("button", { name: /^Select second\.md\b/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("button", { name: "Restore note.md" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Details for second.md" })).toHaveTextContent("/notes/second.md");
     await user.click(screen.getByRole("button", { name: "Restore second.md" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Select second.md" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Select second\.md\b/ })).not.toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Restore note.md" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Select note.md" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: /^Select note\.md\b/ })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("status")).toHaveTextContent("Restored “second.md”");
     expect(screen.getByRole("status")).toHaveFocus();
     const requests = fetchMock.mock.calls.filter(([, options]) => options?.method === "POST");
@@ -69,7 +69,7 @@ describe("TrashModal", () => {
       return response([{ ...item, recoverable: !queued, deletion_pending: queued }]);
     });
     show();
-    await screen.findByRole("button", { name: "Select note.md" });
+    await screen.findByRole("button", { name: /^Select note\.md\b/ });
     await user.click(screen.getByRole("button", { name: "Permanently delete note.md" }));
     expect(fetchMock.mock.calls.some(([, options]) => options?.method === "DELETE")).toBe(false);
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
@@ -114,8 +114,8 @@ describe("TrashModal", () => {
     show();
     await user.click(await screen.findByRole("button", { name: "Permanently delete note.md" }));
     await user.click(screen.getByRole("button", { name: /^Permanently delete$/ }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Select note.md" })).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Select other.md" })).toHaveAttribute("aria-pressed", "false");
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Select note\.md\b/ })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /^Select other\.md\b/ })).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByRole("button", { name: "Permanently delete other.md" })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Permanent deletion requested");
   });
@@ -128,7 +128,7 @@ describe("TrashModal", () => {
     show();
     await user.click(await screen.findByRole("button", { name: "Restore note.md" }));
     await screen.findByRole("alert");
-    expect(screen.getByRole("button", { name: "Select note.md" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Select note\.md\b/ })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Restore note.md" })).toBeEnabled());
   });
 
@@ -157,11 +157,11 @@ describe("TrashModal", () => {
     });
     show();
     await user.click(await screen.findByRole("button", { name: "Load more" }));
-    await user.click(await screen.findByRole("button", { name: "Select second.md" }));
+    await user.click(await screen.findByRole("button", { name: /^Select second\.md\b/ }));
     await user.click(screen.getByRole("button", { name: "Restore second.md" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Select second.md" })).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Select third.md" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Select third.md" })).toHaveAttribute("aria-pressed", "false");
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Select second\.md\b/ })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /^Select third\.md\b/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Select third\.md\b/ })).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("cursor=next-page"))).toHaveLength(2);
   });
@@ -174,7 +174,7 @@ describe("TrashModal", () => {
     });
     let cache: QueryClient | undefined;
     show((client) => { cache = client; });
-    await screen.findByRole("button", { name: "Select note.md" });
+    await screen.findByRole("button", { name: /^Select note\.md\b/ });
     if (!cache) throw new Error("query client missing");
     cache.setQueryData(queryKeys.connections(item.space_id), { connections: ["old-agent"] });
     cache.setQueryData(queryKeys.node(item.space_id, "child"), { id: "child" });
@@ -199,7 +199,7 @@ describe("TrashModal", () => {
     show();
     await user.click(await screen.findByRole("button", { name: "Permanently delete note.md" }));
     await user.click(screen.getByRole("button", { name: /^Permanently delete$/ }));
-    await screen.findByRole("button", { name: "Select new-note.md" });
+    await screen.findByRole("button", { name: /^Select new-note\.md\b/ });
     expect(screen.getByRole("alert")).toHaveTextContent("Trash entry has changed");
     expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "DELETE")).toHaveLength(1);
   });

@@ -42,7 +42,7 @@ test("long Korean Space names stay within the mobile card", async ({ page }) => 
 
   const card = page.getByRole("list", { name: "All spaces" }).getByRole("listitem");
   const inspect = card.getByRole("button", { name: `Inspect ${name}` });
-  const title = inspect.locator("span").first();
+  const title = inspect.locator("[data-space-name]");
   await expect(inspect).toBeVisible();
   expect(await title.evaluate((element) => {
     const style = getComputedStyle(element);
@@ -479,10 +479,7 @@ async function respond(
 }
 
 async function cardNames(grid: ReturnType<Page["getByRole"]>) {
-  return grid.getByRole("listitem").evaluateAll((items) => items.flatMap((item) => {
-    const inspect = item.querySelector<HTMLButtonElement>('button[aria-label^="Inspect "]');
-    return inspect ? [inspect.getAttribute("aria-label")!.replace(/^Inspect /, "")] : [];
-  }));
+  return grid.locator("[data-space-name]").allTextContents();
 }
 
 async function typography(locator: ReturnType<Page["getByRole"]>) {

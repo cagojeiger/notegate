@@ -178,7 +178,7 @@ describe("SpaceLibrary", () => {
 
     expect(onCreateSpace).toHaveBeenCalledTimes(1);
     expect(mocks.reorder).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Inspect Daily" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /^Inspect Daily\b/ })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("offers the first creation card in an empty library", async () => {
@@ -239,11 +239,11 @@ describe("SpaceLibrary", () => {
       spaceId: "private",
       navigation_pinned: true
     });
-    expect(screen.getByRole("button", { name: "Inspect Daily" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Inspect Private" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: /^Inspect Daily\b/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /^Inspect Private\b/ })).toHaveAttribute("aria-pressed", "false");
 
     await user.click(screen.getByTitle("MCP & API access default off"));
-    expect(screen.getByRole("button", { name: "Inspect Private" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /^Inspect Private\b/ })).toHaveAttribute("aria-pressed", "true");
   });
 
   it.each([
@@ -259,7 +259,7 @@ describe("SpaceLibrary", () => {
     const user = userEvent.setup();
     renderLibrary();
 
-    await user.click(screen.getByRole("button", { name: "Inspect Private" }));
+    await user.click(screen.getByRole("button", { name: /^Inspect Private\b/ }));
     expect(screen.getByRole("switch", { name: "User MCP access" })).not.toBeChecked();
     expect(screen.getByRole("switch", { name: "MCP & API access" })).not.toBeChecked();
     expect(screen.getByRole("switch", { name: "Text encryption" })).toBeDisabled();
@@ -299,7 +299,7 @@ describe("SpaceLibrary", () => {
     renderLibrary({ isMobile: true });
 
     expect(screen.queryByText("Space Inspector")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Inspect Private" }));
+    await user.click(screen.getByRole("button", { name: /^Inspect Private\b/ }));
 
     expect(screen.getByRole("dialog", { name: "Space Inspector" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Close" }));
