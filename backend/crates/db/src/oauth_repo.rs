@@ -285,13 +285,12 @@ impl OAuthRepo {
             .await
             .map_err(map_sqlx_error)?;
         let grant: OAuthGrant = sqlx::query_as(
-            "UPDATE oauth_grants SET idle_expires_at=LEAST(expires_at,$2), last_token_at=$3, \
-             client_environment=COALESCE(client_environment,$4) WHERE id=$1 RETURNING *",
+            "UPDATE oauth_grants SET idle_expires_at=LEAST(expires_at,$2), last_token_at=$3 \
+             WHERE id=$1 RETURNING *",
         )
         .bind(id)
         .bind(issue.idle_expires_at)
         .bind(now)
-        .bind(issue.client_environment)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
