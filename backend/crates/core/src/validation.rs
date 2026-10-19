@@ -72,21 +72,6 @@ pub fn validate_space_name(name: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
-/// Validate a folder name with the shared node-name rule.
-pub fn validate_folder_name(name: &str) -> Result<(), ValidationError> {
-    validate_node_name(name)
-}
-
-/// Validate a text name with the shared node-name rule.
-pub fn validate_text_name(name: &str) -> Result<(), ValidationError> {
-    validate_node_name(name)
-}
-
-/// Validate a file name with the shared node-name rule.
-pub fn validate_file_name(name: &str) -> Result<(), ValidationError> {
-    validate_node_name(name)
-}
-
 /// Validate a bare node name.
 ///
 /// Node names are Unicode-friendly and may contain internal spaces. `/` remains
@@ -193,11 +178,11 @@ mod tests {
     }
 
     #[test]
-    fn folder_text_and_file_names_share_node_rules() {
-        assert!(validate_folder_name("notes").is_ok());
-        assert!(validate_folder_name("회의 자료").is_ok());
-        assert!(validate_text_name("상태.json").is_ok());
-        assert!(validate_file_name("이미지.png").is_ok());
+    fn node_names_allow_unicode_and_extensions() {
+        assert!(validate_node_name("notes").is_ok());
+        assert!(validate_node_name("회의 자료").is_ok());
+        assert!(validate_node_name("상태.json").is_ok());
+        assert!(validate_node_name("이미지.png").is_ok());
     }
 
     #[test]

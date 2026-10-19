@@ -274,7 +274,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     let projects_id = projects.node.id;
 
     // Node metadata is readable but managed by the system.
-    let read_metadata = files.read_metadata(owner, ws, projects_id).await?;
+    let read_metadata = files.stat(owner, ws, projects_id).await?.node.metadata;
     assert_eq!(read_metadata, json!({}));
 
     // --- touch: /projects/note.md ---

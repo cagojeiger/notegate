@@ -1473,8 +1473,9 @@ async fn dead_projection_job_is_recorded_and_manual_sync_reactivates_the_node()
     assert_eq!(max_attempts, 8);
     mark_job_dead(&db.pool, first_job_id).await?;
     let terminal_state = LinkGraphRepo::new(db.pool.clone())
-        .state(space_id, source.id)
-        .await?;
+        .node_read_model(space_id, source.id)
+        .await?
+        .state;
     assert_eq!(terminal_state.status, NodeLinkGraphStatus::Failed);
     assert_eq!(
         terminal_state.failure_code.as_deref(),
@@ -1547,8 +1548,9 @@ async fn dead_projection_job_is_recorded_and_manual_sync_reactivates_the_node()
     assert_eq!(reactivated.3, None);
     assert_eq!(reactivated.4, None);
     let reactivated_state = LinkGraphRepo::new(db.pool.clone())
-        .state(space_id, source.id)
-        .await?;
+        .node_read_model(space_id, source.id)
+        .await?
+        .state;
     assert_eq!(reactivated_state.status, NodeLinkGraphStatus::Syncing);
     assert_eq!(reactivated_state.failure_code, None);
 
@@ -1568,8 +1570,9 @@ async fn dead_projection_job_is_recorded_and_manual_sync_reactivates_the_node()
     .await?;
     assert_ne!(full_reindex_job_id, reactivated.1);
     let full_reindex_state = LinkGraphRepo::new(db.pool.clone())
-        .state(space_id, source.id)
-        .await?;
+        .node_read_model(space_id, source.id)
+        .await?
+        .state;
     assert_eq!(full_reindex_state.status, NodeLinkGraphStatus::Syncing);
     assert_eq!(full_reindex_state.failure_code, None);
 
@@ -1605,7 +1608,7 @@ async fn pending_space_changes_do_not_mask_an_older_text_failure()
     .execute(&db.pool)
     .await?;
 
-    let failed_while_space_pending = graph.state(space_id, source.id).await?;
+    let failed_while_space_pending = graph.node_read_model(space_id, source.id).await?.state;
     assert_eq!(
         failed_while_space_pending.status,
         NodeLinkGraphStatus::Failed
@@ -1616,7 +1619,7 @@ async fn pending_space_changes_do_not_mask_an_older_text_failure()
     );
     assert!(failed_while_space_pending.failed_at.is_some());
     assert!(failed_while_space_pending.space_pending);
-    let root_while_space_pending = graph.state(space_id, root_id).await?;
+    let root_while_space_pending = graph.node_read_model(space_id, root_id).await?.state;
     assert_eq!(root_while_space_pending.status, NodeLinkGraphStatus::Idle);
     assert!(root_while_space_pending.space_pending);
 
@@ -1630,12 +1633,12 @@ async fn pending_space_changes_do_not_mask_an_older_text_failure()
     .bind(space_id)
     .execute(&db.pool)
     .await?;
-    let failed = graph.state(space_id, source.id).await?;
+    let failed = graph.node_read_model(space_id, source.id).await?.state;
     assert_eq!(failed.status, NodeLinkGraphStatus::Failed);
     assert_eq!(failed.failure_code.as_deref(), Some("previous_failure"));
     assert!(failed.failed_at.is_some());
     assert!(!failed.space_pending);
-    let idle_root = graph.state(space_id, root_id).await?;
+    let idle_root = graph.node_read_model(space_id, root_id).await?.state;
     assert_eq!(idle_root.status, NodeLinkGraphStatus::Idle);
     assert!(!idle_root.space_pending);
 
@@ -1798,7 +1801,7 @@ async fn unfinished_projection_keeps_space_relation_state_pending()
     .execute(&db.pool)
     .await?;
 
-    let pending = graph.state(space_id, root_id).await?;
+    let pending = graph.node_read_model(space_id, root_id).await?.state;
     assert_eq!(pending.status, NodeLinkGraphStatus::Idle);
     assert!(pending.space_pending);
 
@@ -1810,7 +1813,7 @@ async fn unfinished_projection_keeps_space_relation_state_pending()
     .bind(source.id)
     .execute(&db.pool)
     .await?;
-    let idle = graph.state(space_id, root_id).await?;
+    let idle = graph.node_read_model(space_id, root_id).await?.state;
     assert_eq!(idle.status, NodeLinkGraphStatus::Idle);
     assert!(!idle.space_pending);
 
@@ -2753,7 +2756,7 @@ async fn unsettled_succeeded_projection_keeps_reindex_pending()
     .execute(&db.pool)
     .await?;
 
-    let node_state = graph.state(space_id, source_id).await?;
+    let node_state = graph.node_read_model(space_id, source_id).await?.state;
     assert_eq!(node_state.status, NodeLinkGraphStatus::Failed);
     assert!(node_state.space_pending);
     assert_eq!(work.space_pending(space_id).await?, Some(true));

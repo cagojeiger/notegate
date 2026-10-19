@@ -81,20 +81,6 @@ impl LinkGraphService {
         Self { store, files, work }
     }
 
-    pub async fn node_state(
-        &self,
-        caller_account_id: Uuid,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> ServiceResult<NodeLinkGraphState> {
-        self.require_visible_node(caller_account_id, space_id, node_id)
-            .await?;
-        self.store
-            .state(space_id, node_id)
-            .await
-            .map_err(ServiceError::from)
-    }
-
     pub async fn node_view(
         &self,
         caller: &Caller,

@@ -234,33 +234,18 @@ function restoreRestNodeForSpace(value: unknown, spaceId: string): RestNode | nu
     !Array.isArray(node.metadata) &&
     typeof node.has_children === "boolean" &&
     typeof node.external_access_enabled === "boolean" &&
+    typeof node.write_locked === "boolean" &&
+    typeof node.effective_write_locked === "boolean" &&
+    Array.isArray(node.write_lock_sources) &&
+    node.write_lock_sources.every(source => (
+      source && typeof source.node_id === "string" && typeof source.name === "string" && typeof source.path === "string"
+    )) &&
     isAccountRef(node.created_by) &&
     isAccountRef(node.updated_by) &&
     typeof node.created_at === "string" &&
     typeof node.updated_at === "string"
   );
-  if (!valid) return null;
-  const writeLockSources = readWriteLockSources(node.write_lock_sources);
-  const writeLocked = typeof node.write_locked === "boolean" ? node.write_locked : false;
-  return {
-    ...node,
-    write_locked: writeLocked,
-    effective_write_locked: typeof node.effective_write_locked === "boolean"
-      ? node.effective_write_locked
-      : writeLocked || writeLockSources.length > 0,
-    write_lock_sources: writeLockSources
-  } as RestNode;
-}
-
-function readWriteLockSources(value: unknown): RestNode["write_lock_sources"] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((source): source is RestNode["write_lock_sources"][number] => (
-    Boolean(source)
-    && typeof source === "object"
-    && typeof (source as { node_id?: unknown }).node_id === "string"
-    && typeof (source as { name?: unknown }).name === "string"
-    && typeof (source as { path?: unknown }).path === "string"
-  ));
+  return valid ? node as RestNode : null;
 }
 
 function isAccountRef(value: unknown): boolean {

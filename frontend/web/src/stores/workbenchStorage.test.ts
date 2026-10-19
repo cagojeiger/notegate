@@ -5,16 +5,12 @@ import { makeRestNode } from "../test/fixtures";
 import { MAX_WORKBENCH_SNAPSHOTS, WORKBENCH_INDEX_KEY, WORKBENCH_PANEL_STATE_KEY, clearPersistedSpaceWorkbench, clearPersistedWorkbenches, persistSpaceWorkbench, persistWorkbenchPanelState, restoreSpaceWorkbench, workbenchSpaceKey } from "./workbenchStorage";
 
 describe("workbenchStorage", () => {
-  it("restores compatible nodes and rejects nodes from the wrong space or malformed snapshots", () => {
+  it("restores current nodes and rejects nodes from the wrong space or malformed snapshots", () => {
     const first = node("node-1");
-    const legacyFirst: Partial<RestNode> = { ...first };
-    delete legacyFirst.write_locked;
-    delete legacyFirst.effective_write_locked;
-    delete legacyFirst.write_lock_sources;
     const wrongSpaceNode = node("node-2", "wrong.md", "other-space");
     const malformedNode = { ...node("node-3"), created_by: undefined };
     saveSnapshot([
-      { node: legacyFirst, mode: "edit" },
+      { node: first, mode: "edit" },
       { node: wrongSpaceNode, mode: "edit" },
       { node: malformedNode, mode: "edit" }
     ], 9);
@@ -49,20 +45,19 @@ describe("workbenchStorage", () => {
     expect(restoreSpaceWorkbench("space-1", 0).editorGroups[0]?.node?.external_access_enabled).toBe(false);
   });
 
-  it("derives effective write-lock state when restoring an older snapshot", () => {
-    const first = node("node-1");
-    const legacyLocked: Partial<RestNode> = {
-      ...first,
-      write_locked: false,
-      write_lock_sources: [{ node_id: "folder-1", name: "Policies", path: "/Policies" }]
-    };
-    delete legacyLocked.effective_write_locked;
-    saveSnapshot([{ node: legacyLocked, mode: "preview" }]);
+  it.each(["write_locked", "effective_write_locked", "write_lock_sources"] as const)(
+    "drops an older node snapshot without %s while preserving current panes",
+    (field) => {
+      const current = node("current");
+      const older: Partial<RestNode> = { ...node("older") };
+      delete older[field];
+      saveSnapshot([{ node: older, mode: "edit" }, { node: current, mode: "edit" }]);
 
-    const state = restoreSpaceWorkbench("space-1", 0);
-
-    expect(state.editorGroups[0]?.node?.effective_write_locked).toBe(true);
-  });
+      const state = restoreSpaceWorkbench("space-1", 0);
+      expect(state.editorGroups[0]).toMatchObject({ node: null, mode: "preview" });
+      expect(state.editorGroups[1]).toMatchObject({ node: current, mode: "edit" });
+    }
+  );
 
   it("restores valid navigation history and drops entries from other spaces", () => {
     saveSnapshot([{

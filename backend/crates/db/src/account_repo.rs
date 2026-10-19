@@ -487,28 +487,6 @@ impl AccountRepo {
         Ok((account, user_row.into_user(&self.crypto)?))
     }
 
-    pub async fn find_user_by_identity(
-        &self,
-        issuer: &str,
-        sub: &str,
-    ) -> Result<Option<(Account, User)>> {
-        let subject_hash = self.crypto.provider_sub_hash(issuer, sub)?;
-        let row = sqlx::query_as::<_, UserCallerRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT {USER_CALLER_COLUMNS} \
-             FROM accounts a \
-             JOIN users u ON u.id = a.id \
-             WHERE a.id IN ({})",
-            account_identity::USER_ID_BY_IDENTITY
-        )))
-        .bind(issuer)
-        .bind(subject_hash)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        row.map(|row| row.into_parts(&self.crypto)).transpose()
-    }
-
     /// Resolve only the local user id for subject-equality checks. This avoids
     /// loading and decrypting caller PII.
     pub async fn find_user_id_by_identity(&self, issuer: &str, sub: &str) -> Result<Option<Uuid>> {
