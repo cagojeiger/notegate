@@ -37,7 +37,7 @@ services:
     restart: "no"
 
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: notegate
       POSTGRES_PASSWORD: notegate
@@ -45,7 +45,7 @@ services:
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U notegate"]
       interval: 5s
