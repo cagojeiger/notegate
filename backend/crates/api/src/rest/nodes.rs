@@ -4,7 +4,6 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use notegate_model::{Caller, NodeKind};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
