@@ -81,7 +81,7 @@ Settings → Account의 **Manage connected applications**는 `/oauth/connections
 - `/cli`: CLI resource용 user OAuth bearer만 허용.
 - Swagger는 브라우저 세션으로 열지만 실제 V2 호출에는 별도 Agent key가 필요하다.
 
-Auth endpoint는 IP별 10 req/s, burst 30 제한을 공유하며 기존 전체 ingress 제한도 적용한다. 일반 문서 API 요청에는 이 추가 auth 제한을 적용하지 않는다.
+로그인·콜백·로그아웃과 OAuth endpoint는 프로세스별 10 req/s, burst 30 제한을 공유하며 기존 전체 ingress 제한도 적용한다. 일반 문서 API와 `/auth/session/activity`는 별도의 browser V1 제한을 공유하므로 활동 기록이 로그인 제한의 용량을 소모하지 않는다.
 
 ## 설정과 운영
 
