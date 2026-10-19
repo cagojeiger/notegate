@@ -24,6 +24,9 @@ pub fn routes() -> Router<AppState> {
             get(list_grants).delete(revoke_grants),
         )
         .route("/v1/me/oauth-grants/{id}", delete(revoke_grant))
+        .layer(axum::middleware::from_fn(
+            crate::auth::mark_private_no_store,
+        ))
 }
 
 #[derive(Serialize, ToSchema)]

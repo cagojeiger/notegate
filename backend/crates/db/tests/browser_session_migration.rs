@@ -129,6 +129,9 @@ async fn removing_session_marker_preserves_tokens_issuers_and_owned_data() -> Te
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(unknown, 0);
+    let unknown: i64 = sqlx::query_scalar("SELECT count(*) FROM oauth_grants WHERE client_environment IS NOT NULL OR last_token_at IS NOT NULL")
+        .fetch_one(&db.pool).await?;
+    assert_eq!(unknown, 0);
     notegate_db::check_readiness(&db.pool).await?;
     let sessions = BrowserSessionRepo::new(db.pool.clone());
     for (id, expected_issuer) in [(current, Some(issuer)), (unbound, None)] {

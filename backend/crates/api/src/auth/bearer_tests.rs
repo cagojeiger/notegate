@@ -460,15 +460,45 @@ async fn session_management_is_owner_scoped_and_revokes_browser_cli_and_mcp_acce
                 header::COOKIE,
                 format!("{BROWSER_SESSION_COOKIE}={current}"),
             )
-            .header(header::ORIGIN, "https://api.example.test")
+            .header(header::ORIGIN, state.config.notegate_public_url.as_str())
             .body(Body::empty())
     };
+    let mcp_request = || {
+        Request::builder()
+            .method("POST")
+            .uri("/mcp")
+            .header(header::HOST, "localhost")
+            .header(ACCEPT, "application/json, text/event-stream")
+            .header(CONTENT_TYPE, "application/json")
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", mcp.access_token),
+            )
+            .body(Body::from(MCP_INITIALIZE_REQUEST))
+    };
+    let cli_call = || {
+        cli_request()
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", cli.access_token),
+            )
+            .body(cli_body("me", json!({})))
+    };
+    assert_eq!(
+        router.clone().oneshot(mcp_request()?).await?.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        router.clone().oneshot(cli_call()?).await?.status(),
+        StatusCode::OK
+    );
 
     let response = router
         .clone()
         .oneshot(request("GET", "/api/v1/me/sessions")?)
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[CACHE_CONTROL], "private, no-store");
     let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), 32_000).await?)?;
     let sessions = body["sessions"].as_array().unwrap();
     assert_eq!(sessions.len(), 2);
@@ -584,6 +614,7 @@ async fn session_management_is_owner_scoped_and_revokes_browser_cli_and_mcp_acce
         .oneshot(request("GET", "/api/v1/me/oauth-grants")?)
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[CACHE_CONTROL], "private, no-store");
     let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), 32_000).await?)?;
     let grants = body["grants"].as_array().unwrap();
     assert_eq!(grants.len(), 2);
@@ -624,6 +655,10 @@ async fn session_management_is_owner_scoped_and_revokes_browser_cli_and_mcp_acce
             .access_user(&cli.access_token, &cli_resource, "cli", Utc::now())
             .await?,
         None
+    );
+    assert_eq!(
+        router.clone().oneshot(cli_call()?).await?.status(),
+        StatusCode::UNAUTHORIZED
     );
     assert!(matches!(
         state
@@ -668,6 +703,10 @@ async fn session_management_is_owner_scoped_and_revokes_browser_cli_and_mcp_acce
             )
             .await?,
         None
+    );
+    assert_eq!(
+        router.clone().oneshot(mcp_request()?).await?.status(),
+        StatusCode::UNAUTHORIZED
     );
     assert!(matches!(
         state

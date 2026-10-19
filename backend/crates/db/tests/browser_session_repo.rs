@@ -296,6 +296,23 @@ async fn concurrent_browser_activity_never_undoes_logout() -> Result<(), Box<dyn
         audit_op_types(&db, user).await?,
         ["session.login", "session.logout"]
     );
+    let (remote_id, remote_hash) = insert_session(&repo, &crypto, user).await?;
+    let (renewed, revoked) = tokio::join!(
+        repo.renew_idle_expiry(remote_id, &remote_hash, "https://auth.example.test"),
+        repo.revoke_owned_sessions(user, Some(remote_id), None),
+    );
+    renewed?;
+    assert_eq!(revoked?, 1);
+    assert!(
+        !repo
+            .renew_idle_expiry(remote_id, &remote_hash, "https://auth.example.test")
+            .await?
+    );
+    assert!(
+        repo.find_live_by_token(remote_id, &remote_hash)
+            .await?
+            .is_none()
+    );
     db.cleanup().await;
     Ok(())
 }
