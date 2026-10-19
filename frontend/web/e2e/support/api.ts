@@ -6,6 +6,7 @@ export async function routeJsonApi(
   page: Page,
   responseFor: JsonApiResponder
 ) {
+  await page.route("**/auth/session/activity", (route) => route.fulfill({ status: 204 }));
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     await route.fulfill({

@@ -1,22 +1,9 @@
-//! Nodes category: tree metadata under `/api/v1/spaces/{space_id}`.
-//!
-//! `GET /paths/resolve?path=`, `GET /nodes`, `GET /nodes/{id}`,
-//! `GET /nodes/{id}/children` (paginated), `GET /nodes/{id}/reveal`,
-//! `POST /nodes` (create folder/text), `PATCH /nodes/{id}`
-//! (rename / reorder), `PUT /nodes/{id}/external-access-policy`, `PUT /nodes/{id}/write-lock`,
-//! `GET /nodes/{id}/metadata`,
-//! `POST /nodes/{id}/move`, and `DELETE /nodes/{id}`.
-//! All handlers delegate to the files service,
-//! which owns authorization (no live permission ⇒ 404, insufficient permission ⇒ 403) and
-//! validation.
-
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use notegate_model::{Caller, NodeKind};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -55,10 +42,6 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/spaces/{space_id}/nodes:batchListChildren",
             post(batch_children),
-        )
-        .route(
-            "/v1/spaces/{space_id}/nodes/{node_id}/metadata",
-            get(get_metadata),
         )
         .route(
             "/v1/spaces/{space_id}/nodes/{node_id}/move",
@@ -732,31 +715,6 @@ pub(crate) async fn update_write_lock(
         .find_account_refs(&attribution_ids([&view]))
         .await?;
     Ok(Json(NodeOut::from_view(&view, &refs)))
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct MetadataBody {
-    metadata: Value,
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/v1/spaces/{space_id}/nodes/{node_id}/metadata",
-    tag = "nodes",
-    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
-    responses((status = 200, description = "Get node metadata", body = MetadataBody)),
-    security(("browser_session" = []))
-)]
-pub(crate) async fn get_metadata(
-    State(state): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
-) -> Result<Json<MetadataBody>, ApiError> {
-    let metadata = state
-        .files
-        .read_metadata(caller.account_id(), space_id, node_id)
-        .await?;
-    Ok(Json(MetadataBody { metadata }))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

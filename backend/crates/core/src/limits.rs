@@ -40,6 +40,7 @@ pub const AGENTS_PER_CREATOR_MAX: usize = 50;
 pub const AGENT_API_KEYS_PER_ACCOUNT_MAX: usize = 5;
 /// Maximum agent API-key lifetime in days.
 pub const AGENT_API_KEY_MAX_TTL_DAYS: i64 = 365;
+pub const BROWSER_SESSION_IDLE_TTL_DAYS: i32 = 14;
 
 // --- Identity, path, and name limits ---
 

@@ -47,7 +47,6 @@ percent-encoding.workspace = true
 axum-extra.workspace = true
 axum-governor.workspace = true
 secrecy.workspace = true
-subtle.workspace = true
 rmcp.workspace = true
 chrono.workspace = true
 uuid.workspace = true

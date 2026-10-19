@@ -9,11 +9,13 @@ mod common;
 
 use common::{TestDb, insert_user_account, setup_space};
 use notegate_db::{
-    FilesRepo, LinkGraphProjectNodesJob, LinkGraphProjectNodesPayload, LinkGraphRepo,
+    AccountRepo, FilesRepo, LinkGraphProjectNodesJob, LinkGraphProjectNodesPayload, LinkGraphRepo,
     LinkGraphWorkRepo, SpaceRepo,
 };
 use notegate_jobs::{JobQueue, JobSpec};
-use notegate_model::{AccountKind, ListLinkReferences, files::DeleteNode};
+use notegate_model::{
+    AccountKind, Caller, CallerIdentity, Channel, ListLinkReferences, files::DeleteNode,
+};
 use notegate_service::files::{
     CreateFolder, CreateText, FilesService, UpdateTextEncryption, WriteTarget, WriteText,
     WriteTextBody,
@@ -23,6 +25,21 @@ use notegate_service::{
     link_graph::{LinkGraphProjectionBatch, LinkGraphService},
 };
 use uuid::Uuid;
+
+async fn browser_caller(
+    pool: &sqlx::PgPool,
+    owner: Uuid,
+) -> Result<Caller, Box<dyn std::error::Error>> {
+    let (account, user) = AccountRepo::new(pool.clone())
+        .find_caller_by_account_id(owner)
+        .await?
+        .ok_or("test owner not found")?;
+    Ok(Caller {
+        account,
+        identity: CallerIdentity::User(user),
+        channel: Channel::Browser,
+    })
+}
 
 async fn project_requested_nodes(
     pool: &sqlx::PgPool,
@@ -259,8 +276,9 @@ async fn projection_replaces_outgoing_and_derives_incoming_links()
     );
     assert!(
         graph
-            .node_state(owner, space_id, source_id)
+            .node_view(&browser_caller(&db.pool, owner).await?, space_id, source_id)
             .await?
+            .state
             .projected_at
             .is_some()
     );
@@ -416,8 +434,13 @@ async fn client_encrypted_source_does_not_block_plain_sources_in_the_same_job()
     );
     assert!(
         graph
-            .node_state(owner, space_id, encrypted.node.node.id)
+            .node_view(
+                &browser_caller(&db.pool, owner).await?,
+                space_id,
+                encrypted.node.node.id
+            )
             .await?
+            .state
             .projected_at
             .is_none()
     );
@@ -703,8 +726,9 @@ async fn client_encryption_removes_a_previous_plain_text_projection()
     );
     assert!(
         graph
-            .node_state(owner, space_id, source_id)
+            .node_view(&browser_caller(&db.pool, owner).await?, space_id, source_id)
             .await?
+            .state
             .projected_at
             .is_none()
     );

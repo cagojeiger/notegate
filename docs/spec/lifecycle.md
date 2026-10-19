@@ -156,7 +156,7 @@ object_storage_objects
 - 10 MiB 이하 PNG, JPEG, WebP, AVIF, GIF는 image preview URL을, 10 MiB 이하 PDF와 검증된 DOCX package는 file detail 전용 preview URL을 발급할 수 있다. 실제 bytes에서 media type과 DOCX package 구조를 검증하며 SVG, client-encrypted file과 10 MiB 초과 file은 preview 대상이 아니다.
 - 완료되지 않은 upload와 soft-delete된 File의 물리 삭제는 `object_storage_objects` 원장과 정리 worker가 재시도한다. 완료된 정리 이력은 cluster-singleton purge가 180일 뒤 삭제한다.
 - Provider multipart 생성과 DB 원장 기록은 하나의 transaction이 아니므로, S3 provider에도 incomplete multipart 자동 abort 정책을 설정한다. 로컬 MinIO는 server 기본 stale multipart cleanup을 2차 안전망으로 사용한다.
-- MCP `file_upload`/`file_download`는 임시 presigned URL만 제공하고 bytes는 MCP payload를 통과하지 않는다. URL lifetime은 `performance-limits.md`, Node metadata는 REST metadata API를 따른다.
+- MCP `file_upload`/`file_download`는 임시 presigned URL만 제공하고 bytes는 MCP payload를 통과하지 않는다. URL lifetime은 `performance-limits.md`, Node metadata는 REST Node 조회 응답으로 읽는다.
 - File은 `read op=read`, `write op=patch/edit`, `search op=grep` 대상이 아니다.
 
 ### Node 삭제
@@ -229,8 +229,8 @@ OIDC authorization code + S256 PKCE 로그인에서 확인한 계정에 NoteGate
 browser_sessions.user_id=existing local user_id
 browser_sessions.oidc_issuer=verified upstream issuer
 browser_sessions.token_hash=HMAC(session token)
-browser_sessions.validated_until=min(now()+24h, expires_at)
+browser_sessions.idle_expires_at=min(now()+14d, expires_at)
 browser_sessions.expires_at=now()+configured absolute lifetime (default 30d)
 ```
 
-요청마다 계정 활성 상태·철회·issuer·로컬 인증 기간·absolute expiry를 확인한다. 기간이 끝나면 401로 재로그인을 요구하며 외부 refresh 호출은 하지 않는다. Logout은 로컬 세션을 revoke한 뒤 HttpOnly cookie를 만료시키고, 감사 기록을 남긴다.
+요청마다 계정 활성 상태·철회·issuer·미사용 만료·absolute expiry를 확인한다. 유효한 세션의 전경 활동은 미사용 만료만 14일 뒤로 연장하며 절대 만료와 생성 시각은 바꾸지 않는다. 기간이 끝나면 401로 재로그인을 요구하며 외부 refresh 호출은 하지 않는다. Logout은 로컬 세션을 revoke한 뒤 HttpOnly cookie를 만료시키고, 감사 기록을 남긴다.

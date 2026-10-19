@@ -43,9 +43,12 @@ pub struct OAuthGrant {
     pub expires_at: DateTime<Utc>,
     pub idle_expires_at: DateTime<Utc>,
     pub revoked_at: Option<DateTime<Utc>>,
+    pub client_environment: Option<String>,
+    pub last_token_at: Option<DateTime<Utc>>,
 }
 
 pub struct CredentialIssue<'a> {
+    pub client_environment: Option<&'a str>,
     pub access_hash: &'a str,
     pub refresh_hash: Option<&'a str>,
     pub key_id: &'a str,
@@ -282,10 +285,12 @@ impl OAuthRepo {
             .await
             .map_err(map_sqlx_error)?;
         let grant: OAuthGrant = sqlx::query_as(
-            "UPDATE oauth_grants SET idle_expires_at=LEAST(expires_at,$2) WHERE id=$1 RETURNING *",
+            "UPDATE oauth_grants SET idle_expires_at=LEAST(expires_at,$2), last_token_at=$3 \
+             WHERE id=$1 RETURNING *",
         )
         .bind(id)
         .bind(issue.idle_expires_at)
+        .bind(now)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -307,6 +312,11 @@ impl OAuthRepo {
 
     pub async fn revoke_token(&self, hash: &str, client: &str, now: DateTime<Utc>) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let owner: Option<Uuid> = sqlx::query_scalar("SELECT g.user_id FROM oauth_grants g JOIN oauth_credentials c ON c.grant_id=g.id WHERE c.token_hash=$1 AND g.client_id=$2")
+            .bind(hash).bind(client).fetch_optional(&mut *tx).await.map_err(map_sqlx_error)?;
+        if let Some(owner) = owner {
+            lock_grant_owner(&mut tx, owner).await?;
+        }
         let grant:Option<OAuthGrant>=sqlx::query_as("SELECT g.* FROM oauth_grants g JOIN oauth_credentials c ON c.grant_id=g.id WHERE c.token_hash=$1 AND g.client_id=$2 FOR UPDATE OF g")
             .bind(hash).bind(client).fetch_optional(&mut *tx).await.map_err(map_sqlx_error)?;
         if let Some(grant) = grant {
@@ -323,6 +333,7 @@ impl OAuthRepo {
 
     pub async fn revoke_owned_grant(&self, id: Uuid, user: Uuid, now: DateTime<Utc>) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        lock_grant_owner(&mut tx, user).await?;
         let grant: Option<OAuthGrant> =
             sqlx::query_as("SELECT * FROM oauth_grants WHERE id=$1 AND user_id=$2 FOR UPDATE")
                 .bind(id)
@@ -331,6 +342,30 @@ impl OAuthRepo {
                 .await
                 .map_err(map_sqlx_error)?;
         if let Some(grant) = grant {
+            revoke_grant(&mut tx, &grant, now, "user_revoked").await?;
+        }
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
+    pub async fn revoke_owned_grants(
+        &self,
+        user: Uuid,
+        scope: &str,
+        now: DateTime<Utc>,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        lock_grant_owner(&mut tx, user).await?;
+        let grants: Vec<OAuthGrant> = sqlx::query_as(
+            "SELECT * FROM oauth_grants WHERE user_id=$1 AND revoked_at IS NULL \
+             AND $2=ANY(string_to_array(scope,' ')) ORDER BY id FOR UPDATE",
+        )
+        .bind(user)
+        .bind(scope)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        for grant in grants {
             revoke_grant(&mut tx, &grant, now, "user_revoked").await?;
         }
         tx.commit().await.map_err(map_sqlx_error)?;
@@ -465,6 +500,15 @@ async fn lock_user(conn: &mut PgConnection, user: Uuid) -> Result<bool> {
         .bind(user).fetch_optional(conn).await.map_err(map_sqlx_error)?.is_some())
 }
 
+async fn lock_grant_owner(conn: &mut PgConnection, user: Uuid) -> Result<()> {
+    sqlx::query("SELECT id FROM accounts WHERE id=$1 FOR UPDATE")
+        .bind(user)
+        .execute(conn)
+        .await
+        .map_err(map_sqlx_error)?;
+    Ok(())
+}
+
 async fn new_grant(
     conn: &mut PgConnection,
     id: Uuid,
@@ -488,15 +532,16 @@ async fn new_grant(
         issue.access_expires_at
     };
     let idle = issue.idle_expires_at.min(expires);
-    let grant:OAuthGrant=sqlx::query_as("INSERT INTO oauth_grants (id,user_id,client_id,client_name,resource,scope,created_at,expires_at,idle_expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *")
+    let grant:OAuthGrant=sqlx::query_as("INSERT INTO oauth_grants (id,user_id,client_id,client_name,resource,scope,created_at,expires_at,idle_expires_at,client_environment,last_token_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$7) RETURNING *")
         .bind(id).bind(user).bind(client).bind(name).bind(resource).bind(scope).bind(now).bind(expires).bind(idle)
+        .bind(issue.client_environment)
         .fetch_one(&mut *conn).await.map_err(map_sqlx_error)?;
     insert_credentials(conn, &grant, issue).await?;
     crate::audit_events::oauth_grant_changed(
         conn,
         user,
         grant.id,
-        crate::audit_events::OAuthGrantEvent::Approved,
+        crate::audit_events::OAuthGrantEvent::Approved(issue.client_environment),
     )
     .await?;
     Ok(ExchangeOutcome::Issued(grant))

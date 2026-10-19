@@ -37,6 +37,8 @@ function mockSettingsApi(me: unknown = userMe, options: SettingsApiOptions = {})
   let spacePermission: SpacePermission = options.initialSpacePermission ?? "write";
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const path = String(input);
+    if (path === "/api/v1/me/sessions") return jsonResponse({ sessions: [] });
+    if (path === "/api/v1/me/oauth-grants") return jsonResponse({ grants: [] });
     if (path.includes("/api/v1/agents/agent-1/keys")) return jsonResponse({ keys: [], page });
     if (path.includes("/api/v1/spaces/space-1/agents/agent-1")) {
       if (init?.method === "PUT") {
