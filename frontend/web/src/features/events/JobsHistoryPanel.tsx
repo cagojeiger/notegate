@@ -22,7 +22,7 @@ export function BackgroundJobsPanel() {
       </div></SettingsControls>
       <EventQueryState query={query} itemCount={jobs.length} emptyLabel="No background jobs yet." />
       {jobs.length > 0 ? (
-        <ol className="rounded-lg border border-border bg-surface px-4">
+        <ol className="rounded-workbench-surface border border-border bg-surface px-4">
           {jobs.map((job) => <BackgroundJobRow key={job.id} job={job} />)}
         </ol>
       ) : null}
@@ -71,7 +71,7 @@ function BackgroundJobRow({ job }: { job: BackgroundJob }) {
               aria-controls={attemptsId}
               title={toggleLabel}
               onClick={() => setOpen((value) => !value)}
-              className="grid size-7 place-items-center rounded-lg text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
+              className="grid size-7 place-items-center rounded-workbench-surface text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
             >
               <ChevronRight size={14} className={`transition ${open ? "rotate-90" : ""}`} />
             </button>

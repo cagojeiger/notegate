@@ -46,7 +46,7 @@ export function FileChangeEventsPanel({
       {!selectedSpace && !ownedHistory ? <EmptyState>No space selected.</EmptyState> : <EventQueryState query={query} itemCount={events.length} emptyLabel="No changes yet." />}
       {ownedHistory ? <p className="text-xs text-muted">Changes are retained for 90 days. Removed document bodies cannot be opened from this history.</p> : null}
       {events.length > 0 ? (
-        <ol className="rounded-lg border border-border bg-surface px-4">
+        <ol className="rounded-workbench-surface border border-border bg-surface px-4">
           {events.map((event) => <FileChangeEventRow key={event.id} event={event} />)}
         </ol>
       ) : null}
@@ -82,7 +82,7 @@ function FileChangeEventRow({ event }: { event: FileChangeEvent }) {
                 aria-controls={detailsId}
                 title={toggleLabel}
                 onClick={() => setOpen((value) => !value)}
-                className="grid size-7 place-items-center rounded-lg text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
+                className="grid size-7 place-items-center rounded-workbench-surface text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
               >
                 <ChevronRight size={14} className={`transition ${open ? "rotate-90" : ""}`} />
               </button>

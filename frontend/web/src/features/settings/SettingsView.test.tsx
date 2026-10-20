@@ -87,7 +87,7 @@ describe("SettingsView", () => {
     mockSettingsApi();
   });
 
-  it("keeps identity and user MCP in Account and appearance in General", async () => {
+  it("keeps profile and browser sessions in Account and external access in Connections", async () => {
     const user = userEvent.setup();
     renderSettings();
 
@@ -95,13 +95,21 @@ describe("SettingsView", () => {
     await user.click(screen.getByRole("tab", { name: "Account" }));
 
     expect(screen.queryByText("Appearance")).not.toBeInTheDocument();
-    expect(screen.getByText("User MCP")).toBeInTheDocument();
-    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
+    expect(screen.getByText("Profile")).toBeInTheDocument();
+    expect(screen.queryByText("User MCP")).not.toBeInTheDocument();
     expect(screen.queryByText("My API Keys")).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "MCP" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Connections" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Connections" })).toBeInTheDocument();
     expect(screen.queryByText("Agent MCP")).not.toBeInTheDocument();
     expect(screen.queryByText("REST API")).not.toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.some(([path]) => String(path).endsWith("/oauth-grants"))).toBe(false);
+    await user.click(screen.getByRole("tab", { name: "Connections" }));
+    expect(screen.getByText("User MCP")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.some(([path]) => String(path).endsWith("/oauth-grants"))).toBe(false);
+    await user.click(screen.getByRole("tab", { name: "CLI" }));
+    await screen.findByText("No active CLI connections.");
+    expect(vi.mocked(fetch).mock.calls.some(([path]) => String(path).endsWith("/oauth-grants"))).toBe(true);
   });
 
   it("restores the selected agent across settings tabs and forgets it after settings closes", async () => {
@@ -121,13 +129,13 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("region", { name: "Settings for ci-bot" })).not.toBeInTheDocument();
   });
 
-  it("shows shared Agent MCP and REST API connections in the agents tab", async () => {
+  it("collects user MCP, agent MCP and REST API endpoints in Connections", async () => {
     const user = userEvent.setup();
     renderSettings();
 
-    await user.click(await screen.findByRole("tab", { name: "Agents" }));
+    await user.click(await screen.findByRole("tab", { name: "Connections" }));
 
-    expect(screen.getByRole("heading", { name: "Connections" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Connection guide" })).toBeInTheDocument();
     expect(screen.getByText("Agent MCP")).toBeInTheDocument();
     expect(screen.getByText("http://localhost:3000/mcp/v2")).toBeInTheDocument();
     expect(screen.getByText("REST API")).toBeInTheDocument();
@@ -311,12 +319,15 @@ describe("SettingsView", () => {
 
     await user.click(screen.getByRole("tab", { name: "Account" }));
     expect(await screen.findByText("ci-bot")).toBeInTheDocument();
-    expect(screen.getByText("User MCP")).toBeInTheDocument();
-    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
+    expect(screen.queryByText("User MCP")).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Agents" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Connections" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Connections" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Usage" })).not.toBeInTheDocument();
     expect(screen.queryByText("Agent MCP")).not.toBeInTheDocument();
     expect(screen.queryByText("REST API")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Connections" }));
+    expect(screen.getByText("User MCP")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "CLI" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "MCP" })).not.toBeInTheDocument();
   });
 });

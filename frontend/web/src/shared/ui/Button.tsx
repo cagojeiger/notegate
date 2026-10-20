@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 
 import { cn } from "../lib/cn";
 
@@ -15,6 +15,7 @@ export function Button({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   children: ReactNode;
+  ref?: Ref<HTMLButtonElement>;
   secondary?: boolean;
   variant?: ButtonVariant;
   size?: ButtonSize;
@@ -28,7 +29,7 @@ export function Button({
     primary: "bg-primary text-primary-contrast shadow-[var(--ng-inset-shadow)] hover:bg-[var(--ng-primary-hover)]",
     secondary: "border border-border-strong bg-surface text-muted hover:bg-[var(--ng-hover)] hover:text-text",
     ghost: "text-muted hover:bg-[var(--ng-hover)] hover:text-text",
-    danger: "border border-danger/30 text-danger hover:bg-danger/10"
+    danger: "border border-danger/30 text-danger hover:bg-danger/10 hover:text-text"
   }[variant];
 
   return (

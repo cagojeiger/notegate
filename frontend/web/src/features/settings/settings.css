@@ -9,10 +9,6 @@
   align-items: start;
 }
 
-:is(.ng-settings-view, .ng-settings-inspector) :is(.rounded-2xl, .rounded-xl, .rounded-lg) {
-  border-radius: var(--ng-workbench-surface-radius);
-}
-
 .ng-settings-view [role="tabpanel"] :is(section, ul, li) {
   min-width: 0;
 }
@@ -28,7 +24,7 @@
 }
 
 @media (max-height: 600px) {
-  .ng-settings-detail-view {
+  .ng-settings-with-summary {
     height: auto;
     min-height: 100%;
   }

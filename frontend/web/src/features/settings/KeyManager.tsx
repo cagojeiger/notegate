@@ -1,12 +1,13 @@
 import type { QueryKey } from "@tanstack/react-query";
 import { Copy, KeyRound, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { ApiKeyListResponse, MintedKey } from "../../api/keys";
 import { copyText } from "../../shared/lib/clipboard";
 import { Button, Card, EmptyState, IconButton, SelectField, TextField } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
 import { useApiKeysQuery, useCreateApiKeyMutation, useRevokeApiKeyMutation } from "./useSettingsQueries";
+import { SettingsAddButton } from "./SettingsAddButton";
 
 function expiryOptions(maxTtlDays: number) {
   const presets = maxTtlDays > 30 ? [7, 14, 30, 90, 180, maxTtlDays] : [7, 14, maxTtlDays];
@@ -30,10 +31,14 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
   const [days, setDays] = useState(Math.min(30, maxTtlDays));
   const [created, setCreated] = useState<MintedKey | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  const returnToAdd = () => { requestAnimationFrame(() => addButtonRef.current?.focus()); };
 
   const createMutation = useCreateApiKeyMutation(queryKey, create, (key) => {
     setCreated(key);
     setName("");
+    setAdding(false);
   });
   const revokeMutation = useRevokeApiKeyMutation(queryKey, revoke, () => setConfirmId(null));
 
@@ -63,10 +68,10 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
           <div className="text-sm font-semibold text-text">Key “{created.name}” created</div>
           <p className="mt-1 text-xs text-muted">Copy it now — the token is shown only once.</p>
           <div className="mt-3 flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs">{created.token}</code>
-            <IconButton label="Copy token" onClick={() => { void copyCreatedToken(); }}><Copy size={15} /></IconButton>
+            <code className="min-w-0 flex-1 truncate rounded-workbench-surface border border-border bg-bg px-3 py-2 font-mono text-xs">{created.token}</code>
+            <IconButton autoFocus label="Copy token" onClick={() => { void copyCreatedToken(); }}><Copy size={15} /></IconButton>
           </div>
-          <div className="mt-3 text-right"><Button secondary onClick={() => setCreated(null)}>Done</Button></div>
+          <div className="mt-3 text-right"><Button secondary onClick={() => { setCreated(null); returnToAdd(); }}>Done</Button></div>
         </Card>
       ) : null}
 
@@ -94,27 +99,30 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
                   <Button size="sm" secondary onClick={() => setConfirmId(null)}>Cancel</Button>
                 </div>
               ) : (
-                <IconButton label={`Revoke ${key.name}`} onClick={() => setConfirmId(key.id)}><Trash2 size={15} /></IconButton>
+                <IconButton label={`Revoke ${key.name}`} onClick={() => setConfirmId(key.id)}><Trash2 size={15} className="text-danger" /></IconButton>
               )}
             </li>
           ))}
         </Card>
       )}
 
-      <div className="grid grid-cols-1 items-end gap-2">
+      {adding ? <form onSubmit={(event) => { event.preventDefault(); createKey(); }} className="grid grid-cols-1 items-end gap-2">
         <TextField
+          autoFocus
           label="Name"
           className="min-w-0"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") createKey(); }}
           placeholder="e.g. cli, ci, claude-test"
         />
         <SelectField label="Expires" value={days} onChange={(e) => setDays(Number(e.target.value))}>
           {options.map((option) => <option key={option.days} value={option.days}>{option.label}</option>)}
         </SelectField>
-        <Button onClick={createKey} disabled={!canCreate}><Plus size={15} /> Create</Button>
-      </div>
+        <div className="flex gap-2">
+          <Button type="submit" disabled={!canCreate}><Plus size={15} /> Create</Button>
+          <Button secondary disabled={createMutation.isPending} onClick={() => { setAdding(false); setName(""); returnToAdd(); }}>Cancel</Button>
+        </div>
+      </form> : <SettingsAddButton ref={addButtonRef} onClick={() => setAdding(true)}>Add API key</SettingsAddButton>}
     </div>
   );
 }

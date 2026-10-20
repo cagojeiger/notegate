@@ -4,7 +4,7 @@ import { Button, Card, SectionHeader } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
 import { SettingsControls, SettingsInspectorSection } from "./SettingsInspector";
 
-import { SettingsViewHeader } from "./SettingsViewHeader";
+import { SettingsPage } from "./SettingsPage";
 
 const appVersion = import.meta.env.VITE_NOTEGATE_VERSION || "development";
 
@@ -12,8 +12,7 @@ export function GeneralTab({ onResetSavedWorkspace }: { onResetSavedWorkspace: (
   const theme = useUiStore((state) => state.theme);
   const toggleTheme = useUiStore((state) => state.toggleTheme);
   return (
-    <div>
-      <SettingsViewHeader title="General" inspectorLabel="Open general actions" />
+    <SettingsPage title="General" inspectorLabel="Open general actions" scrollKey="general">
       <div className="ng-settings-grid">
         <section>
           <SectionHeader title="About" />
@@ -43,10 +42,10 @@ export function GeneralTab({ onResetSavedWorkspace }: { onResetSavedWorkspace: (
         <SettingsControls>
           <SettingsInspectorSection title="Workspace actions">
             <p className="mb-3 text-xs text-muted">Only this browser's saved layout is affected.</p>
-            <Button variant="danger" onClick={onResetSavedWorkspace}><RotateCcw size={15} /> Reset</Button>
+            <Button secondary onClick={onResetSavedWorkspace}><RotateCcw size={15} /> Reset</Button>
           </SettingsInspectorSection>
         </SettingsControls>
       </div>
-    </div>
+    </SettingsPage>
   );
 }

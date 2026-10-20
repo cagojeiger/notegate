@@ -1,11 +1,22 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiProvider } from "../../api/ApiProvider";
 import { AuthAccessManager } from "./AuthAccessManager";
+import { Tabs } from "../../shared/ui";
+import { SettingsViewSession } from "./settingsViewState";
 
 const dates = { created_at: "2026-10-19T01:00:00Z", idle_expires_at: "2026-11-02T01:00:00Z", expires_at: "2026-11-18T01:00:00Z" };
+
+function AccessHarness({ onSignOut }: { onSignOut: () => void }) {
+  const [kind, setKind] = useState<"browser" | "cli" | "mcp">("browser");
+  return <SettingsViewSession>
+    <Tabs value={kind} onChange={setKind} items={[{ id: "browser", label: "Browsers" }, { id: "cli", label: "CLI" }, { id: "mcp", label: "MCP" }]} />
+    <AuthAccessManager key={kind} kind={kind} onSignOut={onSignOut} />
+  </SettingsViewSession>;
+}
 
 function setup(fail = false, extraSessions = 0) {
   let failed = fail;
@@ -33,7 +44,7 @@ function setup(fail = false, extraSessions = 0) {
     return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
   });
   const onSignOut = vi.fn();
-  render(<ApiProvider authCacheKey="test"><AuthAccessManager onSignOut={onSignOut} /></ApiProvider>);
+  render(<ApiProvider authCacheKey="test"><AccessHarness onSignOut={onSignOut} /></ApiProvider>);
   return { user: userEvent.setup(), requests, onSignOut, recover: () => { failed = false; } };
 }
 

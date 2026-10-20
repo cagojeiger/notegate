@@ -21,7 +21,7 @@ export function AuditEventsPanel() {
       </div></SettingsControls>
       <EventQueryState query={query} itemCount={events.length} emptyLabel="No audit events." />
       {events.length > 0 ? (
-        <ol className="rounded-lg border border-border bg-surface px-4">
+        <ol className="rounded-workbench-surface border border-border bg-surface px-4">
           {events.map((event) => {
             const detail = formatAuditDetail(event);
             const action = formatAuditAction(event);

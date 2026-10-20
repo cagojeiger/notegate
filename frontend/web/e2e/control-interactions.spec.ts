@@ -95,14 +95,20 @@ for (const width of [1440, 390]) {
     await mockWorkbench(page);
     await page.goto("/");
     const view = await openSettings(page);
+    let headingOrigin: { x: number; y: number } | undefined;
     for (const [tab, label] of [
-      ["General", "General: Open general actions"], ["Account", "Browser sessions: Choose connection type"],
+      ["General", "General: Open general actions"], ["Account", "Account: Open session actions"],
+      ["Connections", "Connection guide: Choose connection view"],
       ["Agents", "Agents: Choose agent"], ["History", "Changes: Choose history type"], ["Trash", "Deleted items: Open trash actions"]
     ]) {
       await view.getByRole("tab", { name: tab, exact: true }).click();
       await closeSettingsInspector(page);
       const toggle = page.getByRole("button", { name: "Toggle settings inspector" });
       if (await toggle.getAttribute("aria-pressed") === "true") await toggle.click();
+      const heading = await view.locator("[data-settings-heading]").boundingBox();
+      if (!heading) throw new Error("Missing settings heading");
+      headingOrigin ??= { x: heading.x, y: heading.y };
+      expect({ x: heading.x, y: heading.y }, `${tab} heading alignment`).toEqual(headingOrigin);
       const opener = view.getByRole("button", { name: label, exact: true });
       await opener.click();
       const inspector = view.getByRole(width < 768 ? "dialog" : "complementary", { name: `${tab} Inspector`, exact: true });
@@ -179,6 +185,7 @@ for (const profile of [
       expect((await tab.boundingBox())?.height).toBe(profile.hasTouch ? 44 : 32);
       await tab.click();
       await showSettingsInspector(page);
+      await expect(settings.getByRole("button", { name: "Add agent", exact: true })).toHaveCSS("height", "48px");
       await settings.getByRole("button", { name: "Add agent", exact: true }).click();
       const field = settings.getByRole("textbox", { name: "New agent name" });
       expect((await field.boundingBox())?.height).toBe(profile.hasTouch ? 44 : 38);

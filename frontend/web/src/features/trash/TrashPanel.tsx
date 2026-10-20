@@ -11,7 +11,7 @@ import { Button, Card, IconButton } from "../../shared/ui";
 
 import { SettingsControls, SettingsInspectorSection, useSettingsInspector } from "../settings/SettingsInspector";
 
-import { SettingsViewHeader } from "../settings/SettingsViewHeader";
+import { SettingsPage } from "../settings/SettingsPage";
 import { useSettingsScroll, useSettingsViewState } from "../settings/settingsViewState";
 
 const itemAppearance = {
@@ -88,12 +88,12 @@ export function TrashPanel() {
   }, [notice]);
 
   return (
-    <section aria-label="Trash" className="flex h-full min-h-0 flex-col">
+    <SettingsPage label="Trash" title="Deleted items" inspectorLabel="Open trash actions" scrollKey="trash" contained disabled={mutation.isPending}
+      actions={<div className="flex items-center gap-2 text-xs text-muted"><span>Newest first</span><IconButton label="Refresh" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void queryClient.invalidateQueries({ queryKey: queryKeys.trash }); }}><RefreshCw size={16} aria-hidden="true" /></IconButton></div>}>
       <SettingsControls><p className="text-xs text-muted">Deleted items are kept for 30 days.</p></SettingsControls>
       <div role="region" aria-label="Trash contents" className="flex min-h-0 flex-1 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1">
-        <Card padding="sm" className="flex min-h-0 min-w-0 flex-1 flex-col" style={{ borderRadius: "var(--ng-workbench-surface-radius)" }}>
-          <SettingsViewHeader title="Deleted items" inspectorLabel="Open trash actions" disabled={mutation.isPending} actions={<div className="flex items-center gap-2 text-xs text-muted"><span>Newest first</span><IconButton label="Refresh" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void queryClient.invalidateQueries({ queryKey: queryKeys.trash }); }}><RefreshCw size={16} aria-hidden="true" /></IconButton></div>} />
+        <Card padding="sm" className="flex min-h-0 min-w-0 flex-1 flex-col">
           {query.isPending ? <p role="status">Loading trash…</p> : null}
           {query.error ? <p role="alert" className="text-danger">Could not load trash. Try refreshing.</p> : null}
           {!query.isPending && !query.error && items.length === 0 ? <p className="text-muted">Trash is empty.</p> : null}
@@ -154,13 +154,13 @@ export function TrashPanel() {
                 <div><dt className="mb-1 text-xs text-muted">{selected.deletion_pending ? "Status" : "Kept until"}</dt><dd className="flex items-start gap-2"><CalendarDays size={14} aria-hidden="true" className="mt-0.5 text-muted" /><span>{selected.deletion_pending ? "Deletion queued · recovery unavailable" : new Date(selected.purge_after).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</span></dd></div>
               </dl>
               {!selected.deletion_pending ? (
-                <Card padding="sm" className="my-4" style={{ borderRadius: "var(--ng-workbench-surface-radius)" }}>
+                <Card padding="sm" className="my-4">
                   <p className="mb-1 font-medium">{!selected.recoverable ? "Restore unavailable" : selected.kind === "folder" ? "What will be restored" : "Restore to original location"}</p>
                   <p className="text-xs text-muted">{!selected.recoverable ? "The parent is deleted or this content predates recovery support." : selected.kind === "space" ? "Restored spaces require reconnecting agents." : selected.kind === "folder" ? "Items deleted with this folder are included. Items deleted separately stay in Trash. Name conflicts must be resolved first." : "Existing files will not be overwritten. Resolve any name conflict before restoring."}</p>
                 </Card>
               ) : null}
               <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-seam pt-4">
-                <Button variant="ghost" size="sm" data-trash-purge disabled={mutation.isPending || selected.deletion_pending} aria-label={`Permanently delete ${selected.name}`} onClick={() => { mutation.reset(); setNotice(null); setConfirmation(selected); }}>Permanently delete</Button>
+                <Button variant="danger" size="sm" data-trash-purge disabled={mutation.isPending || selected.deletion_pending} aria-label={`Permanently delete ${selected.name}`} onClick={() => { mutation.reset(); setNotice(null); setConfirmation(selected); }}>Permanently delete</Button>
                 <Button size="sm" disabled={mutation.isPending || selected.deletion_pending || !selected.recoverable} aria-label={`Restore ${selected.name}`} onClick={() => { setNotice(null); mutation.mutate({ item: selected, action: "restore" }); }}><RotateCcw size={14} aria-hidden="true" />{mutation.isPending && mutation.variables?.action === "restore" ? "Restoring…" : "Restore"}</Button>
               </div>
             </section>
@@ -168,6 +168,6 @@ export function TrashPanel() {
         </div></SettingsInspectorSection></SettingsControls>
       </div>
       </div>
-    </section>
+    </SettingsPage>
   );
 }

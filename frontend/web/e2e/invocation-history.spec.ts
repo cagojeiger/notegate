@@ -145,7 +145,7 @@ for (const viewport of [
       await page.getByRole("button", { name: "Settings", exact: true }).click();
       const settings = page.locator("[data-settings-view]");
       const settingsBounds = await settings.boundingBox();
-      for (const tab of ["Account", "Agents", "General"]) {
+      for (const tab of ["Account", "Connections", "Agents", "General"]) {
         await settings.getByRole("tab", { name: tab, exact: true }).click();
         if (tab === "Account") {
           await expect(settings.getByRole("button", { name: "Select Chrome on Linux (this session)", exact: true })).toBeAttached();
@@ -163,10 +163,10 @@ for (const viewport of [
         expect(await settings.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
         await expect(settings.getByRole("tablist", { name: "Settings sections" })).toBeInViewport();
         await expect(settings.getByRole("button", { name: "Close settings", exact: true })).toBeInViewport();
-        if (tab === "Account") {
+        if (tab === "Connections") {
           for (const [kind, client] of [["CLI", "NoteGate CLI"], ["MCP", "Remote MCP"]]) {
             await showSettingsInspector(page);
-            await settings.getByRole("tab", { name: new RegExp(`^${kind} `) }).click();
+            await settings.getByRole("tab", { name: kind, exact: true }).click();
             await settings.getByRole("button", { name: `Select ${client}`, exact: true }).click();
             await settings.getByRole("button", { name: `Revoke ${client}`, exact: true }).click();
             const confirmation = settings.getByRole("group", { name: "Confirm revocation" });

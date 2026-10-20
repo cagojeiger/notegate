@@ -9,12 +9,12 @@ import {
   type AgentSpaceAccessValue, useAgentKeyManagerProps, useAgentsQuery, useConnectionsQuery,
   useCreateAgentMutation, useDeleteAgentMutation, useSetAgentSpaceAccessMutation, useSettingsSpacesQuery
 } from "./useSettingsQueries";
-import { AgentConnections } from "./AgentConnections";
 import { KeyManager } from "./KeyManager";
 import { SettingsControls, SettingsInspectorSection, useSettingsInspector, useSettingsNavigationScroll } from "./SettingsInspector";
 
-import { SettingsViewHeader } from "./SettingsViewHeader";
-import { useSettingsScroll, useSettingsViewState } from "./settingsViewState";
+import { SettingsPage } from "./SettingsPage";
+import { SettingsAddButton } from "./SettingsAddButton";
+import { useSettingsViewState } from "./settingsViewState";
 
 export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
   const inspector = useSettingsInspector();
@@ -28,12 +28,11 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
   const deleteMutation = useDeleteAgentMutation(() => { setConfirmId(null); setOpenId(null); });
   const agents = agentsQuery.data?.agents ?? [];
   const selected = agents.find((agent) => agent.id === openId);
-  const bodyScroll = useSettingsScroll(`agent-content-${creating ? "new" : openId ?? "overview"}`);
   if (!canManageAgents) return <EmptyState>Agent management is unavailable for this account.</EmptyState>;
 
   return (
-    <div className="ng-settings-detail-view flex h-full min-h-0 flex-col gap-4">
-      <div className="shrink-0"><AgentConnections /></div>
+    <SettingsPage title={creating ? "New agent" : selected?.name ?? "Agents"} inspectorLabel="Choose agent"
+      disabled={deleteMutation.isPending || createMutation.isPending} scrollKey={`agent-${creating ? "new" : openId ?? "overview"}`}>
       <SettingsControls slot="navigation">
         <section>
           <SectionHeader title="Agents" description="Select an agent to manage its permissions and keys." />
@@ -49,7 +48,7 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
               </button>
             </li>)}
           </ul>
-          <button type="button" aria-label="Add agent" disabled={deleteMutation.isPending || createMutation.isPending} onClick={() => { setCreating(true); setConfirmId(null); inspector?.onNavigate(); }} className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-workbench-surface border border-dashed border-border-strong text-muted hover:bg-[var(--ng-hover)] hover:text-text"><Plus size={17} /> Add agent</button>
+          <div className="mt-3"><SettingsAddButton disabled={deleteMutation.isPending || createMutation.isPending} onClick={() => { setCreating(true); setConfirmId(null); inspector?.onNavigate(); }}>Add agent</SettingsAddButton></div>
         </section>
       </SettingsControls>
       <SettingsControls>
@@ -58,23 +57,20 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
             : <Button variant="danger" size="sm" onClick={() => setConfirmId(selected.id)}><Trash2 size={15} /> Delete {selected.name}</Button>}
         </SettingsInspectorSection> : null}
       </SettingsControls>
-      <SettingsViewHeader title={creating ? "New agent" : selected?.name ?? "Agents"} inspectorLabel="Choose agent" disabled={deleteMutation.isPending || createMutation.isPending} />
-      <div key={creating ? "new" : openId ?? "overview"} ref={bodyScroll} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain pr-1">
-        {creating ? <section>
-          <p className="mb-3 text-xs text-muted">Choose a name, then configure permissions and keys.</p>
-          <form onSubmit={(event) => { event.preventDefault(); if (name.trim() && !createMutation.isPending) createMutation.mutate(name.trim()); }} className="flex flex-wrap items-end gap-3">
-            <TextField autoFocus label="New agent name" className="min-w-0 flex-1" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. ci-bot, importer" />
-            <Button type="submit" disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
-            <Button secondary onClick={() => setCreating(false)}>Cancel</Button>
-          </form>
-        </section> : selected ? <section key={selected.id} aria-label={`Settings for ${selected.name}`}>
-          <div className="ng-settings-grid">
-            <section><SectionHeader title="Space permissions" description="Choose which spaces this agent can access." /><AgentSpaceAccess agent={selected} /></section>
-            <section><SectionHeader title="Agent API Keys" description="Keys authenticate as this agent." /><AgentKeyManager agentId={selected.id} /></section>
-          </div>
-        </section> : <EmptyState>{inspector ? "Choose an agent in the Inspector, or add one to get started." : "Choose an agent to manage its permissions and keys."}</EmptyState>}
-      </div>
-    </div>
+      {creating ? <section>
+        <p className="mb-3 text-xs text-muted">Choose a name, then configure permissions and keys.</p>
+        <form onSubmit={(event) => { event.preventDefault(); if (name.trim() && !createMutation.isPending) createMutation.mutate(name.trim()); }} className="flex flex-wrap items-end gap-3">
+          <TextField autoFocus label="New agent name" className="min-w-0 flex-1" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. ci-bot, importer" />
+          <Button type="submit" disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
+          <Button secondary disabled={createMutation.isPending} onClick={() => setCreating(false)}>Cancel</Button>
+        </form>
+      </section> : selected ? <section key={selected.id} aria-label={`Settings for ${selected.name}`}>
+        <div className="ng-settings-grid">
+          <section><SectionHeader title="Space permissions" description="Choose which spaces this agent can access." /><AgentSpaceAccess agent={selected} /></section>
+          <section><SectionHeader title="Agent API Keys" description="Keys authenticate as this agent." /><AgentKeyManager agentId={selected.id} /></section>
+        </div>
+      </section> : <EmptyState>{inspector ? "Choose an agent in the Inspector, or add one to get started." : "Choose an agent to manage its permissions and keys."}</EmptyState>}
+    </SettingsPage>
   );
 }
 
@@ -97,7 +93,7 @@ function AgentSpaceAccess({ agent }: { agent: Agent }) {
   if (spaces.length === 0) return <EmptyState>No writable spaces.</EmptyState>;
 
   return (
-    <ul className="max-h-72 divide-y divide-seam overflow-y-auto rounded-xl border border-border bg-surface">
+    <ul className="max-h-72 divide-y divide-seam overflow-y-auto rounded-workbench-surface border border-border bg-surface">
       {spaces.map((space) => <SpaceAccessRow key={space.id} space={space} agent={agent} />)}
     </ul>
   );
@@ -137,7 +133,7 @@ function SpaceAccessRow({ space, agent }: { space: Space; agent: Agent }) {
       ) : (
         <select
           aria-label={`${space.name} permission`}
-          className="h-9 min-h-[var(--ng-min-target-size)] w-36 shrink-0 rounded-lg border border-border-strong bg-surface px-3 text-sm text-text outline-none transition disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-full"
+          className="h-9 min-h-[var(--ng-min-target-size)] w-36 shrink-0 rounded-workbench-surface border border-border-strong bg-surface px-3 text-sm text-text outline-none transition disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-full"
           value={access}
           disabled={setAccessMutation.isPending}
           onChange={(event) => updateAccess(event.currentTarget.value as AgentSpaceAccessValue)}

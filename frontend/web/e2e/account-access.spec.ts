@@ -48,26 +48,29 @@ for (const profile of [
       const view = await openSettings(page, "Account");
       const list = view.getByRole("list", { name: "Browser sessions" });
       await expect(list.getByRole("button")).toHaveCount(10);
-      await expect.poll(() => reads).toEqual({ sessions: 1, grants: 1 });
+      await expect.poll(() => reads).toEqual({ sessions: 1, grants: 0 });
       const header = view.getByRole("tablist", { name: "Settings sections" });
       const bounds = await header.boundingBox();
       await view.getByRole("button", { name: "Show more (10)", exact: true }).click();
       await expect(list.getByRole("button")).toHaveCount(20);
-      expect(reads).toEqual({ sessions: 1, grants: 1 });
+      expect(reads).toEqual({ sessions: 1, grants: 0 });
       await list.getByRole("button").last().scrollIntoViewIfNeeded();
       expect(await list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
       const scrollTop = await list.evaluate((element) => element.scrollTop);
       await list.getByRole("button", { name: "Select Browser 19", exact: true }).click();
       await closeSettingsInspector(page);
       expect(await header.boundingBox()).toEqual(bounds);
-      await expect(view.getByRole("button", { name: "Copy user MCP server URL" })).toBeInViewport();
+      await expect(view.getByRole("button", { name: "Copy user MCP server URL" })).toHaveCount(0);
       await expect(view.getByRole("button", { name: "Show more (4)" })).toBeInViewport();
       expect(await view.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 
       const browserAccessibility = await new AxeBuilder({ page }).include("[data-settings-view]").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
       expect(browserAccessibility.violations).toEqual([]);
+      await view.getByRole("tab", { name: "Connections", exact: true }).click();
+      await expect(view.getByRole("button", { name: "Copy user MCP server URL" })).toBeInViewport();
+      expect(reads).toEqual({ sessions: 1, grants: 0 });
       await showSettingsInspector(page);
-      await view.getByRole("tab", { name: "MCP (8)", exact: true }).click();
+      await view.getByRole("tab", { name: "MCP", exact: true }).click();
       await expect(view.getByRole("list", { name: "MCP connections" }).getByRole("button")).toHaveCount(8);
       await view.getByRole("button", { name: "Select MCP App 1", exact: true }).click();
       await expect(view.getByRole("region", { name: "Selected connection" }).getByText("MCP App 1 · MCP", { exact: true })).toBeVisible();
@@ -78,7 +81,7 @@ for (const profile of [
       const confirmation = view.getByRole("group", { name: "Confirm revocation" });
       await expect(confirmation).toBeFocused();
       await expect(confirmation.getByRole("button", { name: "Confirm", exact: true })).toBeInViewport();
-      await expect(view.getByRole("tablist", { name: "Account connections" })).toBeInViewport();
+      await expect(view.getByRole("tablist", { name: "Connection views" })).toBeInViewport();
       const accessibility = await new AxeBuilder({ page }).include("[data-settings-view]").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
       expect(accessibility.violations).toEqual([]);
       await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -90,10 +93,10 @@ for (const profile of [
       await expect(view.getByText("Access revoked.", { exact: true })).toBeFocused();
       await closeSettingsInspector(page);
       await showSettingsInspector(page);
-      await view.getByRole("tab", { name: "CLI (12)", exact: true }).click();
+      await view.getByRole("tab", { name: "CLI", exact: true }).click();
       await expect(view.getByRole("list", { name: "CLI connections" }).getByRole("button")).toHaveCount(10);
-      await showSettingsInspector(page);
-      await view.getByRole("tab", { name: "Browsers (24)", exact: true }).click();
+      await closeSettingsInspector(page);
+      await view.getByRole("tab", { name: "Account", exact: true }).click();
       await expect(list.getByRole("button")).toHaveCount(20);
       await expect(list.getByRole("button", { name: "Select Browser 19", exact: true })).toHaveAttribute("aria-pressed", "true");
       expect(await list.evaluate((element) => element.scrollTop)).toBe(scrollTop);
@@ -106,8 +109,8 @@ for (const profile of [
       expect(await header.boundingBox()).toEqual(bounds);
       await closeSettingsInspector(page);
       if (profile.width >= 768) await view.getByRole("button", { name: "Close settings inspector", exact: true }).click();
-      await view.getByRole("button", { name: "Browser sessions: Choose connection type", exact: true }).click();
-      await expect(view.getByRole("tab", { name: "Browsers (24)", exact: true })).toBeVisible();
+      await view.getByRole("button", { name: "Account: Open session actions", exact: true }).click();
+      await expect(view.getByRole("region", { name: "Selected connection" })).toBeVisible();
     });
   });
 }

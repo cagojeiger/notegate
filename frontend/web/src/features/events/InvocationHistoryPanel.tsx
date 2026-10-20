@@ -25,7 +25,7 @@ export function CommandInvocationsPanel({ surface }: { surface: CommandInvocatio
         emptyLabel={`No ${surface.toUpperCase()} calls.`}
       />
       {invocations.length > 0 ? (
-        <ol className="rounded-lg border border-border bg-surface px-4">
+        <ol className="rounded-workbench-surface border border-border bg-surface px-4">
           {invocations.map((invocation) => (
             <CommandInvocationRow key={invocation.id} invocation={invocation} />
           ))}

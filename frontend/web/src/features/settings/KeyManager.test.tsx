@@ -66,9 +66,11 @@ describe("KeyManager", () => {
   });
 
   it("uses the user-key 30-day cap by default", async () => {
+    const user = userEvent.setup();
     renderKeyManager();
 
     await screen.findByText("No active keys.");
+    await user.click(screen.getByRole("button", { name: "Add API key" }));
 
     const expires = screen.getByLabelText("Expires");
     expect(within(expires).getByRole("option", { name: "30 days" })).toBeInTheDocument();
@@ -90,6 +92,7 @@ describe("KeyManager", () => {
     renderKeyManager({ maxTtlDays: 365, create });
 
     await screen.findByText("No active keys.");
+    await user.click(screen.getByRole("button", { name: "Add API key" }));
     await user.type(screen.getByLabelText("Name"), "agent");
     await user.selectOptions(screen.getByLabelText("Expires"), "365");
     await user.click(screen.getByRole("button", { name: "Create" }));
@@ -100,16 +103,37 @@ describe("KeyManager", () => {
         expires_at: "2027-06-14T23:55:00.000Z"
       });
     });
+    expect(screen.getByRole("button", { name: "Copy token" })).toHaveFocus();
+    expect(screen.getByText("ngk_v2_token")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByText("ngk_v2_token")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add API key" })).toHaveFocus());
   });
 
   it("does not expose custom expiry input for agent keys", async () => {
+    const user = userEvent.setup();
     renderKeyManager({ maxTtlDays: 365 });
 
     await screen.findByText("No active keys.");
+    await user.click(screen.getByRole("button", { name: "Add API key" }));
 
     const expires = screen.getByLabelText("Expires");
     expect(within(expires).getByRole("option", { name: "365 days" })).toBeInTheDocument();
     expect(within(expires).queryByRole("option", { name: "Custom" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Custom days/)).not.toBeInTheDocument();
+  });
+
+  it("opens the creation form from the list footer and restores focus after cancellation", async () => {
+    const create = vi.fn();
+    const user = userEvent.setup();
+    renderKeyManager({ create });
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add API key" }));
+    expect(screen.getByLabelText("Name")).toHaveFocus();
+    await user.type(screen.getByLabelText("Name"), "unfinished");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add API key" })).toHaveFocus());
+    expect(create).not.toHaveBeenCalled();
   });
 });
