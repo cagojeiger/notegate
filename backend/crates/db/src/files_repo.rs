@@ -10,6 +10,9 @@
 //! derived by space-bounded recursive CTEs (see `files::queries`);
 //! move/rename updates only the moved node's row (O(1), no descendant rewrite).
 
+#[path = "files/mod.rs"]
+pub mod files;
+
 #[path = "files/trash.rs"]
 mod trash;
 
@@ -17,19 +20,17 @@ use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
 use notegate_core::security::PiiCrypto;
-use notegate_model::search::{SearchDateFilters, SearchNodeCandidate, SearchTextCandidate};
-use notegate_model::{FileObject, Node, NodeKind, NodeSummary, Permission, SavedText, TextObject};
-use serde_json::Value;
+use notegate_model::{FileObject, Node, NodeKind, NodeSummary, SavedText, TextObject};
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
+use self::files::{commands, queries};
 use crate::file_change_event_repo;
-use crate::files::{commands, queries};
 use notegate_model::files::{
     BeginObjectUpload, ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileMutationContext,
-    FileStats, MoveNode, NodeListCursor, NodeListSort, ObjectUploadMode, ObjectUploadRegistration,
-    PendingObjectUpload, StoredContent, TextRead, TextStats,
+    MoveNode, NodeListCursor, NodeListSort, ObjectUploadMode, ObjectUploadRegistration,
+    PendingObjectUpload, StoredContent,
 };
 
 #[derive(Debug, Clone)]
@@ -159,46 +160,6 @@ impl FilesRepo {
 }
 
 impl FilesRepo {
-    pub async fn find_node(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<Node>> {
-        queries::node::find_node(&self.pool, space_id, node_id).await
-    }
-
-    pub async fn find_nodes(
-        &self,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, Node>> {
-        queries::node::find_nodes(&self.pool, space_id, node_ids).await
-    }
-
-    pub async fn node_path(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<String>> {
-        queries::node::node_path(&self.pool, space_id, node_id).await
-    }
-
-    pub async fn node_paths_many(
-        &self,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, String>> {
-        queries::node::node_paths_many(&self.pool, space_id, node_ids).await
-    }
-
-    pub async fn ancestor_chain(&self, space_id: Uuid, node_id: Uuid) -> Result<Vec<Node>> {
-        queries::node::ancestor_chain(&self.pool, space_id, node_id).await
-    }
-
-    pub async fn direct_write_lock_ancestors_many(
-        &self,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, Vec<(Uuid, String, bool)>>> {
-        queries::node::direct_write_lock_ancestors_many(&self.pool, space_id, node_ids).await
-    }
-
-    pub async fn resolve_path(&self, space_id: Uuid, path: &str) -> Result<Option<Uuid>> {
-        queries::search::resolve_scope_node(&self.pool, space_id, path).await
-    }
-
     /// Resolve one search scope through the shared bounded path resolver.
     ///
     /// Hydrating one node is deliberate: search needs its id and kind, and
@@ -216,106 +177,6 @@ impl FilesRepo {
         Ok(resolved
             .pop()
             .map(|(_, path, node)| (node.id, node.kind, path)))
-    }
-
-    pub async fn resolve_nodes_by_paths(
-        &self,
-        space_id: Uuid,
-        paths: &[String],
-    ) -> Result<Vec<(usize, String, Node)>> {
-        queries::search::resolve_nodes_by_paths(&self.pool, space_id, paths).await
-    }
-
-    pub async fn has_children(&self, space_id: Uuid, node_id: Uuid) -> Result<bool> {
-        queries::node::has_children(&self.pool, self.external_only, space_id, node_id).await
-    }
-
-    pub async fn has_children_many(
-        &self,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, bool>> {
-        queries::node::has_children_many(&self.pool, self.external_only, space_id, node_ids).await
-    }
-
-    pub async fn text_stats(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<TextStats>> {
-        queries::text::text_stats(&self.pool, space_id, node_id).await
-    }
-
-    pub async fn text_stats_many(
-        &self,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, TextStats>> {
-        queries::text::text_stats_many(&self.pool, space_id, node_ids).await
-    }
-
-    pub async fn find_text(
-        &self,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<Option<(Node, TextObject)>> {
-        queries::text::find_text(&self.pool, &self.crypto, space_id, node_id).await
-    }
-
-    pub async fn find_text_for_read(
-        &self,
-        space_id: Uuid,
-        node_id: Uuid,
-        if_none_match: Option<&str>,
-    ) -> Result<Option<(Node, TextRead)>> {
-        queries::text::find_text_for_read(
-            &self.pool,
-            &self.crypto,
-            space_id,
-            node_id,
-            if_none_match,
-        )
-        .await
-    }
-
-    pub async fn find_text_object(
-        &self,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<Option<TextObject>> {
-        queries::text::find_text_object(&self.pool, &self.crypto, space_id, node_id).await
-    }
-
-    pub async fn find_texts(
-        &self,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, TextObject>> {
-        queries::text::find_texts(&self.pool, &self.crypto, space_id, node_ids).await
-    }
-
-    pub async fn file_stats(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<FileStats>> {
-        queries::file::file_stats(&self.pool, space_id, node_id).await
-    }
-
-    pub async fn file_stats_many(
-        &self,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, FileStats>> {
-        queries::file::file_stats_many(&self.pool, space_id, node_ids).await
-    }
-
-    pub async fn find_file(
-        &self,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<Option<(Node, FileObject)>> {
-        queries::file::find_file(&self.pool, space_id, node_id).await
-    }
-
-    pub async fn find_files(
-        &self,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, FileObject>> {
-        queries::file::find_files(&self.pool, space_id, node_ids).await
     }
 
     pub async fn paged_children(
@@ -352,22 +213,6 @@ impl FilesRepo {
             parent_node_id,
             limit,
             cursor,
-        )
-        .await
-    }
-
-    pub async fn first_children_pages(
-        &self,
-        space_id: Uuid,
-        parent_node_ids: &[Uuid],
-        limit: i64,
-    ) -> Result<(HashMap<Uuid, Vec<NodeSummary>>, HashSet<Uuid>)> {
-        queries::node::first_children_pages(
-            &self.pool,
-            self.external_only,
-            space_id,
-            parent_node_ids,
-            limit,
         )
         .await
     }
@@ -492,48 +337,6 @@ impl FilesRepo {
         .await
     }
 
-    pub async fn search_node_candidates(
-        &self,
-        space_id: Uuid,
-        scope_node_id: Uuid,
-        scope_path: &str,
-        after_sort_path: Option<&str>,
-        date_filters: &SearchDateFilters,
-        limit: i64,
-    ) -> Result<Vec<SearchNodeCandidate>> {
-        queries::search::node_candidates(
-            &self.pool,
-            space_id,
-            scope_node_id,
-            scope_path,
-            after_sort_path,
-            date_filters,
-            limit,
-        )
-        .await
-    }
-
-    pub async fn search_text_candidates(
-        &self,
-        space_id: Uuid,
-        scope_node_id: Uuid,
-        scope_path: &str,
-        after_sort_path: Option<&str>,
-        date_filters: &SearchDateFilters,
-        limit: i64,
-    ) -> Result<Vec<SearchTextCandidate>> {
-        queries::search::text_candidates(
-            &self.pool,
-            space_id,
-            scope_node_id,
-            scope_path,
-            after_sort_path,
-            date_filters,
-            limit,
-        )
-        .await
-    }
-
     pub async fn search_text_bodies_within_budget(
         &self,
         space_id: Uuid,
@@ -551,10 +354,6 @@ impl FilesRepo {
             self.metrics_enabled,
         )
         .await
-    }
-
-    pub async fn subtree_live_count(&self, space_id: Uuid, node_id: Uuid) -> Result<usize> {
-        queries::node::subtree_live_count(&self.pool, space_id, node_id).await
     }
 
     pub async fn insert_folder(
@@ -853,16 +652,6 @@ impl FilesRepo {
             recursive,
         )
         .await
-    }
-}
-
-impl FilesRepo {
-    pub async fn permission_for(
-        &self,
-        space_id: Uuid,
-        account_id: Uuid,
-    ) -> Result<Option<Permission>> {
-        queries::node::permission_for(&self.pool, space_id, account_id).await
     }
 }
 

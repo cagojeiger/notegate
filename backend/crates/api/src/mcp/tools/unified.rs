@@ -11,7 +11,7 @@ use rmcp::{ErrorData, Json};
 use serde_json::Value;
 
 use super::adapter;
-use crate::commands::{self, CommandContext};
+use crate::commands;
 use crate::state::AppState;
 
 mod sequence;
@@ -25,15 +25,7 @@ pub async fn read(
     parts: &Parts,
     Parameters(input): Parameters<ReadInput>,
 ) -> Result<Json<Value>, ErrorData> {
-    execute_read(state, &adapter::context(parts)?, input).await
-}
-
-async fn execute_read(
-    state: &AppState,
-    context: &CommandContext,
-    input: ReadInput,
-) -> Result<Json<Value>, ErrorData> {
-    adapter::result(commands::executor::read(state, context, input).await)
+    adapter::result(commands::executor::read(state, &adapter::context(parts)?, input).await)
 }
 
 pub async fn search(
@@ -41,15 +33,7 @@ pub async fn search(
     parts: &Parts,
     Parameters(input): Parameters<SearchInput>,
 ) -> Result<Json<Value>, ErrorData> {
-    execute_search(state, &adapter::context(parts)?, input).await
-}
-
-async fn execute_search(
-    state: &AppState,
-    context: &CommandContext,
-    input: SearchInput,
-) -> Result<Json<Value>, ErrorData> {
-    adapter::result(commands::executor::search(state, context, input).await)
+    adapter::result(commands::executor::search(state, &adapter::context(parts)?, input).await)
 }
 
 pub async fn write(
@@ -57,15 +41,7 @@ pub async fn write(
     parts: &Parts,
     Parameters(input): Parameters<WriteInput>,
 ) -> Result<Json<Value>, ErrorData> {
-    execute_write(state, &adapter::context(parts)?, input).await
-}
-
-async fn execute_write(
-    state: &AppState,
-    context: &CommandContext,
-    input: WriteInput,
-) -> Result<Json<Value>, ErrorData> {
-    adapter::result(commands::executor::write(state, context, input).await)
+    adapter::result(commands::executor::write(state, &adapter::context(parts)?, input).await)
 }
 
 pub async fn manage(
@@ -73,15 +49,7 @@ pub async fn manage(
     parts: &Parts,
     Parameters(input): Parameters<ManageInput>,
 ) -> Result<Json<Value>, ErrorData> {
-    execute_manage(state, &adapter::context(parts)?, input).await
-}
-
-async fn execute_manage(
-    state: &AppState,
-    context: &CommandContext,
-    input: ManageInput,
-) -> Result<Json<Value>, ErrorData> {
-    adapter::result(commands::executor::manage(state, context, input).await)
+    adapter::result(commands::executor::manage(state, &adapter::context(parts)?, input).await)
 }
 
 #[cfg(test)]

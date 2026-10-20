@@ -157,6 +157,85 @@ async fn single_path_resolution_preserves_segment_and_visibility_semantics()
 }
 
 #[tokio::test]
+async fn resolved_paths_and_search_candidates_preserve_all_node_fields()
+-> Result<(), Box<dyn std::error::Error>> {
+    use notegate_model::search::SearchDateFilters;
+
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "query-rows").await?;
+    let editor =
+        common::insert_user_account(&db.pool, "query-editor", "query-editor@example.test").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let folder = insert_folder(&repo, space, root, "자료", owner).await?;
+    let (text_node, text) = repo
+        .insert_text(space, folder.id, "note.md", &content(), owner)
+        .await?;
+    sqlx::query(
+        "UPDATE nodes SET sort_order=17, metadata=$2, external_access_enabled=true, \
+         write_locked=true, updated_by_account_id=$3, \
+         created_at=now()-interval '2 days', updated_at=now()-interval '1 day' \
+         WHERE id=ANY($1)",
+    )
+    .bind(vec![folder.id, text_node.id])
+    .bind(serde_json::json!({"label":"retained metadata"}))
+    .bind(editor)
+    .execute(&db.pool)
+    .await?;
+
+    let canonical = repo.find_nodes(space, &[folder.id, text_node.id]).await?;
+    let paths = vec![
+        "/자료/note.md".to_owned(),
+        "/missing".to_owned(),
+        "/자료".to_owned(),
+    ];
+    let resolved = repo.resolve_nodes_by_paths(space, &paths).await?;
+    assert_eq!(resolved.len(), 2);
+    for ((index, path, node), expected_index) in resolved.iter().zip([0, 2]) {
+        assert_eq!(*index, expected_index);
+        assert_eq!(path, &paths[expected_index]);
+        assert_eq!(
+            serde_json::to_value(node)?,
+            serde_json::to_value(&canonical[&node.id])?
+        );
+    }
+
+    let filters = SearchDateFilters::default();
+    let nodes = repo
+        .search_node_candidates(space, root, "/", None, &filters, 10)
+        .await?;
+    assert_eq!(nodes.len(), 2);
+    for candidate in nodes {
+        assert_eq!(
+            serde_json::to_value(&candidate.node)?,
+            serde_json::to_value(&canonical[&candidate.node.id])?
+        );
+        let expected_path = if candidate.node.id == folder.id {
+            &paths[2]
+        } else {
+            &paths[0]
+        };
+        assert_eq!(&candidate.path, expected_path);
+    }
+    let texts = repo
+        .search_text_candidates(space, root, "/", None, &filters, 10)
+        .await?;
+    assert_eq!(texts.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&texts[0].node)?,
+        serde_json::to_value(&canonical[&text_node.id])?
+    );
+    assert_eq!(texts[0].path, paths[0]);
+    assert_eq!(texts[0].content_sha256, text.content_sha256);
+    assert_eq!(texts[0].byte_len, text.byte_len);
+    assert_eq!(texts[0].line_count, text.line_count);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn create_enforces_derived_path_byte_limit_in_transaction()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {

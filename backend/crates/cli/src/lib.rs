@@ -167,10 +167,6 @@ pub struct ReadCommandArgs {
 #[serde(deny_unknown_fields)]
 struct MeInput {}
 
-pub async fn execute(cli: Cli) -> Result<Value, CliError> {
-    execute_with_events(cli, |_event| Ok(())).await
-}
-
 pub async fn execute_with_events(
     cli: Cli,
     mut emit: impl FnMut(&Value) -> Result<(), CliError>,
