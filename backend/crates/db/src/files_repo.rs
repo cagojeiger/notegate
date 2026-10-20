@@ -21,6 +21,7 @@ use notegate_core::Result;
 use notegate_core::limits::Limits;
 use notegate_core::security::PiiCrypto;
 use notegate_model::{FileObject, Node, NodeKind, NodeSummary, SavedText, TextObject};
+use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;

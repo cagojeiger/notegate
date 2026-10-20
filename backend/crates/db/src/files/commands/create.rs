@@ -200,7 +200,7 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, SavedText)> 
 
 /// Shared in-tx create pre-checks: parent live folder, path bounds,
 /// sibling-unique, and fanout.
-pub(in crate::files) async fn prepare_create(
+pub(in crate::files_repo::files) async fn prepare_create(
     tx: &mut sqlx::PgConnection,
     space_id: Uuid,
     parent_id: Uuid,
@@ -211,7 +211,7 @@ pub(in crate::files) async fn prepare_create(
     prepare_create_with_parent_bounds(tx, space_id, parent_id, name, caps, parent_bounds).await
 }
 
-pub(in crate::files) async fn prepare_reserved_file_create(
+pub(in crate::files_repo::files) async fn prepare_reserved_file_create(
     tx: &mut sqlx::PgConnection,
     space_id: Uuid,
     parent_id: Uuid,
