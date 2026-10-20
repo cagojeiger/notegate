@@ -12,6 +12,7 @@ Migration은 forward-only로 운영한다.
 - 호환되지 않는 schema 변경은 구 API·worker·reconciler를 모두 중지한 뒤 적용한다. 이전 이미지만 다시 실행하지 않는다.
 - Migration 59 전에는 v0.1.112에서 history encryption을 완료하고 복구 가능한 백업을 확인한다. 평문 Changes·호출 payload·수정 사유가 남아 있으면 DDL 전에 중단한다.
 - Migration 60은 browser session의 중복 전환 표식만 제거한다. 기존 token·issuer·만료·철회·Audit 행은 보존하며, issuer가 없는 세션은 계속 거부한다.
+- Migration 62 전에는 [세션 준비 절차](rest/auth.md#세션-스키마-업그레이드)로 이전 issuer와 거부 상태를 Audit에 보존한다. 준비되지 않은 세션이 있으면 컬럼 삭제 전에 중단한다.
 - Migration이 포함된 release는 forward fix로 복구한다.
 - Schema 복원이 필요한 rollback은 배포 전에 검증한 database restore 절차로 수행한다.
 
@@ -37,7 +38,7 @@ Agent는 user가 관리한다. Agent name은 제품 메타데이터이며 PII �
 
 ## Browser session table
 
-Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. 신규 세션은 검증한 `oidc_issuer`에 연결한다. Issuer가 없거나 현재 설정과 다르면 인증을 거부한다. 외부 token과 refresh 상태는 보관하지 않는다. `idle_expires_at`은 미사용 만료이며 `expires_at`은 연장할 수 없는 절대 만료다. 기존 `validated_until`은 migration 61에서 값 변경 없이 이름을 바꾼다.
+Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. 로그인 출처 issuer는 `session.login` Audit metadata에 기록하며 세션의 인증·갱신·목록은 현재 OIDC 설정과 독립적이다. 외부 token과 refresh 상태는 보관하지 않는다. `idle_expires_at`은 미사용 만료이며 `expires_at`은 연장할 수 없는 절대 만료다. 기존 `validated_until`은 migration 61에서 값 변경 없이 이름을 바꾼다.
 
 `client_environment`는 nullable 브라우저·OS 표시다. `created_at`·`last_used_at`·두 만료와 함께 사용자 세션 관리에 사용한다. Raw User-Agent·IP·장비 지문을 저장하지 않는다.
 

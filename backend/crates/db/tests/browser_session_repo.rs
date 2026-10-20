@@ -70,10 +70,9 @@ async fn inserted_session_can_be_found_by_hash() -> Result<(), Box<dyn std::erro
         .expect("session should be live");
 
     assert_eq!(found.user_id, user_id);
-    assert_eq!(
-        found.oidc_issuer.as_deref(),
-        Some("https://auth.example.test")
-    );
+    let issuer: String = sqlx::query_scalar("SELECT metadata->>'issuer' FROM audit_events WHERE resource_id=$1 AND op_type='session.login'")
+        .bind(session_id).fetch_one(&db.pool).await?;
+    assert_eq!(issuer, "https://auth.example.test");
     let resolved = repo
         .find_live_caller_by_token(session_id, &token_hash, &crypto)
         .await?
@@ -128,17 +127,12 @@ async fn capped_session_inventory_always_includes_the_current_session()
         .bind(current)
         .execute(&db.pool)
         .await?;
-    sqlx::query("INSERT INTO browser_sessions(id,user_id,token_prefix,token_hash,hash_key_id,hash_version,oidc_issuer,idle_expires_at,expires_at) \
-        SELECT id,$1,'ngs_v1_'||id::text,md5(id::text),'test-lookup',1,'https://auth.example.test',now()+interval '1 hour',now()+interval '15 days' \
+    sqlx::query("INSERT INTO browser_sessions(id,user_id,token_prefix,token_hash,hash_key_id,hash_version,idle_expires_at,expires_at) \
+        SELECT id,$1,'ngs_v1_'||id::text,md5(id::text),'test-lookup',1,now()+interval '1 hour',now()+interval '15 days' \
         FROM (SELECT gen_random_uuid() AS id FROM generate_series(1,100)) s")
         .bind(owner).execute(&db.pool).await?;
-    assert!(
-        repo.renew_idle_expiry(current, &hash, "https://auth.example.test")
-            .await?
-    );
-    let sessions = repo
-        .list_owned_live(owner, "https://auth.example.test", current)
-        .await?;
+    assert!(repo.renew_idle_expiry(current, &hash).await?);
+    let sessions = repo.list_owned_live(owner, current).await?;
     assert_eq!(sessions.len(), 100);
     assert_eq!(sessions.first().map(|s| s.id), Some(current));
     let total: i64 = sqlx::query_scalar("SELECT count(*) FROM browser_sessions WHERE user_id=$1")
@@ -209,10 +203,7 @@ async fn browser_activity_extends_idle_expiry_without_moving_absolute_expiry()
         before.idle_expires_at
     );
     let now = Utc::now();
-    assert!(
-        repo.renew_idle_expiry(id, &hash, "https://auth.example.test")
-            .await?
-    );
+    assert!(repo.renew_idle_expiry(id, &hash).await?);
     let after = repo
         .find_by_token(id, &hash)
         .await?
@@ -225,10 +216,7 @@ async fn browser_activity_extends_idle_expiry_without_moving_absolute_expiry()
     assert_eq!(audit_op_types(&db, user).await?, ["session.login"]);
     sqlx::query("UPDATE browser_sessions SET expires_at=now()+interval '1 day', idle_expires_at=now()+interval '1 hour' WHERE id=$1")
         .bind(id).execute(&db.pool).await?;
-    assert!(
-        repo.renew_idle_expiry(id, &hash, "https://auth.example.test")
-            .await?
-    );
+    assert!(repo.renew_idle_expiry(id, &hash).await?);
     let capped = repo.find_by_token(id, &hash).await?.unwrap();
     assert_eq!(capped.idle_expires_at, capped.expires_at);
     db.cleanup().await;
@@ -243,9 +231,7 @@ async fn browser_activity_cannot_revive_expired_revoked_inactive_or_foreign_sess
     };
     let repo = BrowserSessionRepo::new(db.pool.clone());
     let crypto = PiiCrypto::test();
-    for case in [
-        "idle", "absolute", "revoked", "inactive", "deleted", "issuer", "hash",
-    ] {
+    for case in ["idle", "absolute", "revoked", "inactive", "deleted", "hash"] {
         let user = insert_user_account(&db.pool, case, "browser@example.test").await?;
         let (id, hash) = insert_session(&repo, &crypto, user).await?;
         match case {
@@ -278,22 +264,14 @@ async fn browser_activity_cannot_revive_expired_revoked_inactive_or_foreign_sess
                 .fetch_one(&db.pool)
                 .await?;
         let supplied_hash = if case == "hash" { "wrong-hash" } else { &hash };
-        let issuer = if case == "issuer" {
-            "https://other.test"
-        } else {
-            "https://auth.example.test"
-        };
-        assert!(
-            !repo.renew_idle_expiry(id, supplied_hash, issuer).await?,
-            "{case}"
-        );
+        assert!(!repo.renew_idle_expiry(id, supplied_hash).await?, "{case}");
         let after: serde_json::Value =
             sqlx::query_scalar("SELECT to_jsonb(t) FROM browser_sessions t WHERE id=$1")
                 .bind(id)
                 .fetch_one(&db.pool)
                 .await?;
         assert_eq!(after, before, "{case}");
-        if !matches!(case, "issuer" | "hash") {
+        if case != "hash" {
             assert!(repo.find_live_by_token(id, &hash).await?.is_none());
             assert!(
                 repo.find_live_caller_by_token(id, &hash, &crypto)
@@ -317,16 +295,12 @@ async fn concurrent_browser_activity_never_undoes_logout() -> Result<(), Box<dyn
     let crypto = PiiCrypto::test();
     let (id, hash) = insert_session(&repo, &crypto, user).await?;
     let (renewed, revoked) = tokio::join!(
-        repo.renew_idle_expiry(id, &hash, "https://auth.example.test"),
+        repo.renew_idle_expiry(id, &hash),
         repo.revoke_session_for_logout(id),
     );
     renewed?;
     assert!(revoked?);
-    assert!(
-        !repo
-            .renew_idle_expiry(id, &hash, "https://auth.example.test")
-            .await?
-    );
+    assert!(!repo.renew_idle_expiry(id, &hash).await?);
     assert!(repo.find_live_by_token(id, &hash).await?.is_none());
     assert_eq!(
         audit_op_types(&db, user).await?,
@@ -334,16 +308,12 @@ async fn concurrent_browser_activity_never_undoes_logout() -> Result<(), Box<dyn
     );
     let (remote_id, remote_hash) = insert_session(&repo, &crypto, user).await?;
     let (renewed, revoked) = tokio::join!(
-        repo.renew_idle_expiry(remote_id, &remote_hash, "https://auth.example.test"),
+        repo.renew_idle_expiry(remote_id, &remote_hash),
         repo.revoke_owned_sessions(user, Some(remote_id), None),
     );
     renewed?;
     assert_eq!(revoked?, 1);
-    assert!(
-        !repo
-            .renew_idle_expiry(remote_id, &remote_hash, "https://auth.example.test")
-            .await?
-    );
+    assert!(!repo.renew_idle_expiry(remote_id, &remote_hash).await?);
     assert!(
         repo.find_live_by_token(remote_id, &remote_hash)
             .await?
@@ -471,14 +441,22 @@ async fn dropping_browser_refresh_storage_preserves_sessions_and_owned_data()
         .await?
         .unwrap();
     assert_eq!(caller.account.id, user);
-    assert_eq!(
-        caller.oidc_issuer.as_deref(),
-        Some("https://auth.example.test")
-    );
+    let issuer: Option<String> =
+        sqlx::query_scalar("SELECT oidc_issuer FROM browser_sessions WHERE id=$1")
+            .bind(local_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(issuer.as_deref(), Some("https://auth.example.test"));
     assert_eq!(caller.idle_expires_at, now + Duration::hours(1));
     let legacy_hash = crypto.browser_session_hash(&legacy_id.to_string(), "existing-session")?;
     let legacy = repo.find_by_token(legacy_id, &legacy_hash).await?.unwrap();
-    assert_eq!(legacy.oidc_issuer, None);
+    assert_eq!(legacy.user_id, user);
+    let issuer: Option<String> =
+        sqlx::query_scalar("SELECT oidc_issuer FROM browser_sessions WHERE id=$1")
+            .bind(legacy_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(issuer, None);
 
     let oauth = OAuthRepo::new(db.pool.clone());
     assert_eq!(

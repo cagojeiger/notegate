@@ -639,18 +639,33 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
     config.oidc.client_secret = None;
     state.config = Arc::new(config);
     state.oidc = Arc::new(OidcProvider::new(&state.config, state.http.clone()));
-    // This simulates AuthGate remaining the same standards-based upstream provider.
+    // The new provider identity is explicitly linked to the original local owner.
     let owner = state
         .accounts
         .upsert_user_by_identity(&crate::identity::ResolveAttrs {
-            issuer: mock.issuer.clone(),
-            sub: SUBJECT.to_owned(),
+            issuer: "https://old-provider.example.test".to_owned(),
+            sub: "original-subject".to_owned(),
             email: "test@example.test".to_owned(),
             name: "Existing owner".to_owned(),
         })
         .await?
         .0
         .id;
+    state
+        .accounts
+        .import_identity_links(&[notegate_db::account_repo::IdentityLink {
+            account_id: owner,
+            issuer: mock.issuer.clone(),
+            subject: SUBJECT.to_owned(),
+        }])
+        .await?;
+    assert_eq!(
+        state
+            .accounts
+            .find_user_id_by_identity("https://old-provider.example.test", "original-subject")
+            .await?,
+        Some(owner)
+    );
     sqlx::query("INSERT INTO audit_events (owner_user_id, actor_account_id, source, op_type, resource_type, resource_id) VALUES ($1, $1, 'rest', 'test.before_oidc', 'account', $1)")
         .bind(owner).execute(&db.pool).await?;
     let router = Router::new()
@@ -667,7 +682,8 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
         .await?;
     let location = url::Url::parse(login.headers()[header::LOCATION].to_str()?)?;
     let query: std::collections::HashMap<_, _> = location.query_pairs().into_owned().collect();
-    assert_eq!(query["max_age"], "0");
+    assert!(!query.contains_key("max_age"));
+    assert!(!query.contains_key("claims"));
     assert!(!query["scope"].contains("offline_access"));
     let cookie = login.headers()[header::SET_COOKIE]
         .to_str()?
@@ -706,7 +722,7 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
     mock.set_token(
         KEY_A,
         "key-a",
-        json!({"nonce":query["nonce"],"auth_time":chrono::Utc::now().timestamp()}),
+        json!({"nonce":query["nonce"],"auth_time":null}),
         Algorithm::RS256,
     )
     .await;
@@ -770,7 +786,9 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
         )
         .await?
         .unwrap();
-    assert_eq!(stored.oidc_issuer.as_deref(), Some(mock.issuer.as_str()));
+    let issuer: String = sqlx::query_scalar("SELECT metadata->>'issuer' FROM audit_events WHERE resource_id=$1 AND op_type='session.login'")
+        .bind(id).fetch_one(&db.pool).await?;
+    assert_eq!(issuer, mock.issuer);
     let environment: Option<String> =
         sqlx::query_scalar("SELECT client_environment FROM browser_sessions WHERE id=$1")
             .bind(id)
@@ -829,7 +847,7 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
 }
 
 #[tokio::test]
-async fn standalone_confidential_oidc_requires_recent_auth_time_and_not_a_refresh_token() {
+async fn standalone_confidential_oidc_accepts_optional_auth_time_without_upstream_refresh() {
     let mock = MockProvider::start().await;
     mock.state.omit_refresh.store(true, Ordering::SeqCst);
     let mut config = config(&mock.issuer);
@@ -849,7 +867,7 @@ async fn standalone_confidential_oidc_requires_recent_auth_time_and_not_a_refres
     assert!(
         exchange_code_for_userinfo(&oidc, &http, "code", "verifier", NONCE)
             .await
-            .is_err()
+            .is_ok()
     );
     mock.set_token(
         KEY_A,
@@ -861,7 +879,7 @@ async fn standalone_confidential_oidc_requires_recent_auth_time_and_not_a_refres
     assert!(
         exchange_code_for_userinfo(&oidc, &http, "code", "verifier", NONCE)
             .await
-            .is_err()
+            .is_ok()
     );
     mock.set_token(
         KEY_A,
@@ -872,7 +890,7 @@ async fn standalone_confidential_oidc_requires_recent_auth_time_and_not_a_refres
     .await;
     let result = exchange_code_for_userinfo(&oidc, &http, "code", "verifier", NONCE)
         .await
-        .expect("fresh confidential OIDC");
+        .expect("valid confidential OIDC");
     assert_eq!(result.sub, SUBJECT);
     assert_eq!(
         mock.state.last_token_form.read().await["client_secret"],

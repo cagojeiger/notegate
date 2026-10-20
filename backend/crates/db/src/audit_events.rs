@@ -156,11 +156,12 @@ pub(crate) async fn account_created(tx: &mut PgConnection, account_id: Uuid) -> 
     .await
 }
 
-fn session_logged_in_payload(environment: Option<&str>) -> (&'static str, Value) {
-    (
-        "session.login",
-        environment.map_or_else(|| json!({}), |value| json!({"client_environment": value})),
-    )
+fn session_logged_in_payload(environment: Option<&str>, issuer: &str) -> (&'static str, Value) {
+    let mut metadata = json!({"issuer": issuer});
+    if let Some(environment) = environment {
+        metadata["client_environment"] = json!(environment);
+    }
+    ("session.login", metadata)
 }
 
 pub(crate) async fn session_logged_in(
@@ -168,8 +169,9 @@ pub(crate) async fn session_logged_in(
     user_id: Uuid,
     session_id: Uuid,
     environment: Option<&str>,
+    issuer: &str,
 ) -> Result<()> {
-    let (op_type, metadata) = session_logged_in_payload(environment);
+    let (op_type, metadata) = session_logged_in_payload(environment, issuer);
     event(
         tx,
         AuditContext::rest(user_id),
@@ -681,8 +683,11 @@ mod tests {
     fn account_and_session_events_build_expected_payloads() {
         assert_eq!(account_created_payload(), ("account.create", json!({})));
         assert_eq!(
-            session_logged_in_payload(None),
-            ("session.login", json!({}))
+            session_logged_in_payload(None, "https://issuer.example.test"),
+            (
+                "session.login",
+                json!({"issuer": "https://issuer.example.test"})
+            )
         );
         assert_eq!(session_logged_out_payload(), ("session.logout", json!({})));
     }
