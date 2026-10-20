@@ -401,7 +401,6 @@ pub mod node {
 
     use super::super::error::map_sqlx_error;
     use super::super::rows::{NODE_COLUMNS, NODE_SUMMARY_COLUMNS, NodeRow, NodeSummaryRow};
-    use crate::to_usize;
 
     /// Shared path-derivation CTE used by pool and transaction callers.
     /// Returns the absolute path of a live node, or `None` if it is missing/deleted.

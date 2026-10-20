@@ -195,10 +195,7 @@ async fn resolved_paths_and_search_candidates_preserve_all_node_fields()
     for ((index, path, node), expected_index) in resolved.iter().zip([0, 2]) {
         assert_eq!(*index, expected_index);
         assert_eq!(path, &paths[expected_index]);
-        assert_eq!(
-            serde_json::to_value(node)?,
-            serde_json::to_value(&canonical[&node.id])?
-        );
+        assert_eq!(node, &canonical[&node.id]);
     }
 
     let filters = SearchDateFilters::default();
@@ -207,10 +204,7 @@ async fn resolved_paths_and_search_candidates_preserve_all_node_fields()
         .await?;
     assert_eq!(nodes.len(), 2);
     for candidate in nodes {
-        assert_eq!(
-            serde_json::to_value(&candidate.node)?,
-            serde_json::to_value(&canonical[&candidate.node.id])?
-        );
+        assert_eq!(&candidate.node, &canonical[&candidate.node.id]);
         let expected_path = if candidate.node.id == folder.id {
             &paths[2]
         } else {
@@ -222,10 +216,7 @@ async fn resolved_paths_and_search_candidates_preserve_all_node_fields()
         .search_text_candidates(space, root, "/", None, &filters, 10)
         .await?;
     assert_eq!(texts.len(), 1);
-    assert_eq!(
-        serde_json::to_value(&texts[0].node)?,
-        serde_json::to_value(&canonical[&text_node.id])?
-    );
+    assert_eq!(&texts[0].node, &canonical[&text_node.id]);
     assert_eq!(texts[0].path, paths[0]);
     assert_eq!(texts[0].content_sha256, text.content_sha256);
     assert_eq!(texts[0].byte_len, text.byte_len);
