@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 import type { Me, Space } from "../../api/types";
@@ -47,6 +47,7 @@ function SettingsWorkbench({ me, spaces = [], initialSpaceId = null, onClose, on
   onOpenInspector = () => undefined, onCloseInspector = () => undefined
 }: SettingsViewProps) {
   const [tab, setTab] = useState<Tab>("general");
+  const inspectorId = useId();
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const [navigationContainer, setNavigationContainer] = useState<HTMLDivElement | null>(null);
   const showAgents = canManageAgents(me);
@@ -54,7 +55,7 @@ function SettingsWorkbench({ me, spaces = [], initialSpaceId = null, onClose, on
     (item.id !== "agents" || showAgents) && (item.id !== "trash" || me.account.kind === "user")
   ), [showAgents, me.account.kind]);
   const current = tabs.find((item) => item.id === tab) ?? tabs[0];
-  const inspector = useMemo(() => ({ container, navigationContainer, onOpen: onOpenInspector, onNavigate: () => { if (isMobile) onCloseInspector(); } }), [container, navigationContainer, onOpenInspector, isMobile, onCloseInspector]);
+  const inspector = useMemo(() => ({ id: inspectorId, open: inspectorOpen, container, navigationContainer, onOpen: onOpenInspector, onNavigate: () => { if (isMobile) onCloseInspector(); } }), [inspectorId, inspectorOpen, container, navigationContainer, onOpenInspector, isMobile, onCloseInspector]);
 
   useEffect(() => {
     if (!tabs.some((item) => item.id === tab)) setTab("account");
@@ -64,7 +65,7 @@ function SettingsWorkbench({ me, spaces = [], initialSpaceId = null, onClose, on
     if (container) container.scrollTop = 0;
   }, [container, current.id]);
 
-  const inspectorContents = <div className="ng-settings-inspector-frame flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+  const inspectorContents = <div id={inspectorId} className="ng-settings-inspector-frame flex h-full min-h-0 flex-1 flex-col overflow-hidden">
     <div ref={setNavigationContainer} className="ng-settings-navigation max-h-[60%] shrink-0 overflow-y-auto overscroll-contain border-b border-seam p-4 text-sm empty:hidden" />
     <div ref={setContainer} className="ng-settings-inspector min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain p-4 text-sm empty:hidden" />
   </div>;

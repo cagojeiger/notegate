@@ -71,7 +71,7 @@ function BackgroundJobRow({ job }: { job: BackgroundJob }) {
               aria-controls={attemptsId}
               title={toggleLabel}
               onClick={() => setOpen((value) => !value)}
-              className="grid size-7 place-items-center rounded-workbench-surface text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
+              className="grid size-workbench-control place-items-center rounded-workbench-surface text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
             >
               <ChevronRight size={14} className={`transition ${open ? "rotate-90" : ""}`} />
             </button>
@@ -94,7 +94,7 @@ function BackgroundJobRow({ job }: { job: BackgroundJob }) {
                     ? formatDurationBetween(attempt.started_at, attempt.finished_at)
                     : null;
                   return (
-                    <li key={attempt.attempt_number} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-md bg-bg px-3 py-2">
+                    <li key={attempt.attempt_number} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-workbench-surface bg-bg px-3 py-2">
                       <span className="font-medium text-text">Attempt {attempt.attempt_number}</span>
                       <div className="flex flex-wrap items-center gap-1.5 text-muted">
                         <span>{attempt.outcome ? formatAttemptOutcome(attempt.outcome) : "Running"}</span>

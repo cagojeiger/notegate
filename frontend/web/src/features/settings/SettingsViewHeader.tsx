@@ -16,6 +16,7 @@ export function SettingsViewHeader({ title, inspectorLabel, actions, disabled = 
     <div data-settings-heading className="flex shrink-0 items-center justify-between gap-3">
       <h2 aria-label={title} className="min-w-0">
         <button type="button" aria-label={`${title}: ${inspectorLabel}`} disabled={disabled} onClick={inspector.onOpen}
+          aria-expanded={inspector.open} aria-controls={inspector.open ? inspector.id : undefined}
           className="flex min-h-workbench-control max-w-full items-center gap-2 rounded-workbench-surface text-workbench font-semibold hover:bg-[var(--ng-hover)] disabled:cursor-not-allowed disabled:opacity-50">
           <span className="truncate">{title}</span><ChevronDown size={14} className="shrink-0 text-muted" />
         </button>

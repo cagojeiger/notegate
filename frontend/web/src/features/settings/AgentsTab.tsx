@@ -24,7 +24,7 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
   const [openId, setOpenId] = useSettingsViewState<string | null>("selected-agent", null);
   const [creating, setCreating] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
-  const createMutation = useCreateAgentMutation(() => { setName(""); setCreating(false); });
+  const createMutation = useCreateAgentMutation((agent) => { setName(""); setCreating(false); setOpenId(agent.id); });
   const deleteMutation = useDeleteAgentMutation(() => { setConfirmId(null); setOpenId(null); });
   const agents = agentsQuery.data?.agents ?? [];
   const selected = agents.find((agent) => agent.id === openId);

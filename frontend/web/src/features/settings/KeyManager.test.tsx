@@ -15,14 +15,15 @@ const emptyKeys: ApiKeyListResponse = {
 function renderKeyManager({
   maxTtlDays = 30,
   create = vi.fn(),
-  list = vi.fn().mockResolvedValue(emptyKeys)
+  list = vi.fn().mockResolvedValue(emptyKeys),
+  revoke = vi.fn().mockResolvedValue(undefined)
 }: {
   maxTtlDays?: number;
   create?: (input: { name: string; expires_at: string }) => Promise<MintedKey>;
   list?: () => Promise<ApiKeyListResponse>;
+  revoke?: (id: string) => Promise<void>;
 } = {}) {
   const queryClient = createTestQueryClient();
-  const revoke = vi.fn().mockResolvedValue(undefined);
   render(
     <QueryClientProvider client={queryClient}>
       <KeyManager
@@ -38,6 +39,25 @@ function renderKeyManager({
 }
 
 describe("KeyManager", () => {
+  it("prevents repeated revocation and target changes while a revocation is pending", async () => {
+    const keys = ["ci-key", "other-key"].map((name, index) => ({ id: `key-${index}`, name, created_at: "2026-10-01T00:00:00Z", expires_at: "2026-10-31T00:00:00Z" }));
+    let finish!: () => void;
+    const revoke = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const user = userEvent.setup();
+    renderKeyManager({ list: vi.fn().mockResolvedValue({ ...emptyKeys, keys }), revoke });
+    await user.click(await screen.findByRole("button", { name: "Revoke ci-key" }));
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    await user.click(confirm);
+
+    expect(confirm).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Revoke other-key" })).toBeDisabled();
+    await user.click(confirm);
+    expect(revoke).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Revoke other-key" })).toBeEnabled());
+  });
+
   it("distinguishes a failed read from an empty key list and retries it", async () => {
     const list = vi.fn().mockRejectedValueOnce(new Error("Unavailable")).mockResolvedValue(emptyKeys);
     const user = userEvent.setup();

@@ -71,6 +71,10 @@ for (const width of [1440, 390, 320]) {
       expect(await view.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     }
     await showSettingsInspector(page);
+    const inspectorTrigger = view.getByRole("button", { name: "Account: Open session actions", exact: true });
+    await expect(inspectorTrigger).toHaveAttribute("aria-expanded", "true");
+    const controlsId = await inspectorTrigger.getAttribute("aria-controls");
+    expect(await view.locator(".ng-settings-inspector-frame").getAttribute("id")).toBe(controlsId);
     if (width < 768) {
       const sheet = page.getByRole("dialog", { name: "Account Inspector" });
       await expect(sheet.getByRole("button", { name: "Close", exact: true })).toBeFocused();
@@ -81,6 +85,7 @@ for (const width of [1440, 390, 320]) {
       await view.getByRole("button", { name: "Close settings inspector" }).click();
       await expect(view.getByRole("tabpanel", { name: "Account", exact: true })).toBeVisible();
     }
+    await expect(inspectorTrigger).toHaveAttribute("aria-expanded", "false");
     await closeSettingsInspector(page);
     await view.getByRole("button", { name: "Close settings", exact: true }).click();
     await expect(editor).toBeVisible();

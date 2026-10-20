@@ -35,8 +35,14 @@ type SettingsApiOptions = { failPermissionUpdate?: boolean; initialSpacePermissi
 
 function mockSettingsApi(me: unknown = userMe, options: SettingsApiOptions = {}) {
   let spacePermission: SpacePermission = options.initialSpacePermission ?? "write";
+  const agents = [{ id: "agent-1", name: "ci-bot", owner_user_id: "user-1" }];
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const path = String(input);
+    if (path === "/api/v1/agents" && init?.method === "POST") {
+      const agent = { id: "agent-2", name: JSON.parse(String(init.body)).name as string, owner_user_id: "user-1" };
+      agents.push(agent);
+      return jsonResponse(agent, 201);
+    }
     if (path === "/api/v1/me/sessions") return jsonResponse({ sessions: [] });
     if (path === "/api/v1/me/oauth-grants") return jsonResponse({ grants: [] });
     if (path.includes("/api/v1/agents/agent-1/keys")) return jsonResponse({ keys: [], page });
@@ -65,7 +71,7 @@ function mockSettingsApi(me: unknown = userMe, options: SettingsApiOptions = {})
       return jsonResponse({ connections, page });
     }
     if (path.includes("/api/v1/spaces?")) return options.failedRead === "spaces" ? jsonResponse({ message: "Unavailable" }, 503) : jsonResponse({ spaces: [space], page });
-    if (path.endsWith("/api/v1/agents?limit=100")) return options.failedRead === "agents" ? jsonResponse({ message: "Unavailable" }, 503) : jsonResponse({ agents: [{ id: "agent-1", name: "ci-bot", owner_user_id: "user-1" }], page });
+    if (path.endsWith("/api/v1/agents?limit=100")) return options.failedRead === "agents" ? jsonResponse({ message: "Unavailable" }, 503) : jsonResponse({ agents, page });
     if (path.includes("/api/v1/me")) {
       return jsonResponse(me);
     }
@@ -126,6 +132,20 @@ describe("SettingsView", () => {
     renderSettings();
     await user.click(screen.getByRole("tab", { name: "Agents" }));
     await screen.findByRole("button", { name: "Select ci-bot" });
+    expect(screen.queryByRole("region", { name: "Settings for ci-bot" })).not.toBeInTheDocument();
+  });
+
+  it("selects the newly created agent instead of returning to the previous agent", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("tab", { name: "Agents" }));
+    await user.click(await screen.findByRole("button", { name: "Select ci-bot" }));
+    await user.click(screen.getByRole("button", { name: "Add agent" }));
+    await user.type(screen.getByRole("textbox", { name: "New agent name" }), "review-bot");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(await screen.findByRole("region", { name: "Settings for review-bot" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select review-bot" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("region", { name: "Settings for ci-bot" })).not.toBeInTheDocument();
   });
 

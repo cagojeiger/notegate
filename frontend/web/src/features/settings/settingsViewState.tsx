@@ -21,9 +21,29 @@ export function useSettingsScroll<T extends HTMLElement = HTMLDivElement>(key: s
   const values = useContext(SettingsViewStateContext);
   return useCallback((element: T | null) => {
     if (!element) return;
-    element.scrollTop = (values?.get(key) as number | undefined) ?? 0;
-    const save = () => { values?.set(key, element.scrollTop); };
+    const top = (values?.get(key) as number | undefined) ?? 0;
+    let restoring = true;
+    const observer = new MutationObserver(() => restore());
+    const restore = () => {
+      element.scrollTop = top;
+      restoring = element.scrollTop < top;
+      if (!restoring) observer.disconnect();
+    };
+    restore();
+    // A cold query mounts its scroll area before the asynchronous list arrives.
+    if (restoring) observer.observe(element, { childList: true, subtree: true });
+    const save = () => { if (!restoring) values?.set(key, element.scrollTop); };
+    const stopRestoring = () => { restoring = false; observer.disconnect(); save(); };
     element.addEventListener("scroll", save);
-    return () => { element.removeEventListener("scroll", save); };
+    element.addEventListener("wheel", stopRestoring, { passive: true });
+    element.addEventListener("pointerdown", stopRestoring);
+    element.addEventListener("keydown", stopRestoring);
+    return () => {
+      observer.disconnect();
+      element.removeEventListener("scroll", save);
+      element.removeEventListener("wheel", stopRestoring);
+      element.removeEventListener("pointerdown", stopRestoring);
+      element.removeEventListener("keydown", stopRestoring);
+    };
   }, [values, key]);
 }

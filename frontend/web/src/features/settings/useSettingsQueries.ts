@@ -18,13 +18,13 @@ export function useSettingsSpacesQuery(enabled = true) {
   return useQuery({ queryKey: queryKeys.spaces, queryFn: () => listSpaces(client), enabled });
 }
 
-export function useCreateAgentMutation(onCreated: () => void) {
+export function useCreateAgentMutation(onCreated: (agent: Agent) => void) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (name: string) => createAgent(client, name),
-    onSuccess: () => {
-      onCreated();
+    onSuccess: (agent) => {
+      onCreated(agent);
       invalidateAgentsList(queryClient);
       invalidateAuditEvents(queryClient);
     }

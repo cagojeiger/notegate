@@ -95,11 +95,11 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
               </div>
               {confirmId === key.id ? (
                 <div className="flex shrink-0 items-center gap-1">
-                  <Button size="sm" variant="danger" onClick={() => revokeMutation.mutate(key.id)}>Confirm</Button>
-                  <Button size="sm" secondary onClick={() => setConfirmId(null)}>Cancel</Button>
+                  <Button size="sm" variant="danger" disabled={revokeMutation.isPending} onClick={() => revokeMutation.mutate(key.id)}>Confirm</Button>
+                  <Button size="sm" secondary disabled={revokeMutation.isPending} onClick={() => setConfirmId(null)}>Cancel</Button>
                 </div>
               ) : (
-                <IconButton label={`Revoke ${key.name}`} onClick={() => setConfirmId(key.id)}><Trash2 size={15} className="text-danger" /></IconButton>
+                <IconButton label={`Revoke ${key.name}`} disabled={revokeMutation.isPending} onClick={() => setConfirmId(key.id)}><Trash2 size={15} className="text-danger" /></IconButton>
               )}
             </li>
           ))}

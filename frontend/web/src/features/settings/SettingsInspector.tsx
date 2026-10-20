@@ -6,6 +6,8 @@ import { SectionHeader } from "../../shared/ui";
 import { useSettingsScroll } from "./settingsViewState";
 
 type Inspector = {
+  id: string;
+  open: boolean;
   container: HTMLDivElement | null;
   navigationContainer: HTMLDivElement | null;
   onOpen: () => void;

@@ -178,6 +178,20 @@ for (const viewport of [
           }
         }
       }
+
+      // Returning after query GC must restore scroll once the list loads again.
+      await settings.getByRole("tab", { name: "History", exact: true }).click();
+      await chooseHistorySection(page, "API");
+      const history = settings.getByRole("tabpanel", { name: "API history", exact: true });
+      await expect(rows).toHaveCount(51);
+      await history.evaluate((element) => { element.scrollTop = 900; });
+      await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(900);
+      await page.clock.install();
+      await settings.getByRole("tab", { name: "General", exact: true }).click();
+      await page.clock.fastForward(301_000);
+      await settings.getByRole("tab", { name: "History", exact: true }).click();
+      await expect(rows).toHaveCount(50);
+      await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(900);
     });
   }
 }
