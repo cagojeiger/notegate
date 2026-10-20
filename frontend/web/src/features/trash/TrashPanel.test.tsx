@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ApiProvider } from "../../api/ApiProvider";
 import type { TrashItem } from "../../api/trash";
-import { TrashModal } from "./TrashModal";
+import { TrashPanel } from "./TrashPanel";
 
 const item: TrashItem = {
   id: "node-1", space_id: "space-1", space_name: "Daily", kind: "text",
@@ -22,10 +22,10 @@ function CacheProbe({ onReady }: { onReady?: (client: QueryClient) => void }) {
   return null;
 }
 function show(onReady?: (client: QueryClient) => void) {
-  render(<ApiProvider authCacheKey="trash-test"><CacheProbe onReady={onReady} /><TrashModal onClose={vi.fn()} /></ApiProvider>);
+  render(<ApiProvider authCacheKey="trash-test"><CacheProbe onReady={onReady} /><TrashPanel /></ApiProvider>);
 }
 
-describe("TrashModal", () => {
+describe("TrashPanel", () => {
   it("shows actions only for the selected item and restores that item's deletion", async () => {
     const user = userEvent.setup();
     const second = { ...item, id: "node-2", name: "second.md", path: "/notes/second.md", deletion_operation_id: "operation-2" };

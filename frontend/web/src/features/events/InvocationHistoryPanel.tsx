@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
+import { useSettingsViewState } from "../settings/settingsViewState";
+import { SettingsControls } from "../settings/SettingsInspector";
 import type { CommandInvocation, CommandInvocationSurface } from "../../api/types";
 import { Badge } from "../../shared/ui";
 import { formatActor, shortId } from "./eventDisplay";
@@ -14,9 +16,9 @@ export function CommandInvocationsPanel({ surface }: { surface: CommandInvocatio
   );
   return (
     <section className="space-y-3">
-      <div className="flex justify-end">
+      <SettingsControls><div className="flex justify-end">
         <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} />
-      </div>
+      </div></SettingsControls>
       <EventQueryState
         query={query}
         itemCount={invocations.length}
@@ -83,23 +85,25 @@ function CommandInvocationRow({ invocation }: { invocation: CommandInvocation })
           <span className={invocation.outcome === "success" ? "text-success" : "text-danger"}>{status}</span>
         </div>
         {invocation.invocation_id ? <p className="mt-2 break-all font-mono text-xs text-muted">Call {invocation.invocation_id}</p> : null}
-        <InvocationDetails label="Input" value={invocation.input} />
-        <InvocationDetails label="Response" value={invocation.response} />
+        <InvocationDetails stateKey={`history-${invocation.surface}-${invocation.id}-input`} label="Input" value={invocation.input} />
+        <InvocationDetails stateKey={`history-${invocation.surface}-${invocation.id}-response`} label="Response" value={invocation.response} />
       </div>
     </li>
   );
 }
 
 function InvocationDetails({
+  stateKey,
   label,
   value
 }: {
+  stateKey: string;
   label: "Input" | "Response";
   value: Record<string, unknown> | null | undefined;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useSettingsViewState(stateKey, false);
   return (
-    <details
+    <details open={open}
       className="mt-2 text-xs"
       onToggle={(event) => { setOpen(event.currentTarget.open); }}
     >

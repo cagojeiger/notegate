@@ -165,15 +165,12 @@ test("loads deferred global dialogs after the production entry renders", async (
   await routeJsonApi(page, (url) => responseFor(url));
   await page.goto("/");
 
-  await page.getByRole("button", { name: "History" }).click();
-  const history = page.getByRole("dialog", { name: "History" });
-  await expect(history).toBeVisible();
-  await history.getByRole("button", { name: "Close" }).click();
-
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const settings = page.getByRole("dialog", { name: "Settings" });
+  const settings = page.locator("[data-settings-view]");
   await expect(settings).toBeVisible();
-  await settings.getByRole("button", { name: "Close" }).click();
+  await settings.getByRole("tab", { name: "History", exact: true }).click();
+  await expect(settings.getByRole("region", { name: "History", exact: true })).toBeVisible();
+  await settings.getByRole("button", { name: "Close settings", exact: true }).click();
 
   await page.getByRole("button", { name: "Add space" }).click();
   await expect(page.getByRole("dialog", { name: "New space" })).toBeVisible();

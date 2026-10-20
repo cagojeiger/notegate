@@ -1,9 +1,11 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 
 import type { RestNode } from "../src/api/types";
 import { makeRestNode, makeSpace } from "../src/test/fixtures";
 import { routeJsonApi } from "./support/api";
 import { usageResponse } from "./support/usage";
+import { openSettings, showSettingsInspector, closeSettingsInspector } from "./support/settings";
 
 async function mockWorkbench(page: Page, nodeCount = 1, nodeOverrides: Partial<RestNode> = {}) {
   let space = makeSpace();
@@ -13,12 +15,16 @@ async function mockWorkbench(page: Page, nodeCount = 1, nodeOverrides: Partial<R
   await routeJsonApi(page, (url, request) => {
     if (url.pathname === "/api/v1/me") return { account: { id: "user-1", kind: "user", display_name: "User" }, user: { email: "user@example.com" }, capabilities: { can_create_space: true, can_manage_agents: true } };
     if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
+    if (url.pathname === "/api/v1/me/sessions") return { sessions: [] };
+    if (url.pathname === "/api/v1/me/oauth-grants") return { grants: [] };
     if (url.pathname === "/api/v1/spaces") return { spaces: [space], page: meta };
     if (url.pathname === `/api/v1/spaces/${space.id}` && request.method() === "PATCH") {
       space = { ...space, ...request.postDataJSON() };
       return space;
     }
     if (url.pathname === "/api/v1/agents") return { agents: [], page: meta };
+    if (url.pathname === "/api/v1/me/trash") return { items: [], page: meta };
+    if (url.pathname.endsWith("/file-change-events")) return { events: [], page: meta };
     if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${node.id}`) return node;
     if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${node.id}/reveal`) return { ancestors: [], target: node };
     if (url.pathname === `/api/v1/spaces/${space.id}/text/${node.id}`) return {
@@ -36,6 +42,99 @@ async function mockWorkbench(page: Page, nodeCount = 1, nodeOverrides: Partial<R
   });
   return node;
 }
+
+for (const width of [1440, 390, 320]) {
+  test(`settings preserves an unsaved document and restores focus at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const node = await mockWorkbench(page);
+    await page.goto("/");
+    if (width < 768) await page.getByRole("button", { name: "Toggle left sidebar" }).click();
+    await page.getByRole("button", { name: node.name, exact: true }).click();
+    const edit = page.getByRole("button", { name: "Edit", exact: true });
+    if (await edit.isVisible()) await edit.click();
+    else {
+      await page.getByRole("button", { name: "More actions", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
+    }
+    const editor = page.getByRole("textbox", { name: "Edit text content", includeHidden: true });
+    await editor.fill("Keep my unsaved settings-review draft");
+    const view = await openSettings(page);
+    await expect(editor).toBeAttached();
+    await expect(editor).toBeHidden();
+    await expect(page.getByRole("button", { name: "History", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Trash", exact: true })).toHaveCount(0);
+    for (const tab of ["General", "Account"]) {
+      await view.getByRole("tab", { name: tab, exact: true }).click();
+      await expect(view.getByRole("tabpanel", { name: tab, exact: true })).toBeVisible();
+      const result = await new AxeBuilder({ page }).include("[data-settings-view]").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+      expect(result.violations).toEqual([]);
+      expect(await view.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    }
+    await showSettingsInspector(page);
+    if (width < 768) {
+      const sheet = page.getByRole("dialog", { name: "Account Inspector" });
+      await expect(sheet.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(sheet).toBeHidden();
+      await expect(page.getByRole("button", { name: "Toggle settings inspector" })).toBeFocused();
+    } else {
+      await view.getByRole("button", { name: "Close settings inspector" }).click();
+      await expect(view.getByRole("tabpanel", { name: "Account", exact: true })).toBeVisible();
+    }
+    await closeSettingsInspector(page);
+    await view.getByRole("button", { name: "Close settings", exact: true }).click();
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveValue("Keep my unsaved settings-review draft");
+    await expect(page.getByRole("button", { name: "Settings", exact: true })).toBeFocused();
+  });
+}
+
+for (const width of [1440, 390]) {
+  test(`every settings view reopens its Inspector from the body at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    const view = await openSettings(page);
+    for (const [tab, label] of [
+      ["General", "General: Open general actions"], ["Account", "Browser sessions: Choose connection type"],
+      ["Agents", "Agents: Choose agent"], ["History", "Changes: Choose history type"], ["Trash", "Deleted items: Open trash actions"]
+    ]) {
+      await view.getByRole("tab", { name: tab, exact: true }).click();
+      await closeSettingsInspector(page);
+      const toggle = page.getByRole("button", { name: "Toggle settings inspector" });
+      if (await toggle.getAttribute("aria-pressed") === "true") await toggle.click();
+      const opener = view.getByRole("button", { name: label, exact: true });
+      await opener.click();
+      const inspector = view.getByRole(width < 768 ? "dialog" : "complementary", { name: `${tab} Inspector`, exact: true });
+      await expect(inspector).toBeVisible();
+      if (width < 768) {
+        await page.keyboard.press("Escape");
+        await expect(inspector).toBeHidden();
+        await expect(opener).toBeFocused();
+      } else await toggle.click();
+    }
+  });
+}
+
+test("mobile workspace reset keeps keyboard focus in its confirmation", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockWorkbench(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open space library" }).click();
+  await openSettings(page);
+  await showSettingsInspector(page);
+  const inspector = page.getByRole("dialog", { name: "General Inspector" });
+  const reset = inspector.getByRole("button", { name: "Reset", exact: true });
+  await reset.click();
+  const confirmation = page.getByRole("dialog", { name: "Reset saved workspace" });
+  await expect(confirmation.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(confirmation.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(confirmation).toBeHidden();
+  await expect(inspector).toBeVisible();
+  await expect(reset).toBeFocused();
+});
 
 async function expectSeparateEditorControls(header: Locator, name: string) {
   const controls = await header.getByRole("button").evaluateAll((buttons) => buttons.map((button) => {
@@ -75,13 +174,15 @@ for (const profile of [
       if (profile.width < 768) await page.getByRole("dialog", { name: "Space Inspector" }).getByRole("button", { name: "Close", exact: true }).click();
 
       await page.getByRole("button", { name: "Settings", exact: true }).click();
-      const settings = page.getByRole("dialog", { name: "Settings" });
+      const settings = page.locator("[data-settings-view]");
       const tab = settings.getByRole("tab", { name: "Agents" });
       expect((await tab.boundingBox())?.height).toBe(profile.hasTouch ? 44 : 32);
       await tab.click();
+      await showSettingsInspector(page);
+      await settings.getByRole("button", { name: "Add agent", exact: true }).click();
       const field = settings.getByRole("textbox", { name: "New agent name" });
       expect((await field.boundingBox())?.height).toBe(profile.hasTouch ? 44 : 38);
-      await field.focus();
+      await expect(field).toBeFocused();
       await page.keyboard.press("Tab");
       await page.keyboard.press("Shift+Tab");
       await expect(field).toBeFocused();
@@ -160,7 +261,7 @@ for (const profile of [
           const rect = element.getBoundingClientRect();
           return { left: rect.left, right: rect.right, width: rect.width };
         }));
-        expect(buttons.length).toBeGreaterThan(4);
+        expect(buttons).toHaveLength(4);
         for (const button of buttons) {
           expect(button.width).toBe(44);
           expect(button.left).toBeGreaterThanOrEqual(railBounds!.x);

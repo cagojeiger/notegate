@@ -1,7 +1,6 @@
 import { lazy, Suspense, useRef, useState } from "react";
 
 import type { Me, Space } from "../api/types";
-import { canViewAuditEvents } from "../auth/permissions";
 import { EditorArea } from "../features/editor/EditorArea";
 import { MarkdownOutlineProvider } from "../features/editor/MarkdownOutlineContext";
 import { useUsageQuery } from "../features/spaces/useUsageQueries";
@@ -27,16 +26,10 @@ type AppShellProps = {
   onSignOut: () => void;
 };
 
-type HistoryScope = {
-  initialSpaceId: string | null;
-};
-
 type AppSurface = "workbench" | "library";
 
 const SpaceLibrary = lazy(() => import("../features/spaces/SpaceLibrary").then((module) => ({ default: module.SpaceLibrary })));
-const EventHistoryModal = lazy(() => import("../features/events/EventHistoryModal").then((module) => ({ default: module.EventHistoryModal })));
-const TrashModal = lazy(() => import("../features/trash/TrashModal").then((module) => ({ default: module.TrashModal })));
-const SettingsModal = lazy(() => import("../features/settings/SettingsModal").then((module) => ({ default: module.SettingsModal })));
+const SettingsView = lazy(() => import("../features/settings/SettingsView").then((module) => ({ default: module.SettingsView })));
 const DialogHost = lazy(() => import("../features/workbench/dialogs/DialogHost").then((module) => ({ default: module.DialogHost })));
 const RecordingDock = lazy(() => import("../features/recording/RecordingDock").then((module) => ({ default: module.RecordingDock })));
 
@@ -58,10 +51,9 @@ function WorkspaceStatusBar({
 export function AppShell({ me, onSignOut }: AppShellProps) {
   const workbench = useWorkbenchController({ me, onSignOut });
   const recording = useAudioRecordingState();
-  const [trashOpen, setTrashOpen] = useState(false);
-  const [historyScope, setHistoryScope] = useState<HistoryScope | null>(null);
   const [surface, setSurface] = useState<AppSurface>("workbench");
   const [treeRevealRequest, setTreeRevealRequest] = useState<TreeRevealRequest | null>(null);
+  const settingsOpener = useRef<HTMLElement | null>(null);
   const recentRequestId = useRef(0);
   const activeSpaceId = useRef(workbench.activeSpace?.id ?? null);
   activeSpaceId.current = workbench.activeSpace?.id ?? null;
@@ -70,7 +62,9 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
   const canWriteWorkbench = workbench.canWriteActiveSpace && !recordingActive;
   const canManageWorkbench = workbench.canManageActiveSpace && !recordingActive;
   const libraryAvailable = me.account.kind === "user";
-  const libraryOpen = libraryAvailable && surface === "library";
+  const librarySelected = libraryAvailable && surface === "library";
+  const settingsOpen = workbench.settingsOpen;
+  const libraryOpen = librarySelected && !settingsOpen;
   const statusUsageEnabled = me.account.kind === "user" && !workbench.isMobile;
   const railSpaces = me.account.kind === "user"
     ? workbench.spaces.filter((space) => space.navigation_pinned)
@@ -106,15 +100,18 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
   const openSettings = () => {
     if (recordingActive) return;
     closeMobilePanels();
+    settingsOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     actions.setSettingsOpen(true);
   };
   const openLibrary = () => {
     if (recordingActive) return;
     closeMobilePanels();
+    actions.setSettingsOpen(false);
     setSurface("library");
   };
   const selectWorkbenchSpace = (space: Parameters<typeof actions.selectSpace>[0]) => {
     if (recordingActive) return;
+    actions.setSettingsOpen(false);
     actions.selectSpace(space);
     setSurface("workbench");
   };
@@ -125,16 +122,6 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         ? mergeVisibleSpaceOrder(workbench.spaces, orderedSpaces)
         : orderedSpaces
     );
-  };
-  const openTrash = () => {
-    if (recordingActive || !libraryAvailable) return;
-    closeMobilePanels();
-    setTrashOpen(true);
-  };
-  const openHistory = () => {
-    if (recordingActive) return;
-    closeMobilePanels();
-    setHistoryScope({ initialSpaceId: workbench.activeSpace?.id ?? null });
   };
   const cancelTreeReveal = () => {
     recentRequestId.current += 1;
@@ -175,12 +162,12 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
     <div className="flex h-full flex-col overflow-hidden bg-bg font-ui text-text">
       <TitleBar
         activeSpace={workbench.activeSpace}
-        locationLabel={libraryOpen ? "Spaces" : undefined}
-        showWorkbenchControls={!libraryOpen}
+        locationLabel={settingsOpen ? "Settings" : libraryOpen ? "Spaces" : undefined}
+        showWorkbenchControls={!libraryOpen && !settingsOpen}
         theme={workbench.theme}
         primarySidebarOpen={workbench.isMobile ? workbench.mobileTreeOpen : workbench.primarySidebarOpen}
         auxiliaryOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
-        auxiliaryLabel={libraryOpen ? "Toggle space inspector" : undefined}
+        auxiliaryLabel={settingsOpen ? "Toggle settings inspector" : libraryOpen ? "Toggle space inspector" : undefined}
         editorGroupCount={workbench.editorGroups.length}
         onAddGroup={actions.addGroup}
         onToggleTheme={actions.toggleTheme}
@@ -201,12 +188,19 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
           onDeleteSpace={actions.confirmDeleteSpace}
           onOpenLibrary={libraryAvailable ? openLibrary : undefined}
           libraryActive={libraryOpen}
-          onOpenTrash={libraryAvailable ? openTrash : undefined}
-          onOpenHistory={openHistory}
+          settingsActive={settingsOpen}
           onOpenSettings={openSettings}
         />
         <main className="relative flex min-h-0 min-w-0 flex-1">
-          {libraryOpen ? (
+          {settingsOpen ? <Suspense fallback={<div className="grid flex-1 place-items-center text-sm text-muted" role="status">Preparing settings…</div>}>
+            <SettingsView me={me} spaces={workbench.spaces} initialSpaceId={workbench.activeSpace?.id ?? null}
+              onClose={() => { actions.setSettingsOpen(false); requestAnimationFrame(() => settingsOpener.current?.focus()); }} onSignOut={actions.handleSignOut}
+              onResetSavedWorkspace={actions.confirmResetSavedWorkspace} isMobile={workbench.isMobile}
+              inspectorOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
+              onOpenInspector={openInspector} onCloseInspector={closeInspector} />
+          </Suspense> : null}
+          <div hidden={settingsOpen} className={settingsOpen ? "hidden" : "contents"} inert={settingsOpen} aria-hidden={settingsOpen || undefined}>
+          {librarySelected ? (
             <Suspense fallback={<div className="grid min-h-0 flex-1 place-items-center text-sm text-muted" role="status">Preparing space library…</div>}>
               <SpaceLibrary
                 spaces={workbench.spaces}
@@ -214,7 +208,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                 canCreateSpace={workbench.canCreateSpace && !recordingActive}
                 isMobile={workbench.isMobile}
                 usagePollingEnabled={!statusUsageEnabled}
-                inspectorOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
+                inspectorOpen={!settingsOpen && (workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary)}
                 onOpenInspector={openInspector}
                 onCloseInspector={closeInspector}
                 onOpenSpace={selectWorkbenchSpace}
@@ -306,6 +300,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
               <PanelOverlay visible={overlayVisible} onClose={closeOverlayPanels} isMobile={workbench.isMobile} />
             </>
           )}
+          </div>
         </main>
       </div>
       <div className="shrink-0">
@@ -325,8 +320,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
           onCreateSpace={recordingActive ? () => undefined : actions.promptCreateSpace}
           onOpenLibrary={libraryAvailable ? openLibrary : undefined}
           libraryActive={libraryOpen}
-          onOpenTrash={libraryAvailable ? openTrash : undefined}
-          onOpenHistory={openHistory}
+          settingsActive={settingsOpen}
           onOpenSettings={openSettings}
         />
         <WorkspaceStatusBar
@@ -335,9 +329,6 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         />
       </div>
       <Toast />
-      {trashOpen && libraryAvailable ? <Suspense fallback={null}><TrashModal onClose={() => setTrashOpen(false)} /></Suspense> : null}
-      {historyScope ? <Suspense fallback={null}><EventHistoryModal spaces={workbench.spaces} initialSpaceId={historyScope.initialSpaceId} canViewAuditEvents={canViewAuditEvents(me)} onClose={() => setHistoryScope(null)} /></Suspense> : null}
-      {workbench.settingsOpen ? <Suspense fallback={null}><SettingsModal me={me} onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} onResetSavedWorkspace={actions.confirmResetSavedWorkspace} /></Suspense> : null}
       {workbench.dialog ? <Suspense fallback={null}><DialogHost dialog={workbench.dialog} onClose={() => actions.setDialog(null)} /></Suspense> : null}
     </div>
     </MarkdownOutlineProvider>

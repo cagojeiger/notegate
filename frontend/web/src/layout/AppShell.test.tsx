@@ -62,18 +62,8 @@ vi.mock("../features/spaces/SpaceLibrary", () => ({
   )
 }));
 vi.mock("./AuxiliarySidebar", () => ({ AuxiliarySidebar: () => null }));
-vi.mock("../features/events/EventHistoryModal", () => ({
-  EventHistoryModal: ({ spaces, initialSpaceId, canViewAuditEvents }: { spaces: Space[]; initialSpaceId: string | null; canViewAuditEvents: boolean }) => (
-    <div
-      data-testid="history-modal"
-      data-space-id={initialSpaceId ?? undefined}
-      data-space-count={spaces.length}
-      data-can-view-audit={String(canViewAuditEvents)}
-    />
-  )
-}));
-vi.mock("../features/settings/SettingsModal", () => ({
-  SettingsModal: () => <div data-testid="settings-modal" />
+vi.mock("../features/settings/SettingsView", () => ({
+  SettingsView: ({ spaces, initialSpaceId, me }: { spaces: Space[]; initialSpaceId: string | null; me: Me }) => <div data-testid="settings-view" data-space-id={initialSpaceId ?? undefined} data-space-count={spaces.length} data-account-kind={me.account.kind} />
 }));
 vi.mock("../features/workbench/dialogs/DialogHost", () => ({
   DialogHost: () => <div data-testid="dialog-host" />
@@ -106,22 +96,15 @@ describe("AppShell", () => {
     mocks.recordingState = { status: "idle" };
   });
 
-  it.each([
-    ["user", true],
-    ["agent", false]
-  ] as const)("opens the current scope for a %s account", async (kind, canViewAudit) => {
-    const user = userEvent.setup();
-    mocks.useWorkbenchController.mockReturnValue(workbench());
+  it.each(["user", "agent"] as const)("supplies the current scope to settings for a %s account", async (kind) => {
+    mocks.useWorkbenchController.mockReturnValue({ ...workbench(), settingsOpen: true });
     mocks.useUploadManager.mockReturnValue(uploadManager());
-
     render(<AppShell me={me(kind)} onSignOut={vi.fn()} />);
-
-    await user.click(screen.getByRole("button", { name: "History" }));
-
-    const modal = await screen.findByTestId("history-modal");
-    expect(modal).toHaveAttribute("data-space-id", space.id);
-    expect(modal).toHaveAttribute("data-space-count", "1");
-    expect(modal).toHaveAttribute("data-can-view-audit", String(canViewAudit));
+    const view = await screen.findByTestId("settings-view");
+    expect(view).toHaveAttribute("data-space-id", space.id);
+    expect(view).toHaveAttribute("data-space-count", "1");
+    expect(view).toHaveAttribute("data-account-kind", kind);
+    expect(screen.getByTestId("editor-area")).not.toBeVisible();
   });
 
   it.each(["recording", "paused"] as const)(
@@ -144,18 +127,18 @@ describe("AppShell", () => {
         "md:w-96",
         "md:flex-col"
       );
-      await user.click(screen.getByRole("button", { name: "History" }));
-      expect(screen.queryByTestId("history-modal")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Settings" }));
+      expect(screen.queryByTestId("settings-view")).not.toBeInTheDocument();
     }
   );
 
-  it("loads settings when the deferred modal is opened", async () => {
+  it("loads the full settings surface when opened", async () => {
     mocks.useWorkbenchController.mockReturnValue({ ...workbench(), settingsOpen: true });
     mocks.useUploadManager.mockReturnValue(uploadManager());
 
     render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
 
-    expect(await screen.findByTestId("settings-modal")).toBeInTheDocument();
+    expect(await screen.findByTestId("settings-view")).toBeInTheDocument();
   });
 
   it("loads the deferred dialog host for an active workbench dialog", async () => {
@@ -234,7 +217,7 @@ describe("AppShell", () => {
     mocks.useWorkbenchController.mockReturnValue({
       ...workbench(),
       isMobile: true,
-      actions: { closeMobile: vi.fn() }
+      actions: { setSettingsOpen: vi.fn(), closeMobile: vi.fn() }
     });
     mocks.useUploadManager.mockReturnValue(uploadManager());
 
@@ -311,7 +294,7 @@ describe("AppShell", () => {
       ...workbench(),
       auxiliaryOpen: true,
       showAuxiliary: true,
-      actions: { toggleAuxiliary }
+      actions: { setSettingsOpen: vi.fn(), toggleAuxiliary }
     });
     mocks.useUploadManager.mockReturnValue(uploadManager());
     render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
@@ -396,7 +379,7 @@ function workbench() {
     isMobile: false,
     settingsOpen: false,
     dialog: null,
-    actions: {}
+    actions: { setSettingsOpen: vi.fn() }
   };
 }
 

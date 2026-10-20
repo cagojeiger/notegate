@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ApiProvider } from "../../api/ApiProvider";
 import { makeSpace } from "../../test/fixtures";
-import { EventHistoryModal } from "./EventHistoryModal";
+import { EventHistoryPanel } from "./EventHistoryPanel";
 
 const page = { limit: 50, returned: 0, has_more: false, next_cursor: null };
 
@@ -23,7 +23,7 @@ function jsonResponse(body: unknown) {
   return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
 }
 
-describe("EventHistoryModal", () => {
+describe("EventHistoryPanel", () => {
   it("loads public API history separately and labels HTTP summaries", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
@@ -37,7 +37,7 @@ describe("EventHistoryModal", () => {
       });
       return jsonResponse({ events: [], command_invocations: [], page });
     });
-    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryPanel spaces={[]} initialSpaceId={null} canViewAuditEvents /></ApiProvider>);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("surface=api"))).toBe(false);
     await user.click(screen.getByRole("tab", { name: "API" }));
     expect(await screen.findByText("API v2 request")).toBeInTheDocument();
@@ -58,7 +58,7 @@ describe("EventHistoryModal", () => {
         metadata: { completion_scope: "database", recorded_by: "database_trigger", reason: "unknown" }
       }] : [], page
     }));
-    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryPanel spaces={[]} initialSpaceId={null} canViewAuditEvents /></ApiProvider>);
     await user.click(screen.getByRole("tab", { name: "Audit" }));
     expect(await screen.findByText("Removed version body from database")).toBeInTheDocument();
     expect(screen.getByText("Reason not recorded")).toBeInTheDocument();
@@ -81,7 +81,7 @@ describe("EventHistoryModal", () => {
       }] : [],
       page
     }));
-    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryPanel spaces={[]} initialSpaceId={null} canViewAuditEvents /></ApiProvider>);
     await user.click(screen.getByRole("tab", { name: "Audit" }));
     expect(await screen.findByText("Removed item from database")).toBeInTheDocument();
     expect(screen.getByText("File removed-file")).toBeInTheDocument();
@@ -99,7 +99,7 @@ describe("EventHistoryModal", () => {
         metadata: { completion_scope: "s3", space_id: "removed-space" }
       }] : [], page
     }));
-    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryPanel spaces={[]} initialSpaceId={null} canViewAuditEvents /></ApiProvider>);
     await user.click(screen.getByRole("tab", { name: "Audit" }));
     expect(await screen.findByText("File deletion confirmed by storage")).toBeInTheDocument();
     expect(screen.getByText("Stored file object-42")).toBeInTheDocument();
@@ -114,7 +114,7 @@ describe("EventHistoryModal", () => {
         metadata: { item_kind: "text", item_name: "old.md", purpose: "Correct a date", source: "mcp", before_revision_id: "old-revision", before_revision_status: "unavailable" } }],
       page: { ...page, returned: 1 }
     }));
-    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryPanel spaces={[]} initialSpaceId={null} canViewAuditEvents /></ApiProvider>);
     expect(await screen.findByText("Document · old.md")).toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain("/api/v1/me/file-change-events?limit=50");
     await user.click(screen.getByRole("button", { name: "Show change details for Document · old.md" }));
@@ -127,7 +127,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents={false} onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents={false} />
       </ApiProvider>
     );
 
@@ -148,7 +148,7 @@ describe("EventHistoryModal", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({ events: [], page }));
     const { rerender } = render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
@@ -158,7 +158,7 @@ describe("EventHistoryModal", () => {
 
     rerender(
       <ApiProvider authCacheKey="browser-session:1">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents={false} onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents={false} />
       </ApiProvider>
     );
 
@@ -184,7 +184,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
@@ -229,7 +229,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
@@ -292,7 +292,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
@@ -320,7 +320,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
@@ -363,7 +363,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
@@ -413,7 +413,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
@@ -429,7 +429,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
@@ -458,7 +458,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
@@ -479,7 +479,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space, secondSpace]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space, secondSpace]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 

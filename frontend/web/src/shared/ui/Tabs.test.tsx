@@ -12,9 +12,9 @@ const items = [
   { id: "history", label: "History" }
 ] as const;
 
-function TabsHarness() {
+function TabsHarness({ orientation = "horizontal" }: { orientation?: "horizontal" | "vertical" }) {
   const [value, setValue] = useState<(typeof items)[number]["id"]>("outline");
-  return <Tabs items={[...items]} value={value} onChange={setValue} label="Inspector sections" />;
+  return <Tabs items={[...items]} value={value} onChange={setValue} label="Inspector sections" orientation={orientation} />;
 }
 
 describe("Tabs", () => {
@@ -63,6 +63,24 @@ describe("Tabs", () => {
     await user.click(screen.getByRole("tab", { name: "Metadata" }));
 
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("navigates vertical sections with up and down arrows, skipping disabled tabs", async () => {
+    const user = userEvent.setup();
+    render(<TabsHarness orientation="vertical" />);
+    expect(screen.getByRole("tablist")).toHaveAttribute("aria-orientation", "vertical");
+    const outline = screen.getByRole("tab", { name: "Outline" });
+    const links = screen.getByRole("tab", { name: "Links" });
+    outline.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(outline).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(links).toHaveFocus();
+    expect(links).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{ArrowUp}");
+    expect(outline).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByRole("tab", { name: "History" })).toHaveFocus();
   });
 
   it("keeps the default appearance and offers flush header tabs", () => {

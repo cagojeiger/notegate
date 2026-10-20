@@ -1,103 +1,79 @@
-import { Bot, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { Bot, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { Agent } from "../../api/agents";
 import type { Space } from "../../api/types";
 import { canWriteSpace } from "../../auth/permissions";
-import { Button, Card, EmptyState, IconButton, SectionHeader, TextField } from "../../shared/ui";
+import { Button, Card, EmptyState, SectionHeader, TextField } from "../../shared/ui";
 import {
-  type AgentSpaceAccessValue,
-  useAgentKeyManagerProps,
-  useAgentsQuery,
-  useConnectionsQuery,
-  useCreateAgentMutation,
-  useDeleteAgentMutation,
-  useSetAgentSpaceAccessMutation,
-  useSettingsSpacesQuery
+  type AgentSpaceAccessValue, useAgentKeyManagerProps, useAgentsQuery, useConnectionsQuery,
+  useCreateAgentMutation, useDeleteAgentMutation, useSetAgentSpaceAccessMutation, useSettingsSpacesQuery
 } from "./useSettingsQueries";
 import { AgentConnections } from "./AgentConnections";
 import { KeyManager } from "./KeyManager";
+import { SettingsControls, SettingsInspectorSection, useSettingsInspector, useSettingsNavigationScroll } from "./SettingsInspector";
+
+import { SettingsViewHeader } from "./SettingsViewHeader";
+import { useSettingsScroll, useSettingsViewState } from "./settingsViewState";
 
 export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
+  const inspector = useSettingsInspector();
   const agentsQuery = useAgentsQuery(canManageAgents);
+  useSettingsNavigationScroll("agents", agentsQuery.isSuccess);
   const [name, setName] = useState("");
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useSettingsViewState<string | null>("selected-agent", null);
+  const [creating, setCreating] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
-
-  const createMutation = useCreateAgentMutation(() => setName(""));
-  const deleteMutation = useDeleteAgentMutation(() => setConfirmId(null));
-
-  function confirmDelete(agentId: string) {
-    if (openId === agentId) setOpenId(null);
-    deleteMutation.mutate(agentId);
-  }
-
+  const createMutation = useCreateAgentMutation(() => { setName(""); setCreating(false); });
+  const deleteMutation = useDeleteAgentMutation(() => { setConfirmId(null); setOpenId(null); });
   const agents = agentsQuery.data?.agents ?? [];
+  const selected = agents.find((agent) => agent.id === openId);
+  const bodyScroll = useSettingsScroll(`agent-content-${creating ? "new" : openId ?? "overview"}`);
   if (!canManageAgents) return <EmptyState>Agent management is unavailable for this account.</EmptyState>;
 
   return (
-    <div className="space-y-4">
-      <AgentConnections />
-
-      <section>
-        <SectionHeader title="Agents" description="Manage API keys and space permissions for each agent." />
-        <div className="flex items-end gap-2">
-          <TextField
-            label="New agent name"
-            className="min-w-0 flex-1"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) createMutation.mutate(name.trim()); }}
-            placeholder="e.g. ci-bot, importer"
-          />
-          <Button onClick={() => createMutation.mutate(name.trim())} disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
-        </div>
-      </section>
-
-      {agentsQuery.isLoading ? (
-        <div className="text-sm text-muted">Loading…</div>
-      ) : agentsQuery.isError ? (
-        <Card tone="danger" padding="sm" className="flex flex-wrap items-center justify-between gap-2 text-workbench">
-          <p role="alert" className="text-danger">Could not load agents.</p>
-          <Button size="sm" secondary aria-label="Retry agents" disabled={agentsQuery.isFetching} onClick={() => { void agentsQuery.refetch(); }}>Retry</Button>
-        </Card>
-      ) : agents.length === 0 ? (
-        <EmptyState>No agents yet.</EmptyState>
-      ) : (
-        <ul className="space-y-2">
-          {agents.map((agent) => (
-            <Card key={agent.id} as="li" padding="none">
-              <div className="flex items-center gap-3 px-4 py-3 text-sm">
-                <button type="button" aria-expanded={openId === agent.id} aria-label={`Toggle ${agent.name} details`} onClick={() => setOpenId(openId === agent.id ? null : agent.id)} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-[var(--ng-hover)] hover:text-text">
-                  <ChevronRight size={14} className={`shrink-0 text-muted transition ${openId === agent.id ? "rotate-90" : ""}`} />
-                  <Bot size={15} className="shrink-0 text-muted" />
-                  <span className="truncate font-medium">{agent.name}</span>
-                </button>
-                {confirmId === agent.id ? (
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button size="sm" variant="danger" onClick={() => confirmDelete(agent.id)}>Confirm</Button>
-                    <Button size="sm" secondary onClick={() => setConfirmId(null)}>Cancel</Button>
-                  </div>
-                ) : (
-                  <IconButton label={`Delete ${agent.name}`} onClick={() => setConfirmId(agent.id)}><Trash2 size={15} /></IconButton>
-                )}
-              </div>
-              {openId === agent.id ? (
-                <div className="space-y-4 border-t border-seam p-4">
-                  <section>
-                    <SectionHeader title="Space permissions" description="Choose which spaces this agent can access." />
-                    <AgentSpaceAccess agent={agent} />
-                  </section>
-                  <section>
-                    <SectionHeader title="Agent API Keys" description="Keys authenticate as this agent." />
-                    <AgentKeyManager agentId={agent.id} />
-                  </section>
-                </div>
-              ) : null}
-            </Card>
-          ))}
-        </ul>
-      )}
+    <div className="ng-settings-detail-view flex h-full min-h-0 flex-col gap-4">
+      <div className="shrink-0"><AgentConnections /></div>
+      <SettingsControls slot="navigation">
+        <section>
+          <SectionHeader title="Agents" description="Select an agent to manage its permissions and keys." />
+          {agentsQuery.isLoading ? <p role="status" className="text-muted">Loading agents…</p> : null}
+          {agentsQuery.isError ? <div><p role="alert" className="text-danger">Could not load agents.</p><Button size="sm" secondary aria-label="Retry agents" disabled={agentsQuery.isFetching} onClick={() => { void agentsQuery.refetch(); }}>Retry</Button></div> : null}
+          {agentsQuery.isSuccess && agents.length === 0 ? <p className="text-muted">No agents yet.</p> : null}
+          <ul className="space-y-1">
+            {agents.map((agent) => <li key={agent.id}>
+              <button type="button" aria-label={`Select ${agent.name}`} aria-pressed={selected?.id === agent.id && !creating} disabled={deleteMutation.isPending || createMutation.isPending}
+                onClick={() => { setOpenId(agent.id); setCreating(false); setConfirmId(null); inspector?.onNavigate(); }}
+                className={`flex min-h-[var(--ng-min-target-size)] w-full items-center gap-2 border-l-2 px-3 py-2 text-left text-workbench ${selected?.id === agent.id && !creating ? "border-primary bg-[var(--ng-selection)]" : "border-transparent hover:bg-[var(--ng-hover)]"}`}>
+                <Bot size={15} className="shrink-0" /><span className="truncate">{agent.name}</span>
+              </button>
+            </li>)}
+          </ul>
+          <button type="button" aria-label="Add agent" disabled={deleteMutation.isPending || createMutation.isPending} onClick={() => { setCreating(true); setConfirmId(null); inspector?.onNavigate(); }} className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-workbench-surface border border-dashed border-border-strong text-muted hover:bg-[var(--ng-hover)] hover:text-text"><Plus size={17} /> Add agent</button>
+        </section>
+      </SettingsControls>
+      <SettingsControls>
+        {selected && !creating ? <SettingsInspectorSection title="Agent actions">
+          {confirmId === selected.id ? <div className="space-y-3"><p>Delete this agent and revoke its API keys?</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="danger" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(selected.id)}>Confirm</Button><Button size="sm" secondary disabled={deleteMutation.isPending} onClick={() => setConfirmId(null)}>Cancel</Button></div></div>
+            : <Button variant="danger" size="sm" onClick={() => setConfirmId(selected.id)}><Trash2 size={15} /> Delete {selected.name}</Button>}
+        </SettingsInspectorSection> : null}
+      </SettingsControls>
+      <SettingsViewHeader title={creating ? "New agent" : selected?.name ?? "Agents"} inspectorLabel="Choose agent" disabled={deleteMutation.isPending || createMutation.isPending} />
+      <div key={creating ? "new" : openId ?? "overview"} ref={bodyScroll} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+        {creating ? <section>
+          <p className="mb-3 text-xs text-muted">Choose a name, then configure permissions and keys.</p>
+          <form onSubmit={(event) => { event.preventDefault(); if (name.trim() && !createMutation.isPending) createMutation.mutate(name.trim()); }} className="flex flex-wrap items-end gap-3">
+            <TextField autoFocus label="New agent name" className="min-w-0 flex-1" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. ci-bot, importer" />
+            <Button type="submit" disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
+            <Button secondary onClick={() => setCreating(false)}>Cancel</Button>
+          </form>
+        </section> : selected ? <section key={selected.id} aria-label={`Settings for ${selected.name}`}>
+          <div className="ng-settings-grid">
+            <section><SectionHeader title="Space permissions" description="Choose which spaces this agent can access." /><AgentSpaceAccess agent={selected} /></section>
+            <section><SectionHeader title="Agent API Keys" description="Keys authenticate as this agent." /><AgentKeyManager agentId={selected.id} /></section>
+          </div>
+        </section> : <EmptyState>{inspector ? "Choose an agent in the Inspector, or add one to get started." : "Choose an agent to manage its permissions and keys."}</EmptyState>}
+      </div>
     </div>
   );
 }

@@ -96,6 +96,27 @@ describe("Modal", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("preserves focus moved to a new view by a dialog action", async () => {
+    function Harness() {
+      const [view, setView] = useState("closed");
+      return <>
+        <Button onClick={() => setView("dialog")}>Open modal</Button>
+        {view === "dialog" ? <Modal title="Choose action" onClose={() => setView("closed")}>
+          <Button onClick={() => setView("editor")}>Create item</Button>
+        </Modal> : null}
+        {view === "editor" ? <input autoFocus aria-label="New item name" /> : null}
+      </>;
+    }
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Open modal" }));
+    await user.click(screen.getByRole("button", { name: "Create item" }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "New item name" })).toHaveFocus();
+  });
+
   it("keeps bottom-sheet content above the device safe area", () => {
     render(
       <Modal title="Bottom sheet" placement="bottom" onClose={() => undefined}>

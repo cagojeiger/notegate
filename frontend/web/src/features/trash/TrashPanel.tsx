@@ -7,7 +7,12 @@ import { ApiError } from "../../api/errors";
 import { queryKeys } from "../../api/queryKeys";
 import { invalidateAuditEvents, invalidateFileSyncFallback, invalidateSpacesList } from "../../api/queryInvalidation";
 import { listTrash, purgeTrash, restoreTrash, type TrashItem } from "../../api/trash";
-import { Button, Card, IconButton, Modal } from "../../shared/ui";
+import { Button, Card, IconButton } from "../../shared/ui";
+
+import { SettingsControls, SettingsInspectorSection, useSettingsInspector } from "../settings/SettingsInspector";
+
+import { SettingsViewHeader } from "../settings/SettingsViewHeader";
+import { useSettingsScroll, useSettingsViewState } from "../settings/settingsViewState";
 
 const itemAppearance = {
   space: { icon: Layers, label: "Space" },
@@ -16,7 +21,8 @@ const itemAppearance = {
   file: { icon: File, label: "File" }
 };
 
-export function TrashModal({ onClose }: { onClose: () => void }) {
+export function TrashPanel() {
+  const inspector = useSettingsInspector();
   const client = useApiClient();
   const queryClient = useQueryClient();
   const descriptionId = useId();
@@ -25,7 +31,8 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
   const returnFocus = useRef(false);
   const [confirmation, setConfirmation] = useState<TrashItem | null>(null);
   // undefined selects the initial item; null deliberately leaves no selection after restore.
-  const [selectedKey, setSelectedKey] = useState<string | null>();
+  const [selectedKey, setSelectedKey] = useSettingsViewState<string | null | undefined>("selected-trash-item", undefined);
+  const listScroll = useSettingsScroll<HTMLUListElement>("trash-list");
   const [notice, setNotice] = useState<string | null>(null);
   const query = useInfiniteQuery({
     queryKey: queryKeys.trash,
@@ -65,8 +72,9 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
   const SelectedIcon = itemAppearance[selected?.kind ?? "file"].icon;
 
   useEffect(() => {
-    if (detailsRef.current) detailsRef.current.scrollTop = 0;
-  }, [selected?.kind, selected?.id]);
+    const scroller = inspector?.container ?? detailsRef.current;
+    if (scroller) scroller.scrollTop = 0;
+  }, [inspector?.container, selected?.kind, selected?.id]);
 
   useEffect(() => {
     if (!confirmation && returnFocus.current) {
@@ -80,20 +88,17 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
   }, [notice]);
 
   return (
-    <Modal title={<span className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-workbench-surface bg-panel-strong text-muted"><Trash2 size={18} aria-hidden="true" /></span>Trash</span>} width="max-w-3xl" fixedHeight onClose={onClose}>
-      <p className="mb-4 shrink-0 border-b border-seam pb-4 text-muted">Deleted items are kept for 30 days.</p>
-      <div role="region" aria-label="Trash contents" className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] md:overflow-hidden md:[scrollbar-gutter:auto]">
-      <div className="grid gap-4 md:h-full md:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] md:grid-rows-[minmax(0,1fr)]">
-        <Card padding="sm" className="flex min-h-0 min-w-0 flex-col" style={{ borderRadius: "var(--ng-workbench-surface-radius)" }}>
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="font-medium">Deleted items</h3>
-            <div className="flex items-center gap-2 text-xs text-muted"><span>Newest first</span><IconButton label="Refresh" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void queryClient.invalidateQueries({ queryKey: queryKeys.trash }); }}><RefreshCw size={16} aria-hidden="true" /></IconButton></div>
-          </div>
+    <section aria-label="Trash" className="flex h-full min-h-0 flex-col">
+      <SettingsControls><p className="text-xs text-muted">Deleted items are kept for 30 days.</p></SettingsControls>
+      <div role="region" aria-label="Trash contents" className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <Card padding="sm" className="flex min-h-0 min-w-0 flex-1 flex-col" style={{ borderRadius: "var(--ng-workbench-surface-radius)" }}>
+          <SettingsViewHeader title="Deleted items" inspectorLabel="Open trash actions" disabled={mutation.isPending} actions={<div className="flex items-center gap-2 text-xs text-muted"><span>Newest first</span><IconButton label="Refresh" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void queryClient.invalidateQueries({ queryKey: queryKeys.trash }); }}><RefreshCw size={16} aria-hidden="true" /></IconButton></div>} />
           {query.isPending ? <p role="status">Loading trash…</p> : null}
           {query.error ? <p role="alert" className="text-danger">Could not load trash. Try refreshing.</p> : null}
           {!query.isPending && !query.error && items.length === 0 ? <p className="text-muted">Trash is empty.</p> : null}
           {/* Keep absolutely positioned screen-reader text inside the list's scroll area. */}
-          <ul aria-label="Deleted items" className="relative max-h-[24dvh] space-y-1 overflow-y-auto overscroll-contain empty:hidden md:min-h-0 md:max-h-none md:flex-1">
+          <ul ref={listScroll} aria-label="Deleted items" className="relative min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain empty:hidden">
             {items.map((item) => {
               const key = `${item.kind}:${item.id}`;
               const ItemIcon = itemAppearance[item.kind].icon;
@@ -103,7 +108,7 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
                     type="button"
                     aria-pressed={selected === item}
                     disabled={mutation.isPending || !!confirmation}
-                    onClick={() => { mutation.reset(); setNotice(null); setSelectedKey(key); }}
+                    onClick={() => { mutation.reset(); setNotice(null); setSelectedKey(key); inspector?.onOpen(); }}
                     className={`flex w-full items-start gap-2 rounded-workbench border-l-2 px-2 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-not-allowed ${selected === item ? "border-[var(--ng-active-border)] bg-[var(--ng-selection)]" : "border-transparent hover:bg-[var(--ng-hover)]"}`}
                   >
                     <span className="sr-only">Select</span>{" "}
@@ -123,7 +128,7 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
           </ul>
           {query.hasNextPage ? <Button secondary className="mt-2 shrink-0" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void query.fetchNextPage(); }}>{query.isFetchingNextPage ? "Loading…" : "Load more"}</Button> : null}
         </Card>
-        <div ref={detailsRef} className="min-h-0 min-w-0 border-t border-seam pt-4 md:overflow-y-auto md:overscroll-contain md:border-l md:border-t-0 md:pl-4 md:pt-0">
+        <SettingsControls><SettingsInspectorSection title="Selected item"><div ref={detailsRef} className="min-h-0 min-w-0 text-sm">
           {notice ? <p ref={noticeRef} role="status" tabIndex={-1} className="mb-3 break-words outline-none">{notice}</p> : null}
           {mutation.error ? <p role="alert" className="mb-3 break-words text-danger">{mutation.error instanceof ApiError && mutation.error.status === 404 ? "This item is no longer available in this trash view." : mutation.error instanceof Error ? mutation.error.message : "Request failed"}</p> : null}
           {confirmation ? (
@@ -160,9 +165,9 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
               </div>
             </section>
           ) : <p className="text-muted">Select an item to restore or permanently delete.</p>}
-        </div>
+        </div></SettingsInspectorSection></SettingsControls>
       </div>
       </div>
-    </Modal>
+    </section>
   );
 }

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiProvider } from "../../api/ApiProvider";
 import type { Me } from "../../api/types";
 import { makeSpace } from "../../test/fixtures";
-import { SettingsModal } from "./SettingsModal";
+import { SettingsView } from "./SettingsView";
 
 const page = { limit: 100, returned: 0, has_more: false, next_cursor: null };
 
@@ -74,27 +74,27 @@ function mockSettingsApi(me: unknown = userMe, options: SettingsApiOptions = {})
 }
 
 function renderSettings(me = userMe, onResetSavedWorkspace = vi.fn()) {
-  render(
+  return render(
     <ApiProvider authCacheKey="browser-session:0">
-      <SettingsModal me={me} onClose={vi.fn()} onSignOut={vi.fn()} onResetSavedWorkspace={onResetSavedWorkspace} />
+      <SettingsView me={me} onClose={vi.fn()} onSignOut={vi.fn()} onResetSavedWorkspace={onResetSavedWorkspace} />
     </ApiProvider>
   );
 }
 
-describe("SettingsModal", () => {
+describe("SettingsView", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockSettingsApi();
   });
 
-  it("keeps account identity, appearance, and user MCP inside the account tab", async () => {
+  it("keeps identity and user MCP in Account and appearance in General", async () => {
     const user = userEvent.setup();
     renderSettings();
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Account" }));
 
-    expect(screen.getByText("Appearance")).toBeInTheDocument();
+    expect(screen.queryByText("Appearance")).not.toBeInTheDocument();
     expect(screen.getByText("User MCP")).toBeInTheDocument();
     expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
     expect(screen.queryByText("My API Keys")).not.toBeInTheDocument();
@@ -102,6 +102,23 @@ describe("SettingsModal", () => {
     expect(screen.queryByRole("tab", { name: "Connections" })).not.toBeInTheDocument();
     expect(screen.queryByText("Agent MCP")).not.toBeInTheDocument();
     expect(screen.queryByText("REST API")).not.toBeInTheDocument();
+  });
+
+  it("restores the selected agent across settings tabs and forgets it after settings closes", async () => {
+    const user = userEvent.setup();
+    const view = renderSettings();
+    await user.click(screen.getByRole("tab", { name: "Agents" }));
+    await user.click(await screen.findByRole("button", { name: "Select ci-bot" }));
+    expect(await screen.findByRole("region", { name: "Settings for ci-bot" })).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Account" }));
+    await user.click(screen.getByRole("tab", { name: "Agents" }));
+    expect(await screen.findByRole("region", { name: "Settings for ci-bot" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select ci-bot" })).toHaveAttribute("aria-pressed", "true");
+    view.unmount();
+    renderSettings();
+    await user.click(screen.getByRole("tab", { name: "Agents" }));
+    await screen.findByRole("button", { name: "Select ci-bot" });
+    expect(screen.queryByRole("region", { name: "Settings for ci-bot" })).not.toBeInTheDocument();
   });
 
   it("shows shared Agent MCP and REST API connections in the agents tab", async () => {
@@ -148,9 +165,9 @@ describe("SettingsModal", () => {
     renderSettings();
 
     await user.click(await screen.findByRole("tab", { name: "Agents" }));
-    const agentToggle = await screen.findByRole("button", { name: "Toggle ci-bot details" });
+    const agentToggle = await screen.findByRole("button", { name: "Select ci-bot" });
     await user.click(agentToggle);
-    const agentCard = agentToggle.closest("li");
+    const agentCard = screen.getByRole("region", { name: "Settings for ci-bot" });
     expect(agentCard).not.toBeNull();
     const agentDetails = within(agentCard as HTMLElement);
 
@@ -173,7 +190,7 @@ describe("SettingsModal", () => {
     const user = userEvent.setup();
     renderSettings();
     await user.click(screen.getByRole("tab", { name: "Agents" }));
-    if (failedRead === "spaces") await user.click(await screen.findByRole("button", { name: "Toggle ci-bot details" }));
+    if (failedRead === "spaces") await user.click(await screen.findByRole("button", { name: "Select ci-bot" }));
 
     expect(await screen.findByRole("alert", {}, { timeout: 3_000 })).toHaveTextContent(message);
     expect(screen.queryByText(empty)).not.toBeInTheDocument();
@@ -181,7 +198,7 @@ describe("SettingsModal", () => {
     await user.click(screen.getByRole("button", { name: retry }));
 
     if (failedRead === "agents") {
-      expect(await screen.findByRole("button", { name: "Toggle ci-bot details" })).toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: "Select ci-bot" })).toBeInTheDocument();
     } else {
       expect(await screen.findByRole("combobox", { name: "Personal permission" })).toHaveValue("write");
     }
@@ -195,7 +212,7 @@ describe("SettingsModal", () => {
     const user = userEvent.setup();
     renderSettings();
     await user.click(screen.getByRole("tab", { name: "Agents" }));
-    await user.click(await screen.findByRole("button", { name: "Toggle ci-bot details" }));
+    await user.click(await screen.findByRole("button", { name: "Select ci-bot" }));
 
     expect(await screen.findByRole("alert", {}, { timeout: 3_000 })).toHaveTextContent("Could not load permissions.");
     expect(screen.queryByText("No access")).not.toBeInTheDocument();
@@ -212,7 +229,7 @@ describe("SettingsModal", () => {
     renderSettings();
 
     await user.click(await screen.findByRole("tab", { name: "Agents" }));
-    await user.click(await screen.findByRole("button", { name: "Toggle ci-bot details" }));
+    await user.click(await screen.findByRole("button", { name: "Select ci-bot" }));
 
     const permissionSelect = await screen.findByRole("combobox", { name: "Personal permission" });
     await user.selectOptions(permissionSelect, "read");
@@ -232,7 +249,7 @@ describe("SettingsModal", () => {
     renderSettings();
 
     await user.click(await screen.findByRole("tab", { name: "Agents" }));
-    await user.click(await screen.findByRole("button", { name: "Toggle ci-bot details" }));
+    await user.click(await screen.findByRole("button", { name: "Select ci-bot" }));
 
     const permissionSelect = await screen.findByRole("combobox", { name: "Personal permission" });
     expect(permissionSelect).toHaveValue("none");
@@ -254,7 +271,7 @@ describe("SettingsModal", () => {
     renderSettings();
 
     await user.click(await screen.findByRole("tab", { name: "Agents" }));
-    await user.click(await screen.findByRole("button", { name: "Toggle ci-bot details" }));
+    await user.click(await screen.findByRole("button", { name: "Select ci-bot" }));
 
     const permissionSelect = await screen.findByRole("combobox", { name: "Personal permission" });
     expect(permissionSelect).toHaveValue("write");
@@ -273,7 +290,7 @@ describe("SettingsModal", () => {
     renderSettings();
 
     await user.click(await screen.findByRole("tab", { name: "Agents" }));
-    await user.click(await screen.findByRole("button", { name: "Toggle ci-bot details" }));
+    await user.click(await screen.findByRole("button", { name: "Select ci-bot" }));
 
     const permissionSelect = await screen.findByRole("combobox", { name: "Personal permission" });
     await user.selectOptions(permissionSelect, "none");

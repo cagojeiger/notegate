@@ -70,21 +70,6 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
         </Card>
       ) : null}
 
-      <div className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_9rem_auto]">
-        <TextField
-          label="Name"
-          className="min-w-0"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") createKey(); }}
-          placeholder="e.g. cli, ci, claude-test"
-        />
-        <SelectField label="Expires" value={days} onChange={(e) => setDays(Number(e.target.value))}>
-          {options.map((option) => <option key={option.days} value={option.days}>{option.label}</option>)}
-        </SelectField>
-        <Button onClick={createKey} disabled={!canCreate}><Plus size={15} /> Create</Button>
-      </div>
-
       {keysQuery.isLoading ? (
         <div className="text-sm text-muted">Loading…</div>
       ) : keysQuery.isError ? (
@@ -115,6 +100,21 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
           ))}
         </Card>
       )}
+
+      <div className="grid grid-cols-1 items-end gap-2">
+        <TextField
+          label="Name"
+          className="min-w-0"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") createKey(); }}
+          placeholder="e.g. cli, ci, claude-test"
+        />
+        <SelectField label="Expires" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          {options.map((option) => <option key={option.days} value={option.days}>{option.label}</option>)}
+        </SelectField>
+        <Button onClick={createKey} disabled={!canCreate}><Plus size={15} /> Create</Button>
+      </div>
     </div>
   );
 }

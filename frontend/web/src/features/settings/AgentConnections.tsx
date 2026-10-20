@@ -9,7 +9,7 @@ export function AgentConnections() {
   return (
     <section>
       <SectionHeader title="Connections" description="Shared endpoints for every agent." />
-      <Card className="space-y-4 text-sm">
+      <Card className="ng-settings-grid text-sm">
         <EndpointRow label="Agent MCP" value={`${origin}/mcp/v2`} copyLabel="Copy Agent MCP server URL" />
         <EndpointRow label="REST API" value={`${origin}/api/v2`} copyLabel="Copy API base URL" />
         <a

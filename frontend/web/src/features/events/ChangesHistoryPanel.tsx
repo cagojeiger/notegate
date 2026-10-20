@@ -1,6 +1,8 @@
 import { ChevronRight } from "lucide-react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo } from "react";
 
+import { useSettingsViewState } from "../settings/settingsViewState";
+import { SettingsControls } from "../settings/SettingsInspector";
 import type { FileChangeEvent, Space } from "../../api/types";
 import { EmptyState, SelectField } from "../../shared/ui";
 import {
@@ -21,7 +23,7 @@ export function FileChangeEventsPanel({
   initialSpaceId: string | null;
   canViewOwnedHistory?: boolean;
 }) {
-  const [selectedSpaceId, setSelectedSpaceId] = useState(() => selectInitialSpaceId(spaces, initialSpaceId) ?? (canViewOwnedHistory ? "all-owned" : null));
+  const [selectedSpaceId, setSelectedSpaceId] = useSettingsViewState("history-files-space", () => selectInitialSpaceId(spaces, initialSpaceId) ?? (canViewOwnedHistory ? "all-owned" : null));
   const selectedSpace = spaces.find((space) => space.id === selectedSpaceId) ?? null;
   const ownedHistory = canViewOwnedHistory && selectedSpaceId === "all-owned";
   const query = useFileChangeEventsQuery(selectedSpace?.id ?? null, null, ownedHistory);
@@ -29,18 +31,18 @@ export function FileChangeEventsPanel({
 
   useEffect(() => {
     if (!selectedSpace && !ownedHistory) setSelectedSpaceId(spaces[0]?.id ?? (canViewOwnedHistory ? "all-owned" : null));
-  }, [selectedSpace, spaces, ownedHistory, canViewOwnedHistory]);
+  }, [selectedSpace, spaces, ownedHistory, canViewOwnedHistory, setSelectedSpaceId]);
 
   return (
     <section className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <SelectField label="Space" className="w-full sm:w-72" value={selectedSpaceId ?? ""} onChange={(event) => setSelectedSpaceId(event.target.value || null)} disabled={spaces.length === 0 && !canViewOwnedHistory}>
+      <SettingsControls><div className="flex flex-wrap items-center justify-between gap-3">
+        <SelectField label="Space" className="w-full" value={selectedSpaceId ?? ""} onChange={(event) => setSelectedSpaceId(event.target.value || null)} disabled={spaces.length === 0 && !canViewOwnedHistory}>
           {canViewOwnedHistory ? <option value="all-owned">All owned spaces (including removed)</option> : null}
           {spaces.length === 0 && !canViewOwnedHistory ? <option value="">No spaces available</option> : null}
           {spaces.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}
         </SelectField>
         <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} disabled={!selectedSpace && !ownedHistory} />
-      </div>
+      </div></SettingsControls>
       {!selectedSpace && !ownedHistory ? <EmptyState>No space selected.</EmptyState> : <EventQueryState query={query} itemCount={events.length} emptyLabel="No changes yet." />}
       {ownedHistory ? <p className="text-xs text-muted">Changes are retained for 90 days. Removed document bodies cannot be opened from this history.</p> : null}
       {events.length > 0 ? (
@@ -54,7 +56,7 @@ export function FileChangeEventsPanel({
 }
 
 function FileChangeEventRow({ event }: { event: FileChangeEvent }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useSettingsViewState(`history-change-${event.space_id}-${event.id}-expanded`, false);
   const detailsId = useId();
   const target = formatFileChangeTarget(event);
   const actor = formatActor(event.actor, event.actor_account_id);

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { openSettings, chooseHistorySection, showSettingsInspector, closeSettingsInspector } from "./support/settings";
+
 import type { CommandInvocation } from "../src/api/types";
 import { makeSpace } from "../src/test/fixtures";
 import { routeJsonApi } from "./support/api";
@@ -71,14 +73,14 @@ for (const viewport of [
       });
 
       await page.goto("/");
-      await page.getByRole("button", { name: "History", exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: "History" });
+      await openSettings(page, "History");
+      const dialog = page.locator("[data-settings-view]");
       await expect(dialog.getByText("No changes yet.")).toBeVisible();
       const bounds = await dialog.boundingBox();
       if (!bounds) throw new Error("History dialog missing");
-      expect(bounds.y).toBeGreaterThanOrEqual(16);
-      expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height - 16);
-      const tabs = dialog.getByRole("tablist");
+      expect(bounds.y).toBeGreaterThanOrEqual(0);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
+      const tabs = dialog.getByRole("tablist", { name: "Settings sections" });
       const tabBounds = await tabs.boundingBox();
       expect(historyRequests).toHaveLength(0);
       let release!: () => void;
@@ -88,7 +90,7 @@ for (const viewport of [
         await route.fallback();
       });
       try {
-        await dialog.getByRole("tab", { name: "API", exact: true }).click();
+        await chooseHistorySection(page, "API");
         await expect(dialog.getByText("Loading…", { exact: true })).toBeVisible();
         expect(await dialog.boundingBox()).toEqual(bounds);
       } finally {
@@ -98,7 +100,7 @@ for (const viewport of [
       await expect(rows).toHaveCount(50);
       expect(await dialog.boundingBox()).toEqual(bounds);
       expect(historyRequests.map((url) => url.search)).toEqual(["?surface=api&limit=50"]);
-      const panel = dialog.locator("section");
+      const panel = dialog.getByRole("region", { name: "History", exact: true });
       expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 
       await rows.first().getByText("Response", { exact: true }).click();
@@ -110,11 +112,11 @@ for (const viewport of [
         contentType: "image/png"
       });
 
-      await dialog.getByRole("tab", { name: "CLI", exact: true }).click();
+      await chooseHistorySection(page, "CLI");
       await expect(dialog.getByText("No CLI calls.")).toBeVisible();
       expect(await dialog.boundingBox()).toEqual(bounds);
       await page.screenshot({ path: `test-results/invocation-history-empty-${viewport.name}-${theme}.png` });
-      await dialog.getByRole("tab", { name: "API", exact: true }).click();
+      await chooseHistorySection(page, "API");
       await expect(rows).toHaveCount(50);
       expect(historyRequests.map((url) => url.searchParams.get("surface"))).toEqual(["api", "cli"]);
 
@@ -122,48 +124,57 @@ for (const viewport of [
       await expect(rows).toHaveCount(51);
       expect(historyRequests.at(-1)?.search).toBe("?surface=api&limit=50&cursor=api-page-2");
       await expect(dialog.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
-      expect(await dialog.getByRole("tabpanel").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      expect(await dialog.getByRole("tabpanel", { name: / history$/ }).evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
       expect(await tabs.boundingBox()).toEqual(tabBounds);
       expect(await dialog.boundingBox()).toEqual(bounds);
       expect(await dialog.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
       for (const [tab, empty] of [["MCP", "No MCP calls."], ["Audit", "No audit events."], ["Jobs", "No background jobs yet."], ["Changes", "No changes yet."]]) {
-        await dialog.getByRole("tab", { name: tab, exact: true }).click();
+        await chooseHistorySection(page, tab);
         await expect(dialog.getByText(empty, { exact: true })).toBeVisible();
         expect(await dialog.boundingBox()).toEqual(bounds);
-        expect(await dialog.getByRole("tabpanel").evaluate((element) => element.scrollTop)).toBe(0);
+        if (tab !== "API") expect(await dialog.getByRole("tabpanel", { name: / history$/ }).evaluate((element) => element.scrollTop)).toBe(0);
       }
 
-      await dialog.getByRole("button", { name: "Close", exact: true }).click();
+      await chooseHistorySection(page, "API");
+      await expect(rows).toHaveCount(51);
+      await expect(rows.first().locator("details").filter({ has: page.getByText("Response", { exact: true }) })).toHaveAttribute("open", "");
+      expect(await dialog.getByRole("tabpanel", { name: "API history", exact: true }).evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      await chooseHistorySection(page, "Changes");
+
+      await dialog.getByRole("button", { name: "Close settings", exact: true }).click();
       await page.getByRole("button", { name: "Settings", exact: true }).click();
-      const settings = page.getByRole("dialog", { name: "Settings" });
+      const settings = page.locator("[data-settings-view]");
       const settingsBounds = await settings.boundingBox();
       for (const tab of ["Account", "Agents", "General"]) {
         await settings.getByRole("tab", { name: tab, exact: true }).click();
         if (tab === "Account") {
-          await expect(settings.getByText("Chrome on Linux · This session", { exact: true })).toBeAttached();
-          await expect(settings.getByText("NoteGate CLI · CLI", { exact: true })).toBeAttached();
-          await expect(settings.getByText("Remote MCP · MCP", { exact: true })).toBeAttached();
+          await expect(settings.getByRole("button", { name: "Select Chrome on Linux (this session)", exact: true })).toBeAttached();
         }
         if (tab === "Agents") {
-          await expect(settings.getByRole("button", { name: "Toggle Agent 29 details", exact: true })).toBeAttached();
-          await settings.getByRole("button", { name: "Toggle Agent 29 details", exact: true }).scrollIntoViewIfNeeded();
-          expect(await settings.getByRole("tabpanel").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+          await showSettingsInspector(page);
+          await expect(settings.getByRole("button", { name: "Select Agent 29", exact: true })).toBeAttached();
+          await settings.getByRole("button", { name: "Select Agent 29", exact: true }).scrollIntoViewIfNeeded();
+          expect(await settings.locator(".ng-settings-navigation").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+          await closeSettingsInspector(page);
         } else {
           expect(await settings.getByRole("tabpanel").evaluate((element) => element.scrollTop)).toBe(0);
         }
         expect(await settings.boundingBox()).toEqual(settingsBounds);
         expect(await settings.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
-        await expect(settings.getByRole("tablist")).toBeInViewport();
-        await expect(settings.getByRole("button", { name: "Close", exact: true })).toBeInViewport();
+        await expect(settings.getByRole("tablist", { name: "Settings sections" })).toBeInViewport();
+        await expect(settings.getByRole("button", { name: "Close settings", exact: true })).toBeInViewport();
         if (tab === "Account") {
           for (const [kind, client] of [["CLI", "NoteGate CLI"], ["MCP", "Remote MCP"]]) {
-            const connections = settings.getByRole("region", { name: `${kind} connections` });
-            await connections.getByRole("button", { name: `Revoke ${client}`, exact: true }).click();
-            const confirmation = connections.getByRole("group", { name: "Confirm revocation" });
+            await showSettingsInspector(page);
+            await settings.getByRole("tab", { name: new RegExp(`^${kind} `) }).click();
+            await settings.getByRole("button", { name: `Select ${client}`, exact: true }).click();
+            await settings.getByRole("button", { name: `Revoke ${client}`, exact: true }).click();
+            const confirmation = settings.getByRole("group", { name: "Confirm revocation" });
             await expect(confirmation).toBeFocused();
             await expect(confirmation.getByRole("button", { name: "Confirm", exact: true })).toBeInViewport();
             await page.screenshot({ path: `test-results/dialog-auth-${kind.toLowerCase()}-${viewport.name}-${theme}.png` });
             await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+            await closeSettingsInspector(page);
           }
         }
       }

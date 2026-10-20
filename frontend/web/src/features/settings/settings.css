@@ -1,0 +1,40 @@
+.ng-settings-body {
+  container: settings-body / inline-size;
+}
+
+.ng-settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+:is(.ng-settings-view, .ng-settings-inspector) :is(.rounded-2xl, .rounded-xl, .rounded-lg) {
+  border-radius: var(--ng-workbench-surface-radius);
+}
+
+.ng-settings-view [role="tabpanel"] :is(section, ul, li) {
+  min-width: 0;
+}
+
+@container settings-body (min-width: 740px) {
+  .ng-settings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ng-settings-wide {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-height: 600px) {
+  .ng-settings-detail-view {
+    height: auto;
+    min-height: 100%;
+  }
+}
+
+.ng-settings-inspector-frame:has(> .ng-settings-inspector:empty) > .ng-settings-navigation {
+  max-height: 100%;
+  flex: 1;
+}

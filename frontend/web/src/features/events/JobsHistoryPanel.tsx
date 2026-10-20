@@ -1,6 +1,8 @@
 import { ChevronRight } from "lucide-react";
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo } from "react";
 
+import { useSettingsViewState } from "../settings/settingsViewState";
+import { SettingsControls } from "../settings/SettingsInspector";
 import type { BackgroundJob } from "../../api/types";
 import { formatDurationBetween } from "./eventDisplay";
 import { EventQueryState, LifecycleTime, LoadMore, RefreshButton } from "./eventHistoryPrimitives";
@@ -12,12 +14,12 @@ export function BackgroundJobsPanel() {
   const activeCount = jobs.filter((job) => job.status === "queued" || job.status === "running").length;
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
+      <SettingsControls><div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted">
           {activeCount > 0 ? `${activeCount} active · updates automatically` : "Background activity for your account"}
         </p>
         <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} />
-      </div>
+      </div></SettingsControls>
       <EventQueryState query={query} itemCount={jobs.length} emptyLabel="No background jobs yet." />
       {jobs.length > 0 ? (
         <ol className="rounded-lg border border-border bg-surface px-4">
@@ -30,7 +32,7 @@ export function BackgroundJobsPanel() {
 }
 
 function BackgroundJobRow({ job }: { job: BackgroundJob }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useSettingsViewState(`history-job-${job.id}-expanded`, false);
   const detail = useBackgroundJobQuery(job.id, open);
   const currentJob = detail.data?.job ?? job;
   const presentation = jobPresentation(currentJob);

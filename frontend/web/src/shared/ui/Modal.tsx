@@ -12,7 +12,7 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])'
 ].join(",");
 
-// Shared modal shell matching the SettingsModal tone: soft backdrop + paper panel.
+// Shared modal shell for focused dialogs and mobile Inspector sheets.
 // Escape and backdrop click both dismiss. Keep panels small and focused.
 export function Modal({
   title,
@@ -55,6 +55,9 @@ export function Modal({
     }
 
     function onKey(event: KeyboardEvent) {
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      if (dialogs[dialogs.length - 1] !== dialog) return;
+
       if (event.key === "Escape") {
         event.stopPropagation();
         onCloseRef.current();
@@ -88,7 +91,9 @@ export function Modal({
     return () => {
       window.removeEventListener("keydown", onKey);
       window.setTimeout(() => {
-        if (!dialog.isConnected && previousFocus?.isConnected) previousFocus.focus();
+        const active = document.activeElement;
+        if (!dialog.isConnected && previousFocus?.isConnected &&
+          (!active || active === document.body || dialog.contains(active))) previousFocus.focus();
       }, 0);
     };
   }, []);
