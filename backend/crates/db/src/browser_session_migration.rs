@@ -1,4 +1,4 @@
-//! Offline preparation for migration 62; never called from request or startup paths.
+//! Offline preparation for migration 62; never called from requests or normal startup.
 use crate::{CryptoKeyEpochRepo, map_sqlx_error};
 use notegate_core::{Error, Result, security::PiiCrypto};
 use sqlx::PgPool;

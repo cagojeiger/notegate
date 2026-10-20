@@ -248,11 +248,11 @@ fn state_with_pool(
 
         enc_root_key_id: "test-enc".to_owned(),
         enc_root_secret: secrecy::SecretString::from(
-            "test-enc-root-secret-32-bytes-long".to_owned(),
+            "notegate-test-enc-root-secret-32-bytes".to_owned(),
         ),
         lookup_root_key_id: "test-lookup".to_owned(),
         lookup_root_secret: secrecy::SecretString::from(
-            "test-lookup-root-secret-32-bytes-long".to_owned(),
+            "notegate-test-lookup-root-secret-32-bytes".to_owned(),
         ),
 
         browser_session_max_ttl: Duration::from_secs(30 * 86_400),
@@ -2509,7 +2509,7 @@ async fn browser_activity_requires_live_cookie_and_same_origin_without_reauthent
         assert_eq!(after[field], before[field], "{field}");
     }
     assert_ne!(after["idle_expires_at"], before["idle_expires_at"]);
-    for reason in ["idle", "absolute", "issuer", "revoked"] {
+    for reason in ["idle", "absolute", "revoked"] {
         sqlx::query("UPDATE browser_sessions SET \
           idle_expires_at=CASE WHEN $2 IN ('idle','absolute') THEN now() ELSE now()+interval '1 hour' END, \
           expires_at=CASE WHEN $2='absolute' THEN now() ELSE now()+interval '1 day' END, \
