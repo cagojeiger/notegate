@@ -157,10 +157,10 @@ pub(crate) async fn account_created(tx: &mut PgConnection, account_id: Uuid) -> 
 }
 
 fn session_logged_in_payload(environment: Option<&str>, issuer: &str) -> (&'static str, Value) {
-    let mut metadata = json!({"issuer": issuer});
-    if let Some(environment) = environment {
-        metadata["client_environment"] = json!(environment);
-    }
+    let metadata = environment.map_or_else(
+        || json!({"issuer": issuer}),
+        |value| json!({"issuer": issuer, "client_environment": value}),
+    );
     ("session.login", metadata)
 }
 

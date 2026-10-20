@@ -213,8 +213,8 @@ async fn provider_migration_preserves_accounts_sessions_documents_and_both_oauth
         let resource = format!("https://notegate.example.test/{kind}");
         let access = crypto.oauth_hash("token", &format!("retained-{kind}-access"))?;
         let refresh = crypto.oauth_hash("token", &format!("retained-{kind}-refresh"))?;
-        sqlx::query("INSERT INTO oauth_grants(id,user_id,client_id,client_name,resource,scope,expires_at,idle_expires_at) \
-             VALUES($1,$2,$3,$3,$4,$5,now()+interval '7 days',now()+interval '7 days')")
+        sqlx::query("INSERT INTO oauth_grants(id,user_id,client_id,client_name,resource,scope,created_at,expires_at,idle_expires_at) \
+             VALUES($1,$2,$3,$3,$4,$5,now(),now()+interval '7 days',now()+interval '7 days')")
             .bind(id).bind(owner).bind(&client).bind(&resource).bind(format!("{kind} offline_access"))
             .execute(&db.pool).await?;
         sqlx::query("INSERT INTO oauth_credentials(token_hash,hash_key_id,hash_version,grant_id,kind,expires_at) \

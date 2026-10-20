@@ -74,7 +74,7 @@ async fn device_http_flow_rejects_csrf_and_uses_own_tokens_without_authgate()
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let mut state = standalone_state(&db)?;
+    let state = standalone_state(&db)?;
     let user = owner(&state).await;
     let session = create_browser_session(&state, user, None).await?;
     let cookie = format!("{BROWSER_SESSION_COOKIE}={session}");
@@ -198,7 +198,7 @@ async fn authorization_consent_is_bound_single_use_and_explicit()
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let mut state = standalone_state(&db)?;
+    let state = standalone_state(&db)?;
     let user = owner(&state).await;
     let session = create_browser_session(&state, user, None).await?;
     let id = Uuid::new_v4();
