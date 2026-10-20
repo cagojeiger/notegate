@@ -36,6 +36,25 @@ function ModalHarness({
 }
 
 describe("Modal", () => {
+  it("keeps the focus loop on tabbable controls when tabs or fieldsets exclude buttons", async () => {
+    const user = userEvent.setup();
+    render(<>
+      <Modal title="Navigation" onClose={() => undefined}>
+        <button>Active tab</button>
+        <button tabIndex={-1}>Inactive tab</button>
+        <fieldset disabled><button>Disabled action</button></fieldset>
+      </Modal>
+      <button>Outside dialog</button>
+    </>);
+    const active = screen.getByRole("button", { name: "Active tab" });
+    const close = screen.getByRole("button", { name: "Close" });
+    active.focus();
+    await user.tab();
+    expect(close).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(active).toHaveFocus();
+  });
+
   it("exposes dialog semantics, traps focus, and restores focus on close", async () => {
     const user = userEvent.setup();
     render(<ModalHarness />);

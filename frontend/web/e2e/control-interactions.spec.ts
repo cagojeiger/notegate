@@ -24,6 +24,7 @@ async function mockWorkbench(page: Page, nodeCount = 1, nodeOverrides: Partial<R
     }
     if (url.pathname === "/api/v1/agents") return { agents: [], page: meta };
     if (url.pathname === "/api/v1/me/trash") return { items: [], page: meta };
+    if (url.pathname === "/api/v1/me/audit-events") return { events: [], page: meta };
     if (url.pathname.endsWith("/file-change-events")) return { events: [], page: meta };
     if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${node.id}`) return node;
     if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${node.id}/reveal`) return { ancestors: [], target: node };
@@ -126,6 +127,99 @@ for (const width of [1440, 390]) {
     }
   });
 }
+
+test("desktop Connections keeps keyboard focus across view replacements", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockWorkbench(page);
+  await page.goto("/");
+  const view = await openSettings(page, "Connections");
+  await showSettingsInspector(page);
+  const navigation = view.getByRole("tablist", { name: "Connection views" });
+  await navigation.getByRole("tab", { name: "Connection guide", exact: true }).focus();
+  for (const [key, name, title] of [
+    ["ArrowDown", "CLI", "CLI connections"], ["ArrowDown", "MCP", "MCP connections"],
+    ["Home", "Connection guide", "Connection guide"], ["End", "MCP", "MCP connections"],
+    ["ArrowUp", "CLI", "CLI connections"], ["ArrowUp", "Connection guide", "Connection guide"]
+  ]) {
+    await page.keyboard.press(key);
+    await expect(navigation.getByRole("tab", { name, exact: true })).toBeFocused();
+    await expect(navigation.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(view.getByRole("heading", { name: title, exact: true })).toBeVisible();
+  }
+});
+
+test("mobile Connections separates keyboard navigation from committing a view", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockWorkbench(page);
+  await page.goto("/");
+  const view = await openSettings(page, "Connections");
+  await view.getByRole("button", { name: "Connection guide: Choose connection view", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "Connections Inspector" });
+  const navigation = sheet.getByRole("tablist", { name: "Connection views" });
+  await navigation.getByRole("tab", { name: "Connection guide", exact: true }).focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(navigation.getByRole("tab", { name: "CLI", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(sheet.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(navigation.getByRole("tab", { name: "Connection guide", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await expect(navigation.getByRole("tab", { name: "MCP", exact: true })).toBeFocused();
+  await expect(navigation.getByRole("tab", { name: "Connection guide", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Enter");
+  await expect(sheet).toBeHidden();
+  const mcp = view.getByRole("button", { name: "MCP connections: Choose connection view", exact: true });
+  await expect(mcp).toBeFocused();
+  await mcp.click();
+  await navigation.getByRole("tab", { name: "MCP", exact: true }).focus();
+  await page.keyboard.press("ArrowUp");
+  await expect(navigation.getByRole("tab", { name: "CLI", exact: true })).toBeFocused();
+  await expect(navigation.getByRole("tab", { name: "MCP", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Space");
+  await expect(sheet).toBeHidden();
+  const cli = view.getByRole("button", { name: "CLI connections: Choose connection view", exact: true });
+  await expect(cli).toBeFocused();
+  await cli.click();
+  await navigation.getByRole("tab", { name: "Connection guide", exact: true }).click();
+  await expect(sheet).toBeHidden();
+  await expect(view.getByRole("button", { name: "Connection guide: Choose connection view", exact: true })).toBeFocused();
+});
+
+test("mobile History commits with Enter or Space and cancels with Escape", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockWorkbench(page);
+  await page.goto("/");
+  const view = await openSettings(page, "History");
+  const changes = view.getByRole("button", { name: "Changes: Choose history type", exact: true });
+  await changes.click();
+  const sheet = page.getByRole("dialog", { name: "History Inspector" });
+  const navigation = sheet.getByRole("tablist", { name: "History sections" });
+  await navigation.getByRole("tab", { name: "Changes", exact: true }).focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(navigation.getByRole("tab", { name: "Audit", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(navigation.getByRole("tab", { name: "MCP", exact: true })).toBeFocused();
+  await expect(navigation.getByRole("tab", { name: "Changes", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Enter");
+  await expect(sheet).toBeHidden();
+  const audit = view.getByRole("button", { name: "Audit: Choose history type", exact: true });
+  await expect(audit).toBeFocused();
+  await audit.click();
+  await navigation.getByRole("tab", { name: "Audit", exact: true }).focus();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Space");
+  await expect(sheet).toBeHidden();
+  await expect(changes).toBeFocused();
+  await changes.click();
+  await navigation.getByRole("tab", { name: "Changes", exact: true }).focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  await expect(changes).toBeFocused();
+  await expect(view.getByRole("heading", { name: "Changes", exact: true })).toBeVisible();
+});
 
 test("mobile workspace reset keeps keyboard focus in its confirmation", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });

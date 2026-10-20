@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 import type { Me, Space } from "../../api/types";
@@ -48,6 +48,7 @@ function SettingsWorkbench({ me, spaces = [], initialSpaceId = null, onClose, on
 }: SettingsViewProps) {
   const [tab, setTab] = useState<Tab>("general");
   const inspectorId = useId();
+  const viewRef = useRef<HTMLDivElement>(null);
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const [navigationContainer, setNavigationContainer] = useState<HTMLDivElement | null>(null);
   const showAgents = canManageAgents(me);
@@ -55,7 +56,21 @@ function SettingsWorkbench({ me, spaces = [], initialSpaceId = null, onClose, on
     (item.id !== "agents" || showAgents) && (item.id !== "trash" || me.account.kind === "user")
   ), [showAgents, me.account.kind]);
   const current = tabs.find((item) => item.id === tab) ?? tabs[0];
-  const inspector = useMemo(() => ({ id: inspectorId, open: inspectorOpen, container, navigationContainer, onOpen: onOpenInspector, onNavigate: () => { if (isMobile) onCloseInspector(); } }), [inspectorId, inspectorOpen, container, navigationContainer, onOpenInspector, isMobile, onCloseInspector]);
+  const inspector = useMemo(() => ({
+    id: inspectorId, open: inspectorOpen, isMobile, container, navigationContainer, onOpen: onOpenInspector,
+    onNavigate: () => {
+      const hadFocus = navigationContainer?.contains(document.activeElement);
+      if (isMobile) onCloseInspector();
+      if (hadFocus) requestAnimationFrame(() => {
+        // View replacement may remove the focused tab or the sheet's opener.
+        if (document.activeElement !== document.body) return;
+        const target = isMobile
+          ? viewRef.current?.querySelector<HTMLButtonElement>("[data-settings-heading] button")
+          : navigationContainer?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]');
+        target?.focus();
+      });
+    }
+  }), [inspectorId, inspectorOpen, container, navigationContainer, onOpenInspector, isMobile, onCloseInspector]);
 
   useEffect(() => {
     if (!tabs.some((item) => item.id === tab)) setTab("account");
@@ -72,7 +87,7 @@ function SettingsWorkbench({ me, spaces = [], initialSpaceId = null, onClose, on
 
   return (
     <SettingsInspectorContext value={inspector}>
-      <div data-settings-view className="ng-settings-view flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg">
+      <div ref={viewRef} data-settings-view className="ng-settings-view flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg">
         <section aria-label="Settings" className="flex min-h-0 min-w-0 flex-1 flex-col">
           <h1 className="sr-only">Settings</h1>
           <PanelHeader tabs>

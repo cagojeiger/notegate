@@ -12,12 +12,37 @@ const items = [
   { id: "history", label: "History" }
 ] as const;
 
-function TabsHarness({ orientation = "horizontal" }: { orientation?: "horizontal" | "vertical" }) {
+function TabsHarness({ orientation = "horizontal", activationMode = "automatic" }: { orientation?: "horizontal" | "vertical"; activationMode?: "automatic" | "manual" }) {
   const [value, setValue] = useState<(typeof items)[number]["id"]>("outline");
-  return <Tabs items={[...items]} value={value} onChange={setValue} label="Inspector sections" orientation={orientation} />;
+  return <Tabs items={[...items]} value={value} onChange={setValue} label="Inspector sections" orientation={orientation} activationMode={activationMode} />;
 }
 
 describe("Tabs", () => {
+  it.each([{ key: "Enter", input: "{Enter}" }, { key: "Space", input: " " }])("keeps manual navigation separate from activation with $key", async ({ input }) => {
+    const user = userEvent.setup();
+    render(<><TabsHarness orientation="vertical" activationMode="manual" /><button>After tabs</button></>);
+    const outline = screen.getByRole("tab", { name: "Outline" });
+    const links = screen.getByRole("tab", { name: "Links" });
+    const history = screen.getByRole("tab", { name: "History" });
+    outline.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(links).toHaveFocus();
+    expect(outline).toHaveAttribute("aria-selected", "true");
+    expect(links).toHaveAttribute("aria-selected", "false");
+    await user.keyboard("{End}");
+    expect(history).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(outline).toHaveFocus();
+    await user.keyboard("{ArrowUp}{ArrowUp}");
+    expect(links).toHaveFocus();
+    await user.keyboard(input);
+    expect(links).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{ArrowDown}{Tab}");
+    expect(screen.getByRole("button", { name: "After tabs" })).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(links).toHaveFocus();
+  });
+
   it("uses roving tab stops and selects tabs while moving focus", async () => {
     const user = userEvent.setup();
     render(<TabsHarness />);

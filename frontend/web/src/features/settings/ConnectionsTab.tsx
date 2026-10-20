@@ -21,6 +21,7 @@ export function ConnectionsTab({ me, onSignOut }: { me: Me; onSignOut: () => voi
   const navigation = <section>
     <SectionHeader title="Connection view" />
     <Tabs label="Connection views" orientation="vertical" value={current}
+      activationMode={inspector?.isMobile ? "manual" : "automatic"}
       onChange={(value) => { setView(value); inspector?.onNavigate(); }}
       items={me.account.kind === "user" ? VIEWS : VIEWS.slice(0, 1)} />
   </section>;

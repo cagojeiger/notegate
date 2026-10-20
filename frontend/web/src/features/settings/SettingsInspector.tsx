@@ -8,6 +8,7 @@ import { useSettingsScroll } from "./settingsViewState";
 type Inspector = {
   id: string;
   open: boolean;
+  isMobile: boolean;
   container: HTMLDivElement | null;
   navigationContainer: HTMLDivElement | null;
   onOpen: () => void;

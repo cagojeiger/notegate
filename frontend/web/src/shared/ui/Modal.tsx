@@ -51,7 +51,8 @@ export function Modal({
     const previousFocus = previousFocusRef.current;
 
     function focusableElements(): HTMLElement[] {
-      return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+        .filter((element) => element.tabIndex >= 0 && !element.matches(":disabled"));
     }
 
     function onKey(event: KeyboardEvent) {
