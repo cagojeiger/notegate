@@ -224,43 +224,42 @@ export async function runWorkbenchLive(
           await expect(dialog.getByRole("button", { name: "Restore this version" })).toBeEnabled();
         });
         await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).first().click();
+        const settings = page.locator("[data-settings-view]");
         await measure("history-changes", async () => {
-          await page.getByRole("button", { name: "History", exact: true }).click();
-          await expect(page.getByRole("tabpanel", { name: "Changes history" }).locator("ol > li")).toHaveCount(50);
+          await page.getByRole("button", { name: "Settings", exact: true }).click();
+          await settings.getByRole("tab", { name: "History", exact: true }).click();
+          await expect(settings.getByRole("tabpanel", { name: "Changes history" }).locator("ol > li")).toHaveCount(50);
         });
-        const history = page.getByRole("dialog", { name: "History", exact: true });
         await measure("history-audit", async () => {
-          await history.getByRole("tab", { name: "Audit", exact: true }).click();
-          await expect(history.getByText("No audit events.", { exact: true }).or(history.locator("ol > li").first())).toBeVisible();
+          await settings.getByRole("tab", { name: "Audit", exact: true }).click();
+          await expect(settings.getByText("No audit events.", { exact: true }).or(settings.locator("ol > li").first())).toBeVisible();
         });
         for (const [tab, empty] of [["MCP", "No MCP calls."], ["CLI", "No CLI calls."], ["Jobs", "No background jobs yet."]]) {
           await measure(`history-${tab.toLowerCase()}-empty`, async () => {
-            await history.getByRole("tab", { name: tab, exact: true }).click();
-            await expect(history.getByText(empty, { exact: true })).toBeVisible();
+            await settings.getByRole("tab", { name: tab, exact: true }).click();
+            await expect(settings.getByText(empty, { exact: true })).toBeVisible();
           });
         }
         await measure("history-api-first-page", async () => {
-          await history.getByRole("tab", { name: "API", exact: true }).click();
-          await expect(history.locator("ol > li")).toHaveCount(50);
+          await settings.getByRole("tab", { name: "API", exact: true }).click();
+          await expect(settings.locator("ol > li")).toHaveCount(50);
         });
         await measure("history-api-next-page", async () => {
-          await history.getByRole("button", { name: "Load more", exact: true }).click();
-          await expect(history.locator("ol > li")).toHaveCount(fixture.apiCalls);
+          await settings.getByRole("button", { name: "Load more", exact: true }).click();
+          await expect(settings.locator("ol > li")).toHaveCount(fixture.apiCalls);
         });
-        await history.getByRole("button", { name: "Close", exact: true }).click();
         await measure("trash-first-page", async () => {
-          await page.getByRole("button", { name: "Trash", exact: true }).click();
-          await expect(page.getByRole("list", { name: "Deleted items" }).locator("li")).toHaveCount(50);
+          await settings.getByRole("tab", { name: "Trash", exact: true }).click();
+          await expect(settings.getByRole("list", { name: "Deleted items" }).locator("li")).toHaveCount(50);
         });
-        const trash = page.getByRole("dialog", { name: "Trash", exact: true });
         await measure("trash-next-page", async () => {
-          await trash.getByRole("button", { name: "Load more", exact: true }).click();
-          await expect(trash.getByRole("list", { name: "Deleted items" }).locator("li")).toHaveCount(fixture.trashItems);
+          await settings.getByRole("button", { name: "Load more", exact: true }).click();
+          await expect(settings.getByRole("list", { name: "Deleted items" }).locator("li")).toHaveCount(fixture.trashItems);
         });
         await measure("trash-select-details", async () => {
-          await trash.getByRole("button", { name: /^Select deleted-0\.md\b/ }).click();
-          await expect(trash.getByRole("region", { name: "Details for deleted-0.md" })).toBeVisible();
-          await expect(trash.getByRole("button", { name: "Restore deleted-0.md", exact: true })).toBeEnabled();
+          await settings.getByRole("button", { name: /^Select deleted-0\.md\b/ }).click();
+          await expect(settings.getByRole("region", { name: "Details for deleted-0.md" })).toBeVisible();
+          await expect(settings.getByRole("button", { name: "Restore deleted-0.md", exact: true })).toBeEnabled();
         });
         expect(failures, "unexpected API or browser errors").toEqual([]);
       } finally {
