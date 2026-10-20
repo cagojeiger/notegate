@@ -117,6 +117,7 @@ account.delete
 session.login
 session.logout
 session.revoke
+session.migrate
 oauth.approve
 oauth.revoke
 identity.link
@@ -161,8 +162,18 @@ connection.upsert
 *.revoke
   reason: bounded enum/string when already part of the domain model
 
+session.login
+  issuer: verified public issuer URL
+  client_environment: bounded browser/OS label when known
+
+session.migrate
+  issuer: original session issuer, nullable
+  trusted_issuer: previous deployment's verified public issuer URL
+  reason: "provider_independent"
+  source: "system"; actor_account_id: null
+
 session.revoke
-  reason: "refresh_failed"
+  reason: "user_revoked" | "untrusted_login_issuer"
 
 oauth.approve
   metadata: {}

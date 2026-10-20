@@ -248,11 +248,11 @@ fn state_with_pool(
 
         enc_root_key_id: "test-enc".to_owned(),
         enc_root_secret: secrecy::SecretString::from(
-            "test-enc-root-secret-32-bytes-long".to_owned(),
+            "notegate-test-enc-root-secret-32-bytes".to_owned(),
         ),
         lookup_root_key_id: "test-lookup".to_owned(),
         lookup_root_secret: secrecy::SecretString::from(
-            "test-lookup-root-secret-32-bytes-long".to_owned(),
+            "notegate-test-lookup-root-secret-32-bytes".to_owned(),
         ),
 
         browser_session_max_ttl: Duration::from_secs(30 * 86_400),
@@ -587,7 +587,7 @@ async fn session_management_is_owner_scoped_and_revokes_browser_cli_and_mcp_acce
     assert!(
         !state
             .browser_sessions
-            .renew_idle_expiry(remote_id, &remote_hash, state.oidc.issuer())
+            .renew_idle_expiry(remote_id, &remote_hash)
             .await?
     );
     let revokes: i64 = sqlx::query_scalar(
@@ -2271,6 +2271,13 @@ async fn session_marker_migration_preserves_authentication_decisions()
     );
     db.apply_migration(60).await?;
     db.apply_migration(61).await?;
+    notegate_db::browser_session_migration::prepare_browser_sessions(
+        &db.pool,
+        &state.security,
+        state.oidc.issuer(),
+    )
+    .await?;
+    db.apply_migration(62).await?;
     for (case, token) in &tokens {
         match verify_browser_session(&state, token).await {
             Ok(caller) => {
@@ -2299,7 +2306,7 @@ async fn session_marker_migration_preserves_authentication_decisions()
 }
 
 #[tokio::test]
-async fn legacy_browser_sessions_are_rejected_without_deleting_account_or_history()
+async fn nonexistent_browser_sessions_are_rejected_without_deleting_account_or_history()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -2311,7 +2318,7 @@ async fn legacy_browser_sessions_are_rejected_without_deleting_account_or_histor
     )?;
     let session = valid_browser_session(&db, &state).await?;
     let (id, _) = notegate_db::browser_session_repo::parse_token(&session).ok_or("bad session")?;
-    sqlx::query("UPDATE browser_sessions SET oidc_issuer=NULL WHERE id=$1")
+    sqlx::query("UPDATE browser_sessions SET id=gen_random_uuid() WHERE id=$1")
         .bind(id)
         .execute(&db.pool)
         .await?;
@@ -2496,20 +2503,18 @@ async fn browser_activity_requires_live_cookie_and_same_origin_without_reauthent
         "token_hash",
         "hash_key_id",
         "hash_version",
-        "oidc_issuer",
         "created_at",
         "expires_at",
     ] {
         assert_eq!(after[field], before[field], "{field}");
     }
     assert_ne!(after["idle_expires_at"], before["idle_expires_at"]);
-    for reason in ["idle", "absolute", "issuer", "revoked"] {
+    for reason in ["idle", "absolute", "revoked"] {
         sqlx::query("UPDATE browser_sessions SET \
           idle_expires_at=CASE WHEN $2 IN ('idle','absolute') THEN now() ELSE now()+interval '1 hour' END, \
           expires_at=CASE WHEN $2='absolute' THEN now() ELSE now()+interval '1 day' END, \
-          oidc_issuer=CASE WHEN $2='issuer' THEN 'https://other.test' ELSE $3 END, \
           revoked_at=CASE WHEN $2='revoked' THEN now() ELSE NULL END WHERE id=$1")
-          .bind(id).bind(reason).bind(state.oidc.issuer()).execute(&db.pool).await?;
+          .bind(id).bind(reason).execute(&db.pool).await?;
         let response = router
             .clone()
             .oneshot(

@@ -132,7 +132,7 @@ async fn removing_session_marker_preserves_tokens_issuers_and_owned_data() -> Te
     let unknown: i64 = sqlx::query_scalar("SELECT count(*) FROM oauth_grants WHERE client_environment IS NOT NULL OR last_token_at IS NOT NULL")
         .fetch_one(&db.pool).await?;
     assert_eq!(unknown, 0);
-    notegate_db::check_readiness(&db.pool).await?;
+    assert!(notegate_db::check_readiness(&db.pool).await.is_err());
     let sessions = BrowserSessionRepo::new(db.pool.clone());
     for (id, expected_issuer) in [(current, Some(issuer)), (unbound, None)] {
         let hash = crypto.browser_session_hash(&id.to_string(), "retained-secret")?;
@@ -141,7 +141,12 @@ async fn removing_session_marker_preserves_tokens_issuers_and_owned_data() -> Te
             .await?
             .ok_or("retained session missing")?;
         assert_eq!(session.account.id, owner);
-        assert_eq!(session.oidc_issuer.as_deref(), expected_issuer);
+        let issuer: Option<String> =
+            sqlx::query_scalar("SELECT oidc_issuer FROM browser_sessions WHERE id=$1")
+                .bind(id)
+                .fetch_one(&db.pool)
+                .await?;
+        assert_eq!(issuer.as_deref(), expected_issuer);
     }
     assert!(files.find_text(space, node.id).await?.is_some());
     assert_eq!(
@@ -203,12 +208,12 @@ async fn idle_expiry_migration_preserves_expired_and_revoked_sessions() -> TestR
       FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='browser_sessions'")
         .fetch_one(&db.pool).await?;
     assert_eq!(columns, (0, 1));
-    notegate_db::check_readiness(&db.pool).await?;
+    assert!(notegate_db::check_readiness(&db.pool).await.is_err());
     let repo = BrowserSessionRepo::new(db.pool.clone());
     for (case, id, hash) in sessions {
         assert_eq!(
-            repo.renew_idle_expiry(id, &hash, "https://auth.example.test")
-                .await?,
+            sqlx::query_scalar::<_, Option<bool>>("SELECT revoked_at IS NULL AND idle_expires_at>now() AND expires_at>now() AND oidc_issuer='https://auth.example.test' FROM browser_sessions WHERE id=$1")
+                .bind(id).fetch_one(&db.pool).await?.unwrap_or(false),
             case == "live",
             "{case}"
         );

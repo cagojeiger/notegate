@@ -64,9 +64,6 @@ pub async fn verify_browser_session(state: &AppState, token: &str) -> Result<Cal
         .await
         .map_err(|_| AuthError::Internal)?
         .ok_or(AuthError::InvalidToken)?;
-    if resolved.oidc_issuer.as_deref() != Some(state.oidc.issuer()) {
-        return Err(AuthError::InvalidToken);
-    }
     state
         .metadata_writes
         .record_browser_session(resolved.session_id);
@@ -92,7 +89,7 @@ pub async fn activity(
         let parsed = parse_browser_session_token(&state, token.value())?;
         let renewed = state
             .browser_sessions
-            .renew_idle_expiry(parsed.session_id, &parsed.token_hash, state.oidc.issuer())
+            .renew_idle_expiry(parsed.session_id, &parsed.token_hash)
             .await
             .map_err(|_| AuthError::Internal)?;
         if !renewed {

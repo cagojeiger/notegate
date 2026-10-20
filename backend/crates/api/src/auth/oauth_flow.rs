@@ -24,9 +24,6 @@ pub(super) async fn new_login_flow(oidc: &OidcProvider) -> notegate_core::Result
         .add_scope(Scope::new("profile".to_owned()))
         .add_scope(Scope::new("email".to_owned()))
         .set_pkce_challenge(pkce_challenge);
-    let builder = builder
-        .add_extra_param("max_age", "0")
-        .add_extra_param("claims", r#"{"id_token":{"auth_time":{"essential":true}}}"#);
     let (redirect_url, csrf_state, nonce) = builder.url();
 
     Ok(LoginFlow {

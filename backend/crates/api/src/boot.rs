@@ -27,6 +27,10 @@ pub(crate) async fn run() -> anyhow::Result<()> {
         return Ok(());
     }
     let recalculate_usage = std::env::args().any(|arg| arg == "--recalculate-usage");
+    let prepare_sessions = std::env::args().any(|arg| arg == "--prepare-browser-sessions");
+    if prepare_sessions && recalculate_usage {
+        anyhow::bail!("choose one maintenance operation");
+    }
 
     // Load `.env` for local development; absence is fine in production.
     let _ = dotenvy::dotenv();
@@ -41,9 +45,32 @@ pub(crate) async fn run() -> anyhow::Result<()> {
     // aborts startup instead of leaving us without graceful shutdown.
     let signals = ShutdownSignals::install()?;
 
-    let pools =
-        notegate_db::PgPools::connect(&config, plan.uses_read_pool && !recalculate_usage).await?;
+    let pools = notegate_db::PgPools::connect(
+        &config,
+        plan.uses_read_pool && !recalculate_usage && !prepare_sessions,
+    )
+    .await?;
     let pool = pools.primary().clone();
+    if prepare_sessions {
+        let crypto = PiiCrypto::from_root_secrets(
+            config.enc_root_key_id.clone(),
+            &config.enc_root_secret,
+            config.lookup_root_key_id.clone(),
+            &config.lookup_root_secret,
+        )?;
+        let result = notegate_db::browser_session_migration::prepare_browser_sessions(
+            &pool,
+            &crypto,
+            &config.oidc.issuer,
+        )
+        .await?;
+        println!(
+            "Recorded {} session origins; revoked {} untrusted sessions.",
+            result.recorded, result.revoked
+        );
+        pools.close().await;
+        return Ok(());
+    }
     if recalculate_usage {
         notegate_db::run_migrations(&pool).await?;
         let spaces_recalculated = usage_bootstrap::recalculate_all(&pool).await?;

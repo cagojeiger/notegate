@@ -21,6 +21,7 @@ use notegate_db::{oauth_repo::Authorization, test_support::TestDb};
 use notegate_model::ResolveAttrs;
 use notegate_service::oauth::pkce_challenge;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use tower::ServiceExt as _;
 use uuid::Uuid;
 
@@ -391,12 +392,19 @@ async fn authorization_consent_is_bound_single_use_and_explicit()
 }
 
 #[tokio::test]
-async fn local_sessions_reject_old_issuer_and_expire_without_upstream_refresh()
+async fn local_sessions_survive_provider_changes_and_expire_without_upstream_refresh()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let state = standalone_state(&db)?;
+    let mut state = standalone_state(&db)?;
+    let mut old_config = (*state.config).clone();
+    old_config.oidc.issuer = "https://old-provider.example.test".to_owned();
+    state.config = Arc::new(old_config);
+    state.oidc = Arc::new(crate::auth::oidc::OidcProvider::new(
+        &state.config,
+        state.http.clone(),
+    ));
     let user = owner(&state).await;
     let session = create_browser_session(&state, user, None).await?;
     assert_eq!(
@@ -405,16 +413,56 @@ async fn local_sessions_reject_old_issuer_and_expire_without_upstream_refresh()
             .account_id(),
         user
     );
-    sqlx::query("UPDATE browser_sessions SET oidc_issuer='https://other.test' WHERE user_id=$1")
-        .bind(user)
-        .execute(&db.pool)
-        .await?;
-    assert!(
+    let mut config = (*state.config).clone();
+    config.oidc.issuer = "https://accounts.google.com".to_owned();
+    state.config = Arc::new(config);
+    state.oidc = Arc::new(crate::auth::oidc::OidcProvider::new(
+        &state.config,
+        state.http.clone(),
+    ));
+    assert_eq!(
         crate::auth::session::verify_browser_session(&state, &session)
-            .await
-            .is_err()
+            .await?
+            .account_id(),
+        user
     );
-    sqlx::query("UPDATE browser_sessions SET oidc_issuer=$2,idle_expires_at=now()-interval '1 second' WHERE user_id=$1").bind(user).bind(state.oidc.issuer()).execute(&db.pool).await?;
+    let router = crate::routes::app(state.clone());
+    let cookie = format!("{BROWSER_SESSION_COOKIE}={session}");
+    let activity = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/session/activity")
+                .header(header::ORIGIN, "http://localhost:9191")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(activity.status(), StatusCode::NO_CONTENT);
+    let inventory = router
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/me/sessions")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(inventory.status(), StatusCode::OK);
+    let inventory = body(inventory).await;
+    assert_eq!(
+        inventory["sessions"]
+            .as_array()
+            .ok_or("missing inventory")?
+            .len(),
+        1
+    );
+    sqlx::query(
+        "UPDATE browser_sessions SET idle_expires_at=now()-interval '1 second' WHERE user_id=$1",
+    )
+    .bind(user)
+    .execute(&db.pool)
+    .await?;
     assert!(
         crate::auth::session::verify_browser_session(&state, &session)
             .await

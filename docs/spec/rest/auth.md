@@ -23,11 +23,11 @@ GET /auth/login?next=<내부 경로>
 
 로그인 상태는 5분 동안 DB에 암호화 저장한다. PKCE verifier·nonce·next는 cookie에 저장하지 않는다. 각 flow에 독립적인 browser-binding cookie를 발급하고 콜백에서 한 번만 소비한다. `next`는 내부 경로만 허용한다.
 
-`max_age=0`과 `auth_time`을 요청하며, 검증된 `auth_time`이 현재 시각과 60초를 초과해 차이 나면 거부한다. 공급자의 재인증 정책이 적용되며, 이것이 특정 MFA 수행을 보장한다는 의미는 아니다. 외부 access/refresh token은 로컬 세션에 보관하지 않는다.
+일반 로그인은 위 OIDC 검증으로 신원을 확인한다. `max_age=0`이나 필수 `auth_time`을 요청하지 않으며 최근 비밀번호 입력·MFA 수행을 보장하지 않는다. `iat`을 사용자 재인증 시각으로 해석하지 않는다. 외부 access/refresh token은 로컬 세션에 보관하지 않는다.
 
-세션은 issuer에 연결된다. 활성 계정·철회·`idle_expires_at`·절대 만료 `expires_at`을 요청마다 확인한다. 신규 세션은 미사용 14일, 절대 수명은 설정값(기본·최대 30일)이다. HttpOnly cookie는 절대 만료까지 유지하며, 서버의 미사용 만료가 먼저 오면 401로 OIDC 재로그인을 요구한다. 외부 refresh token은 요구하거나 저장하지 않는다.
+세션은 NoteGate가 발급하며 현재 로그인 공급자 설정과 독립적이다. 발급 당시 검증된 issuer는 `session.login` Audit metadata에 기록한다. 활성 계정·철회·`idle_expires_at`·절대 만료 `expires_at`을 요청마다 확인한다. 신규 세션은 미사용 14일, 절대 수명은 설정값(기본·최대 30일)이다. HttpOnly cookie는 절대 만료까지 유지하며, 서버의 미사용 만료가 먼저 오면 401로 OIDC 재로그인을 요구한다. 외부 refresh token은 요구하거나 저장하지 않는다.
 
-`POST /auth/session/activity`는 same-origin Origin/Referer와 유효한 browser cookie를 요구하며 bearer는 거부한다. DB에서 계정 활성·issuer·철회·두 만료를 확인하고 `idle_expires_at`만 현재 시각 + 14일과 절대 만료 중 이른 값까지 연장한다. 응답은 `204`, `private, no-store`이며 token·cookie·`created_at`은 바꾸지 않는다. 따라서 OAuth 연결 승인에 필요한 최근 5분 내 로그인은 세션 연장으로 충족되지 않는다. 만료·철회된 세션은 연장하지 않는다.
+`POST /auth/session/activity`는 same-origin Origin/Referer와 유효한 browser cookie를 요구하며 bearer는 거부한다. DB에서 계정 활성·철회·두 만료를 확인하고 `idle_expires_at`만 현재 시각 + 14일과 절대 만료 중 이른 값까지 연장한다. 응답은 `204`, `private, no-store`이며 token·cookie·`created_at`은 바꾸지 않는다. 따라서 OAuth 연결 승인에 필요한 최근 5분 내 NoteGate 로그인은 세션 연장으로 충족되지 않는다. 이는 공급자 비밀번호 재입력이나 MFA 수행의 증거가 아니다. 만료·철회된 세션은 연장하지 않는다.
 
 Web은 인증된 페이지를 표시하거나 다시 보이게 할 때와 전경의 입력·스크롤 시 탭당 분당 최대 한 번 활동을 기록한다. `/me`나 문서 동기화·백그라운드 조회 자체는 만료를 연장하지 않는다. 활동 UPDATE는 `last_used_at`도 함께 기록한다. 일반 인증 요청의 사용 관측은 기존 write-behind 경로로 시간당 갱신하며 보안 만료의 근거로 사용하지 않는다.
 
@@ -48,7 +48,7 @@ MCP client
 
 Authorize는 `response_type=code`, `code_challenge_method=S256`, 정확한 MCP resource와 `mcp [offline_access]` scope를 요구한다. 공개 HTTPS CIMD URL을 client ID로 사용한다. 메타데이터 조회는 public IP만 허용하고 DNS 결과를 연결에 고정하며 proxy와 redirect를 사용하지 않는다. 응답은 64 KiB, 요청은 5초, 동시 조회는 8개로 제한한다. Positive cache는 HTTP no-store/no-cache와 더 짧은 max-age를 존중하며 최대 5분·256개다.
 
-Redirect는 등록 값과 일치해야 한다. HTTP loopback redirect는 port만 달라질 수 있으며 승인 화면에서 로컬 앱으로 시작한 로그인인지 확인하도록 안내한다. GET은 승인하지 않는다. POST는 browser-bound flow, 활성 로컬 세션, 5분 이내의 로그인, same-origin Origin/Referer를 요구한다. 매 연결에 동의를 받으며 자동 승인을 하지 않는다.
+Redirect는 등록 값과 일치해야 한다. HTTP loopback redirect는 port만 달라질 수 있으며 승인 화면에서 로컬 앱으로 시작한 로그인인지 확인하도록 안내한다. GET은 승인하지 않는다. POST는 browser-bound flow, 활성 로컬 세션, 5분 이내의 NoteGate 로그인, same-origin Origin/Referer를 요구한다. 매 연결에 동의를 받으며 자동 승인을 하지 않는다.
 
 ## 토큰과 CLI
 
@@ -112,6 +112,11 @@ Settings → Account에서 브라우저 세션·CLI 연결·MCP 연결을 별도
 
 ## 세션 스키마 업그레이드
 
-Migration 61은 `validated_until`을 `idle_expires_at`으로 이름을 바꾸고 browser session과 OAuth grant에 nullable 환경 표시, grant에 nullable 최근 token 발급 시각을 추가한다. 기존 session ID·HMAC·issuer·생성 시각·두 만료·철회 상태와 계정·문서·OAuth 연결은 그대로 보존한다. 기존 유효 세션은 첫 활동 시 새 정책으로 연장하며, 이미 만료된 세션은 재로그인이 필요하다. 과거 환경·발급 시각을 backfill하거나 추정하지 않는다.
+Migration 62는 `browser_sessions.oidc_issuer`를 제거한다. 기존 계정·session ID·HMAC·생성 시각·두 만료·기존 철회 상태·문서·OAuth 연결은 보존한다. 로그인 공급자 변경만으로 NoteGate 세션을 무효화하지 않는다.
 
-백업 후 기존 API·worker를 모두 종료한 상태에서 새 binary의 embedded migration을 적용한다. 이전 binary는 바뀐 컬럼을 읽지 못하므로 버전을 섞어 실행하거나 이전 이미지만으로 rollback하지 않는다.
+1. Schema 61 상태에서 복구 가능한 백업을 확인하고 모든 API·worker·reconciler를 중지한다.
+2. **이전 배포에서 사용한 OIDC 설정과 현재 ENC/LOOKUP 키**로 새 API binary의 `--prepare-browser-sessions` 유지보수 명령를 실행한다. 새 Google 설정을 먼저 사용하지 않는다. 도구는 세션 출처를 `session.migrate` Audit에 추가하고 issuer 미연결·다른 issuer의 기존 거부 세션만 `untrusted_login_issuer`로 철회한다. 같은 설정으로 재실행해도 Audit·철회를 중복 생성하지 않으며, 준비 후 issuer가 바뀌면 거부한다.
+3. 새 API의 embedded migration을 적용한다. 준비 Audit가 없거나 원본 issuer와 다르거나 신뢰되지 않은 세션이 미철회 상태이면 DDL 전에 중단한다. 이전 Audit는 수정하지 않는다.
+4. 기존 쿠키로 인증·활동 갱신·세션 목록·철회와 CLI/MCP 연결 보존을 검증한다.
+
+이전 binary는 제거된 컬럼을 읽으므로 버전을 섞어 실행하거나 이전 이미지만으로 rollback하지 않는다. 빈 DB는 준비 도구 없이 migration을 적용할 수 있다. 이 배포에서는 기존 OIDC 공급자를 유지할 수 있으며, Google로 바꾸기 전 검증된 Google identity를 같은 로컬 계정에 import하고 새 client 설정을 별도로 적용한다.

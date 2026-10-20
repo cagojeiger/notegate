@@ -16,6 +16,7 @@ pub mod api_key_repo;
 pub mod audit_event_repo;
 mod audit_events;
 pub mod background_job_repo;
+pub mod browser_session_migration;
 pub mod browser_session_repo;
 pub mod command_invocation_repo;
 pub mod connection_repo;
