@@ -7,6 +7,8 @@ import { Modal } from "./Modal";
 import { PanelHeader } from "./PanelHeader";
 import { Tabs, type TabItem } from "./Tabs";
 
+type SurfaceContentRenderer = (body: ReactNode, inspectorContent?: ReactNode) => ReactNode;
+
 type WorkbenchSurfaceProps<T extends string> = {
   title: string;
   tabs: TabItem<T>[];
@@ -16,7 +18,7 @@ type WorkbenchSurfaceProps<T extends string> = {
   headerActions?: ReactNode;
   bodyRef?: Ref<HTMLDivElement>;
   bodyClassName?: string;
-  children: ReactNode;
+  children: ReactNode | ((renderContent: SurfaceContentRenderer) => ReactNode);
   isMobile: boolean;
   inspector?: {
     title: string;
@@ -34,24 +36,17 @@ type WorkbenchSurfaceProps<T extends string> = {
 export function WorkbenchSurface<T extends string>({ title, tabs, value, onChange, navigationLabel,
   headerActions, bodyRef, bodyClassName = "", children, isMobile, inspector
 }: WorkbenchSurfaceProps<T>) {
-  const surface = useRef<HTMLDivElement>(null);
+  const surface = useRef<HTMLElement>(null);
   const current = tabs.find((tab) => tab.id === value);
-  return <div ref={surface} data-workbench-surface className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg">
-    <section aria-label={title} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <h1 className="sr-only">{title}</h1>
-      <PanelHeader tabs>
-        <WorkbenchTabs items={tabs} value={value} onChange={onChange} label={navigationLabel} />
-        {headerActions ? <div className="flex h-full shrink-0 items-center">{headerActions}</div> : null}
-      </PanelHeader>
-      <div key={value} ref={bodyRef} id={current?.controls} role="tabpanel"
-        aria-labelledby={current?.controls ? `${current.controls}-tab` : undefined}
-        className={`min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 md:p-5 ${bodyClassName}`}>
-        {children}
-      </div>
-    </section>
+  const renderContent: SurfaceContentRenderer = (body, inspectorContent = inspector?.children) => <>
+    <div key={value} ref={bodyRef} id={current?.controls} role="tabpanel"
+      aria-labelledby={current?.controls ? `${current.controls}-tab` : undefined}
+      className={`col-start-1 row-start-2 min-h-0 min-w-0 overflow-y-auto overscroll-contain p-4 md:p-5 ${bodyClassName}`}>
+      {body}
+    </div>
     {inspector && !isMobile && (inspector.open || inspector.keepMounted) ? (
       <aside aria-label={inspector.label ?? inspector.title}
-        className={inspector.open ? "flex min-h-0 shrink-0 flex-col border-l border-seam bg-surface" : "hidden"}
+        className={inspector.open ? "col-start-2 row-span-2 row-start-1 flex min-h-0 flex-col border-l border-seam bg-surface" : "hidden"}
         style={{ width: WORKBENCH_LAYOUT.defaultAuxiliaryWidth }}>
         <PanelHeader>
           <h2 className="font-medium">{inspector.title}</h2>
@@ -61,12 +56,24 @@ export function WorkbenchSurface<T extends string>({ title, tabs, value, onChang
             inspector.onClose();
           }}><X size={16} /></IconButton>
         </PanelHeader>
-        {inspector.children}
+        {inspectorContent}
       </aside>
     ) : inspector?.open && isMobile ? (
-      <Modal title={inspector.title} placement="bottom" width="max-w-none" onClose={inspector.onClose}>{inspector.children}</Modal>
+      <Modal title={inspector.title} placement="bottom" width="max-w-none" onClose={inspector.onClose}>{inspectorContent}</Modal>
     ) : null}
-  </div>;
+  </>;
+  // Keep the navigation mounted above feature controllers that supply both content slots.
+  return <section ref={surface} aria-label={title} data-workbench-surface
+    className="grid min-h-0 min-w-0 flex-1 grid-rows-[var(--ng-workbench-header-size)_minmax(0,1fr)] overflow-hidden bg-bg"
+    style={{ gridTemplateColumns: inspector?.open && !isMobile
+      ? `minmax(0, 1fr) ${WORKBENCH_LAYOUT.defaultAuxiliaryWidth}px` : "minmax(0, 1fr)" }}>
+    <h1 className="sr-only">{title}</h1>
+    <PanelHeader tabs className="col-start-1 row-start-1">
+      <WorkbenchTabs items={tabs} value={value} onChange={onChange} label={navigationLabel} />
+      {headerActions ? <div className="flex h-full shrink-0 items-center">{headerActions}</div> : null}
+    </PanelHeader>
+    {typeof children === "function" ? children(renderContent) : renderContent(children)}
+  </section>;
 }
 
 function WorkbenchTabs<T extends string>({ items, value, onChange, label }: {
@@ -82,6 +89,8 @@ function WorkbenchTabs<T extends string>({ items, value, onChange, label }: {
     const selected = active.getBoundingClientRect();
     if (selected.left < visible.left) list.scrollLeft -= Math.ceil(visible.left - selected.left);
     else if (selected.right > visible.right) list.scrollLeft += Math.ceil(selected.right - visible.right);
+    if (selected.top < visible.top) list.scrollTop -= Math.ceil(visible.top - selected.top);
+    else if (selected.bottom > visible.bottom) list.scrollTop += Math.ceil(selected.bottom - visible.bottom);
   }, []);
   useLayoutEffect(() => {
     const outer = frame.current!;

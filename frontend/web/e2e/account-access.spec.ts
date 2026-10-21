@@ -15,7 +15,7 @@ for (const profile of [
   test.describe(profile.name, () => {
     test.use({ viewport: { width: profile.width, height: 900 }, hasTouch: profile.width < 768 });
 
-    test("keeps growing account connections bounded and revokes only the selected connection", async ({ page }) => {
+    test("keeps growing account connections bounded and revokes only the selected connection", async ({ page }, testInfo) => {
       const space = makeSpace();
       const meta = { limit: 100, returned: 0, has_more: false, next_cursor: null };
       const dates = { created_at: "2026-10-18T00:00:00Z", idle_expires_at: "2026-11-02T00:00:00Z", expires_at: "2026-11-18T00:00:00Z" };
@@ -110,6 +110,19 @@ for (const profile of [
       if (profile.width >= 768) await view.getByRole("button", { name: "Close settings inspector", exact: true }).click();
       await view.getByRole("button", { name: "Open session actions", exact: true }).click();
       await expect(view.getByRole("region", { name: "Selected connection" })).toBeVisible();
+
+      // Short viewports must scroll Inspector actions independently from the session list.
+      await page.setViewportSize({ width: profile.width, height: 600 });
+      const signOutOthers = view.getByRole("button", { name: "Sign out other browsers", exact: true });
+      await signOutOthers.click();
+      const browserConfirmation = view.getByRole("group", { name: "Confirm revocation", exact: true });
+      await expect(browserConfirmation).toBeFocused();
+      await expect(browserConfirmation.getByRole("button", { name: "Cancel", exact: true })).toBeInViewport();
+      await browserConfirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(signOutOthers).toBeFocused();
+      expect(mutations).toEqual(["/api/v1/me/oauth-grants/mcp-1"]);
+      await page.setViewportSize({ width: profile.width, height: 900 });
+      await page.screenshot({ path: testInfo.outputPath("account-inspector.png") });
     });
   });
 }

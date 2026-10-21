@@ -8,7 +8,7 @@ type Inspector = {
   open: boolean;
   container: HTMLDivElement | null;
   onOpen: () => void;
-  setAvailable: (available: boolean) => void;
+  setAvailable?: (available: boolean) => void;
 };
 
 export const SettingsInspectorContext = createContext<Inspector | null>(null);

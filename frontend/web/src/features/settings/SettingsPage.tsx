@@ -4,6 +4,8 @@ import { SettingsViewHeader } from "./SettingsViewHeader";
 import { useSettingsInspector } from "./SettingsInspector";
 import { useSettingsScroll } from "./settingsViewState";
 
+export type SettingsPageRenderer = (body: ReactNode, inspector: ReactNode) => ReactNode;
+
 // Each view supplies content; this frame owns its heading, spacing and scroll boundary.
 export function SettingsPage({ title, inspectorLabel, leading, actions, summary, children, scrollKey,
   contained = false, disabled = false, label = title, contentLabel

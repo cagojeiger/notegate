@@ -102,6 +102,26 @@ for (const width of [1440, 390]) {
 }
 
 for (const width of [1440, 390, 320]) {
+  test(`settings tabs retain keyboard focus across Account at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    const view = await openSettings(page);
+    const tabs = view.getByRole("tablist", { name: "Settings sections", exact: true });
+    await tabs.getByRole("tab", { name: "General", exact: true }).focus();
+    for (const [key, label] of [
+      ["ArrowRight", "Account"], ["ArrowRight", "Connections"],
+      ["ArrowLeft", "Account"], ["ArrowLeft", "General"],
+      ["End", "Trash"], ["Home", "General"]
+    ]) {
+      await page.keyboard.press(key);
+      const active = tabs.getByRole("tab", { name: label, exact: true });
+      await expect(active).toHaveAttribute("aria-selected", "true");
+      await expect(active).toBeFocused();
+      await expect(active).toBeInViewport({ ratio: 1 });
+    }
+  });
+
   test(`settings preserves an unsaved document and restores focus at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     const node = await mockWorkbench(page);

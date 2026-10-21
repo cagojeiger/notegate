@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Monitor, Terminal, Unplug } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useApiClient } from "../../api/ApiProvider";
 import { invalidateAuditEvents } from "../../api/queryInvalidation";
@@ -10,7 +10,7 @@ import { Button, Card, ListItemButton, PanelSection, SectionHeader } from "../..
 import { formatEventTime } from "../events/eventDisplay";
 import { SettingsControls, SettingsInspectorSection, useSettingsInspector } from "./SettingsInspector";
 
-import { SettingsPage } from "./SettingsPage";
+import { SettingsPage, type SettingsPageRenderer } from "./SettingsPage";
 import { useSettingsScroll, useSettingsViewState } from "./settingsViewState";
 import { useSettingsMutation } from "./useSettingsMutation";
 
@@ -20,11 +20,12 @@ type Revocation = { path: string; label: string; signOut?: boolean };
 const PAGE_SIZE = 10;
 const TITLES = { browser: "Browser sessions", cli: "CLI connections", mcp: "MCP connections" };
 
-export function AuthAccessManager({ kind = "browser", onSignOut, summary, navigation }: {
+export function AuthAccessManager({ kind = "browser", onSignOut, summary, navigation, renderPage }: {
   kind?: Kind;
   onSignOut: () => void;
   summary?: ReactNode;
   navigation?: ReactNode;
+  renderPage?: SettingsPageRenderer;
 }) {
   const client = useApiClient();
   const cache = useQueryClient();
@@ -36,8 +37,8 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
   const updateView = (value: Partial<ConnectionView>) => setViews((current) => ({ ...current, [kind]: { ...current[kind], ...value } }));
   const scroll = useSettingsScroll<HTMLUListElement>(`account-list-${kind}`);
   const [confirmation, setConfirmation] = useState<Revocation | null>(null);
-  const confirmationRef = useRef<HTMLDivElement>(null);
-  const noticeRef = useRef<HTMLParagraphElement>(null);
+  const focusConfirmation = useCallback((element: HTMLDivElement | null) => { element?.focus(); }, []);
+  const focusNotice = useCallback((element: HTMLParagraphElement | null) => { element?.focus(); }, []);
   const actionRef = useRef<HTMLElement | null>(null);
   const sessions = useQuery({ queryKey: queryKeys.browserSessions, queryFn: () => listBrowserSessions(client), enabled: kind === "browser" });
   const grants = useQuery({ queryKey: queryKeys.oauthGrants, queryFn: () => listOAuthGrants(client), enabled: kind !== "browser" });
@@ -60,12 +61,6 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
   useEffect(() => {
     if (!inspectorOpen && !revoke.isPending) setConfirmation(null);
   }, [inspectorOpen, revoke.isPending]);
-  useEffect(() => {
-    if (confirmation) confirmationRef.current?.focus();
-  }, [confirmation, inspector?.container]);
-  useEffect(() => {
-    if (notice) noticeRef.current?.focus();
-  }, [notice, inspector?.container]);
 
   const browserSessions = sessions.data?.sessions ?? [];
   const connections = (grants.data?.grants ?? []).filter((grant) => grant.kind === kind);
@@ -89,11 +84,7 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
     updateView({ selectedId: id }); setConfirmation(null); revoke.reset(); inspector?.onOpen();
   };
 
-  return (
-    <SettingsPage title={kind === "browser" ? "Account" : TITLES[kind]} label={TITLES[kind]}
-      inspectorLabel={kind === "browser" ? "Open session actions" : "Open connection actions"}
-      disabled={revoke.isPending} summary={navigation ? <fieldset disabled={revoke.isPending} className="min-w-0">{navigation}{summary}</fieldset> : summary} scrollKey={`access-${kind}`} contained
-      actions={kind === "browser" ? undefined : count}>
+  const body = <>
       {revoke.isPending ? <p role="status" className="mb-3 text-xs text-muted">{kind === "browser" ? "Signing out…" : "Revoking access…"}</p> : null}
       {kind === "browser" ? <SectionHeader title="Browser sessions" actions={count} /> : null}
       {query.isLoading ? <p role="status" className="text-sm text-muted">Loading connections…</p> : query.isError ? (
@@ -117,10 +108,11 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
         <span>{query.isSuccess ? `Showing ${Math.min(visibleCount, rows.length)} of ${rows.length} loaded` : ""}</span>
         {rows.length > visibleCount ? <Button secondary size="sm" disabled={revoke.isPending} onClick={() => updateView({ visibleCount: visibleCount + PAGE_SIZE })}>Show more ({Math.min(PAGE_SIZE, rows.length - visibleCount)})</Button> : null}
       </div>
-      <SettingsControls>
+  </>;
+  const inspectorContents = <>
         <SettingsInspectorSection title="Selected connection">
           <div role="region" aria-label="Selected connection">
-            {notice ? <p ref={noticeRef} role="status" tabIndex={-1} className="mb-3 outline-none">{notice}</p> : null}
+            {notice ? <p ref={focusNotice} role="status" tabIndex={-1} className="mb-3 outline-none">{notice}</p> : null}
             {revoke.isError ? <p role="alert" className="mb-3">Could not revoke access. Try again.</p> : null}
             {session ? <>
               <p className="break-words font-medium">{session.client_environment ?? "Environment not recorded"}{session.current ? " · This session" : ""}</p>
@@ -144,7 +136,7 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
             </> : <p className="text-xs text-muted">Select a connection to view its details.</p>}
           </div>
         </SettingsInspectorSection>
-        {confirmation ? <PanelSection><div ref={confirmationRef} tabIndex={-1} role="group" aria-label="Confirm revocation" className="outline-none">
+        {confirmation ? <PanelSection><div ref={focusConfirmation} tabIndex={-1} role="group" aria-label="Confirm revocation" className="outline-none">
           <Card className="space-y-3 text-sm">
             <p>{confirmation.label}?</p>
             <div className="flex flex-wrap gap-2">
@@ -163,7 +155,13 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
           <p className="mt-3 text-xs text-muted">{kind === "browser" ? "Browser sign-out leaves CLI, MCP and Agent API keys connected." : `Revoking a ${kind.toUpperCase()} connection disables its access and refresh tokens.`}</p>
         </SettingsInspectorSection>
         <PanelSection><p className="text-xs text-muted">Agent API keys are managed in the Agents tab. Sign-in and revocation events appear in Audit history.</p></PanelSection>
-      </SettingsControls>
-    </SettingsPage>
-  );
+  </>;
+  const page = <SettingsPage title={kind === "browser" ? "Account" : TITLES[kind]} label={TITLES[kind]}
+      inspectorLabel={kind === "browser" ? "Open session actions" : "Open connection actions"}
+      disabled={revoke.isPending} summary={navigation ? <fieldset disabled={revoke.isPending} className="min-w-0">{navigation}{summary}</fieldset> : summary} scrollKey={`access-${kind}`} contained
+      actions={kind === "browser" ? undefined : count}>
+      {body}
+      {!renderPage ? <SettingsControls>{inspectorContents}</SettingsControls> : null}
+    </SettingsPage>;
+  return renderPage ? renderPage(page, inspectorContents) : page;
 }
