@@ -61,8 +61,16 @@ function SettingsWorkbench({ me, spaces = [], initialSpaceId = null, onClose, on
   ), [showAgents, me.account.kind]);
   const current = tabs.find((item) => item.id === tab) ?? tabs[0];
   const inspector = useMemo(() => ({
-    id: inspectorId, open: inspectorOpen && inspectorAvailable, container, onOpen: onOpenInspector, setAvailable
+    id: inspectorId, open: inspectorOpen && inspectorAvailable, container,
+    onOpen: () => {
+      if (container) container.scrollTop = 0;
+      onOpenInspector();
+    }, setAvailable
   }), [inspectorId, inspectorOpen, inspectorAvailable, container, onOpenInspector, setAvailable]);
+
+  useEffect(() => {
+    if (isMobile && !inspectorAvailable && inspectorOpen) onCloseInspector();
+  }, [isMobile, inspectorAvailable, inspectorOpen, onCloseInspector]);
 
   useEffect(() => {
     if (!tabs.some((item) => item.id === tab)) setTab("account");
@@ -116,8 +124,8 @@ function SettingsSectionTabs({ items, value, onChange }: { items: typeof TABS; v
     if (!list || !active) return;
     const visible = list.getBoundingClientRect();
     const selected = active.getBoundingClientRect();
-    if (selected.left < visible.left) list.scrollLeft -= visible.left - selected.left;
-    else if (selected.right > visible.right) list.scrollLeft += selected.right - visible.right;
+    if (selected.left < visible.left) list.scrollLeft -= Math.ceil(visible.left - selected.left);
+    else if (selected.right > visible.right) list.scrollLeft += Math.ceil(selected.right - visible.right);
   }, []);
   useLayoutEffect(() => {
     const outer = frame.current!;

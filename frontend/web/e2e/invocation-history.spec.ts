@@ -108,6 +108,15 @@ for (const viewport of [
       const callDetails = dialog.getByRole("region", { name: "Details for API call 51", exact: true });
       await callDetails.getByText("Response", { exact: true }).click();
       await expect(callDetails.locator("pre")).toContainText('"status": 200');
+      if (viewport.name === "short-desktop") {
+        const inspector = dialog.locator(".ng-settings-inspector");
+        await inspector.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+        expect(await inspector.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+        await rows.nth(1).getByRole("button").click();
+        await expect(dialog.getByRole("region", { name: "Details for API call 50", exact: true })).toBeAttached();
+        await expect.poll(() => inspector.evaluate((element) => element.scrollTop)).toBe(0);
+        await rows.first().getByRole("button").click();
+      }
       expect(await dialog.boundingBox()).toEqual(bounds);
       expect(historyRequests).toHaveLength(1);
       await testInfo.attach(`invocation-history-${viewport.name}-${theme}`, {

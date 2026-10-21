@@ -1,5 +1,5 @@
 import { ArrowLeft, Bot, ChevronRight, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { Agent } from "../../api/agents";
 import type { Space } from "../../api/types";
@@ -22,6 +22,7 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
   const [openId, setOpenId] = useSettingsViewState<string | null>("selected-agent", null);
   const [creating, setCreating] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const deleteButton = useRef<HTMLButtonElement>(null);
   const createMutation = useCreateAgentMutation((agent) => { setName(""); setCreating(false); setOpenId(agent.id); });
   const deleteMutation = useDeleteAgentMutation(() => { setConfirmId(null); setOpenId(null); });
   const agents = agentsQuery.data?.agents ?? [];
@@ -53,8 +54,8 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
       </> : null}
       <SettingsControls>
         {selected && !creating ? <SettingsInspectorSection title="Agent actions">
-          {confirmId === selected.id ? <div className="space-y-3"><p>Delete this agent and revoke its API keys?</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="danger" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(selected.id)}>Confirm</Button><Button size="sm" secondary disabled={deleteMutation.isPending} onClick={() => setConfirmId(null)}>Cancel</Button></div></div>
-            : <Button variant="danger" size="sm" onClick={() => setConfirmId(selected.id)}><Trash2 size={15} /> Delete {selected.name}</Button>}
+          {confirmId === selected.id ? <div className="space-y-3"><p>Delete this agent and revoke its API keys?</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="danger" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(selected.id)}>Confirm</Button><Button size="sm" secondary autoFocus disabled={deleteMutation.isPending} onClick={() => { setConfirmId(null); requestAnimationFrame(() => deleteButton.current?.focus()); }}>Cancel</Button></div></div>
+            : <Button ref={deleteButton} variant="danger" size="sm" onClick={() => setConfirmId(selected.id)}><Trash2 size={15} /> Delete {selected.name}</Button>}
         </SettingsInspectorSection> : null}
       </SettingsControls>
       {creating ? <section>

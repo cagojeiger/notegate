@@ -44,6 +44,63 @@ async function mockWorkbench(page: Page, nodeCount = 1, nodeOverrides: Partial<R
   return node;
 }
 
+async function mockAgentManagement(page: Page) {
+  await mockWorkbench(page);
+  let agents = [{ id: "review-agent", name: "Review agent", owner_user_id: "user-1" }];
+  await page.route("**/api/v1/agents**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "DELETE") {
+      agents = agents.filter((agent) => !path.endsWith(`/${agent.id}`));
+      return route.fulfill({ status: 204 });
+    }
+    if (request.method() === "POST") {
+      const agent = { id: "replacement-agent", name: request.postDataJSON().name as string, owner_user_id: "user-1" };
+      agents.push(agent);
+      return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(agent) });
+    }
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(path.endsWith("/keys") ? { keys: [] } : { agents }) });
+  });
+  await page.route("**/api/v1/spaces/*/agents?*", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connections: [] }) }));
+}
+
+test("mobile agent creation stays in the body after deleting an inspected agent", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockAgentManagement(page);
+  await page.goto("/");
+  const view = await openSettings(page, "Agents");
+  await view.getByRole("button", { name: "Select Review agent", exact: true }).click();
+  await view.getByRole("button", { name: "Open agent actions", exact: true }).click();
+  const inspector = page.getByRole("dialog", { name: "Agents Inspector", exact: true });
+  await inspector.getByRole("button", { name: "Delete Review agent", exact: true }).click();
+  await inspector.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(inspector).toHaveCount(0);
+  await view.getByRole("button", { name: "Add agent", exact: true }).click();
+  await view.getByRole("textbox", { name: "New agent name", exact: true }).fill("Replacement");
+  await view.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(view.locator("[data-settings-heading] h2")).toHaveText("Replacement");
+  await expect(inspector).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Toggle settings inspector", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(view.getByRole("combobox", { name: "Daily permission", exact: true })).toBeInViewport();
+});
+
+for (const width of [1440, 390]) {
+  test(`agent deletion confirmation retains keyboard focus at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockAgentManagement(page);
+    await page.goto("/");
+    const view = await openSettings(page, "Agents");
+    await view.getByRole("button", { name: "Select Review agent", exact: true }).click();
+    await view.getByRole("button", { name: "Open agent actions", exact: true }).click();
+    const remove = view.getByRole("button", { name: "Delete Review agent", exact: true });
+    await remove.click();
+    const cancel = view.getByRole("button", { name: "Cancel", exact: true });
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(remove).toBeFocused();
+  });
+}
+
 for (const width of [1440, 390, 320]) {
   test(`settings preserves an unsaved document and restores focus at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
