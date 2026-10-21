@@ -108,11 +108,16 @@ impl FilesService {
         space_id: Uuid,
         path: &str,
     ) -> ServiceResult<(NodeView, Vec<String>)> {
-        let mut current = self.resolve_path(caller_account_id, space_id, "/").await?;
+        let mut current = self
+            .resolve_path_node(caller_account_id, space_id, "/")
+            .await?;
         let mut current_path = "/".to_owned();
         let mut created_paths = Vec::new();
+        let mut segments = path.split('/');
+        let mut next_segment = segments.find(|segment| !segment.is_empty());
 
-        for segment in path.split('/').filter(|segment| !segment.is_empty()) {
+        while let Some(segment) = next_segment {
+            next_segment = segments.find(|segment| !segment.is_empty());
             let next_path = if current_path == "/" {
                 format!("/{segment}")
             } else {
@@ -120,10 +125,10 @@ impl FilesService {
             };
 
             match self
-                .resolve_path(caller_account_id, space_id, &next_path)
+                .resolve_path_node(caller_account_id, space_id, &next_path)
                 .await
             {
-                Ok(existing) if existing.node.kind == NodeKind::Folder => {
+                Ok(existing) if existing.kind == NodeKind::Folder => {
                     current = existing;
                     current_path = next_path;
                 }
@@ -138,20 +143,23 @@ impl FilesService {
                             caller_account_id,
                             space_id,
                             CreateFolder {
-                                parent_node_id: current.node.id,
+                                parent_node_id: current.id,
                                 name: segment.to_owned(),
                             },
                         )
                         .await?;
                     created_paths.push(created.path.clone());
-                    current = created;
+                    if next_segment.is_none() {
+                        return Ok((created, created_paths));
+                    }
+                    current = created.node;
                     current_path = next_path;
                 }
                 Err(error) => return Err(error),
             }
         }
 
-        Ok((current, created_paths))
+        Ok((self.node_view(space_id, current).await?, created_paths))
     }
 
     /// Create an empty text (`touch`). Requires write permission.
