@@ -29,3 +29,5 @@
 - Icon control에 문맥 있는 이름과 보이는 focus를 제공한다. Menu의 키보드 이동·닫기·focus 복귀, 비동기 결과 안내와 reduced motion을 유지한다.
 - Desktop의 시각 밀도와 mobile/coarse-pointer의 조작 영역은 별개다.
 - 화면 검증은 [개발 가이드](../development.md#검증)를 따른다. Screenshot은 외관의 증거이며 동작·접근성의 대체가 아니다.
+
+Settings의 표시·확인·요청·focus 전환 계약은 [Settings 상태 전환](settings-state-machines.md)을 따른다.

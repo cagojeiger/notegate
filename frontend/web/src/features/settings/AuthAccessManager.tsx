@@ -56,6 +56,10 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
       invalidateAuditEvents(cache);
     }
   });
+  const inspectorOpen = inspector?.open ?? true;
+  useEffect(() => {
+    if (!inspectorOpen && !revoke.isPending) setConfirmation(null);
+  }, [inspectorOpen, revoke.isPending]);
   useEffect(() => {
     if (confirmation) confirmationRef.current?.focus();
   }, [confirmation, inspector?.container]);

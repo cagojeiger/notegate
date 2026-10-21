@@ -36,6 +36,26 @@ function ModalHarness({
 }
 
 describe("Modal", () => {
+  it("includes native disclosure summaries in both directions of the focus loop", async () => {
+    const user = userEvent.setup();
+    render(<Modal title="Call details" onClose={() => undefined}>
+      <details><summary>Input</summary><p>Request data</p></details>
+      <details><summary>Response</summary><p>Response data</p></details>
+    </Modal>);
+    const close = screen.getByRole("button", { name: "Close" });
+    const input = screen.getByText("Input");
+    const response = screen.getByText("Response");
+    expect(close).toHaveFocus();
+    await user.tab();
+    expect(input).toHaveFocus();
+    await user.tab();
+    expect(response).toHaveFocus();
+    await user.tab();
+    expect(close).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(response).toHaveFocus();
+  });
+
   it("keeps the focus loop on tabbable controls when tabs or fieldsets exclude buttons", async () => {
     const user = userEvent.setup();
     render(<>

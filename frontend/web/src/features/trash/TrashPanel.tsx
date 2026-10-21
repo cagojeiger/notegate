@@ -67,6 +67,11 @@ export function TrashPanel() {
       await queryClient.invalidateQueries({ queryKey: queryKeys.trash });
     }
   });
+  const inspectorOpen = inspector?.open ?? true;
+  useEffect(() => {
+    // Dismiss unsubmitted confirmation; an in-flight request still owns its result.
+    if (!inspectorOpen && !mutation.isPending) setConfirmation(null);
+  }, [inspectorOpen, mutation.isPending]);
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const selected = selectedKey === undefined ? items[0] : items.find((item) => `${item.kind}:${item.id}` === selectedKey);
   const SelectedIcon = itemAppearance[selected?.kind ?? "file"].icon;

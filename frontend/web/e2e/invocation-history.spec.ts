@@ -106,8 +106,24 @@ for (const viewport of [
       await expect(rows.first().getByText(operation, { exact: true })).toHaveCount(0);
       await rows.first().getByRole("button").click();
       const callDetails = dialog.getByRole("region", { name: "Details for API call 51", exact: true });
+      if (viewport.name === "mobile") {
+        const close = page.getByRole("dialog", { name: "History Inspector", exact: true }).getByRole("button", { name: "Close", exact: true });
+        const input = callDetails.locator("summary", { hasText: "Input" });
+        const response = callDetails.locator("summary", { hasText: "Response" });
+        await expect(close).toBeFocused();
+        await page.keyboard.press("Tab");
+        await expect(input).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(input.locator("..")).toHaveAttribute("open", "");
+        await page.keyboard.press("Tab");
+        await expect(response).toBeFocused();
+        await page.keyboard.press("Tab");
+        await expect(close).toBeFocused();
+        await page.keyboard.press("Shift+Tab");
+        await expect(response).toBeFocused();
+      }
       await callDetails.getByText("Response", { exact: true }).click();
-      await expect(callDetails.locator("pre")).toContainText('"status": 200');
+      await expect(callDetails.locator("details").filter({ has: page.locator("summary", { hasText: "Response" }) }).locator("pre")).toContainText('"status": 200');
       if (viewport.name === "short-desktop") {
         const inspector = dialog.locator(".ng-settings-inspector");
         await inspector.evaluate((element) => { element.scrollTop = element.scrollHeight; });

@@ -1,5 +1,5 @@
 import { ArrowLeft, Bot, ChevronRight, Plus, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Agent } from "../../api/agents";
 import type { Space } from "../../api/types";
@@ -10,13 +10,14 @@ import {
   useCreateAgentMutation, useDeleteAgentMutation, useSetAgentSpaceAccessMutation, useSettingsSpacesQuery
 } from "./useSettingsQueries";
 import { KeyManager } from "./KeyManager";
-import { SettingsControls, SettingsInspectorSection } from "./SettingsInspector";
+import { SettingsControls, SettingsInspectorSection, useSettingsInspector } from "./SettingsInspector";
 
 import { SettingsPage } from "./SettingsPage";
 import { SettingsAddButton } from "./SettingsAddButton";
 import { useSettingsViewState } from "./settingsViewState";
 
 export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
+  const inspectorOpen = useSettingsInspector()?.open ?? true;
   const agentsQuery = useAgentsQuery(canManageAgents);
   const [name, setName] = useState("");
   const [openId, setOpenId] = useSettingsViewState<string | null>("selected-agent", null);
@@ -25,6 +26,9 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
   const deleteButton = useRef<HTMLButtonElement>(null);
   const createMutation = useCreateAgentMutation((agent) => { setName(""); setCreating(false); setOpenId(agent.id); });
   const deleteMutation = useDeleteAgentMutation(() => { setConfirmId(null); setOpenId(null); });
+  useEffect(() => {
+    if (!inspectorOpen && !deleteMutation.isPending) setConfirmId(null);
+  }, [inspectorOpen, deleteMutation.isPending]);
   const agents = agentsQuery.data?.agents ?? [];
   const selected = agents.find((agent) => agent.id === openId);
   if (!canManageAgents) return <EmptyState>Agent management is unavailable for this account.</EmptyState>;
