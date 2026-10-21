@@ -873,6 +873,8 @@ async fn refresh_idle_and_absolute_expiry_are_independent() -> Result<(), Box<dy
         .refresh_token
         .unwrap();
     for day in [6, 12, 18, 24, 29] {
+        sqlx::query("UPDATE oauth_credentials SET refresh_retry_until=clock_timestamp()-interval '1 second' WHERE private_refresh_response IS NOT NULL")
+            .execute(&db.pool).await?;
         refresh = issued(
             svc.refresh(&refresh, CLIENT, RESOURCE, t + Duration::days(day))
                 .await?,
@@ -880,6 +882,8 @@ async fn refresh_idle_and_absolute_expiry_are_independent() -> Result<(), Box<dy
         .refresh_token
         .unwrap();
     }
+    sqlx::query("UPDATE oauth_credentials SET refresh_retry_until=clock_timestamp()-interval '1 second' WHERE private_refresh_response IS NOT NULL")
+        .execute(&db.pool).await?;
     let near = issued(
         svc.refresh(
             &refresh,
