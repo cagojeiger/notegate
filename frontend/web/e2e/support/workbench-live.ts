@@ -231,17 +231,17 @@ export async function runWorkbenchLive(
           await expect(settings.getByRole("tabpanel", { name: "Changes history" }).locator("ol > li")).toHaveCount(50);
         });
         await measure("history-audit", async () => {
-          await settings.getByRole("tab", { name: "Audit", exact: true }).click();
+          await settings.getByRole("combobox", { name: "History type", exact: true }).selectOption({ label: "Audit" });
           await expect(settings.getByText("No audit events.", { exact: true }).or(settings.locator("ol > li").first())).toBeVisible();
         });
         for (const [tab, empty] of [["MCP", "No MCP calls."], ["CLI", "No CLI calls."], ["Jobs", "No background jobs yet."]]) {
           await measure(`history-${tab.toLowerCase()}-empty`, async () => {
-            await settings.getByRole("tab", { name: tab, exact: true }).click();
+            await settings.getByRole("combobox", { name: "History type", exact: true }).selectOption({ label: tab });
             await expect(settings.getByText(empty, { exact: true })).toBeVisible();
           });
         }
         await measure("history-api-first-page", async () => {
-          await settings.getByRole("tab", { name: "API", exact: true }).click();
+          await settings.getByRole("combobox", { name: "History type", exact: true }).selectOption({ label: "API" });
           await expect(settings.locator("ol > li")).toHaveCount(50);
         });
         await measure("history-api-next-page", async () => {
