@@ -9,7 +9,7 @@ use axum::http::{Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use metrics::{Gauge, Unit};
-use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
+use metrics_exporter_prometheus::{BuildError, Matcher, PrometheusBuilder, PrometheusHandle};
 use notegate_core::ProcessMode;
 use notegate_jobs::JobQueue;
 use tokio::task::JoinHandle;
@@ -45,8 +45,21 @@ pub(crate) fn install(
         return Ok(None);
     }
 
-    let handle = prometheus_builder(process_mode)
-        .with_recommended_naming(true)
+    let handle =
+        with_histogram_buckets(prometheus_builder(process_mode).with_recommended_naming(true))?
+            .install_recorder()?;
+
+    describe_metrics();
+
+    Ok(Some(MetricsHandle(handle)))
+}
+
+fn prometheus_builder(process_mode: ProcessMode) -> PrometheusBuilder {
+    PrometheusBuilder::new().add_global_label("process_mode", process_mode.as_str())
+}
+
+fn with_histogram_buckets(builder: PrometheusBuilder) -> Result<PrometheusBuilder, BuildError> {
+    builder
         .set_buckets_for_metric(
             Matcher::Full("notegate_http_request_duration".to_owned()),
             HTTP_DURATION_BUCKETS_SECONDS,
@@ -94,16 +107,7 @@ pub(crate) fn install(
         .set_buckets_for_metric(
             Matcher::Full("notegate_reconciliation_duration".to_owned()),
             BACKGROUND_EXECUTION_DURATION_BUCKETS_SECONDS,
-        )?
-        .install_recorder()?;
-
-    describe_metrics();
-
-    Ok(Some(MetricsHandle(handle)))
-}
-
-fn prometheus_builder(process_mode: ProcessMode) -> PrometheusBuilder {
-    PrometheusBuilder::new().add_global_label("process_mode", process_mode.as_str())
+        )
 }
 
 fn describe_metrics() {
@@ -768,69 +772,10 @@ mod tests {
         MetricsHandle,
         metrics_exporter_prometheus::PrometheusRecorder,
     ) {
-        let recorder = PrometheusBuilder::new()
-            .with_recommended_naming(true)
-            .set_buckets_for_metric(
-                Matcher::Full("notegate_http_request_duration".to_owned()),
-                HTTP_DURATION_BUCKETS_SECONDS,
-            )
-            .unwrap()
-            .set_buckets_for_metric(
-                Matcher::Full("notegate_search_operation_duration".to_owned()),
-                SEARCH_DURATION_BUCKETS_SECONDS,
-            )
-            .unwrap()
-            .set_buckets_for_metric(
-                Matcher::Full("notegate_search_stage_duration".to_owned()),
-                SEARCH_DURATION_BUCKETS_SECONDS,
-            )
-            .unwrap()
-            .set_buckets_for_metric(
-                Matcher::Full("notegate_search_match_reduce_duration".to_owned()),
-                SEARCH_DURATION_BUCKETS_SECONDS,
-            )
-            .unwrap()
-            .set_buckets_for_metric(
-                Matcher::Full("notegate_command_invocation_duration".to_owned()),
-                HTTP_DURATION_BUCKETS_SECONDS,
-            )
-            .unwrap()
-            .set_buckets_for_metric(
-                Matcher::Full("notegate_command_history_duration".to_owned()),
-                SEARCH_DURATION_BUCKETS_SECONDS,
-            )
-            .unwrap()
-            .set_buckets_for_metric(
-                Matcher::Full("notegate_command_completion_duration".to_owned()),
-                HTTP_DURATION_BUCKETS_SECONDS,
-            )
-            .unwrap()
-            .set_buckets_for_metric(
-                Matcher::Full("notegate_db_pool_acquire_duration".to_owned()),
-                SEARCH_DURATION_BUCKETS_SECONDS,
-            )
-            .unwrap()
-            .set_buckets_for_metric(
-                Matcher::Full("notegate_text_decryption_duration".to_owned()),
-                SEARCH_DURATION_BUCKETS_SECONDS,
-            )
-            .unwrap()
-            .set_buckets_for_metric(
-                Matcher::Full("notegate_metadata_write_flush_duration".to_owned()),
-                HTTP_DURATION_BUCKETS_SECONDS,
-            )
-            .unwrap()
-            .set_buckets_for_metric(
-                Matcher::Full("notegate_background_job_duration".to_owned()),
-                BACKGROUND_EXECUTION_DURATION_BUCKETS_SECONDS,
-            )
-            .unwrap()
-            .set_buckets_for_metric(
-                Matcher::Full("notegate_reconciliation_duration".to_owned()),
-                BACKGROUND_EXECUTION_DURATION_BUCKETS_SECONDS,
-            )
-            .unwrap()
-            .build_recorder();
+        let recorder =
+            with_histogram_buckets(PrometheusBuilder::new().with_recommended_naming(true))
+                .unwrap()
+                .build_recorder();
         (MetricsHandle(recorder.handle()), recorder)
     }
 
