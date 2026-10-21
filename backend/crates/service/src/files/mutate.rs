@@ -7,8 +7,8 @@ use crate::error::{ServiceError, ServiceResult};
 use crate::files::patch::{AppliedText, apply_edits, apply_line_edits, unified_diff};
 use crate::files::validation;
 use crate::files::{
-    AppendText, BeginObjectUpload, CopyNode, CopyResult, CreateFolder, CreateText, DeleteNode,
-    DeleteResult, EditText, FileCommand, MoveNode, NodeView, PatchResult, PatchText,
+    AppendText, BeginObjectUpload, CopyNode, CopyResult, CreateFolder, CreateNode, CreateText,
+    DeleteNode, DeleteResult, EditText, FileCommand, MoveNode, NodeView, PatchResult, PatchText,
     PendingObjectUpload, StoredContent, TextWriteResult, UpdateNode,
     UpdateNodeExternalAccessPolicy, UpdateNodeWriteLock, UpdateTextEncryption, WriteTarget,
     WriteText, WriteTextBody, content,
@@ -18,6 +18,59 @@ use super::view::text_write_result_at_path;
 use super::{FilesService, validate_structured_text};
 
 impl FilesService {
+    pub async fn create_node(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        command: CreateNode,
+    ) -> ServiceResult<NodeView> {
+        match (command.kind, command.content) {
+            (NodeKind::Folder, None) => {
+                self.create_folder(
+                    caller_account_id,
+                    space_id,
+                    CreateFolder {
+                        parent_node_id: command.parent_node_id,
+                        name: command.name,
+                    },
+                )
+                .await
+            }
+            (NodeKind::Text, Some(content)) => Ok(self
+                .write_text(
+                    caller_account_id,
+                    space_id,
+                    WriteText {
+                        target: WriteTarget::Create {
+                            parent_node_id: command.parent_node_id,
+                            name: command.name,
+                        },
+                        body: WriteTextBody::Plain(content),
+                        expected_sha256: None,
+                    },
+                )
+                .await?
+                .node),
+            (NodeKind::Text, None) => Ok(self
+                .create_text(
+                    caller_account_id,
+                    space_id,
+                    CreateText {
+                        parent_node_id: command.parent_node_id,
+                        name: command.name,
+                    },
+                )
+                .await?
+                .node),
+            (NodeKind::Folder, Some(_)) => Err(ServiceError::InvalidInput(
+                "content is only valid when kind=text".to_owned(),
+            )),
+            (NodeKind::File, _) => Err(ServiceError::InvalidInput(
+                "file node creation is not supported by this endpoint".to_owned(),
+            )),
+        }
+    }
+
     /// Create a folder (`mkdir`). Requires write permission.
     pub async fn create_folder(
         &self,

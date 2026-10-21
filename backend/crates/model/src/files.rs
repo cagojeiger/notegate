@@ -56,6 +56,14 @@ impl NodeListSort {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateNode {
+    pub parent_node_id: Uuid,
+    pub kind: NodeKind,
+    pub name: String,
+    pub content: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateFolder {
     pub parent_node_id: Uuid,
     pub name: String,

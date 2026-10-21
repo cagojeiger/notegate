@@ -126,6 +126,7 @@ type CreateNodeBody = {
 ```
 
 - Folder create는 `nodes(kind='folder')`만 만든다.
+- Folder에 `content`를 지정하면 빈 문자열이어도 `400 invalid_input`이다.
 - Text create는 `nodes(kind='text')`와 `text_objects`를 함께 만든다.
 - Text create 요청에 `content`가 있으면 plain Text content를 같은 요청에서 쓴다.
 - Text create 요청에서는 encrypted payload를 받지 않는다. Encrypted Text는 Text API `PUT /text/{node_id}`로 저장한다.

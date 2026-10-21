@@ -4,10 +4,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use notegate_core::validation::normalize_path;
-use notegate_model::{Caller, files::FileMutationContext};
+use notegate_model::{Caller, NodeKind, files::FileMutationContext};
 use notegate_service::files::{
-    ChildrenRequest, CopyNode, CreateFolder, CreateText, DeleteNode, MoveNode, TreeRequest,
-    WriteTarget, WriteText, WriteTextBody,
+    ChildrenRequest, CopyNode, CreateNode, DeleteNode, MoveNode, TreeRequest,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -263,66 +262,24 @@ pub(crate) async fn create(
     Json(body): Json<CreateNodeBody>,
 ) -> Result<(StatusCode, Json<NodeOut>), ApiError> {
     let account_id = caller.account_id();
-    let view = match body.kind {
-        CreateNodeKind::Folder if body.content.is_none() => {
-            state
-                .files
-                .for_channel(caller.channel)
-                .with_mutation_context(mutation)
-                .create_folder(
-                    account_id,
-                    space_id,
-                    CreateFolder {
-                        parent_node_id: body.parent_id,
-                        name: body.name,
-                    },
-                )
-                .await?
-        }
-        CreateNodeKind::Text => match body.content {
-            Some(content) => {
-                state
-                    .files
-                    .for_channel(caller.channel)
-                    .with_mutation_context(mutation)
-                    .write_text(
-                        account_id,
-                        space_id,
-                        WriteText {
-                            target: WriteTarget::Create {
-                                parent_node_id: body.parent_id,
-                                name: body.name,
-                            },
-                            body: WriteTextBody::Plain(content),
-                            expected_sha256: None,
-                        },
-                    )
-                    .await?
-                    .node
-            }
-            None => {
-                state
-                    .files
-                    .for_channel(caller.channel)
-                    .with_mutation_context(mutation)
-                    .create_text(
-                        account_id,
-                        space_id,
-                        CreateText {
-                            parent_node_id: body.parent_id,
-                            name: body.name,
-                        },
-                    )
-                    .await?
-                    .node
-            }
-        },
-        CreateNodeKind::Folder => {
-            return Err(ApiError::invalid_field(
-                "content is only valid when kind=text",
-            ));
-        }
-    };
+    let view = state
+        .files
+        .for_channel(caller.channel)
+        .with_mutation_context(mutation)
+        .create_node(
+            account_id,
+            space_id,
+            CreateNode {
+                parent_node_id: body.parent_id,
+                kind: match body.kind {
+                    CreateNodeKind::Folder => NodeKind::Folder,
+                    CreateNodeKind::Text => NodeKind::Text,
+                },
+                name: body.name,
+                content: body.content,
+            },
+        )
+        .await?;
     Ok((StatusCode::CREATED, Json(NodeOut::from(&view))))
 }
 

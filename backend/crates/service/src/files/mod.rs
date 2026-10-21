@@ -23,13 +23,13 @@ mod view;
 pub use notegate_model::files::{
     AppendText, BatchChildrenRequest, BatchChildrenResult, BeginObjectUpload,
     CanonicalChildrenPage, CanonicalNodeListPage, ChildrenCursor, ChildrenPage, ChildrenRequest,
-    CopyCounts, CopyNode, CopyResult, CreateFolder, CreateText, DeleteNode, DeleteResult, Edit,
-    EditText, FileMutationContext, FileStats, FileView, LineEdit, ListNodesRequest, MoveNode,
-    NodeListCursor, NodeListPage, NodeListSort, NodeReveal, NodeSummaryView, NodeView, PatchMode,
-    PatchResult, PatchText, PendingObjectUpload, ReadContent, ReadResult, ReadText, ReadTextBody,
-    StoredContent, TextStats, TextWriteResult, UpdateNode, UpdateNodeExternalAccessPolicy,
-    UpdateNodeWriteLock, UpdateTextEncryption, WriteLockSource, WriteTarget, WriteText,
-    WriteTextBody,
+    CopyCounts, CopyNode, CopyResult, CreateFolder, CreateNode, CreateText, DeleteNode,
+    DeleteResult, Edit, EditText, FileMutationContext, FileStats, FileView, LineEdit,
+    ListNodesRequest, MoveNode, NodeListCursor, NodeListPage, NodeListSort, NodeReveal,
+    NodeSummaryView, NodeView, PatchMode, PatchResult, PatchText, PendingObjectUpload, ReadContent,
+    ReadResult, ReadText, ReadTextBody, StoredContent, TextStats, TextWriteResult, UpdateNode,
+    UpdateNodeExternalAccessPolicy, UpdateNodeWriteLock, UpdateTextEncryption, WriteLockSource,
+    WriteTarget, WriteText, WriteTextBody,
 };
 pub use notegate_model::search::{TreePage, TreeRequest};
 pub use notegate_model::{
