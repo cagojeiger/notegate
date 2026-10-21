@@ -5,7 +5,7 @@ use notegate_command::{
     LINE_EDIT_OP_INSERT_BEFORE_LINE, LINE_EDIT_OP_REPLACE_LINES, LINE_EDIT_OPERATIONS,
     LineEditInput, PatchEdit,
 };
-use notegate_model::{Node, TextStorageFormat};
+use notegate_model::TextStorageFormat;
 use notegate_service::ServiceError;
 use notegate_service::files::{
     AppendText, ChildrenRequest, CopyNode, CreateFolder, DeleteNode, Edit as ServiceEdit, EditText,
@@ -283,34 +283,26 @@ async fn resolve_write_target(
     space_id: uuid::Uuid,
     path: &str,
     create: bool,
-) -> Result<(WriteTarget, Option<Node>), CommandError> {
-    let existing = match files.resolve_path_node(account_id, space_id, path).await {
-        Ok(node) => Some(node),
-        Err(ServiceError::NotFound(_)) => None,
+) -> Result<WriteTarget, CommandError> {
+    match files.resolve_path_node(account_id, space_id, path).await {
+        Ok(node) => return Ok(WriteTarget::Existing { node_id: node.id }),
+        Err(ServiceError::NotFound(_)) => {}
         Err(error) => return Err(service_error(error)),
-    };
-
-    let target = match &existing {
-        Some(node) => WriteTarget::Existing { node_id: node.id },
-        None => {
-            if !create {
-                return Err(service_error(ServiceError::NotFound(
-                    "text does not exist; pass create=true to create it".to_owned(),
-                )));
-            }
-            let (parent_path, name) = split_parent_name(path)?;
-            let parent = files
-                .resolve_path_node(account_id, space_id, &parent_path)
-                .await
-                .map_err(service_error)?;
-            WriteTarget::Create {
-                parent_node_id: parent.id,
-                name,
-            }
-        }
-    };
-
-    Ok((target, existing))
+    }
+    if !create {
+        return Err(service_error(ServiceError::NotFound(
+            "text does not exist; pass create=true to create it".to_owned(),
+        )));
+    }
+    let (parent_path, name) = split_parent_name(path)?;
+    let parent = files
+        .resolve_path_node(account_id, space_id, &parent_path)
+        .await
+        .map_err(service_error)?;
+    Ok(WriteTarget::Create {
+        parent_node_id: parent.id,
+        name,
+    })
 }
 
 pub async fn write(
@@ -327,15 +319,14 @@ pub async fn write(
     let space_id = resolved.space_id();
 
     let files = context.files(&state.files);
-    let (target, existing) =
-        resolve_write_target(&files, account_id, space_id, &path, create).await?;
+    let target = resolve_write_target(&files, account_id, space_id, &path, create).await?;
 
-    if let Some(node) = &existing {
+    if let WriteTarget::Existing { node_id } = &target {
         let current_sha = guarded_plain_text_sha(
             &files,
             account_id,
             space_id,
-            node.id,
+            *node_id,
             expected_sha256.as_deref(),
         )
         .await
@@ -379,7 +370,7 @@ pub async fn append(
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
-    let (target, _existing) = resolve_write_target(
+    let target = resolve_write_target(
         &context.files(&state.files),
         account_id,
         space_id,
