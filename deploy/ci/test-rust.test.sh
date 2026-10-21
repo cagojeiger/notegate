@@ -23,6 +23,7 @@ cat > "$tmp_root/bin/cargo" <<'MOCK'
 #!/usr/bin/env bash
 set -eu
 [[ "$NOTEGATE_TEST_RUN_ID" =~ ^[0-9a-f]{16}$ ]]
+[[ -z "${NOTEGATE_TEST_SKIP_INTEGRATION:-}" ]]
 [[ "$*" == 'test --locked --workspace example_filter -- --exact' ]]
 echo cargo >> "$TEST_RUNNER_LOG"
 exit "${TEST_CARGO_CODE:-0}"
@@ -54,6 +55,8 @@ assert_calls ''
 run_case 2 TEST_PREFLIGHT_CODE=2
 assert_calls preflight
 run_case 0
+assert_calls $'preflight\ncargo\ncleanup'
+run_case 0 NOTEGATE_TEST_SKIP_INTEGRATION=1
 assert_calls $'preflight\ncargo\ncleanup'
 run_case 101 TEST_CARGO_CODE=101
 assert_calls $'preflight\ncargo\ncleanup'

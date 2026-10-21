@@ -8,6 +8,41 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{Connection, PgConnection, PgPool};
 use uuid::Uuid;
 
+/// Missing integration configuration is an error unless a local partial run
+/// explicitly opts out. CI must always execute the integration tests.
+pub fn integration_test_env(name: &str) -> Result<Option<String>, std::io::Error> {
+    integration_test_env_value(
+        name,
+        std::env::var(name).ok().as_deref(),
+        std::env::var("NOTEGATE_TEST_SKIP_INTEGRATION").as_deref() == Ok("1"),
+        std::env::var_os("CI").is_some(),
+    )
+}
+
+fn integration_test_env_value(
+    name: &str,
+    value: Option<&str>,
+    skip: bool,
+    ci: bool,
+) -> Result<Option<String>, std::io::Error> {
+    if skip {
+        if ci {
+            return Err(std::io::Error::other(
+                "NOTEGATE_TEST_SKIP_INTEGRATION is not allowed in CI",
+            ));
+        }
+        return Ok(None);
+    }
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| Some(value.to_owned()))
+        .ok_or_else(|| {
+            std::io::Error::other(format!(
+                "{name} is required; use make test-fast for an explicit local partial run"
+            ))
+        })
+}
+
 /// A throwaway schema-isolated database for one test.
 pub struct TestDb {
     database_url: String,
@@ -16,7 +51,7 @@ pub struct TestDb {
 }
 
 impl TestDb {
-    /// Set up an isolated schema, or return `None` when the env var is unset.
+    /// Set up an isolated schema, or return `None` for an explicit local partial run.
     pub async fn setup() -> Result<Option<Self>, Box<dyn std::error::Error>> {
         Self::setup_before_migration(None).await
     }
@@ -31,12 +66,8 @@ impl TestDb {
     async fn setup_before_migration(
         migration_version: Option<i64>,
     ) -> Result<Option<Self>, Box<dyn std::error::Error>> {
-        let database_url = match std::env::var("NOTEGATE_TEST_DATABASE_URL") {
-            Ok(value) if !value.trim().is_empty() => value,
-            _ => {
-                eprintln!("skipping Postgres tests; set NOTEGATE_TEST_DATABASE_URL to run them");
-                return Ok(None);
-            }
+        let Some(database_url) = integration_test_env("NOTEGATE_TEST_DATABASE_URL")? else {
+            return Ok(None);
         };
         let run_id = std::env::var("NOTEGATE_TEST_RUN_ID").ok();
         let schema = schema_name(run_id.as_deref(), Uuid::new_v4())?;
@@ -216,8 +247,32 @@ fn schema_name(run_id: Option<&str>, id: Uuid) -> Result<String, std::io::Error>
 
 #[cfg(test)]
 mod tests {
-    use super::schema_name;
+    use super::{integration_test_env_value, schema_name};
     use uuid::Uuid;
+
+    #[test]
+    fn integration_environment_is_required_by_default() {
+        for name in ["NOTEGATE_TEST_DATABASE_URL", "NOTEGATE_TEST_S3_ENDPOINT"] {
+            for value in [None, Some(""), Some(" \t\n")] {
+                for ci in [false, true] {
+                    assert!(integration_test_env_value(name, value, false, ci).is_err());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn partial_runs_require_an_explicit_local_opt_out() -> Result<(), std::io::Error> {
+        for value in [None, Some("postgres://configured")] {
+            assert!(integration_test_env_value("TEST_SETTING", value, true, false)?.is_none());
+            assert!(integration_test_env_value("TEST_SETTING", value, true, true).is_err());
+        }
+        assert_eq!(
+            integration_test_env_value("TEST_SETTING", Some("postgres://configured"), false, true)?,
+            Some("postgres://configured".to_owned())
+        );
+        Ok(())
+    }
 
     #[test]
     fn run_scoped_schema_names_fit_postgres_identifiers() -> Result<(), std::io::Error> {

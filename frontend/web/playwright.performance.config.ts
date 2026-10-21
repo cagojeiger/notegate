@@ -4,6 +4,7 @@ export default defineConfig({
   testDir: "./performance",
   outputDir: "./test-results/browser-performance",
   timeout: 180_000,
+  forbidOnly: !!process.env.CI,
   expect: { timeout: 10_000 },
   workers: 1,
   retries: 0,

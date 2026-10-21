@@ -13,7 +13,7 @@ test-integration:
 
 test-fast:
 	@echo "Partial Rust checks: PostgreSQL/S3 integration tests are excluded. Use make test for full verification."
-	env -u NOTEGATE_TEST_DATABASE_URL -u NOTEGATE_TEST_S3_ENDPOINT -u NOTEGATE_TEST_RUN_ID cargo test --locked --workspace
+	env -u NOTEGATE_TEST_DATABASE_URL -u NOTEGATE_TEST_S3_ENDPOINT -u NOTEGATE_TEST_RUN_ID NOTEGATE_TEST_SKIP_INTEGRATION=1 cargo test --locked --workspace
 
 clippy:
 	cargo clippy --workspace --all-targets -- -D warnings

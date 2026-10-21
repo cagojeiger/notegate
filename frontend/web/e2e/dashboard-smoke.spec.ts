@@ -3,7 +3,9 @@ import { expect, test } from "@playwright/test";
 const browserSession = process.env.NOTEGATE_WEB_E2E_BROWSER_SESSION;
 
 test("browser session dashboard supports space, text, read-only metadata, and file basics", async ({ page, baseURL }) => {
-  test.skip(!browserSession, "set NOTEGATE_WEB_E2E_BROWSER_SESSION to run dashboard smoke e2e");
+  if (!browserSession?.trim()) {
+    throw new Error("NOTEGATE_WEB_E2E_BROWSER_SESSION is required for dashboard smoke e2e");
+  }
   const suffix = Date.now().toString(36);
   const spaceName = `web-e2e-${suffix}`;
   const textName = `note-${suffix}.md`;
@@ -11,7 +13,7 @@ test("browser session dashboard supports space, text, read-only metadata, and fi
 
   await page.context().addCookies([{
     name: "notegate_browser_session",
-    value: browserSession!,
+    value: browserSession,
     url: new URL(baseURL ?? "http://127.0.0.1:5173").origin,
     httpOnly: true,
     sameSite: "Lax"
