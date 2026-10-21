@@ -1058,7 +1058,7 @@ pub(crate) mod search {
 
     use notegate_core::Result;
     use notegate_model::search::{SearchDateFilters, SearchNodeCandidate, SearchTextCandidate};
-    use notegate_model::{Node, TextAtRestEncryption, TextObject};
+    use notegate_model::{Node, NodeKind, TextAtRestEncryption, TextObject};
     use sqlx::{Executor, FromRow, Postgres};
     use std::collections::HashMap;
     use std::time::Instant;
