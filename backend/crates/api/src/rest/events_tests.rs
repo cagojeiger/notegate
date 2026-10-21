@@ -17,6 +17,61 @@ use super::test_support::{
 };
 
 #[tokio::test]
+async fn history_routes_do_not_cache_success_or_error_responses()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state(&db);
+    let (caller, space_id, _) = caller_and_space(&state).await?;
+    let app = rest_app(state, caller);
+    for (path, expected) in [
+        ("/v1/me/audit-events".to_owned(), StatusCode::OK),
+        ("/v1/me/file-change-events".to_owned(), StatusCode::OK),
+        (
+            "/v1/me/command-invocations?surface=mcp".to_owned(),
+            StatusCode::OK,
+        ),
+        ("/v1/me/jobs".to_owned(), StatusCode::OK),
+        (
+            format!("/v1/spaces/{space_id}/file-change-events"),
+            StatusCode::OK,
+        ),
+        (
+            format!("/v1/spaces/{space_id}/file-change-sync"),
+            StatusCode::OK,
+        ),
+        (
+            format!("/v1/me/jobs/{}", Uuid::new_v4()),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            "/v1/me/audit-events?limit=invalid".to_owned(),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            format!("/v1/spaces/{space_id}/file-change-events?limit=invalid"),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            format!("/v1/spaces/{space_id}/file-change-sync?after_id=invalid"),
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        let response =
+            json_response(app.clone(), "GET", path.clone(), serde_json::json!({})).await?;
+        assert_eq!(response.status(), expected, "{path}");
+        assert_eq!(
+            response.headers().get(CACHE_CONTROL),
+            Some(&"private, no-store".parse()?),
+            "{path}",
+        );
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn command_invocations_require_one_surface_and_keep_pagination_independent()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
