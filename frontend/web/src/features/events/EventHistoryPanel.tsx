@@ -1,8 +1,7 @@
 import { useEffect, useMemo } from "react";
 
 import type { Space } from "../../api/types";
-import { SectionHeader, Tabs } from "../../shared/ui";
-import { SettingsControls, useSettingsInspector, useSettingsNavigationScroll } from "../settings/SettingsInspector";
+import { SelectField } from "../../shared/ui";
 import { AuditEventsPanel } from "./AuditHistoryPanel";
 import { FileChangeEventsPanel } from "./ChangesHistoryPanel";
 import { BackgroundJobsPanel } from "./JobsHistoryPanel";
@@ -31,8 +30,6 @@ export function EventHistoryPanel({
   initialSpaceId: string | null;
   canViewAuditEvents: boolean;
 }) {
-  const inspector = useSettingsInspector();
-  useSettingsNavigationScroll("history");
   const [tab, setTab] = useSettingsViewState<HistoryTab>("history-kind", "files");
   const tabs = useMemo(
     () => TABS.filter((item) => item.id === "files" || canViewAuditEvents),
@@ -44,10 +41,12 @@ export function EventHistoryPanel({
   }, [canViewAuditEvents, tab, setTab]);
 
   return (
-    <SettingsPage label="History" title={tabs.find((item) => item.id === tab)?.label ?? "Changes"}
-      inspectorLabel="Choose history type" scrollKey={`history-${tab}`}
+    <SettingsPage label="History" title="History"
+      inspectorLabel={canViewAuditEvents && ["mcp", "cli", "api"].includes(tab) ? "Open call details" : undefined} scrollKey={`history-${tab}`}
+      actions={<SelectField label="History type" className="w-40 max-w-full" value={tab} onChange={(event) => setTab(event.target.value as HistoryTab)}>
+        {tabs.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+      </SelectField>}
       contentLabel={`${tabs.find((item) => item.id === tab)?.label ?? "Changes"} history`}>
-      <SettingsControls slot="navigation"><SectionHeader title="History type" /><Tabs items={tabs} value={tab} onChange={(value) => { setTab(value); inspector?.onNavigate(); }} label="History sections" orientation={inspector ? "vertical" : "horizontal"} activationMode={inspector?.isMobile ? "manual" : "automatic"} /></SettingsControls>
         {canViewAuditEvents && tab === "audit" ? <AuditEventsPanel /> : null}
         {canViewAuditEvents && tab === "mcp" ? <CommandInvocationsPanel surface="mcp" /> : null}
         {canViewAuditEvents && tab === "cli" ? <CommandInvocationsPanel surface="cli" /> : null}

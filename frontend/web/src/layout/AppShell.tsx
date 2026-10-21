@@ -53,6 +53,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
   const recording = useAudioRecordingState();
   const [surface, setSurface] = useState<AppSurface>("workbench");
   const [treeRevealRequest, setTreeRevealRequest] = useState<TreeRevealRequest | null>(null);
+  const [settingsInspectorAvailable, setSettingsInspectorAvailable] = useState(false);
   const settingsOpener = useRef<HTMLElement | null>(null);
   const recentRequestId = useRef(0);
   const activeSpaceId = useRef(workbench.activeSpace?.id ?? null);
@@ -166,7 +167,8 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         showWorkbenchControls={!libraryOpen && !settingsOpen}
         theme={workbench.theme}
         primarySidebarOpen={workbench.isMobile ? workbench.mobileTreeOpen : workbench.primarySidebarOpen}
-        auxiliaryOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
+        auxiliaryOpen={(!settingsOpen || settingsInspectorAvailable) && (workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary)}
+        auxiliaryDisabled={settingsOpen && !settingsInspectorAvailable}
         auxiliaryLabel={settingsOpen ? "Toggle settings inspector" : libraryOpen ? "Toggle space inspector" : undefined}
         editorGroupCount={workbench.editorGroups.length}
         onAddGroup={actions.addGroup}
@@ -197,7 +199,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
               onClose={() => { actions.setSettingsOpen(false); requestAnimationFrame(() => settingsOpener.current?.focus()); }} onSignOut={actions.handleSignOut}
               onResetSavedWorkspace={actions.confirmResetSavedWorkspace} isMobile={workbench.isMobile}
               inspectorOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
-              onOpenInspector={openInspector} onCloseInspector={closeInspector} />
+              onOpenInspector={openInspector} onCloseInspector={closeInspector} onInspectorAvailabilityChange={setSettingsInspectorAvailable} />
           </Suspense> : null}
           <div hidden={settingsOpen} className={settingsOpen ? "hidden" : "contents"} inert={settingsOpen} aria-hidden={settingsOpen || undefined}>
           {librarySelected ? (

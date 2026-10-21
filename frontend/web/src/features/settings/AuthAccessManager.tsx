@@ -87,8 +87,8 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
 
   return (
     <SettingsPage title={kind === "browser" ? "Account" : TITLES[kind]} label={TITLES[kind]}
-      inspectorLabel={kind === "browser" ? "Open session actions" : "Choose connection view"}
-      disabled={revoke.isPending} summary={summary} scrollKey={`access-${kind}`} contained
+      inspectorLabel={kind === "browser" ? "Open session actions" : "Open connection actions"}
+      disabled={revoke.isPending} summary={navigation ? <fieldset disabled={revoke.isPending} className="min-w-0">{navigation}{summary}</fieldset> : summary} scrollKey={`access-${kind}`} contained
       actions={kind === "browser" ? undefined : count}>
       {kind === "browser" ? <SectionHeader title="Browser sessions" actions={count} /> : null}
       {query.isLoading ? <p role="status" className="text-sm text-muted">Loading connections…</p> : query.isError ? (
@@ -112,7 +112,6 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
         <span>{query.isSuccess ? `Showing ${Math.min(visibleCount, rows.length)} of ${rows.length} loaded` : ""}</span>
         {rows.length > visibleCount ? <Button secondary size="sm" disabled={revoke.isPending} onClick={() => updateView({ visibleCount: visibleCount + PAGE_SIZE })}>Show more ({Math.min(PAGE_SIZE, rows.length - visibleCount)})</Button> : null}
       </div>
-      {navigation ? <SettingsControls slot="navigation"><fieldset disabled={revoke.isPending} className="min-w-0">{navigation}</fieldset></SettingsControls> : null}
       <SettingsControls>
         <SettingsInspectorSection title="Selected connection">
           <div role="region" aria-label="Selected connection">

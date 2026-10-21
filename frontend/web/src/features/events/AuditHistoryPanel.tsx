@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 
-import { SettingsControls } from "../settings/SettingsInspector";
 import {
   formatActor,
   formatAuditAction,
@@ -16,9 +15,9 @@ export function AuditEventsPanel() {
   const events = useMemo(() => query.data?.pages.flatMap((page) => page.events) ?? [], [query.data]);
   return (
     <section className="space-y-3">
-      <SettingsControls><div className="flex justify-end">
+      <div className="flex justify-end">
         <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} />
-      </div></SettingsControls>
+      </div>
       <EventQueryState query={query} itemCount={events.length} emptyLabel="No audit events." />
       {events.length > 0 ? (
         <ol className="rounded-workbench-surface border border-border bg-surface px-4">

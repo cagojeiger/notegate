@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 
 import { makeSpace } from "../src/test/fixtures";
 import { routeJsonApi } from "./support/api";
-import { openSettings, showSettingsInspector, closeSettingsInspector } from "./support/settings";
+import { openSettings, closeSettingsInspector } from "./support/settings";
 import { usageResponse } from "./support/usage";
 
 for (const profile of [
@@ -69,8 +69,9 @@ for (const profile of [
       await view.getByRole("tab", { name: "Connections", exact: true }).click();
       await expect(view.getByRole("button", { name: "Copy user MCP server URL" })).toBeInViewport();
       expect(reads).toEqual({ sessions: 1, grants: 0 });
-      await showSettingsInspector(page);
+      await expect(page.getByRole("button", { name: "Toggle settings inspector" })).toBeDisabled();
       await view.getByRole("tab", { name: "MCP", exact: true }).click();
+      await expect(view.getByRole("tablist", { name: "Connection views" })).toBeInViewport();
       await expect(view.getByRole("list", { name: "MCP connections" }).getByRole("button")).toHaveCount(8);
       await view.getByRole("button", { name: "Select MCP App 1", exact: true }).click();
       await expect(view.getByRole("region", { name: "Selected connection" }).getByText("MCP App 1 · MCP", { exact: true })).toBeVisible();
@@ -81,7 +82,6 @@ for (const profile of [
       const confirmation = view.getByRole("group", { name: "Confirm revocation" });
       await expect(confirmation).toBeFocused();
       await expect(confirmation.getByRole("button", { name: "Confirm", exact: true })).toBeInViewport();
-      await expect(view.getByRole("tablist", { name: "Connection views" })).toBeInViewport();
       const accessibility = await new AxeBuilder({ page }).include("[data-settings-view]").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
       expect(accessibility.violations).toEqual([]);
       await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -92,7 +92,6 @@ for (const profile of [
       await expect(view.getByRole("button", { name: "Select MCP App 1", exact: true })).toHaveCount(0);
       await expect(view.getByText("Access revoked.", { exact: true })).toBeFocused();
       await closeSettingsInspector(page);
-      await showSettingsInspector(page);
       await view.getByRole("tab", { name: "CLI", exact: true }).click();
       await expect(view.getByRole("list", { name: "CLI connections" }).getByRole("button")).toHaveCount(10);
       await closeSettingsInspector(page);
@@ -109,7 +108,7 @@ for (const profile of [
       expect(await header.boundingBox()).toEqual(bounds);
       await closeSettingsInspector(page);
       if (profile.width >= 768) await view.getByRole("button", { name: "Close settings inspector", exact: true }).click();
-      await view.getByRole("button", { name: "Account: Open session actions", exact: true }).click();
+      await view.getByRole("button", { name: "Open session actions", exact: true }).click();
       await expect(view.getByRole("region", { name: "Selected connection" })).toBeVisible();
     });
   });

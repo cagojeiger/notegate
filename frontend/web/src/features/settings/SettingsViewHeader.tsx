@@ -1,27 +1,28 @@
-import { ChevronDown } from "lucide-react";
+import { PanelRight } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { SectionHeader } from "../../shared/ui";
+import { IconButton } from "../../shared/ui";
 import { useSettingsInspector } from "./SettingsInspector";
 
-export function SettingsViewHeader({ title, inspectorLabel, actions, disabled = false }: {
+export function SettingsViewHeader({ title, inspectorLabel, leading, actions, disabled = false }: {
   title: string;
-  inspectorLabel: string;
+  inspectorLabel?: string;
+  leading?: ReactNode;
   actions?: ReactNode;
   disabled?: boolean;
 }) {
   const inspector = useSettingsInspector();
-  if (!inspector) return <SectionHeader title={title} actions={actions} />;
   return (
-    <div data-settings-heading className="flex shrink-0 items-center justify-between gap-3">
-      <h2 aria-label={title} className="min-w-0">
-        <button type="button" aria-label={`${title}: ${inspectorLabel}`} disabled={disabled} onClick={inspector.onOpen}
-          aria-expanded={inspector.open} aria-controls={inspector.open ? inspector.id : undefined}
-          className="flex min-h-workbench-control max-w-full items-center gap-2 rounded-workbench-surface text-workbench font-semibold hover:bg-[var(--ng-hover)] disabled:cursor-not-allowed disabled:opacity-50">
-          <span className="truncate">{title}</span><ChevronDown size={14} className="shrink-0 text-muted" />
-        </button>
-      </h2>
-      {actions ? <div className="shrink-0">{actions}</div> : null}
+    <div data-settings-heading className="flex min-h-workbench-control shrink-0 items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-3">
+        {leading ? <div className="shrink-0">{leading}</div> : null}
+        <h2 tabIndex={-1} className="min-w-0 truncate text-workbench font-semibold outline-none">{title}</h2>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {actions}
+        {inspector && inspectorLabel ? <IconButton label={inspectorLabel} disabled={disabled} onClick={inspector.onOpen}
+          expanded={inspector.open} controls={inspector.open ? inspector.id : undefined}><PanelRight size={16} /></IconButton> : null}
+      </div>
     </div>
   );
 }

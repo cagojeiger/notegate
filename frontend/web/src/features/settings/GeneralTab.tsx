@@ -2,7 +2,6 @@ import { ExternalLink, Moon, RotateCcw, Sun } from "lucide-react";
 
 import { Button, Card, SectionHeader } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
-import { SettingsControls, SettingsInspectorSection } from "./SettingsInspector";
 
 import { SettingsPage } from "./SettingsPage";
 
@@ -12,7 +11,7 @@ export function GeneralTab({ onResetSavedWorkspace }: { onResetSavedWorkspace: (
   const theme = useUiStore((state) => state.theme);
   const toggleTheme = useUiStore((state) => state.toggleTheme);
   return (
-    <SettingsPage title="General" inspectorLabel="Open general actions" scrollKey="general">
+    <SettingsPage title="General" scrollKey="general">
       <div className="ng-settings-grid">
         <section>
           <SectionHeader title="About" />
@@ -34,17 +33,14 @@ export function GeneralTab({ onResetSavedWorkspace }: { onResetSavedWorkspace: (
         </section>
         <section className="ng-settings-wide">
           <SectionHeader title="Saved workspace" description="Open panes and panel visibility are restored on this browser." />
-          <Card className="text-sm">
-            <div className="font-medium">Saved open panes</div>
-            <p className="mt-1 text-xs leading-5 text-muted">Reset the browser-only pane snapshots and panel visibility used when returning to a space or refreshing NoteGate. Your spaces, documents and files are kept.</p>
+          <Card className="flex flex-wrap items-center gap-4 text-sm">
+            <div className="min-w-0 flex-1 basis-64">
+              <div className="font-medium">Saved open panes</div>
+              <p className="mt-1 text-xs leading-5 text-muted">Reset the browser-only pane snapshots and panel visibility used when returning to a space or refreshing NoteGate. Your spaces, documents and files are kept.</p>
+            </div>
+            <Button secondary onClick={onResetSavedWorkspace}><RotateCcw size={15} /> Reset</Button>
           </Card>
         </section>
-        <SettingsControls>
-          <SettingsInspectorSection title="Workspace actions">
-            <p className="mb-3 text-xs text-muted">Only this browser's saved layout is affected.</p>
-            <Button secondary onClick={onResetSavedWorkspace}><RotateCcw size={15} /> Reset</Button>
-          </SettingsInspectorSection>
-        </SettingsControls>
       </div>
     </SettingsPage>
   );

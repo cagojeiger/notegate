@@ -1,25 +1,23 @@
-import { Bot, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Bot, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { Agent } from "../../api/agents";
 import type { Space } from "../../api/types";
 import { canWriteSpace } from "../../auth/permissions";
-import { Button, Card, EmptyState, SectionHeader, TextField } from "../../shared/ui";
+import { Button, Card, EmptyState, IconButton, SectionHeader, TextField } from "../../shared/ui";
 import {
   type AgentSpaceAccessValue, useAgentKeyManagerProps, useAgentsQuery, useConnectionsQuery,
   useCreateAgentMutation, useDeleteAgentMutation, useSetAgentSpaceAccessMutation, useSettingsSpacesQuery
 } from "./useSettingsQueries";
 import { KeyManager } from "./KeyManager";
-import { SettingsControls, SettingsInspectorSection, useSettingsInspector, useSettingsNavigationScroll } from "./SettingsInspector";
+import { SettingsControls, SettingsInspectorSection } from "./SettingsInspector";
 
 import { SettingsPage } from "./SettingsPage";
 import { SettingsAddButton } from "./SettingsAddButton";
 import { useSettingsViewState } from "./settingsViewState";
 
 export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
-  const inspector = useSettingsInspector();
   const agentsQuery = useAgentsQuery(canManageAgents);
-  useSettingsNavigationScroll("agents", agentsQuery.isSuccess);
   const [name, setName] = useState("");
   const [openId, setOpenId] = useSettingsViewState<string | null>("selected-agent", null);
   const [creating, setCreating] = useState(false);
@@ -31,26 +29,28 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
   if (!canManageAgents) return <EmptyState>Agent management is unavailable for this account.</EmptyState>;
 
   return (
-    <SettingsPage title={creating ? "New agent" : selected?.name ?? "Agents"} inspectorLabel="Choose agent"
+    <SettingsPage title={creating ? "New agent" : selected?.name ?? "Agents"} inspectorLabel={selected && !creating ? "Open agent actions" : undefined}
+      leading={creating || selected ? <IconButton label="Back to agents" disabled={deleteMutation.isPending || createMutation.isPending}
+        onClick={() => { setCreating(false); setOpenId(null); setConfirmId(null); }}><ArrowLeft size={16} /></IconButton> : undefined}
       disabled={deleteMutation.isPending || createMutation.isPending} scrollKey={`agent-${creating ? "new" : openId ?? "overview"}`}>
-      <SettingsControls slot="navigation">
+      {!creating && !selected ? <>
         <section>
-          <SectionHeader title="Agents" description="Select an agent to manage its permissions and keys." />
+          <p className="mb-3 text-xs text-muted">Select an agent to manage its permissions and keys.</p>
           {agentsQuery.isLoading ? <p role="status" className="text-muted">Loading agents…</p> : null}
           {agentsQuery.isError ? <div><p role="alert" className="text-danger">Could not load agents.</p><Button size="sm" secondary aria-label="Retry agents" disabled={agentsQuery.isFetching} onClick={() => { void agentsQuery.refetch(); }}>Retry</Button></div> : null}
           {agentsQuery.isSuccess && agents.length === 0 ? <p className="text-muted">No agents yet.</p> : null}
-          <ul className="space-y-1">
+          <Card as="ul" aria-label="Agents" padding="none" className="divide-y divide-seam empty:hidden">
             {agents.map((agent) => <li key={agent.id}>
-              <button type="button" aria-label={`Select ${agent.name}`} aria-pressed={selected?.id === agent.id && !creating} disabled={deleteMutation.isPending || createMutation.isPending}
-                onClick={() => { setOpenId(agent.id); setCreating(false); setConfirmId(null); inspector?.onNavigate(); }}
-                className={`flex min-h-[var(--ng-min-target-size)] w-full items-center gap-2 border-l-2 px-3 py-2 text-left text-workbench ${selected?.id === agent.id && !creating ? "border-primary bg-[var(--ng-selection)]" : "border-transparent hover:bg-[var(--ng-hover)]"}`}>
-                <Bot size={15} className="shrink-0" /><span className="truncate">{agent.name}</span>
+              <button type="button" aria-label={`Select ${agent.name}`} disabled={deleteMutation.isPending || createMutation.isPending}
+                onClick={() => { setOpenId(agent.id); setConfirmId(null); }}
+                className="flex min-h-[var(--ng-min-target-size)] w-full items-center gap-3 px-4 py-3 text-left text-workbench hover:bg-[var(--ng-hover)]">
+                <Bot size={15} className="shrink-0 text-muted" /><span className="min-w-0 flex-1 truncate">{agent.name}</span><ChevronRight size={15} className="shrink-0 text-muted" />
               </button>
             </li>)}
-          </ul>
-          <div className="mt-3"><SettingsAddButton disabled={deleteMutation.isPending || createMutation.isPending} onClick={() => { setCreating(true); setConfirmId(null); inspector?.onNavigate(); }}>Add agent</SettingsAddButton></div>
+          </Card>
+          <div className="mt-3"><SettingsAddButton disabled={deleteMutation.isPending || createMutation.isPending} onClick={() => { setCreating(true); setConfirmId(null); }}>Add agent</SettingsAddButton></div>
         </section>
-      </SettingsControls>
+      </> : null}
       <SettingsControls>
         {selected && !creating ? <SettingsInspectorSection title="Agent actions">
           {confirmId === selected.id ? <div className="space-y-3"><p>Delete this agent and revoke its API keys?</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="danger" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(selected.id)}>Confirm</Button><Button size="sm" secondary disabled={deleteMutation.isPending} onClick={() => setConfirmId(null)}>Cancel</Button></div></div>
@@ -69,7 +69,7 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
           <section><SectionHeader title="Space permissions" description="Choose which spaces this agent can access." /><AgentSpaceAccess agent={selected} /></section>
           <section><SectionHeader title="Agent API Keys" description="Keys authenticate as this agent." /><AgentKeyManager agentId={selected.id} /></section>
         </div>
-      </section> : <EmptyState>{inspector ? "Choose an agent in the Inspector, or add one to get started." : "Choose an agent to manage its permissions and keys."}</EmptyState>}
+      </section> : null}
     </SettingsPage>
   );
 }

@@ -29,8 +29,3 @@
     min-height: 100%;
   }
 }
-
-.ng-settings-inspector-frame:has(> .ng-settings-inspector:empty) > .ng-settings-navigation {
-  max-height: 100%;
-  flex: 1;
-}

@@ -19,8 +19,8 @@ export async function showSettingsInspector(page: Page) {
 }
 
 export async function chooseHistorySection(page: Page, name: string) {
-  await showSettingsInspector(page);
-  await page.getByRole("tab", { name, exact: true }).click();
+  await closeSettingsInspector(page);
+  await page.getByRole("combobox", { name: "History type", exact: true }).selectOption({ label: name });
 }
 
 export async function selectTrashItem(page: Page, name: string) {

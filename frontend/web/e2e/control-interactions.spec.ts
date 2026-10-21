@@ -72,7 +72,7 @@ for (const width of [1440, 390, 320]) {
       expect(await view.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     }
     await showSettingsInspector(page);
-    const inspectorTrigger = view.getByRole("button", { name: "Account: Open session actions", exact: true });
+    const inspectorTrigger = view.getByRole("button", { name: "Open session actions", exact: true });
     await expect(inspectorTrigger).toHaveAttribute("aria-expanded", "true");
     const controlsId = await inspectorTrigger.getAttribute("aria-controls");
     expect(await view.locator(".ng-settings-inspector-frame").getAttribute("id")).toBe(controlsId);
@@ -95,18 +95,35 @@ for (const width of [1440, 390, 320]) {
   });
 }
 
+test("settings sections remain discoverable and keep the selected tab visible after resizing", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockWorkbench(page);
+  await page.goto("/");
+  const view = await openSettings(page);
+  const more = view.getByRole("button", { name: "More settings sections", exact: true });
+  await expect(more).toBeVisible();
+  await more.click();
+  const trash = view.getByRole("tab", { name: "Trash", exact: true });
+  await trash.click();
+  for (const width of [320, 844, 1440, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(trash).toHaveAttribute("aria-selected", "true");
+    await expect(trash).toBeInViewport({ ratio: 1 });
+    expect(await view.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  }
+});
+
 for (const width of [1440, 390]) {
-  test(`every settings view reopens its Inspector from the body at ${width}px`, async ({ page }) => {
+  test(`settings exposes primary controls and opens only contextual Inspectors at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await mockWorkbench(page);
     await page.goto("/");
     const view = await openSettings(page);
     let headingOrigin: { x: number; y: number } | undefined;
     for (const [tab, label] of [
-      ["General", "General: Open general actions"], ["Account", "Account: Open session actions"],
-      ["Connections", "Connection guide: Choose connection view"],
-      ["Agents", "Agents: Choose agent"], ["History", "Changes: Choose history type"], ["Trash", "Deleted items: Open trash actions"]
-    ]) {
+      ["General", null], ["Account", "Open session actions"], ["Connections", null],
+      ["Agents", null], ["History", null], ["Trash", "Open trash actions"]
+    ] as const) {
       await view.getByRole("tab", { name: tab, exact: true }).click();
       await closeSettingsInspector(page);
       const toggle = page.getByRole("button", { name: "Toggle settings inspector" });
@@ -115,6 +132,12 @@ for (const width of [1440, 390]) {
       if (!heading) throw new Error("Missing settings heading");
       headingOrigin ??= { x: heading.x, y: heading.y };
       expect({ x: heading.x, y: heading.y }, `${tab} heading alignment`).toEqual(headingOrigin);
+      await expect(view.getByRole("tab", { name: tab!, exact: true })).toBeInViewport({ ratio: 1 });
+      if (!label) {
+        await expect(toggle).toBeDisabled();
+        await expect(view.getByRole("complementary")).toHaveCount(0);
+        continue;
+      }
       const opener = view.getByRole("button", { name: label, exact: true });
       await opener.click();
       const inspector = view.getByRole(width < 768 ? "dialog" : "complementary", { name: `${tab} Inspector`, exact: true });
@@ -128,97 +151,45 @@ for (const width of [1440, 390]) {
   });
 }
 
-test("desktop Connections keeps keyboard focus across view replacements", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await mockWorkbench(page);
-  await page.goto("/");
-  const view = await openSettings(page, "Connections");
-  await showSettingsInspector(page);
-  const navigation = view.getByRole("tablist", { name: "Connection views" });
-  await navigation.getByRole("tab", { name: "Connection guide", exact: true }).focus();
-  for (const [key, name, title] of [
-    ["ArrowDown", "CLI", "CLI connections"], ["ArrowDown", "MCP", "MCP connections"],
-    ["Home", "Connection guide", "Connection guide"], ["End", "MCP", "MCP connections"],
-    ["ArrowUp", "CLI", "CLI connections"], ["ArrowUp", "Connection guide", "Connection guide"]
-  ]) {
-    await page.keyboard.press(key);
-    await expect(navigation.getByRole("tab", { name, exact: true })).toBeFocused();
-    await expect(navigation.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true");
-    await expect(view.getByRole("heading", { name: title, exact: true })).toBeVisible();
-  }
-});
+for (const width of [1440, 390]) {
+  test(`Connections switches from the body and preserves keyboard focus at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    const view = await openSettings(page, "Connections");
+    const navigation = view.getByRole("tablist", { name: "Connection views" });
+    await navigation.getByRole("tab", { name: "Connection guide", exact: true }).focus();
+    for (const [key, name, title] of [
+      ["ArrowRight", "CLI", "CLI connections"], ["ArrowRight", "MCP", "MCP connections"],
+      ["Home", "Connection guide", "Connections"], ["End", "MCP", "MCP connections"],
+      ["ArrowLeft", "CLI", "CLI connections"], ["ArrowLeft", "Connection guide", "Connections"]
+    ]) {
+      await page.keyboard.press(key);
+      const target = navigation.getByRole("tab", { name, exact: true });
+      await expect(target).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(target).toBeFocused();
+      await expect(target).toHaveAttribute("aria-selected", "true");
+      await expect(view.getByRole("heading", { name: title, exact: true })).toBeVisible();
+      await expect(page.getByRole("dialog", { name: "Connections Inspector" })).toHaveCount(0);
+    }
+  });
+}
 
-test("mobile Connections separates keyboard navigation from committing a view", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await mockWorkbench(page);
-  await page.goto("/");
-  const view = await openSettings(page, "Connections");
-  await view.getByRole("button", { name: "Connection guide: Choose connection view", exact: true }).click();
-  const sheet = page.getByRole("dialog", { name: "Connections Inspector" });
-  const navigation = sheet.getByRole("tablist", { name: "Connection views" });
-  await navigation.getByRole("tab", { name: "Connection guide", exact: true }).focus();
-  await page.keyboard.press("ArrowDown");
-  await expect(navigation.getByRole("tab", { name: "CLI", exact: true })).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(sheet.getByRole("button", { name: "Close", exact: true })).toBeFocused();
-  await page.keyboard.press("Shift+Tab");
-  await expect(navigation.getByRole("tab", { name: "Connection guide", exact: true })).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("ArrowDown");
-  await expect(navigation.getByRole("tab", { name: "MCP", exact: true })).toBeFocused();
-  await expect(navigation.getByRole("tab", { name: "Connection guide", exact: true })).toHaveAttribute("aria-selected", "true");
-  await page.keyboard.press("Enter");
-  await expect(sheet).toBeHidden();
-  const mcp = view.getByRole("button", { name: "MCP connections: Choose connection view", exact: true });
-  await expect(mcp).toBeFocused();
-  await mcp.click();
-  await navigation.getByRole("tab", { name: "MCP", exact: true }).focus();
-  await page.keyboard.press("ArrowUp");
-  await expect(navigation.getByRole("tab", { name: "CLI", exact: true })).toBeFocused();
-  await expect(navigation.getByRole("tab", { name: "MCP", exact: true })).toHaveAttribute("aria-selected", "true");
-  await page.keyboard.press("Space");
-  await expect(sheet).toBeHidden();
-  const cli = view.getByRole("button", { name: "CLI connections: Choose connection view", exact: true });
-  await expect(cli).toBeFocused();
-  await cli.click();
-  await navigation.getByRole("tab", { name: "Connection guide", exact: true }).click();
-  await expect(sheet).toBeHidden();
-  await expect(view.getByRole("button", { name: "Connection guide: Choose connection view", exact: true })).toBeFocused();
-});
-
-test("mobile History commits with Enter or Space and cancels with Escape", async ({ page }) => {
+test("mobile History exposes its type and refresh without opening the Inspector", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockWorkbench(page);
   await page.goto("/");
   const view = await openSettings(page, "History");
-  const changes = view.getByRole("button", { name: "Changes: Choose history type", exact: true });
-  await changes.click();
-  const sheet = page.getByRole("dialog", { name: "History Inspector" });
-  const navigation = sheet.getByRole("tablist", { name: "History sections" });
-  await navigation.getByRole("tab", { name: "Changes", exact: true }).focus();
-  await page.keyboard.press("ArrowDown");
-  await expect(navigation.getByRole("tab", { name: "Audit", exact: true })).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await expect(navigation.getByRole("tab", { name: "MCP", exact: true })).toBeFocused();
-  await expect(navigation.getByRole("tab", { name: "Changes", exact: true })).toHaveAttribute("aria-selected", "true");
-  await page.keyboard.press("ArrowUp");
-  await page.keyboard.press("Enter");
-  await expect(sheet).toBeHidden();
-  const audit = view.getByRole("button", { name: "Audit: Choose history type", exact: true });
-  await expect(audit).toBeFocused();
-  await audit.click();
-  await navigation.getByRole("tab", { name: "Audit", exact: true }).focus();
-  await page.keyboard.press("ArrowUp");
-  await page.keyboard.press("Space");
-  await expect(sheet).toBeHidden();
-  await expect(changes).toBeFocused();
-  await changes.click();
-  await navigation.getByRole("tab", { name: "Changes", exact: true }).focus();
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Escape");
-  await expect(sheet).toBeHidden();
-  await expect(changes).toBeFocused();
-  await expect(view.getByRole("heading", { name: "Changes", exact: true })).toBeVisible();
+  const type = view.getByRole("combobox", { name: "History type", exact: true });
+  await expect(type).toBeInViewport();
+  await type.focus();
+  await type.selectOption("audit");
+  await expect(view.getByText("No audit events.", { exact: true })).toBeVisible();
+  await expect(type).toBeFocused();
+  await expect(view.getByRole("button", { name: "Refresh", exact: true })).toBeInViewport();
+  await expect(page.getByRole("dialog", { name: "History Inspector" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Toggle settings inspector" })).toBeDisabled();
 });
 
 test("mobile workspace reset keeps keyboard focus in its confirmation", async ({ page }) => {
@@ -227,9 +198,8 @@ test("mobile workspace reset keeps keyboard focus in its confirmation", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "Open space library" }).click();
   await openSettings(page);
-  await showSettingsInspector(page);
-  const inspector = page.getByRole("dialog", { name: "General Inspector" });
-  const reset = inspector.getByRole("button", { name: "Reset", exact: true });
+  await expect(page.getByRole("button", { name: "Toggle settings inspector" })).toBeDisabled();
+  const reset = page.locator("[data-settings-content]").getByRole("button", { name: "Reset", exact: true });
   await reset.click();
   const confirmation = page.getByRole("dialog", { name: "Reset saved workspace" });
   await expect(confirmation.getByRole("button", { name: "Close", exact: true })).toBeFocused();
@@ -237,7 +207,7 @@ test("mobile workspace reset keeps keyboard focus in its confirmation", async ({
   await expect(confirmation.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(confirmation).toBeHidden();
-  await expect(inspector).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "General Inspector" })).toHaveCount(0);
   await expect(reset).toBeFocused();
 });
 
@@ -283,7 +253,7 @@ for (const profile of [
       const tab = settings.getByRole("tab", { name: "Agents" });
       expect((await tab.boundingBox())?.height).toBe(profile.hasTouch ? 44 : 32);
       await tab.click();
-      await showSettingsInspector(page);
+      await expect(page.getByRole("button", { name: "Toggle settings inspector" })).toBeDisabled();
       await expect(settings.getByRole("button", { name: "Add agent", exact: true })).toHaveCSS("height", "48px");
       await settings.getByRole("button", { name: "Add agent", exact: true }).click();
       const field = settings.getByRole("textbox", { name: "New agent name" });

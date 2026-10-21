@@ -1,18 +1,14 @@
-import { createContext, useContext, useLayoutEffect, type ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { SectionHeader } from "../../shared/ui";
 
-import { useSettingsScroll } from "./settingsViewState";
-
 type Inspector = {
   id: string;
   open: boolean;
-  isMobile: boolean;
   container: HTMLDivElement | null;
-  navigationContainer: HTMLDivElement | null;
   onOpen: () => void;
-  onNavigate: () => void;
+  setAvailable: (available: boolean) => void;
 };
 
 export const SettingsInspectorContext = createContext<Inspector | null>(null);
@@ -22,10 +18,10 @@ export function useSettingsInspector() {
 }
 
 // Features own their controls; the workbench owns their presentation.
-export function SettingsControls({ children, slot = "content" }: { children: ReactNode; slot?: "navigation" | "content" }) {
+export function SettingsControls({ children }: { children: ReactNode }) {
   const inspector = useSettingsInspector();
   if (!inspector) return children;
-  const container = slot === "navigation" ? inspector.navigationContainer : inspector.container;
+  const container = inspector.container;
   return container ? createPortal(children, container) : null;
 }
 
@@ -33,12 +29,4 @@ export function SettingsInspectorSection({ title, children }: { title: string; c
   return <section className="border-t border-seam pt-4 first:border-t-0 first:pt-0">
     <SectionHeader title={title} />{children}
   </section>;
-}
-
-export function useSettingsNavigationScroll(key: string, ready = true) {
-  const inspector = useSettingsInspector();
-  const scroll = useSettingsScroll(`settings-navigation-${key}`);
-  useLayoutEffect(() => {
-    if (ready) return scroll(inspector?.navigationContainer ?? null);
-  }, [scroll, inspector?.navigationContainer, ready]);
 }

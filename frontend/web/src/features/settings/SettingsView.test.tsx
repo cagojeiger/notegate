@@ -79,10 +79,10 @@ function mockSettingsApi(me: unknown = userMe, options: SettingsApiOptions = {})
   });
 }
 
-function renderSettings(me = userMe, onResetSavedWorkspace = vi.fn()) {
+function renderSettings(me = userMe, onResetSavedWorkspace = vi.fn(), props: Partial<Parameters<typeof SettingsView>[0]> = {}) {
   return render(
     <ApiProvider authCacheKey="browser-session:0">
-      <SettingsView me={me} onClose={vi.fn()} onSignOut={vi.fn()} onResetSavedWorkspace={onResetSavedWorkspace} />
+      <SettingsView me={me} onClose={vi.fn()} onSignOut={vi.fn()} onResetSavedWorkspace={onResetSavedWorkspace} {...props} />
     </ApiProvider>
   );
 }
@@ -91,6 +91,26 @@ describe("SettingsView", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockSettingsApi();
+  });
+
+  it.each([false, true])("keeps primary actions in the body with the Inspector closed (mobile: %s)", async (isMobile) => {
+    const user = userEvent.setup();
+    renderSettings(userMe, vi.fn(), { isMobile, inspectorOpen: false });
+    expect(within(screen.getByRole("tabpanel", { name: "General" })).getByRole("button", { name: "Reset" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Agents" }));
+    const agents = within(screen.getByRole("tabpanel", { name: "Agents" }));
+    await user.click(await agents.findByRole("button", { name: "Select ci-bot" }));
+    expect(await screen.findByRole("region", { name: "Settings for ci-bot" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Back to agents" }));
+    expect(agents.getByRole("button", { name: "Add agent" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Connections" }));
+    const connections = within(screen.getByRole("tabpanel", { name: "Connections" }));
+    expect(connections.getByRole("tab", { name: "MCP" })).toBeInTheDocument();
+    expect(connections.getByRole("tab", { name: "CLI" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("keeps profile and browser sessions in Account and external access in Connections", async () => {
@@ -127,7 +147,7 @@ describe("SettingsView", () => {
     await user.click(screen.getByRole("tab", { name: "Account" }));
     await user.click(screen.getByRole("tab", { name: "Agents" }));
     expect(await screen.findByRole("region", { name: "Settings for ci-bot" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Select ci-bot" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Back to agents" })).toBeInTheDocument();
     view.unmount();
     renderSettings();
     await user.click(screen.getByRole("tab", { name: "Agents" }));
@@ -140,12 +160,13 @@ describe("SettingsView", () => {
     renderSettings();
     await user.click(screen.getByRole("tab", { name: "Agents" }));
     await user.click(await screen.findByRole("button", { name: "Select ci-bot" }));
+    await user.click(screen.getByRole("button", { name: "Back to agents" }));
     await user.click(screen.getByRole("button", { name: "Add agent" }));
     await user.type(screen.getByRole("textbox", { name: "New agent name" }), "review-bot");
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     expect(await screen.findByRole("region", { name: "Settings for review-bot" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Select review-bot" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("heading", { name: "review-bot" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Settings for ci-bot" })).not.toBeInTheDocument();
   });
 
@@ -155,7 +176,7 @@ describe("SettingsView", () => {
 
     await user.click(await screen.findByRole("tab", { name: "Connections" }));
 
-    expect(screen.getByRole("heading", { name: "Connection guide" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Connections" })).toBeInTheDocument();
     expect(screen.getByText("Agent MCP")).toBeInTheDocument();
     expect(screen.getByText("http://localhost:3000/mcp/v2")).toBeInTheDocument();
     expect(screen.getByText("REST API")).toBeInTheDocument();

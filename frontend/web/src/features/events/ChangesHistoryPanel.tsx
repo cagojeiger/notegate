@@ -2,7 +2,6 @@ import { ChevronRight } from "lucide-react";
 import { useEffect, useId, useMemo } from "react";
 
 import { useSettingsViewState } from "../settings/settingsViewState";
-import { SettingsControls } from "../settings/SettingsInspector";
 import type { FileChangeEvent, Space } from "../../api/types";
 import { EmptyState, SelectField } from "../../shared/ui";
 import {
@@ -35,14 +34,14 @@ export function FileChangeEventsPanel({
 
   return (
     <section className="space-y-3">
-      <SettingsControls><div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <SelectField label="Space" className="w-full" value={selectedSpaceId ?? ""} onChange={(event) => setSelectedSpaceId(event.target.value || null)} disabled={spaces.length === 0 && !canViewOwnedHistory}>
           {canViewOwnedHistory ? <option value="all-owned">All owned spaces (including removed)</option> : null}
           {spaces.length === 0 && !canViewOwnedHistory ? <option value="">No spaces available</option> : null}
           {spaces.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}
         </SelectField>
         <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} disabled={!selectedSpace && !ownedHistory} />
-      </div></SettingsControls>
+      </div>
       {!selectedSpace && !ownedHistory ? <EmptyState>No space selected.</EmptyState> : <EventQueryState query={query} itemCount={events.length} emptyLabel="No changes yet." />}
       {ownedHistory ? <p className="text-xs text-muted">Changes are retained for 90 days. Removed document bodies cannot be opened from this history.</p> : null}
       {events.length > 0 ? (
