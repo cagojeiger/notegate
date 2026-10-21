@@ -43,6 +43,20 @@ impl FilesService {
         space_id: Uuid,
         path: &str,
     ) -> ServiceResult<NodeView> {
+        let node = self
+            .resolve_path_node(caller_account_id, space_id, path)
+            .await?;
+        self.node_view(space_id, node).await
+    }
+
+    /// Resolve a live node with the same authorization and external-access policy
+    /// as `resolve_path`, without assembling response metadata.
+    pub async fn resolve_path_node(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        path: &str,
+    ) -> ServiceResult<Node> {
         self.authorize(space_id, caller_account_id, FileCommand::Stat)
             .await?;
         let path = validation::normalize_path(path)?;
@@ -51,8 +65,7 @@ impl FilesService {
             .resolve_path(space_id, &path)
             .await?
             .ok_or_else(|| ServiceError::NotFound("path does not resolve to a node".to_owned()))?;
-        let node = self.load_node(space_id, node_id).await?;
-        self.node_view(space_id, node).await
+        self.load_node(space_id, node_id).await
     }
 
     /// List a folder's direct children (`ls`), keyset-paginated. Requires read permission.
