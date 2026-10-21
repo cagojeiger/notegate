@@ -113,12 +113,11 @@ impl FilesService {
             .await?;
         let mut current_path = "/".to_owned();
         let mut created_paths = Vec::new();
-        let mut segments = path
-            .split('/')
-            .filter(|segment: &&str| !segment.is_empty())
-            .peekable();
+        let mut segments = path.split('/');
+        let mut next_segment = segments.find(|segment| !segment.is_empty());
 
-        while let Some(segment) = segments.next() {
+        while let Some(segment) = next_segment {
+            next_segment = segments.find(|segment| !segment.is_empty());
             let next_path = if current_path == "/" {
                 format!("/{segment}")
             } else {
@@ -150,7 +149,7 @@ impl FilesService {
                         )
                         .await?;
                     created_paths.push(created.path.clone());
-                    if segments.peek().is_none() {
+                    if next_segment.is_none() {
                         return Ok((created, created_paths));
                     }
                     current = created.node;
