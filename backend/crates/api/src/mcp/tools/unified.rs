@@ -25,7 +25,8 @@ pub async fn read(
     parts: &Parts,
     Parameters(input): Parameters<ReadInput>,
 ) -> Result<Json<Value>, ErrorData> {
-    adapter::result(commands::executor::read(state, &adapter::context(parts)?, input).await)
+    let context = adapter::context(parts)?;
+    adapter::result(commands::executor::read(state, &context, input).await)
 }
 
 pub async fn search(
@@ -33,7 +34,8 @@ pub async fn search(
     parts: &Parts,
     Parameters(input): Parameters<SearchInput>,
 ) -> Result<Json<Value>, ErrorData> {
-    adapter::result(commands::executor::search(state, &adapter::context(parts)?, input).await)
+    let context = adapter::context(parts)?;
+    adapter::result(commands::executor::search(state, &context, input).await)
 }
 
 pub async fn write(
@@ -41,7 +43,8 @@ pub async fn write(
     parts: &Parts,
     Parameters(input): Parameters<WriteInput>,
 ) -> Result<Json<Value>, ErrorData> {
-    adapter::result(commands::executor::write(state, &adapter::context(parts)?, input).await)
+    let context = adapter::context(parts)?;
+    adapter::result(commands::executor::write(state, &context, input).await)
 }
 
 pub async fn manage(
@@ -49,7 +52,8 @@ pub async fn manage(
     parts: &Parts,
     Parameters(input): Parameters<ManageInput>,
 ) -> Result<Json<Value>, ErrorData> {
-    adapter::result(commands::executor::manage(state, &adapter::context(parts)?, input).await)
+    let context = adapter::context(parts)?;
+    adapter::result(commands::executor::manage(state, &context, input).await)
 }
 
 #[cfg(test)]

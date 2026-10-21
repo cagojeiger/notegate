@@ -13,10 +13,10 @@ use super::rows::TextRow;
 use crate::{map_sqlx_error, space_usage};
 
 const DAY_SECONDS: i32 = 24 * 60 * 60;
-pub const RECENT_SECONDS: i32 = DAY_SECONDS;
-pub const RETENTION_SECONDS: i32 = 30 * DAY_SECONDS;
-pub const IDLE_SECONDS: i32 = 120;
-pub const GROUP_SECONDS: i32 = 600;
+const RECENT_SECONDS: i32 = DAY_SECONDS;
+const RETENTION_SECONDS: i32 = 30 * DAY_SECONDS;
+const IDLE_SECONDS: i32 = 120;
+const GROUP_SECONDS: i32 = 600;
 pub const SPACE_HISTORY_BYTES: i64 = 1024 * 1024 * 1024;
 const CLEANUP_BATCH: i64 = 100;
 const META: &str = "r.id, r.node_id, r.content_sha256, r.byte_len, r.line_count, r.written_at, r.author_id, r.group_id, r.source, r.private_purpose, r.superseded_at";
@@ -199,7 +199,7 @@ fn metadata(row: &PgRow, crypto: &PiiCrypto, space: Uuid) -> Result<TextRevision
     })
 }
 
-pub async fn list(
+pub(crate) async fn list(
     pool: &PgPool,
     crypto: &PiiCrypto,
     space: Uuid,
@@ -277,7 +277,7 @@ pub async fn list(
     })
 }
 
-pub async fn read(
+pub(crate) async fn read(
     pool: &PgPool,
     crypto: &PiiCrypto,
     space: Uuid,

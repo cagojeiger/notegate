@@ -7,7 +7,7 @@
 //! deleted_by) from the caller.
 //!
 //! Nodes have NO stored path column. Display paths and scoped search paths are
-//! derived by space-bounded recursive CTEs (see `files::queries`);
+//! derived by space-bounded recursive CTEs;
 //! move/rename updates only the moved node's row (O(1), no descendant rewrite).
 
 #[path = "files/mod.rs"]
@@ -20,18 +20,16 @@ use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
 use notegate_core::security::PiiCrypto;
-use notegate_model::{FileObject, Node, NodeKind, NodeSummary, SavedText, TextObject};
+use notegate_model::{FileObject, Node, SavedText};
 use serde_json::Value;
 use sqlx::PgPool;
-use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
-use self::files::{commands, queries};
+use self::files::commands;
 use crate::file_change_event_repo;
 use notegate_model::files::{
-    BeginObjectUpload, ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileMutationContext,
-    MoveNode, NodeListCursor, NodeListSort, ObjectUploadMode, ObjectUploadRegistration,
-    PendingObjectUpload, StoredContent,
+    BeginObjectUpload, CopyCounts, CopyNode, CreateFolder, FileMutationContext, MoveNode,
+    ObjectUploadMode, ObjectUploadRegistration, PendingObjectUpload, StoredContent,
 };
 
 #[derive(Debug, Clone)]
@@ -67,28 +65,6 @@ impl TextMutationKind {
 }
 
 impl FilesRepo {
-    pub async fn externally_accessible_node_ids(
-        &self,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-        include_deleted: bool,
-    ) -> Result<HashSet<Uuid>> {
-        if node_ids.is_empty() {
-            return Ok(HashSet::new());
-        }
-        let ids: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM nodes WHERE space_id = $1 AND id = ANY($2) \
-             AND ($3 OR deleted_at IS NULL) AND node_external_access_allowed(space_id, id)",
-        )
-        .bind(space_id)
-        .bind(node_ids)
-        .bind(include_deleted)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(crate::map_sqlx_error)?;
-        Ok(ids.into_iter().collect())
-    }
-
     #[cfg(any(test, feature = "test-util"))]
     pub fn new(pool: PgPool) -> Self {
         Self::with_limits(pool, Limits::default())
@@ -161,133 +137,6 @@ impl FilesRepo {
 }
 
 impl FilesRepo {
-    /// Resolve one search scope through the shared bounded path resolver.
-    ///
-    /// Hydrating one node is deliberate: search needs its id and kind, and
-    /// reusing the bulk resolver keeps path-walk semantics in one SQL query
-    /// implementation and one database round trip.
-    pub async fn resolve_search_scope(
-        &self,
-        space_id: Uuid,
-        path: &str,
-    ) -> Result<Option<(Uuid, NodeKind, String)>> {
-        let path = notegate_core::validation::normalize_path(path.trim())
-            .map_err(notegate_core::Error::validation)?;
-        let paths = [path];
-        let mut resolved = self.resolve_nodes_by_paths(space_id, &paths).await?;
-        Ok(resolved
-            .pop()
-            .map(|(_, path, node)| (node.id, node.kind, path)))
-    }
-
-    pub async fn paged_children(
-        &self,
-        space_id: Uuid,
-        parent_node_id: Uuid,
-        limit: i64,
-        cursor: Option<&ChildrenCursor>,
-    ) -> Result<(Vec<Node>, bool)> {
-        let cursor = cursor.map(|c| (c.sort_order, c.name.as_str(), c.id));
-        queries::node::paged_children(
-            &self.pool,
-            self.external_only,
-            space_id,
-            parent_node_id,
-            limit,
-            cursor,
-        )
-        .await
-    }
-
-    pub async fn paged_child_summaries(
-        &self,
-        space_id: Uuid,
-        parent_node_id: Uuid,
-        limit: i64,
-        cursor: Option<&ChildrenCursor>,
-    ) -> Result<(Vec<NodeSummary>, bool)> {
-        let cursor = cursor.map(|c| (c.sort_order, c.name.as_str(), c.id));
-        queries::node::paged_child_summaries(
-            &self.pool,
-            self.external_only,
-            space_id,
-            parent_node_id,
-            limit,
-            cursor,
-        )
-        .await
-    }
-
-    pub async fn paged_node_summaries(
-        &self,
-        space_id: Uuid,
-        kind: Option<NodeKind>,
-        sort: NodeListSort,
-        limit: i64,
-        cursor: Option<&NodeListCursor>,
-    ) -> Result<(Vec<NodeSummary>, bool)> {
-        let cursor = match cursor {
-            Some(NodeListCursor::UpdatedAtDesc { updated_at, id, .. }) => {
-                Some(queries::node::NodeListDbCursor::UpdatedAtDesc {
-                    updated_at: *updated_at,
-                    id: *id,
-                })
-            }
-            Some(NodeListCursor::NameAsc { name, id, .. }) => {
-                Some(queries::node::NodeListDbCursor::NameAsc {
-                    name: name.as_str(),
-                    id: *id,
-                })
-            }
-            None => None,
-        };
-        queries::node::paged_node_summaries(
-            &self.pool,
-            self.external_only,
-            space_id,
-            kind,
-            sort,
-            limit,
-            cursor,
-        )
-        .await
-    }
-
-    pub async fn paged_nodes(
-        &self,
-        space_id: Uuid,
-        kind: Option<NodeKind>,
-        sort: NodeListSort,
-        limit: i64,
-        cursor: Option<&NodeListCursor>,
-    ) -> Result<(Vec<Node>, bool)> {
-        let cursor = match cursor {
-            Some(NodeListCursor::UpdatedAtDesc { updated_at, id, .. }) => {
-                Some(queries::node::NodeListDbCursor::UpdatedAtDesc {
-                    updated_at: *updated_at,
-                    id: *id,
-                })
-            }
-            Some(NodeListCursor::NameAsc { name, id, .. }) => {
-                Some(queries::node::NodeListDbCursor::NameAsc {
-                    name: name.as_str(),
-                    id: *id,
-                })
-            }
-            None => None,
-        };
-        queries::node::paged_nodes(
-            &self.pool,
-            self.external_only,
-            space_id,
-            kind,
-            sort,
-            limit,
-            cursor,
-        )
-        .await
-    }
-
     pub async fn list_file_change_events(
         &self,
         space_id: Uuid,
@@ -334,25 +183,6 @@ impl FilesRepo {
             space_id,
             after_id,
             limit,
-        )
-        .await
-    }
-
-    pub async fn search_text_bodies_within_budget(
-        &self,
-        space_id: Uuid,
-        candidates: &[(Uuid, String, i64)],
-        max_bytes: usize,
-    ) -> Result<HashMap<Uuid, TextObject>> {
-        let max_bytes = i64::try_from(max_bytes)
-            .map_err(|_| notegate_core::Error::internal("text search byte budget exceeds i64"))?;
-        queries::search::text_bodies_within_budget(
-            &self.pool,
-            &self.crypto,
-            space_id,
-            candidates,
-            max_bytes,
-            self.metrics_enabled,
         )
         .await
     }
