@@ -115,7 +115,7 @@ impl FilesService {
         let mut created_paths = Vec::new();
         let mut segments = path
             .split('/')
-            .filter(|segment| !segment.is_empty())
+            .filter(|segment: &&str| !segment.is_empty())
             .peekable();
 
         while let Some(segment) = segments.next() {
