@@ -44,6 +44,76 @@ fn single_upload_registration(id: Uuid, object_key: impl Into<String>) -> Object
 }
 
 #[tokio::test]
+async fn recursive_folder_creation_preserves_results_and_idempotency()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+    let owner = insert_user_account(&db.pool, "mkdir-owner", "mkdir-owner@example.test").await?;
+    let outsider =
+        insert_user_account(&db.pool, "mkdir-outsider", "mkdir-outsider@example.test").await?;
+    let (space, root) = setup_space(&SpaceRepo::new(db.pool.clone()), owner, "mkdir").await;
+    let existing = files
+        .create_folder(
+            owner,
+            space,
+            CreateFolder {
+                parent_node_id: root,
+                name: "existing".to_owned(),
+            },
+        )
+        .await?;
+    files
+        .create_text(
+            owner,
+            space,
+            CreateText {
+                parent_node_id: existing.node.id,
+                name: "note.md".to_owned(),
+            },
+        )
+        .await?;
+
+    let (root_view, created) = files.create_folder_recursive(owner, space, "/").await?;
+    assert_eq!(root_view.node.id, root);
+    assert!(root_view.has_children);
+    assert!(created.is_empty());
+
+    let (leaf, created) = files
+        .create_folder_recursive(owner, space, "/existing/new/leaf")
+        .await?;
+    assert_eq!(created, ["/existing/new", "/existing/new/leaf"]);
+    assert_eq!(leaf.path, "/existing/new/leaf");
+    assert_eq!(leaf.node.kind, NodeKind::Folder);
+    assert!(!leaf.has_children);
+    let (again, created) = files
+        .create_folder_recursive(owner, space, "/existing/new/leaf")
+        .await?;
+    assert_eq!(again.node.id, leaf.node.id);
+    assert!(created.is_empty());
+    let (parent, created) = files
+        .create_folder_recursive(owner, space, "/existing/new")
+        .await?;
+    assert!(parent.has_children);
+    assert!(created.is_empty());
+    assert!(matches!(
+        files
+            .create_folder_recursive(owner, space, "/existing/note.md/child")
+            .await,
+        Err(ServiceError::Conflict(_)),
+    ));
+    assert!(matches!(
+        files
+            .create_folder_recursive(outsider, space, "/existing/new/leaf")
+            .await,
+        Err(ServiceError::NotFound(_)),
+    ));
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn file_change_events_list_through_service() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
