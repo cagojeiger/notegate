@@ -20,28 +20,28 @@ export function CommandInvocationsPanel({ surface }: { surface: CommandInvocatio
   );
   const selected = invocations.find((item) => item.id === selectedId);
   return (
-    <section className="space-y-3">
-      <div className="flex justify-end">
-        <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} />
-      </div>
-      <EventQueryState
-        query={query}
-        itemCount={invocations.length}
-        emptyLabel={`No ${surface.toUpperCase()} calls.`}
-      />
-      {invocations.length > 0 ? (
-        <ol className="rounded-workbench-surface border border-border bg-surface">
-          {invocations.map((invocation) => (
-            <CommandInvocationRow key={invocation.id} invocation={invocation} selected={selectedId === invocation.id}
-              onSelect={() => { setSelectedId(invocation.id); inspector?.onOpen(); }} />
-          ))}
-        </ol>
-      ) : null}
-      <LoadMore query={query} />
-      <SettingsControls><SettingsInspectorSection title="Selected call">
-        {selected ? <CommandInvocationDetails key={selected.id} invocation={selected} /> : <p className="text-xs text-muted">Select a call to view its details.</p>}
-      </SettingsInspectorSection></SettingsControls>
-    </section>
+    <>
+      <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} />
+      <section className="w-full space-y-3">
+        <EventQueryState
+          query={query}
+          itemCount={invocations.length}
+          emptyLabel={`No ${surface.toUpperCase()} calls.`}
+        />
+        {invocations.length > 0 ? (
+          <ol className="rounded-workbench-surface border border-border bg-surface">
+            {invocations.map((invocation) => (
+              <CommandInvocationRow key={invocation.id} invocation={invocation} selected={selectedId === invocation.id}
+                onSelect={() => { setSelectedId(invocation.id); inspector?.onOpen(); }} />
+            ))}
+          </ol>
+        ) : null}
+        <LoadMore query={query} />
+        <SettingsControls><SettingsInspectorSection title="Selected call">
+          {selected ? <CommandInvocationDetails key={selected.id} invocation={selected} /> : <p className="text-xs text-muted">Select a call to view its details.</p>}
+        </SettingsInspectorSection></SettingsControls>
+      </section>
+    </>
   );
 }
 

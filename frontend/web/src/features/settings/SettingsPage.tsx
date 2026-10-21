@@ -22,6 +22,7 @@ export function SettingsPage({ title, inspectorLabel, leading, actions, summary,
   label?: string;
   contentLabel?: string;
 }) {
+  // Restore per-view scroll through the ref without remounting persistent controls.
   const scroll = useSettingsScroll(`settings-content-${scrollKey}`);
   const setInspectorAvailable = useSettingsInspector()?.setAvailable;
   const heading = useRef<HTMLDivElement>(null);
@@ -36,7 +37,7 @@ export function SettingsPage({ title, inspectorLabel, leading, actions, summary,
     <section aria-label={label} className={`ng-settings-page flex h-full min-h-0 min-w-0 flex-col gap-4${summary ? " ng-settings-with-summary" : ""}`}>
       <div ref={heading} className="shrink-0"><SettingsViewHeader title={title} inspectorLabel={inspectorLabel} leading={leading} actions={actions} disabled={disabled} /></div>
       {summary ? <div className="shrink-0">{summary}</div> : null}
-      <div key={scrollKey} ref={scroll} data-settings-content role={contentLabel ? "tabpanel" : undefined} aria-label={contentLabel}
+      <div ref={scroll} data-settings-content role={contentLabel ? "tabpanel" : undefined} aria-label={contentLabel}
         className={`min-h-0 min-w-0 flex-1 ${contained ? "flex flex-col overflow-hidden" : "overflow-y-auto overscroll-contain [scrollbar-gutter:stable]"}`}>
         {children}
       </div>

@@ -27,6 +27,7 @@ stateDiagram-v2
 
 - 공통 `WorkbenchSurface`는 탭·본문과 Inspector의 표시 위치를 소유한다. Account는 기능이 본문과 Inspector를 함께 `renderPage`에 전달하고, Settings Workbench는 탭에서 제공 여부를 계산한다. 나머지 설정은 기존 portal container를 사용한다. Layout을 공유해도 선택·확인·요청 상태의 소유자는 바뀌지 않는다.
 - 탭 바는 기능 controller 위에 유지한다. 탭을 바꿀 때 본문·Inspector의 기능은 제거되지만 탭 DOM은 유지하므로 방향키·Home·End 탐색의 focus가 본문 제목으로 이동하지 않는다.
+- 복원한 작업 결과는 기존 탭 탐색의 focus를 가져가지 않는다. History 종류 선택도 목록 controller 위에 유지하므로 종류 전환 후 같은 컨트롤에서 키보드 조작을 이어갈 수 있다.
 - Inspector의 제공 여부는 상단 toggle과 표시 내용이 어긋나지 않도록 layout effect에서 외부 chrome에 반영한다. Account의 확인·결과 focus는 Inspector 내용의 DOM mount 시점에 적용하며, 기능이 portal container를 참조하지 않는다.
 - Feature는 선택 대상·확인 UI를 소유한다. Portal의 unmount를 feature의 unmount로 간주하지 않는다.
 - 요청의 진행 상태·대상·결과는 인증별 query cache가 소유한다. Feature는 현재 작업을 구독해 잠금과 결과 안내를 복원한다.

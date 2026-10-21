@@ -18,8 +18,8 @@ export function RefreshButton({
   disabled?: boolean;
 }) {
   return (
-    <Button size="sm" secondary onClick={onRefresh} disabled={disabled || isFetching}>
-      <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /> Refresh
+    <Button size="sm" secondary aria-label="Refresh" title="Refresh" className="min-w-workbench-control" onClick={onRefresh} disabled={disabled || isFetching}>
+      <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /><span className="hidden sm:inline">Refresh</span>
     </Button>
   );
 }

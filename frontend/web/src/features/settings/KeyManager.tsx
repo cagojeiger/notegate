@@ -93,7 +93,7 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
                 <div className="text-xs text-muted">created {key.created_at.slice(0, 10)} · expires {key.expires_at.slice(0, 10)}</div>
               </div>
               {confirmId === key.id ? (
-                <div className="flex shrink-0 items-center gap-1">
+                <div className="flex shrink-0 items-center gap-2">
                   <Button size="sm" variant="danger" disabled={revokeMutation.isPending} onClick={() => revokeMutation.mutate(key.id)}>Confirm</Button>
                   <Button size="sm" secondary disabled={revokeMutation.isPending} onClick={() => setConfirmId(null)}>Cancel</Button>
                 </div>

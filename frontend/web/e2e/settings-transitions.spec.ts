@@ -52,6 +52,41 @@ for (const width of [1440, 390]) {
   test.describe(`settings FSM at ${width}px`, () => {
     test.use({ viewport: { width, height: 900 }, hasTouch: mobile });
 
+    test("restored operation feedback preserves settings tab keyboard navigation", async ({ page }) => {
+      const data = await mockSettings(page);
+      const requests: string[] = [];
+      for (const [path, clear] of [
+        ["**/api/v1/me/sessions/session-1", () => { data.sessions.length = 0; }],
+        ["**/api/v1/me/oauth-grants/grant-1", () => { data.grants.length = 0; }],
+        ["**/api/v1/me/trash/spaces/*/nodes/deleted-0?**", () => { data.trash[0] = { ...data.trash[0], recoverable: false, deletion_pending: true }; }]
+      ] as const) {
+        await page.route(path, async (route) => {
+          requests.push(new URL(route.request().url()).pathname);
+          clear();
+          return route.fulfill({ status: 204 });
+        });
+      }
+      await page.goto("/");
+      const view = await openSettings(page, "Account");
+      for (const [tab, trigger] of [["Account", "Sign out Other browser"], ["Connections", "Revoke MCP App"], ["Trash", "Permanently delete meeting.md"]]) {
+        await view.getByRole("tab", { name: tab, exact: true }).click();
+        if (tab === "Connections") await view.getByRole("tab", { name: "MCP", exact: true }).click();
+        await showSettingsInspector(page);
+        await view.getByRole("button", { name: trigger, exact: true }).click();
+        await view.getByRole("button", { name: tab === "Trash" ? "Permanently delete" : "Confirm", exact: true }).click();
+        await expect(view.getByRole("status")).toContainText(tab === "Trash" ? "Permanent deletion requested" : "Access revoked.");
+        await expect(view.getByRole("status")).toBeFocused();
+        if (mobile) await dismissInspector(page, true, "close");
+      }
+      await view.getByRole("tab", { name: "General", exact: true }).click();
+      for (const [key, label] of [["ArrowRight", "Account"], ["ArrowRight", "Connections"], ["ArrowLeft", "Account"], ["End", "Trash"]]) {
+        await page.keyboard.press(key);
+        await expect(view.getByRole("tab", { name: label, exact: true })).toBeFocused();
+        if (!mobile) await expect(view.getByRole("status")).toContainText(label === "Trash" ? "Permanent deletion requested" : "Access revoked.");
+      }
+      expect(requests).toEqual(["/api/v1/me/sessions/session-1", "/api/v1/me/oauth-grants/grant-1", `/api/v1/me/trash/spaces/${space.id}/nodes/deleted-0`]);
+    });
+
     test("dismissing an unsubmitted confirmation returns each feature to browsing", async ({ page }) => {
       const { mutations } = await mockSettings(page);
       await page.goto("/");

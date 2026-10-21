@@ -99,7 +99,7 @@ export function TrashPanel() {
   }, [confirmation]);
 
   useEffect(() => {
-    if (notice) noticeRef.current?.focus();
+    if (notice && !document.activeElement?.closest('[role="tablist"]')) noticeRef.current?.focus();
   }, [notice, inspector?.container]);
 
   return (

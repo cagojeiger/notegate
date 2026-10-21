@@ -12,21 +12,21 @@ export function BackgroundJobsPanel() {
   const jobs = useMemo(() => query.data?.pages.flatMap((page) => page.jobs) ?? [], [query.data]);
   const activeCount = jobs.filter((job) => job.status === "queued" || job.status === "running").length;
   return (
-    <section className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <>
+      <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} />
+      <section className="w-full space-y-3">
         <p className="text-xs text-muted">
           {activeCount > 0 ? `${activeCount} active · updates automatically` : "Background activity for your account"}
         </p>
-        <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} />
-      </div>
-      <EventQueryState query={query} itemCount={jobs.length} emptyLabel="No background jobs yet." />
-      {jobs.length > 0 ? (
-        <ol className="rounded-workbench-surface border border-border bg-surface px-4">
-          {jobs.map((job) => <BackgroundJobRow key={job.id} job={job} />)}
-        </ol>
-      ) : null}
-      <LoadMore query={query} />
-    </section>
+        <EventQueryState query={query} itemCount={jobs.length} emptyLabel="No background jobs yet." />
+        {jobs.length > 0 ? (
+          <ol className="rounded-workbench-surface border border-border bg-surface px-4">
+            {jobs.map((job) => <BackgroundJobRow key={job.id} job={job} />)}
+          </ol>
+        ) : null}
+        <LoadMore query={query} />
+      </section>
+    </>
   );
 }
 

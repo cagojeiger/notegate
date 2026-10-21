@@ -38,7 +38,10 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
   const scroll = useSettingsScroll<HTMLUListElement>(`account-list-${kind}`);
   const [confirmation, setConfirmation] = useState<Revocation | null>(null);
   const focusConfirmation = useCallback((element: HTMLDivElement | null) => { element?.focus(); }, []);
-  const focusNotice = useCallback((element: HTMLParagraphElement | null) => { element?.focus(); }, []);
+  const focusNotice = useCallback((element: HTMLParagraphElement | null) => {
+    // Restored feedback must not interrupt navigation in an existing tab strip.
+    if (!document.activeElement?.closest('[role="tablist"]')) element?.focus();
+  }, []);
   const actionRef = useRef<HTMLElement | null>(null);
   const sessions = useQuery({ queryKey: queryKeys.browserSessions, queryFn: () => listBrowserSessions(client), enabled: kind === "browser" });
   const grants = useQuery({ queryKey: queryKeys.oauthGrants, queryFn: () => listOAuthGrants(client), enabled: kind !== "browser" });

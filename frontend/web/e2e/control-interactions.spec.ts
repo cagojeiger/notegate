@@ -173,7 +173,7 @@ for (const width of [1440, 390, 320]) {
 }
 
 for (const width of [1440, 390]) {
-  test(`Space Library and Settings share tabs, gutters and control geometry at ${width}px`, async ({ page }) => {
+  test(`Space Library and Settings share tabs, gutters and control geometry at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     await mockWorkbench(page);
     await page.goto("/");
@@ -204,6 +204,13 @@ for (const width of [1440, 390]) {
     const buttonHeight = await reset.evaluate((element) => element.getBoundingClientRect().height);
     expect(buttonHeight).toBe(width < 768 ? 44 : 28);
     expect(await reset.evaluate((element) => getComputedStyle(element).borderRadius)).toBe(addRadius);
+    const themeSwitch = settings.getByRole("button", { name: /^Switch to (light|dark) theme$/ });
+    expect(await themeSwitch.evaluate((element) => element.getBoundingClientRect().height)).toBe(buttonHeight);
+    const previousTheme = await page.locator("html").getAttribute("data-theme");
+    await themeSwitch.click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", previousTheme === "dark" ? "light" : "dark");
+    await themeSwitch.click();
+    await page.screenshot({ path: testInfo.outputPath("general.png") });
     await settings.getByRole("tab", { name: "History", exact: true }).click();
     expect(await settings.getByRole("combobox", { name: "History type", exact: true })
       .evaluate((element) => element.getBoundingClientRect().height)).toBe(buttonHeight);
@@ -297,13 +304,28 @@ for (const width of [1440, 390]) {
   });
 }
 
-test("mobile History exposes its type and refresh without opening the Inspector", async ({ page }) => {
+test("mobile History exposes its type and refresh without opening the Inspector", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockWorkbench(page);
   await page.goto("/");
   const view = await openSettings(page, "History");
   const type = view.getByRole("combobox", { name: "History type", exact: true });
   await expect(type).toBeInViewport();
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const space = await view.getByRole("combobox", { name: "Space", exact: true }).boundingBox();
+    const refresh = await view.getByRole("button", { name: "Refresh", exact: true }).boundingBox();
+    expect(space).not.toBeNull();
+    expect(refresh).not.toBeNull();
+    const historyType = await type.boundingBox();
+    expect(historyType).not.toBeNull();
+    expect(refresh!.y + refresh!.height).toBeCloseTo(historyType!.y + historyType!.height, 0);
+    expect(refresh!.y + refresh!.height).toBeCloseTo(space!.y + space!.height, 0);
+    expect(refresh!.width).toBeGreaterThanOrEqual(44);
+    expect(refresh!.height).toBeGreaterThanOrEqual(44);
+    expect(await view.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`history-${width}.png`) });
+  }
   await type.focus();
   await type.selectOption("audit");
   await expect(view.getByText("No audit events.", { exact: true })).toBeVisible();

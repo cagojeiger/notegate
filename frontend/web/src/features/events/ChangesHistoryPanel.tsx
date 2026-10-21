@@ -33,24 +33,24 @@ export function FileChangeEventsPanel({
   }, [selectedSpace, spaces, ownedHistory, canViewOwnedHistory, setSelectedSpaceId]);
 
   return (
-    <section className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <SelectField label="Space" className="w-full" value={selectedSpaceId ?? ""} onChange={(event) => setSelectedSpaceId(event.target.value || null)} disabled={spaces.length === 0 && !canViewOwnedHistory}>
-          {canViewOwnedHistory ? <option value="all-owned">All owned spaces (including removed)</option> : null}
-          {spaces.length === 0 && !canViewOwnedHistory ? <option value="">No spaces available</option> : null}
-          {spaces.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}
-        </SelectField>
-        <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} disabled={!selectedSpace && !ownedHistory} />
-      </div>
-      {!selectedSpace && !ownedHistory ? <EmptyState>No space selected.</EmptyState> : <EventQueryState query={query} itemCount={events.length} emptyLabel="No changes yet." />}
-      {ownedHistory ? <p className="text-xs text-muted">Changes are retained for 90 days. Removed document bodies cannot be opened from this history.</p> : null}
-      {events.length > 0 ? (
-        <ol className="rounded-workbench-surface border border-border bg-surface px-4">
-          {events.map((event) => <FileChangeEventRow key={event.id} event={event} />)}
-        </ol>
-      ) : null}
-      <LoadMore query={query} />
-    </section>
+    <>
+      <SelectField label="Space" className="min-w-0 flex-1" value={selectedSpaceId ?? ""} onChange={(event) => setSelectedSpaceId(event.target.value || null)} disabled={spaces.length === 0 && !canViewOwnedHistory}>
+        {canViewOwnedHistory ? <option value="all-owned">All owned spaces (including removed)</option> : null}
+        {spaces.length === 0 && !canViewOwnedHistory ? <option value="">No spaces available</option> : null}
+        {spaces.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}
+      </SelectField>
+      <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} disabled={!selectedSpace && !ownedHistory} />
+      <section className="w-full space-y-3">
+        {!selectedSpace && !ownedHistory ? <EmptyState>No space selected.</EmptyState> : <EventQueryState query={query} itemCount={events.length} emptyLabel="No changes yet." />}
+        {ownedHistory ? <p className="text-xs text-muted">Changes are retained for 90 days. Removed document bodies cannot be opened from this history.</p> : null}
+        {events.length > 0 ? (
+          <ol className="rounded-workbench-surface border border-border bg-surface px-4">
+            {events.map((event) => <FileChangeEventRow key={event.id} event={event} />)}
+          </ol>
+        ) : null}
+        <LoadMore query={query} />
+      </section>
+    </>
   );
 }
 

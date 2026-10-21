@@ -15,7 +15,7 @@ export function GeneralTab({ onResetSavedWorkspace }: { onResetSavedWorkspace: (
       <div className="ng-settings-grid">
         <section>
           <SectionHeader title="About" />
-          <Card className="flex flex-wrap items-center gap-4 text-sm">
+          <Card padding="sm" className="flex flex-wrap items-center gap-3 text-workbench">
             <span className="min-w-0 flex-1 font-medium">NoteGate</span>
             <span aria-label={`Version v${appVersion}`} className="text-muted">Version <code className="ml-1 font-mono text-text">v{appVersion}</code></span>
             <a href="https://github.com/cagojeiger/notegate" target="_blank" rel="noopener noreferrer"
@@ -27,13 +27,16 @@ export function GeneralTab({ onResetSavedWorkspace }: { onResetSavedWorkspace: (
         </section>
         <section>
           <SectionHeader title="Appearance" />
-          <button type="button" onClick={toggleTheme} className="flex min-h-16 w-full items-center justify-between gap-4 rounded-workbench-surface border border-border bg-surface p-4 text-workbench transition hover:bg-panel">
-            <span>Theme</span><span className="flex items-center gap-2 capitalize text-muted">{theme === "light" ? <Sun size={16} /> : <Moon size={16} />} {theme}</span>
-          </button>
+          <Card padding="sm" className="flex flex-wrap items-center gap-3 text-workbench">
+            <span className="min-w-0 flex-1">Theme</span>
+            <Button secondary onClick={toggleTheme} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`}>
+              {theme === "light" ? <Sun size={16} /> : <Moon size={16} />} <span className="capitalize">{theme}</span>
+            </Button>
+          </Card>
         </section>
         <section className="ng-settings-wide">
           <SectionHeader title="Saved workspace" description="Open panes and panel visibility are restored on this browser." />
-          <Card className="flex flex-wrap items-center gap-4 text-sm">
+          <Card padding="sm" className="flex flex-wrap items-center gap-3 text-workbench">
             <div className="min-w-0 flex-1 basis-64">
               <div className="font-medium">Saved open panes</div>
               <p className="mt-1 text-xs leading-5 text-muted">Reset the browser-only pane snapshots and panel visibility used when returning to a space or refreshing NoteGate. Your spaces, documents and files are kept.</p>
