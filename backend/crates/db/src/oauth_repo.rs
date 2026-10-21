@@ -71,6 +71,15 @@ pub enum ExchangeOutcome {
     Rejected(&'static str),
 }
 
+#[derive(FromRow)]
+struct RefreshCredential {
+    expires_at: DateTime<Utc>,
+    consumed_at: Option<DateTime<Utc>>,
+    private_refresh_response: Option<Value>,
+    refresh_retry_until: Option<DateTime<Utc>>,
+    database_now: DateTime<Utc>,
+}
+
 #[derive(Debug, FromRow)]
 struct DeviceCode {
     client_id: String,
@@ -269,24 +278,20 @@ impl OAuthRepo {
         if requested_scope.is_some_and(|scope| scope != grant.scope) {
             return Ok(ExchangeOutcome::Rejected("invalid_scope"));
         }
-        let (expires, consumed, private_response, retry_until, database_now): (
-            DateTime<Utc>,
-            Option<DateTime<Utc>>,
-            Option<Value>,
-            Option<DateTime<Utc>>,
-            DateTime<Utc>,
-        ) = sqlx::query_as(
-            "SELECT expires_at,consumed_at,private_refresh_response,refresh_retry_until,clock_timestamp() \
+        let credential: RefreshCredential = sqlx::query_as(
+            "SELECT expires_at,consumed_at,private_refresh_response,refresh_retry_until,clock_timestamp() AS database_now \
              FROM oauth_credentials WHERE token_hash=$1",
         )
         .bind(hash)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        if consumed.is_some() {
-            if expires > now
-                && retry_until.is_some_and(|deadline| database_now < deadline)
-                && let Some(private_response) = private_response
+        if credential.consumed_at.is_some() {
+            if credential.expires_at > now
+                && credential
+                    .refresh_retry_until
+                    .is_some_and(|deadline| credential.database_now < deadline)
+                && let Some(private_response) = credential.private_refresh_response
             {
                 tx.commit().await.map_err(map_sqlx_error)?;
                 return Ok(ExchangeOutcome::Replayed {
@@ -300,7 +305,7 @@ impl OAuthRepo {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(ExchangeOutcome::Rejected("invalid_grant"));
         }
-        if expires <= now {
+        if credential.expires_at <= now {
             return Ok(ExchangeOutcome::Rejected("invalid_grant"));
         }
         // Coalesce the new token's immediate refreshes too, so out-of-order
