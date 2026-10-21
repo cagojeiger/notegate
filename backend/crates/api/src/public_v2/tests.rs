@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use crate::rest::test_support::{caller_and_space, empty_request, get_json, json_request, state};
 
+mod creation;
 mod invocation;
 
 fn app(state: crate::state::AppState, caller: Caller) -> Router {
