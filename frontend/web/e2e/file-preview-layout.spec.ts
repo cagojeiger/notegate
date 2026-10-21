@@ -79,7 +79,8 @@ for (const viewport of [
   { name: "wide desktop", width: 1920, height: 1080, mobile: false },
   { name: "desktop", width: 1440, height: 900, mobile: false },
   { name: "tablet", width: 900, height: 1024, mobile: false },
-  { name: "mobile", width: 390, height: 844, mobile: true }
+  { name: "mobile", width: 390, height: 844, mobile: true },
+  { name: "small mobile", width: 320, height: 568, mobile: true }
 ]) {
   test(`image, PDF, and DOCX previews stay inside the editor on ${viewport.name}`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
@@ -106,6 +107,10 @@ for (const viewport of [
     await expect(pdfPreview.locator("canvas")).toBeVisible();
     const pageInput = pdfPreview.getByRole("spinbutton", { name: "Page number" });
     await expect(pageInput).toHaveValue("1");
+    expect((await pageInput.boundingBox())?.height).toBe(viewport.mobile ? 44 : 28);
+    if (viewport.mobile) expect((await pageInput.boundingBox())?.width).toBeGreaterThanOrEqual(44);
+    await expectInsideActiveEditor(page, pageInput);
+    await expectInsideActiveEditor(page, pdfPreview.getByRole("button", { name: "Next page" }));
     await expect(pdfPreview.getByText("/ 2")).toBeVisible();
     await expectInsideActiveEditor(page, pdfPreview);
 
@@ -113,6 +118,9 @@ for (const viewport of [
     await expect(pageInput).toHaveValue("2");
     await pdfPreview.getByRole("button", { name: "Zoom in" }).click();
     await expect(pdfPreview.getByRole("button", { name: "Reset zoom: 125%", exact: true })).toHaveText("125%");
+    expect((await pdfPreview.getByRole("button", { name: "Reset zoom: 125%", exact: true }).boundingBox())?.height)
+      .toBe(viewport.mobile ? 44 : 28);
+    await expectInsideActiveEditor(page, pdfPreview.getByRole("button", { name: "Reset zoom: 125%", exact: true }));
     await expectNoAccessibilityViolations(page);
 
     if (viewport.mobile) {
