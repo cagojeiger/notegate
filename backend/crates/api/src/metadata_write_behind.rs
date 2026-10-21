@@ -407,23 +407,11 @@ fn report_flush_metrics(
         crate::observability::record_metadata_flush(metrics_enabled, outcome, started_at.elapsed());
     }
     let (api_keys, browser_sessions, media_types) = flushed;
-    crate::observability::record_metadata_items(
+    report_item_counts(
         metrics_enabled,
-        "api_key",
         "flushed",
-        u64::try_from(api_keys).unwrap_or(u64::MAX),
-    );
-    crate::observability::record_metadata_items(
-        metrics_enabled,
-        "browser_session",
-        "flushed",
-        u64::try_from(browser_sessions).unwrap_or(u64::MAX),
-    );
-    crate::observability::record_metadata_items(
-        metrics_enabled,
-        "media_type",
-        "flushed",
-        u64::try_from(media_types).unwrap_or(u64::MAX),
+        [api_keys, browser_sessions, media_types]
+            .map(|count| u64::try_from(count).unwrap_or(u64::MAX)),
     );
 }
 
@@ -436,23 +424,11 @@ fn report_pending(buffer: &MetadataWriteBuffer, metrics_enabled: bool) {
             browser_sessions,
             media_types,
         );
-        crate::observability::record_metadata_items(
+        report_item_counts(
             metrics_enabled,
-            "api_key",
             "stranded",
-            u64::try_from(api_keys).unwrap_or(u64::MAX),
-        );
-        crate::observability::record_metadata_items(
-            metrics_enabled,
-            "browser_session",
-            "stranded",
-            u64::try_from(browser_sessions).unwrap_or(u64::MAX),
-        );
-        crate::observability::record_metadata_items(
-            metrics_enabled,
-            "media_type",
-            "stranded",
-            u64::try_from(media_types).unwrap_or(u64::MAX),
+            [api_keys, browser_sessions, media_types]
+                .map(|count| u64::try_from(count).unwrap_or(u64::MAX)),
         );
     }
 }
@@ -466,24 +442,20 @@ fn report_drops(buffer: &MetadataWriteBuffer, metrics_enabled: bool) {
             browser_sessions,
             media_types,
         );
-        crate::observability::record_metadata_items(
+        report_item_counts(
             metrics_enabled,
-            "api_key",
             "dropped",
-            api_keys,
+            [api_keys, browser_sessions, media_types],
         );
-        crate::observability::record_metadata_items(
-            metrics_enabled,
-            "browser_session",
-            "dropped",
-            browser_sessions,
-        );
-        crate::observability::record_metadata_items(
-            metrics_enabled,
-            "media_type",
-            "dropped",
-            media_types,
-        );
+    }
+}
+
+fn report_item_counts(metrics_enabled: bool, disposition: &'static str, counts: [u64; 3]) {
+    for (kind, count) in ["api_key", "browser_session", "media_type"]
+        .into_iter()
+        .zip(counts)
+    {
+        crate::observability::record_metadata_items(metrics_enabled, kind, disposition, count);
     }
 }
 

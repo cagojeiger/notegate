@@ -170,7 +170,8 @@ Labels must not derive from user, request, or content data. They must not contai
 | `notegate_reconciliation_last_success_timestamp_seconds` | `kind` |
 
 - `kind`는 `system.purge`, `object_storage.cleanup`,
-  `background_jobs.lease_recovery`, `background_jobs.history_retention` 중 하나다.
+  `background_jobs.lease_recovery`, `background_jobs.history_retention`,
+  `text_revisions.retention`, `link_graph.change_collector` 중 하나다.
 - `outcome`은 `succeeded`, `failed`, `timed_out`, `panicked`, `cancelled`,
   `lock_held`, `lock_error` 중 하나다.
 - 실행 시간은 advisory lock을 획득한 결과에만 기록한다.
