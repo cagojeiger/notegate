@@ -1,4 +1,5 @@
-//! Real-Postgres OAuth state-machine tests. Every boundary uses an injected clock.
+//! Real-Postgres OAuth state-machine tests. Lifetimes use an injected clock;
+//! cross-replica retry windows use the PostgreSQL clock.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -392,6 +393,8 @@ async fn refresh_rotation_commits_family_revocation_on_reuse()
         svc.refresh(&refresh, CLIENT, RESOURCE, t + Duration::seconds(1))
             .await?,
     );
+    sqlx::query("UPDATE oauth_credentials SET refresh_retry_until=clock_timestamp()-interval '1 second' WHERE private_refresh_response IS NOT NULL")
+        .execute(&db.pool).await?;
     assert_eq!(
         svc.access_user(
             &second.access_token,
@@ -504,6 +507,8 @@ async fn refresh_retries_and_successor_requests_share_one_bounded_encrypted_resp
     assert_eq!(retained.last_token_at, grant.last_token_at);
     assert_eq!(retained.idle_expires_at, grant.idle_expires_at);
     assert_eq!(retained.expires_at, grant.expires_at);
+    sqlx::query("UPDATE oauth_credentials SET refresh_retry_until=clock_timestamp()-interval '1 second' WHERE private_refresh_response IS NOT NULL")
+        .execute(&db.pool).await?;
     let next = issued(
         svc.refresh(current, CLIENT, RESOURCE, t + Duration::seconds(11))
             .await?,
@@ -695,7 +700,7 @@ async fn refresh_retry_schema_preserves_existing_grants_and_credentials()
     let t = now();
     approved(&db, user, "upgrade", "mcp offline_access", t).await?;
     let initial = issued(exchange(&svc, "upgrade", t).await?);
-    let query = "SELECT jsonb_build_object('accounts',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM accounts t),'users',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM users t),'grants',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM oauth_grants t),'credentials',(SELECT jsonb_agg(to_jsonb(t)-'private_refresh_response' ORDER BY token_hash) FROM oauth_credentials t))";
+    let query = "SELECT jsonb_build_object('accounts',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM accounts t),'users',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM users t),'grants',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM oauth_grants t),'credentials',(SELECT jsonb_agg(to_jsonb(t)-ARRAY['private_refresh_response','refresh_retry_until'] ORDER BY token_hash) FROM oauth_credentials t))";
     let before: serde_json::Value = sqlx::query_scalar(query).fetch_one(&db.pool).await?;
     db.apply_migration(63).await?;
     notegate_db::check_readiness(&db.pool).await?;
@@ -725,6 +730,121 @@ async fn refresh_retry_schema_preserves_existing_grants_and_credentials()
         )
         .await?,
         Some(user)
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn refresh_retry_uses_shared_database_time_despite_replica_clock_skew()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "retry-clock", "user@test").await?;
+    let svc = service(&db);
+    let other_replica = service(&db);
+    let t = now();
+    approved(&db, user, "clock", "mcp offline_access", t).await?;
+    let previous = issued(exchange(&svc, "clock", t).await?)
+        .refresh_token
+        .ok_or("missing refresh token")?;
+    let rotated = issued(
+        svc.refresh(&previous, CLIENT, RESOURCE, t + Duration::seconds(1))
+            .await?,
+    );
+    let current = rotated
+        .refresh_token
+        .as_deref()
+        .ok_or("missing successor")?;
+    for replica_clock in [
+        t + Duration::milliseconds(500),
+        t + Duration::milliseconds(1500),
+    ] {
+        for token in [previous.as_str(), current] {
+            let retry = issued(
+                other_replica
+                    .refresh(token, CLIENT, RESOURCE, replica_clock)
+                    .await?,
+            );
+            assert!(retry.access_token == rotated.access_token);
+            assert!(retry.refresh_token == rotated.refresh_token);
+            assert!(retry.expires_in <= 600);
+        }
+    }
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM oauth_credentials")
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(count, 4);
+    sqlx::query("UPDATE oauth_credentials SET refresh_retry_until=clock_timestamp()-interval '1 second' WHERE private_refresh_response IS NOT NULL")
+        .execute(&db.pool).await?;
+    rejected(
+        other_replica
+            .refresh(&previous, CLIENT, RESOURCE, t)
+            .await?,
+        "invalid_grant",
+    );
+    assert_eq!(
+        svc.access_user(
+            &rotated.access_token,
+            RESOURCE,
+            "mcp",
+            t + Duration::seconds(2)
+        )
+        .await?,
+        None
+    );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn waiting_for_account_lock_cannot_extend_the_refresh_retry_deadline()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "retry-wait", "user@test").await?;
+    let svc = service(&db);
+    let t = now();
+    approved(&db, user, "wait", "mcp offline_access", t).await?;
+    let previous = issued(exchange(&svc, "wait", t).await?)
+        .refresh_token
+        .ok_or("missing refresh token")?;
+    let rotated = issued(
+        svc.refresh(&previous, CLIENT, RESOURCE, t + Duration::seconds(1))
+            .await?,
+    );
+    let mut lock = db.pool.begin().await?;
+    sqlx::query("SELECT id FROM accounts WHERE id=$1 FOR UPDATE")
+        .bind(user)
+        .execute(&mut *lock)
+        .await?;
+    sqlx::query("UPDATE oauth_credentials SET refresh_retry_until=clock_timestamp()+interval '100 milliseconds' WHERE private_refresh_response IS NOT NULL")
+        .execute(&mut *lock).await?;
+    let retry_service = svc.clone();
+    let retry = tokio::spawn(async move {
+        retry_service
+            .refresh(&previous, CLIENT, RESOURCE, t + Duration::seconds(1))
+            .await
+    });
+    sqlx::query("SELECT pg_sleep(0.15)")
+        .execute(&mut *lock)
+        .await?;
+    lock.commit().await?;
+    rejected(
+        tokio::time::timeout(std::time::Duration::from_secs(10), retry).await???,
+        "invalid_grant",
+    );
+    assert_eq!(
+        svc.access_user(
+            &rotated.access_token,
+            RESOURCE,
+            "mcp",
+            t + Duration::seconds(2)
+        )
+        .await?,
+        None
     );
     db.cleanup().await;
     Ok(())
@@ -1140,6 +1260,8 @@ async fn cleanup_removes_expired_access_but_preserves_refresh_reuse_detection()
         )
         .await?,
     );
+    sqlx::query("UPDATE oauth_credentials SET refresh_retry_until=clock_timestamp()-interval '1 second' WHERE private_refresh_response IS NOT NULL")
+        .execute(&db.pool).await?;
     notegate_db::PurgeRepo::new(db.pool.clone())
         .run_once()
         .await?;

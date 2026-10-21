@@ -62,7 +62,7 @@ Redirect는 등록 값과 일치해야 한다. HTTP loopback redirect는 port만
 | Scope | MCP는 `mcp`, CLI는 `cli`, 선택적 `offline_access`; 기존 Space·node 권한도 적용 |
 | 연결 수 | 사용자당 활성 grant 최대 100개; 동시 승인에도 같은 한도 적용 |
 
-토큰 검증값은 별도 목적 키의 HMAC으로 저장한다. Refresh 응답 재전달을 위해 token pair와 access 만료를 기존 OAuth state 키로 암호화하여 소비된 credential 행의 `private_refresh_response`에 보관한다. AAD는 `refresh-retry:`와 해당 credential HMAC에 묶는다. 원문 token은 DB·log·Audit에 저장하지 않는다. 재시도는 동일 account/client/resource/scope와 계정 활성·grant 철회·두 만료를 다시 확인하며 요청 중 DB lock 대기 시간도 유예 판정에 포함한다. 유예 기준은 최초 소비 시각이고 재전달로 갱신하지 않는다. 응답의 `expires_in`은 원래 만료까지 남은 시간으로 줄인다. 10초 이후 캐시는 사용할 수 없으며 기존 bounded purge가 암호문을 제거하되 재사용 탐지용 HMAC은 유지한다. 연결 철회 시 캐시도 같은 transaction에서 제거한다.
+토큰 검증값은 별도 목적 키의 HMAC으로 저장한다. Refresh 응답 재전달을 위해 token pair와 access 만료를 기존 OAuth state 키로 암호화하여 소비된 credential 행의 `private_refresh_response`에 보관한다. AAD는 `refresh-retry:`와 해당 credential HMAC에 묶는다. 원문 token은 DB·log·Audit에 저장하지 않는다. 재시도는 동일 account/client/resource/scope와 계정 활성·grant 철회·두 만료를 다시 확인한다. `refresh_retry_until`은 회전 transaction의 PostgreSQL 시계로 정하며 lock 취득 후 같은 DB 시계로 검사한다. Pod 시계 차이와 lock 대기로 유예가 늘어나지 않으며 재전달로 기한을 갱신하지 않는다. 응답의 `expires_in`은 원래 만료까지 남은 시간으로 줄인다. 10초 이후 캐시는 사용할 수 없으며 기존 bounded purge가 암호문과 기한을 제거하되 재사용 탐지용 HMAC은 유지한다. 연결 철회 시 캐시도 같은 transaction에서 제거한다.
 
 외부 OIDC 토큰을 API bearer로 받지 않는다. Refresh 요청은 원래 scope를 반복할 수 있으며 scope 변경은 거부한다. 토큰·철회·실패 응답은 no-store다. 승인 화면의 Referrer-Policy는 `same-origin`으로 동일 출처 form POST의 Origin 검증을 유지하면서 외부 redirect에는 Referer를 보내지 않는다.
 

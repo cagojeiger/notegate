@@ -49,7 +49,7 @@ Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie�
 | `oidc_login_flows` | 5분짜리 OIDC state; browser cookie HMAC, issuer, 암호화된 PKCE/nonce/next |
 | `oauth_authorizations` | browser-bound 동의 요청과 1회용 code; client/resource/redirect/S256 challenge 및 nullable 승인 user ID |
 | `oauth_grants` | user FK, client/resource/scope, absolute/idle expiry, revoked_at, nullable client_environment·last_token_at; 사용자당 활성 100개 |
-| `oauth_credentials` | access/refresh HMAC PK와 key epoch; grant FK `ON DELETE CASCADE`, expires_at, consumed_at; 소비된 refresh 행의 nullable `private_refresh_response`는 10초 재시도용 암호문과 successor HMAC을 보관하며 이후 bounded purge로 제거 |
+| `oauth_credentials` | access/refresh HMAC PK와 key epoch; grant FK `ON DELETE CASCADE`, expires_at, consumed_at; 소비된 refresh 행의 nullable `private_refresh_response`는 응답 암호문과 successor HMAC을 보관한다. `refresh_retry_until`은 PostgreSQL 시계로 정한 고정 10초 기한이고 이후 bounded purge가 두 필드를 제거 |
 | `oauth_device_codes` | device/user-code HMAC, CLI client/resource/scope, 승인 user FK, polling·거절·소비 상태 |
 
 Bearer token·code·PKCE verifier 원문은 평문 DB 필드에 남기지 않는다. Grant 발급·code 소비·credential 삽입·승인 audit는 함께 commit한다. Refresh 재사용에 의한 철회는 오류 응답 전에 commit한다. 계정 삭제는 grant를 함께 철회한다. 만료·철회는 조회 시 바로 적용하며 purge는 short-lived flow와 15일 이상 지난 dead grant를 제한된 batch로 물리 삭제한다. 만료된 access HMAC은 별도 batch로 바로 정리하고, 사용된 refresh HMAC은 해당 grant의 재사용 탐지를 위해 보존한다.

@@ -124,12 +124,11 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
     .rows_affected();
 
     sqlx::query(
-        "UPDATE oauth_credentials SET private_refresh_response=NULL WHERE token_hash IN ( \
+        "UPDATE oauth_credentials SET private_refresh_response=NULL,refresh_retry_until=NULL WHERE token_hash IN ( \
          SELECT token_hash FROM oauth_credentials WHERE private_refresh_response IS NOT NULL \
-           AND consumed_at<=now()-make_interval(secs => $1::int) \
-         ORDER BY consumed_at,token_hash LIMIT 1000)",
+           AND refresh_retry_until<=clock_timestamp() \
+         ORDER BY refresh_retry_until,token_hash LIMIT 1000)",
     )
-    .bind(i32::try_from(crate::oauth_repo::REFRESH_RETRY_SECONDS).unwrap_or(i32::MAX))
     .execute(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;

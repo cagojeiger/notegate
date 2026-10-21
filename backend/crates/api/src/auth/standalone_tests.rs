@@ -163,7 +163,7 @@ async fn device_http_flow_rejects_csrf_and_uses_own_tokens_without_authgate()
     let repeated = body(repeated).await;
     assert!(repeated["access_token"] == rotated["access_token"]);
     assert!(repeated["refresh_token"] == rotated["refresh_token"]);
-    sqlx::query("UPDATE oauth_credentials SET consumed_at=now()-interval '11 seconds' WHERE kind='refresh' AND consumed_at IS NOT NULL")
+    sqlx::query("UPDATE oauth_credentials SET refresh_retry_until=clock_timestamp()-interval '1 second' WHERE private_refresh_response IS NOT NULL")
         .execute(&db.pool).await?;
     assert_eq!(
         post(
