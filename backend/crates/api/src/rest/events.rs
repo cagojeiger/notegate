@@ -2,7 +2,7 @@
 //! Storage and authorization remain in the corresponding services.
 
 use axum::extract::{Extension, Path, Query, State};
-use axum::response::{IntoResponse, Response};
+use axum::middleware::from_fn;
 use axum::routing::get;
 use axum::{Json, Router};
 use notegate_model::{
@@ -12,7 +12,7 @@ use notegate_service::files::{ListFileChangeEvents, SyncFileChanges};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::auth::set_private_no_store;
+use crate::auth::mark_private_no_store;
 use crate::error::ApiError;
 use crate::page::Page;
 use crate::rest::dto::{
@@ -37,6 +37,7 @@ pub fn routes() -> Router<AppState> {
             "/v1/spaces/{space_id}/file-change-sync",
             get(sync_file_changes),
         )
+        .route_layer(from_fn(mark_private_no_store))
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,7 +113,7 @@ pub(crate) async fn list_command_invocations(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Query(query): Query<ListCommandInvocationsQuery>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<CommandInvocationListResponse>, ApiError> {
     let page = state
         .history
         .list_command_invocations(
@@ -136,13 +137,10 @@ pub(crate) async fn list_command_invocations(
         .iter()
         .map(|invocation| CommandInvocationOut::from_invocation(invocation, &refs))
         .collect();
-    let mut response = Json(CommandInvocationListResponse {
+    Ok(Json(CommandInvocationListResponse {
         command_invocations,
         page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
-    })
-    .into_response();
-    set_private_no_store(&mut response);
-    Ok(response)
+    }))
 }
 
 #[utoipa::path(
@@ -160,7 +158,7 @@ pub(crate) async fn list_background_jobs(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Query(query): Query<ListEventsQuery>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<BackgroundJobListResponse>, ApiError> {
     let page = state
         .history
         .list_background_jobs(
@@ -173,13 +171,10 @@ pub(crate) async fn list_background_jobs(
         )
         .await?;
     let jobs = page.items.iter().map(BackgroundJobOut::from).collect();
-    let mut response = Json(BackgroundJobListResponse {
+    Ok(Json(BackgroundJobListResponse {
         jobs,
         page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
-    })
-    .into_response();
-    set_private_no_store(&mut response);
-    Ok(response)
+    }))
 }
 
 #[utoipa::path(
@@ -197,14 +192,12 @@ pub(crate) async fn get_background_job(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(job_id): Path<Uuid>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<BackgroundJobDetailResponse>, ApiError> {
     let detail = state
         .history
         .get_background_job(caller.account.kind, caller.account_id(), job_id)
         .await?;
-    let mut response = Json(BackgroundJobDetailResponse::from(&detail)).into_response();
-    set_private_no_store(&mut response);
-    Ok(response)
+    Ok(Json(BackgroundJobDetailResponse::from(&detail)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -280,7 +273,7 @@ pub(crate) async fn list_owned_file_changes(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Query(query): Query<OwnedChangesQuery>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<FileChangeEventListResponse>, ApiError> {
     let page = state
         .history
         .list_file_changes(
@@ -297,17 +290,14 @@ pub(crate) async fn list_owned_file_changes(
         .filter_map(|e| e.actor_account_id)
         .collect();
     let refs = state.accounts.find_account_refs(&ids).await?;
-    let mut response = Json(FileChangeEventListResponse {
+    Ok(Json(FileChangeEventListResponse {
         events: page
             .items
             .iter()
             .map(|e| FileChangeEventOut::from_event(e, &refs))
             .collect(),
         page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
-    })
-    .into_response();
-    set_private_no_store(&mut response);
-    Ok(response)
+    }))
 }
 
 #[derive(Debug, Deserialize)]
