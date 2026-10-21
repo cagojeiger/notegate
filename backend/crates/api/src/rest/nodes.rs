@@ -2,7 +2,7 @@ use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use notegate_model::{Caller, NodeKind};
+use notegate_model::Caller;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -13,9 +13,9 @@ use crate::rest::dto::{NodeOut, NodeRef, NodeSummaryOut, attribution_ids, parse_
 use crate::state::AppState;
 
 use notegate_service::files::{
-    BatchChildrenRequest, BatchChildrenResult, ChildrenRequest, CreateFolder, CreateText,
-    DeleteNode, ListNodesRequest, MoveNode, NodeListSort, UpdateNode,
-    UpdateNodeExternalAccessPolicy, UpdateNodeWriteLock, WriteTarget, WriteText, WriteTextBody,
+    BatchChildrenRequest, BatchChildrenResult, ChildrenRequest, CreateNode, DeleteNode,
+    ListNodesRequest, MoveNode, NodeListSort, UpdateNode, UpdateNodeExternalAccessPolicy,
+    UpdateNodeWriteLock,
 };
 
 pub fn routes() -> Router<AppState> {
@@ -530,63 +530,19 @@ pub(crate) async fn create(
     let kind = parse_kind(&body.kind)?;
     let account_id = caller.account_id();
 
-    let view = match kind {
-        NodeKind::Folder => {
-            state
-                .files
-                .create_folder(
-                    account_id,
-                    space_id,
-                    CreateFolder {
-                        parent_node_id: body.parent_id,
-                        name: body.name,
-                    },
-                )
-                .await?
-        }
-        NodeKind::Text => {
-            // With initial content, create-and-write; otherwise create empty.
-            match body.content {
-                Some(content) => {
-                    state
-                        .files
-                        .write_text(
-                            account_id,
-                            space_id,
-                            WriteText {
-                                target: WriteTarget::Create {
-                                    parent_node_id: body.parent_id,
-                                    name: body.name,
-                                },
-                                body: WriteTextBody::Plain(content),
-                                expected_sha256: None,
-                            },
-                        )
-                        .await?
-                        .node
-                }
-                None => {
-                    state
-                        .files
-                        .create_text(
-                            account_id,
-                            space_id,
-                            CreateText {
-                                parent_node_id: body.parent_id,
-                                name: body.name,
-                            },
-                        )
-                        .await?
-                        .node
-                }
-            }
-        }
-        NodeKind::File => {
-            return Err(ApiError::invalid_field(
-                "file node creation is not supported by this endpoint",
-            ));
-        }
-    };
+    let view = state
+        .files
+        .create_node(
+            account_id,
+            space_id,
+            CreateNode {
+                parent_node_id: body.parent_id,
+                kind,
+                name: body.name,
+                content: body.content,
+            },
+        )
+        .await?;
 
     let refs = state
         .accounts

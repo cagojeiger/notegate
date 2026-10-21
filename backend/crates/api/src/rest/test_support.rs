@@ -167,7 +167,7 @@ pub(crate) async fn caller_and_space(
     ))
 }
 
-pub(super) fn rest_app(state: crate::state::AppState, caller: Caller) -> Router {
+pub(crate) fn rest_app(state: crate::state::AppState, caller: Caller) -> Router {
     Router::new()
         .merge(crate::rest::me::routes())
         .merge(crate::rest::events::routes())
