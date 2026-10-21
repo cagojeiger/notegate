@@ -5,12 +5,12 @@ use notegate_command::{
     LINE_EDIT_OP_INSERT_BEFORE_LINE, LINE_EDIT_OP_REPLACE_LINES, LINE_EDIT_OPERATIONS,
     LineEditInput, PatchEdit,
 };
-use notegate_model::TextStorageFormat;
+use notegate_model::{Node, TextStorageFormat};
 use notegate_service::ServiceError;
 use notegate_service::files::{
     AppendText, ChildrenRequest, CopyNode, CreateFolder, DeleteNode, Edit as ServiceEdit, EditText,
-    LineEdit, MoveNode, NodeView, PatchError, PatchMode, PatchText, ReadText, ReadTextBody,
-    TreeRequest, WriteTarget, WriteText, WriteTextBody,
+    LineEdit, MoveNode, PatchError, PatchMode, PatchText, ReadText, ReadTextBody, TreeRequest,
+    WriteTarget, WriteText, WriteTextBody,
 };
 use serde_json::{Value, json};
 
@@ -43,7 +43,7 @@ pub async fn list(
     if depth == 1 {
         let folder = context
             .files(&state.files)
-            .resolve_path(account_id, space_id, &path)
+            .resolve_path_node(account_id, space_id, &path)
             .await
             .map_err(service_error)?;
 
@@ -52,7 +52,7 @@ pub async fn list(
             .canonical_children(
                 account_id,
                 space_id,
-                folder.node.id,
+                folder.id,
                 ChildrenRequest { limit, cursor },
             )
             .await
@@ -178,7 +178,7 @@ pub async fn mkdir(
     let (parent_path, name) = split_parent_name(&path)?;
     let parent = context
         .files(&state.files)
-        .resolve_path(account_id, space_id, &parent_path)
+        .resolve_path_node(account_id, space_id, &parent_path)
         .await
         .map_err(service_error)?;
 
@@ -188,7 +188,7 @@ pub async fn mkdir(
             account_id,
             space_id,
             CreateFolder {
-                parent_node_id: parent.node.id,
+                parent_node_id: parent.id,
                 name,
             },
         )
@@ -217,7 +217,7 @@ pub async fn read(
 
     let node = context
         .files(&state.files)
-        .resolve_path(account_id, space_id, &path)
+        .resolve_path_node(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
@@ -227,7 +227,7 @@ pub async fn read(
             account_id,
             space_id,
             ReadText {
-                node_id: node.node.id,
+                node_id: node.id,
                 start_line,
                 max_lines,
                 max_bytes,
@@ -276,24 +276,22 @@ pub async fn read(
 
 /// Resolve `path` to an existing node's write target, or a create target under
 /// its parent when it does not exist and `create` is set. Shared by `write`
-/// and `append`, which only differ in what they do with the existing view.
+/// and `append`.
 async fn resolve_write_target(
     files: &notegate_service::files::FilesService,
     account_id: uuid::Uuid,
     space_id: uuid::Uuid,
     path: &str,
     create: bool,
-) -> Result<(WriteTarget, Option<NodeView>), CommandError> {
-    let existing = match files.resolve_path(account_id, space_id, path).await {
-        Ok(view) => Some(view),
+) -> Result<(WriteTarget, Option<Node>), CommandError> {
+    let existing = match files.resolve_path_node(account_id, space_id, path).await {
+        Ok(node) => Some(node),
         Err(ServiceError::NotFound(_)) => None,
         Err(error) => return Err(service_error(error)),
     };
 
     let target = match &existing {
-        Some(view) => WriteTarget::Existing {
-            node_id: view.node.id,
-        },
+        Some(node) => WriteTarget::Existing { node_id: node.id },
         None => {
             if !create {
                 return Err(service_error(ServiceError::NotFound(
@@ -302,11 +300,11 @@ async fn resolve_write_target(
             }
             let (parent_path, name) = split_parent_name(path)?;
             let parent = files
-                .resolve_path(account_id, space_id, &parent_path)
+                .resolve_path_node(account_id, space_id, &parent_path)
                 .await
                 .map_err(service_error)?;
             WriteTarget::Create {
-                parent_node_id: parent.node.id,
+                parent_node_id: parent.id,
                 name,
             }
         }
@@ -332,12 +330,12 @@ pub async fn write(
     let (target, existing) =
         resolve_write_target(&files, account_id, space_id, &path, create).await?;
 
-    if let Some(view) = &existing {
+    if let Some(node) = &existing {
         let current_sha = guarded_plain_text_sha(
             &files,
             account_id,
             space_id,
-            view.node.id,
+            node.id,
             expected_sha256.as_deref(),
         )
         .await
@@ -430,7 +428,7 @@ pub async fn patch(
 
     let node = context
         .files(&state.files)
-        .resolve_path(account_id, space_id, &path)
+        .resolve_path_node(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
@@ -440,7 +438,7 @@ pub async fn patch(
             account_id,
             space_id,
             PatchText {
-                node_id: node.node.id,
+                node_id: node.id,
                 edits,
                 expected_sha256,
             },
@@ -477,7 +475,7 @@ pub async fn edit(
 
     let node = context
         .files(&state.files)
-        .resolve_path(account_id, space_id, &path)
+        .resolve_path_node(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
@@ -487,7 +485,7 @@ pub async fn edit(
             account_id,
             space_id,
             EditText {
-                node_id: node.node.id,
+                node_id: node.id,
                 edits,
                 expected_sha256,
             },
@@ -529,14 +527,14 @@ pub async fn mv(
 
     let source = context
         .files(&state.files)
-        .resolve_path(account_id, space_id, &source_path)
+        .resolve_path_node(account_id, space_id, &source_path)
         .await
         .map_err(service_error)?;
 
     let (dest_parent_path, new_name) = split_parent_name(&destination_path)?;
     let dest_parent = context
         .files(&state.files)
-        .resolve_path(account_id, space_id, &dest_parent_path)
+        .resolve_path_node(account_id, space_id, &dest_parent_path)
         .await
         .map_err(service_error)?;
 
@@ -546,8 +544,8 @@ pub async fn mv(
             account_id,
             space_id,
             MoveNode {
-                node_id: source.node.id,
-                new_parent_node_id: dest_parent.node.id,
+                node_id: source.id,
+                new_parent_node_id: dest_parent.id,
                 new_name: Some(new_name),
                 expected_parent_id: None,
             },
@@ -582,13 +580,13 @@ pub async fn copy(
 
     let source = context
         .files(&state.files)
-        .resolve_path(account_id, space_id, &source_path)
+        .resolve_path_node(account_id, space_id, &source_path)
         .await
         .map_err(service_error)?;
     let (parent_path, new_name) = split_parent_name(&destination_path)?;
     let parent = context
         .files(&state.files)
-        .resolve_path(account_id, space_id, &parent_path)
+        .resolve_path_node(account_id, space_id, &parent_path)
         .await
         .map_err(service_error)?;
 
@@ -598,8 +596,8 @@ pub async fn copy(
             account_id,
             space_id,
             CopyNode {
-                node_id: source.node.id,
-                new_parent_node_id: parent.node.id,
+                node_id: source.id,
+                new_parent_node_id: parent.id,
                 new_name,
                 recursive,
             },
@@ -633,7 +631,7 @@ pub async fn rm(
 
     let node = context
         .files(&state.files)
-        .resolve_path(account_id, space_id, &path)
+        .resolve_path_node(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
@@ -643,7 +641,7 @@ pub async fn rm(
             account_id,
             space_id,
             DeleteNode {
-                node_id: node.node.id,
+                node_id: node.id,
                 recursive,
             },
         )
