@@ -11,6 +11,111 @@ use notegate_service::files::{
 };
 
 #[tokio::test]
+async fn path_resolution_preserves_live_node_and_channel_access_checks()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = FilesRepo::new(db.pool.clone());
+    let files = FilesService::new(repo.clone());
+    let owner = insert_user_account(&db.pool, "path-owner", "path-owner@example.test").await?;
+    let outsider =
+        insert_user_account(&db.pool, "path-outsider", "path-outsider@example.test").await?;
+    let (space, root) = setup_space(&SpaceRepo::new(db.pool.clone()), owner, "paths").await;
+    let folder = files
+        .create_folder(
+            owner,
+            space,
+            CreateFolder {
+                parent_node_id: root,
+                name: "private".to_owned(),
+            },
+        )
+        .await?
+        .node
+        .id;
+    for (parent, name) in [(root, "visible.md"), (folder, "child.md")] {
+        files
+            .create_text(
+                owner,
+                space,
+                CreateText {
+                    parent_node_id: parent,
+                    name: name.to_owned(),
+                },
+            )
+            .await?;
+    }
+    files
+        .update_node_external_access_policy(
+            AccountKind::User,
+            owner,
+            space,
+            UpdateNodeExternalAccessPolicy {
+                node_id: folder,
+                enabled: false,
+            },
+        )
+        .await?;
+    let deleted = files
+        .create_text(
+            owner,
+            space,
+            CreateText {
+                parent_node_id: root,
+                name: "deleted.md".to_owned(),
+            },
+        )
+        .await?
+        .node
+        .node
+        .id;
+    repo.soft_delete_node(space, deleted, owner, false).await?;
+
+    for channel in [Channel::Browser, Channel::Api, Channel::Mcp] {
+        let scoped = files.for_channel(channel);
+        for path in ["/", "/visible.md", "/private", "/private/child.md"] {
+            let node = scoped.resolve_path_node(owner, space, path).await;
+            let view = scoped.resolve_path(owner, space, path).await;
+            if path.starts_with("/private") && channel != Channel::Browser {
+                assert!(matches!(
+                    node,
+                    Err(notegate_service::ServiceError::NotFound(_))
+                ));
+                assert!(matches!(
+                    view,
+                    Err(notegate_service::ServiceError::NotFound(_))
+                ));
+            } else {
+                let node = node?;
+                let view = view?;
+                assert_eq!(node.id, view.node.id);
+                assert_eq!(node.kind, view.node.kind);
+                assert_eq!(
+                    node.external_access_enabled,
+                    view.node.external_access_enabled
+                );
+            }
+        }
+        for (account, path) in [
+            (owner, "/missing.md"),
+            (owner, "/deleted.md"),
+            (outsider, "/visible.md"),
+        ] {
+            assert!(matches!(
+                scoped.resolve_path_node(account, space, path).await,
+                Err(notegate_service::ServiceError::NotFound(_))
+            ));
+            assert!(matches!(
+                scoped.resolve_path(account, space, path).await,
+                Err(notegate_service::ServiceError::NotFound(_))
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn collection_pages_exclude_private_nodes_before_pagination()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
