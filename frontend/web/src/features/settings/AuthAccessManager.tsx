@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Monitor, Terminal, Unplug } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -12,6 +12,7 @@ import { SettingsControls, SettingsInspectorSection, useSettingsInspector } from
 
 import { SettingsPage } from "./SettingsPage";
 import { useSettingsScroll, useSettingsViewState } from "./settingsViewState";
+import { useSettingsMutation } from "./useSettingsMutation";
 
 type Kind = "browser" | "cli" | "mcp";
 type ConnectionView = { selectedId?: string; visibleCount: number };
@@ -35,27 +36,26 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
   const updateView = (value: Partial<ConnectionView>) => setViews((current) => ({ ...current, [kind]: { ...current[kind], ...value } }));
   const scroll = useSettingsScroll<HTMLUListElement>(`account-list-${kind}`);
   const [confirmation, setConfirmation] = useState<Revocation | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const confirmationRef = useRef<HTMLDivElement>(null);
   const noticeRef = useRef<HTMLParagraphElement>(null);
   const actionRef = useRef<HTMLElement | null>(null);
   const sessions = useQuery({ queryKey: queryKeys.browserSessions, queryFn: () => listBrowserSessions(client), enabled: kind === "browser" });
   const grants = useQuery({ queryKey: queryKeys.oauthGrants, queryFn: () => listOAuthGrants(client), enabled: kind !== "browser" });
-  const revoke = useMutation({
+  const revoke = useSettingsMutation(`revoke-${kind}`, {
     mutationFn: (action: Revocation) => client.delete(action.path),
     meta: { silentError: true },
     onSuccess: (_result, action) => {
-      setConfirmation(null);
       if (action.signOut) {
         onSignOut();
         return;
       }
-      setNotice("Access revoked.");
       void cache.invalidateQueries({ queryKey: queryKeys.browserSessions });
       void cache.invalidateQueries({ queryKey: queryKeys.oauthGrants });
       invalidateAuditEvents(cache);
     }
   });
+  const notice = revoke.isSuccess && !revoke.variables?.signOut ? "Access revoked." : null;
+  useEffect(() => { if (revoke.isSuccess) setConfirmation(null); }, [revoke.isSuccess]);
   const inspectorOpen = inspector?.open ?? true;
   useEffect(() => {
     if (!inspectorOpen && !revoke.isPending) setConfirmation(null);
@@ -83,10 +83,10 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
   const count = query.isSuccess ? <span className="text-xs text-muted">{rows.length} loaded</span> : undefined;
   const ask = (action: Revocation) => {
     actionRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    revoke.reset(); setNotice(null); setConfirmation(action);
+    revoke.reset(); setConfirmation(action);
   };
   const select = (id: string) => {
-    updateView({ selectedId: id }); setConfirmation(null); setNotice(null); revoke.reset(); inspector?.onOpen();
+    updateView({ selectedId: id }); setConfirmation(null); revoke.reset(); inspector?.onOpen();
   };
 
   return (
@@ -94,6 +94,7 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
       inspectorLabel={kind === "browser" ? "Open session actions" : "Open connection actions"}
       disabled={revoke.isPending} summary={navigation ? <fieldset disabled={revoke.isPending} className="min-w-0">{navigation}{summary}</fieldset> : summary} scrollKey={`access-${kind}`} contained
       actions={kind === "browser" ? undefined : count}>
+      {revoke.isPending ? <p role="status" className="mb-3 text-xs text-muted">{kind === "browser" ? "Signing out…" : "Revoking access…"}</p> : null}
       {kind === "browser" ? <SectionHeader title="Browser sessions" actions={count} /> : null}
       {query.isLoading ? <p role="status" className="text-sm text-muted">Loading connections…</p> : query.isError ? (
         <div><p role="alert">Could not load {TITLES[kind].toLowerCase()}.</p><Button secondary onClick={() => { void query.refetch(); }}>Retry {kind === "browser" ? "sessions" : `${kind.toUpperCase()} connections`}</Button></div>
@@ -120,6 +121,7 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
         <SettingsInspectorSection title="Selected connection">
           <div role="region" aria-label="Selected connection">
             {notice ? <p ref={noticeRef} role="status" tabIndex={-1} className="mb-3 outline-none">{notice}</p> : null}
+            {revoke.isError ? <p role="alert" className="mb-3">Could not revoke access. Try again.</p> : null}
             {session ? <>
               <p className="break-words font-medium">{session.client_environment ?? "Environment not recorded"}{session.current ? " · This session" : ""}</p>
               <dl className="my-4 space-y-3 text-xs">
@@ -145,7 +147,6 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
         {confirmation ? <div ref={confirmationRef} tabIndex={-1} role="group" aria-label="Confirm revocation" className="outline-none">
           <Card className="space-y-3 text-sm">
             <p>{confirmation.label}?</p>
-            {revoke.isError ? <p role="alert">Could not revoke access. Try again.</p> : null}
             <div className="flex flex-wrap gap-2">
               <Button variant="danger" disabled={revoke.isPending} onClick={() => revoke.mutate(confirmation)}>Confirm</Button>
               <Button secondary disabled={revoke.isPending} onClick={() => { setConfirmation(null); requestAnimationFrame(() => actionRef.current?.focus()); }}>Cancel</Button>

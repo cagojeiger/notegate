@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarDays, CircleAlert, Clock3, File, FileText, Folder, FolderOpen, Layers, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
@@ -13,6 +13,7 @@ import { SettingsControls, SettingsInspectorSection, useSettingsInspector } from
 
 import { SettingsPage } from "../settings/SettingsPage";
 import { useSettingsScroll, useSettingsViewState } from "../settings/settingsViewState";
+import { useSettingsMutation } from "../settings/useSettingsMutation";
 
 const itemAppearance = {
   space: { icon: Layers, label: "Space" },
@@ -33,14 +34,13 @@ export function TrashPanel() {
   // undefined selects the initial item; null deliberately leaves no selection after restore.
   const [selectedKey, setSelectedKey] = useSettingsViewState<string | null | undefined>("selected-trash-item", undefined);
   const listScroll = useSettingsScroll<HTMLUListElement>("trash-list");
-  const [notice, setNotice] = useState<string | null>(null);
   const query = useInfiniteQuery({
     queryKey: queryKeys.trash,
     initialPageParam: null as string | null,
     queryFn: ({ pageParam }) => listTrash(client, pageParam),
     getNextPageParam: (last) => last.page.next_cursor ?? undefined
   });
-  const mutation = useMutation({
+  const mutation = useSettingsMutation("trash", {
     meta: { silentError: true },
     mutationFn: async ({ item, action }: { item: TrashItem; action: "restore" | "purge" }) => {
       if (action === "restore") await restoreTrash(client, item);
@@ -48,14 +48,10 @@ export function TrashPanel() {
     },
     onError: (error) => {
       if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
-        setConfirmation(null);
         void queryClient.invalidateQueries({ queryKey: queryKeys.trash });
       }
     },
     onSuccess: async (_, { item, action }) => {
-      setConfirmation(null);
-      setNotice(action === "restore" ? `Restored “${item.name}” to ${item.space_name} · ${item.path}.` : `Permanent deletion requested for “${item.name}”. Recovery is unavailable; cleanup runs in the background.`);
-      setSelectedKey(action === "restore" ? null : `${item.kind}:${item.id}`);
       invalidateAuditEvents(queryClient);
       invalidateSpacesList(queryClient);
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
@@ -67,13 +63,27 @@ export function TrashPanel() {
       await queryClient.invalidateQueries({ queryKey: queryKeys.trash });
     }
   });
+  const completed = mutation.isSuccess ? mutation.variables : undefined;
+  const notice = completed ? completed.action === "restore"
+    ? `Restored “${completed.item.name}” to ${completed.item.space_name} · ${completed.item.path}.`
+    : `Permanent deletion requested for “${completed.item.name}”. Recovery is unavailable; cleanup runs in the background.` : null;
+  useEffect(() => {
+    if (completed) {
+      setConfirmation(null);
+      setSelectedKey(completed.action === "restore" ? null : `${completed.item.kind}:${completed.item.id}`);
+    } else if (mutation.error instanceof ApiError && [404, 409].includes(mutation.error.status)) setConfirmation(null);
+  }, [completed, mutation.error, setSelectedKey]);
   const inspectorOpen = inspector?.open ?? true;
   useEffect(() => {
     // Dismiss unsubmitted confirmation; an in-flight request still owns its result.
     if (!inspectorOpen && !mutation.isPending) setConfirmation(null);
   }, [inspectorOpen, mutation.isPending]);
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
-  const selected = selectedKey === undefined ? items[0] : items.find((item) => `${item.kind}:${item.id}` === selectedKey);
+  const operation = mutation.variables;
+  const effectiveKey = operation && (mutation.isPending || mutation.isSuccess)
+    ? mutation.isSuccess && operation.action === "restore" ? null : `${operation.item.kind}:${operation.item.id}`
+    : selectedKey;
+  const selected = effectiveKey === undefined ? items[0] : items.find((item) => `${item.kind}:${item.id}` === effectiveKey);
   const SelectedIcon = itemAppearance[selected?.kind ?? "file"].icon;
 
   useEffect(() => {
@@ -90,12 +100,13 @@ export function TrashPanel() {
 
   useEffect(() => {
     if (notice) noticeRef.current?.focus();
-  }, [notice]);
+  }, [notice, inspector?.container]);
 
   return (
     <SettingsPage label="Trash" title="Deleted items" inspectorLabel="Open trash actions" scrollKey="trash" contained disabled={mutation.isPending}
       actions={<div className="flex items-center gap-2 text-xs text-muted"><span>Newest first</span><IconButton label="Refresh" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void queryClient.invalidateQueries({ queryKey: queryKeys.trash }); }}><RefreshCw size={16} aria-hidden="true" /></IconButton></div>}>
       <SettingsControls><p className="text-xs text-muted">Deleted items are kept for 30 days.</p></SettingsControls>
+      {mutation.isPending ? <p role="status" className="text-xs text-muted">{operation?.action === "restore" ? "Restoring…" : "Requesting deletion…"}</p> : null}
       <div role="region" aria-label="Trash contents" className="flex min-h-0 flex-1 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1">
         <Card padding="sm" className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -113,7 +124,7 @@ export function TrashPanel() {
                     type="button"
                     aria-pressed={selected === item}
                     disabled={mutation.isPending || !!confirmation}
-                    onClick={() => { mutation.reset(); setNotice(null); setSelectedKey(key); inspector?.onOpen(); }}
+                    onClick={() => { mutation.reset(); setSelectedKey(key); inspector?.onOpen(); }}
                     className={`flex w-full items-start gap-2 rounded-workbench border-l-2 px-2 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-not-allowed ${selected === item ? "border-[var(--ng-active-border)] bg-[var(--ng-selection)]" : "border-transparent hover:bg-[var(--ng-hover)]"}`}
                   >
                     <span className="sr-only">Select</span>{" "}
@@ -165,8 +176,8 @@ export function TrashPanel() {
                 </Card>
               ) : null}
               <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-seam pt-4">
-                <Button variant="danger" size="sm" data-trash-purge disabled={mutation.isPending || selected.deletion_pending} aria-label={`Permanently delete ${selected.name}`} onClick={() => { mutation.reset(); setNotice(null); setConfirmation(selected); }}>Permanently delete</Button>
-                <Button size="sm" disabled={mutation.isPending || selected.deletion_pending || !selected.recoverable} aria-label={`Restore ${selected.name}`} onClick={() => { setNotice(null); mutation.mutate({ item: selected, action: "restore" }); }}><RotateCcw size={14} aria-hidden="true" />{mutation.isPending && mutation.variables?.action === "restore" ? "Restoring…" : "Restore"}</Button>
+                <Button variant="danger" size="sm" data-trash-purge disabled={mutation.isPending || selected.deletion_pending} aria-label={`Permanently delete ${selected.name}`} onClick={() => { mutation.reset(); setConfirmation(selected); }}>Permanently delete</Button>
+                <Button size="sm" disabled={mutation.isPending || selected.deletion_pending || !selected.recoverable} aria-label={`Restore ${selected.name}`} onClick={() => mutation.mutate({ item: selected, action: "restore" })}><RotateCcw size={14} aria-hidden="true" />{mutation.isPending && mutation.variables?.action === "restore" ? "Restoring…" : "Restore"}</Button>
               </div>
             </section>
           ) : <p className="text-muted">Select an item to restore or permanently delete.</p>}

@@ -25,19 +25,25 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const deleteButton = useRef<HTMLButtonElement>(null);
   const createMutation = useCreateAgentMutation((agent) => { setName(""); setCreating(false); setOpenId(agent.id); });
-  const deleteMutation = useDeleteAgentMutation(() => { setConfirmId(null); setOpenId(null); });
+  const deleteMutation = useDeleteAgentMutation();
+  useEffect(() => {
+    if (deleteMutation.isSuccess) { setConfirmId(null); setOpenId(null); }
+  }, [deleteMutation.isSuccess, setOpenId]);
   useEffect(() => {
     if (!inspectorOpen && !deleteMutation.isPending) setConfirmId(null);
   }, [inspectorOpen, deleteMutation.isPending]);
   const agents = agentsQuery.data?.agents ?? [];
-  const selected = agents.find((agent) => agent.id === openId);
+  const selected = agents.find((agent) => agent.id === (deleteMutation.isPending ? deleteMutation.variables : openId));
   if (!canManageAgents) return <EmptyState>Agent management is unavailable for this account.</EmptyState>;
 
   return (
     <SettingsPage title={creating ? "New agent" : selected?.name ?? "Agents"} inspectorLabel={selected && !creating ? "Open agent actions" : undefined}
       leading={creating || selected ? <IconButton label="Back to agents" disabled={deleteMutation.isPending || createMutation.isPending}
-        onClick={() => { setCreating(false); setOpenId(null); setConfirmId(null); }}><ArrowLeft size={16} /></IconButton> : undefined}
+        onClick={() => { deleteMutation.reset(); setCreating(false); setOpenId(null); setConfirmId(null); }}><ArrowLeft size={16} /></IconButton> : undefined}
       disabled={deleteMutation.isPending || createMutation.isPending} scrollKey={`agent-${creating ? "new" : openId ?? "overview"}`}>
+      {deleteMutation.isPending ? <p role="status" className="mb-3 text-xs text-muted">Deleting agent…</p> : null}
+      {deleteMutation.isSuccess ? <p role="status" className="mb-3 text-xs text-muted">Agent deleted.</p> : null}
+      {deleteMutation.error ? <p role="alert" className="mb-3 text-danger">{deleteMutation.error.message}</p> : null}
       {!creating && !selected ? <>
         <section>
           <p className="mb-3 text-xs text-muted">Select an agent to manage its permissions and keys.</p>
@@ -47,19 +53,19 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
           <Card as="ul" aria-label="Agents" padding="none" className="divide-y divide-seam empty:hidden">
             {agents.map((agent) => <li key={agent.id}>
               <button type="button" aria-label={`Select ${agent.name}`} disabled={deleteMutation.isPending || createMutation.isPending}
-                onClick={() => { setOpenId(agent.id); setConfirmId(null); }}
+                onClick={() => { deleteMutation.reset(); setOpenId(agent.id); setConfirmId(null); }}
                 className="flex min-h-[var(--ng-min-target-size)] w-full items-center gap-3 px-4 py-3 text-left text-workbench hover:bg-[var(--ng-hover)]">
                 <Bot size={15} className="shrink-0 text-muted" /><span className="min-w-0 flex-1 truncate">{agent.name}</span><ChevronRight size={15} className="shrink-0 text-muted" />
               </button>
             </li>)}
           </Card>
-          <div className="mt-3"><SettingsAddButton disabled={deleteMutation.isPending || createMutation.isPending} onClick={() => { setCreating(true); setConfirmId(null); }}>Add agent</SettingsAddButton></div>
+          <div className="mt-3"><SettingsAddButton disabled={deleteMutation.isPending || createMutation.isPending} onClick={() => { deleteMutation.reset(); setCreating(true); setConfirmId(null); }}>Add agent</SettingsAddButton></div>
         </section>
       </> : null}
       <SettingsControls>
         {selected && !creating ? <SettingsInspectorSection title="Agent actions">
           {confirmId === selected.id ? <div className="space-y-3"><p>Delete this agent and revoke its API keys?</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="danger" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(selected.id)}>Confirm</Button><Button size="sm" secondary autoFocus disabled={deleteMutation.isPending} onClick={() => { setConfirmId(null); requestAnimationFrame(() => deleteButton.current?.focus()); }}>Cancel</Button></div></div>
-            : <Button ref={deleteButton} variant="danger" size="sm" onClick={() => setConfirmId(selected.id)}><Trash2 size={15} /> Delete {selected.name}</Button>}
+            : <Button ref={deleteButton} disabled={deleteMutation.isPending} variant="danger" size="sm" onClick={() => setConfirmId(selected.id)}><Trash2 size={15} /> Delete {selected.name}</Button>}
         </SettingsInspectorSection> : null}
       </SettingsControls>
       {creating ? <section>

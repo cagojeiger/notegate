@@ -7,6 +7,7 @@ import type { ApiKeyListResponse, MintedKey } from "../../api/keys";
 import { invalidateAgentsList, invalidateAuditEvents } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import { listSpaces } from "../../api/spaces";
+import { useSettingsMutation } from "./useSettingsMutation";
 
 export function useAgentsQuery(enabled = true) {
   const client = useApiClient();
@@ -31,13 +32,13 @@ export function useCreateAgentMutation(onCreated: (agent: Agent) => void) {
   });
 }
 
-export function useDeleteAgentMutation(onDeleted: () => void) {
+export function useDeleteAgentMutation() {
   const client = useApiClient();
   const queryClient = useQueryClient();
-  return useMutation({
+  return useSettingsMutation("delete-agent", {
+    meta: { silentError: true },
     mutationFn: (id: string) => deleteAgent(client, id),
     onSuccess: () => {
-      onDeleted();
       invalidateAgentsList(queryClient);
       invalidateAuditEvents(queryClient);
     }

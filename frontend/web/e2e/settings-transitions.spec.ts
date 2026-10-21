@@ -16,15 +16,18 @@ async function mockSettings(page: Page) {
     path: `/notes/${name}`, deleted_at: dates.created_at, purge_after: dates.expires_at,
     recoverable: true, deletion_pending: false
   }));
+  const sessions = [{ ...dates, id: "session-1", current: false, client_environment: "Other browser", last_used_at: dates.created_at }];
+  const grants = [{ ...dates, id: "grant-1", kind: "mcp", client_name: "MCP App", client_environment: "macOS", last_token_at: dates.created_at, offline_access: true }];
+  const agents = [{ id: "agent-1", name: "Review agent", owner_user_id: "user-1" }];
   await routeJsonApi(page, (url, request) => {
     if (request.method() !== "GET") mutations.push(`${request.method()} ${url.pathname}`);
     if (url.pathname === "/api/v1/me") return { account: { id: "user-1", kind: "user", display_name: "User" }, user: { email: "user@example.com" }, capabilities: { can_create_space: true, can_manage_agents: true } };
     if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
     if (url.pathname === "/api/v1/spaces") return { spaces: [space], page: meta };
     if (url.pathname === "/api/v1/me/trash") return { items: trash, page: meta };
-    if (url.pathname === "/api/v1/me/sessions") return { sessions: [{ ...dates, id: "session-1", current: false, client_environment: "Other browser", last_used_at: dates.created_at }] };
-    if (url.pathname === "/api/v1/me/oauth-grants") return { grants: [{ ...dates, id: "grant-1", kind: "mcp", client_name: "MCP App", client_environment: "macOS", last_token_at: dates.created_at, offline_access: true }] };
-    if (url.pathname === "/api/v1/agents") return { agents: [{ id: "agent-1", name: "Review agent", owner_user_id: "user-1" }], page: meta };
+    if (url.pathname === "/api/v1/me/sessions") return { sessions };
+    if (url.pathname === "/api/v1/me/oauth-grants") return { grants };
+    if (url.pathname === "/api/v1/agents") return { agents, page: meta };
     if (url.pathname.endsWith("/keys")) return { keys: [] };
     if (url.pathname.endsWith("/agents")) return { connections: [], page: meta };
     if (url.pathname.endsWith("/children")) return { parent: { id: space.root_node_id, path: "/" }, children: [], page: meta };
@@ -32,7 +35,7 @@ async function mockSettings(page: Page) {
     if (url.pathname.endsWith("/file-change-sync")) return { changes: [], next_after_id: 0, has_more: false, resync_required: false };
     throw new Error(`Unhandled request: ${request.method()} ${url.pathname}`);
   });
-  return { mutations, trash };
+  return { mutations, trash, sessions, grants, agents };
 }
 
 type Dismiss = "close" | "toggle" | "escape" | "backdrop";
@@ -143,6 +146,58 @@ for (const width of [1440, 390]) {
         }
         expect(requests).toBe(1);
       });
+    }
+
+    for (const target of [
+      { tab: "Trash", trigger: "Permanently delete meeting.md", confirm: "Permanently delete", path: "**/api/v1/me/trash/spaces/*/nodes/deleted-0?**", success: "Permanent deletion requested", error: "Storage unavailable" },
+      { tab: "Account", trigger: "Sign out Other browser", confirm: "Confirm", path: "**/api/v1/me/sessions/session-1", success: "Access revoked.", error: "Could not revoke access. Try again." },
+      { tab: "Connections", trigger: "Revoke MCP App", confirm: "Confirm", path: "**/api/v1/me/oauth-grants/grant-1", success: "Access revoked.", error: "Could not revoke access. Try again." },
+      { tab: "Agents", trigger: "Delete Review agent", confirm: "Confirm", path: "**/api/v1/agents/agent-1", success: "Agent deleted.", error: "Storage unavailable" }
+    ]) {
+      for (const outcome of ["success", "error"] as const) {
+        for (const leave of target.tab === "Trash" && outcome === "error" ? ["tabs", "settings"] : ["tabs"]) {
+          test(`remount through ${leave}: ${target.tab} / ${outcome} retains the operation`, async ({ page }) => {
+            const data = await mockSettings(page);
+            let requests = 0;
+            let release!: () => void;
+            const response = new Promise<void>((resolve) => { release = resolve; });
+            await page.route(target.path, async (route) => {
+              requests++;
+              await response;
+              if (outcome === "error") return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "Storage unavailable", kind: "unavailable" }) });
+              if (target.tab === "Trash") data.trash[0] = { ...data.trash[0], recoverable: false, deletion_pending: true };
+              else if (target.tab === "Account") data.sessions.length = 0;
+              else if (target.tab === "Connections") data.grants.length = 0;
+              else data.agents.length = 0;
+              return route.fulfill({ status: 204 });
+            });
+            await page.goto("/");
+            const view = await openSettings(page, target.tab);
+            if (target.tab === "Connections") await view.getByRole("tab", { name: "MCP", exact: true }).click();
+            if (target.tab === "Agents") await view.getByRole("button", { name: "Select Review agent", exact: true }).click();
+            await showSettingsInspector(page);
+            await view.getByRole("button", { name: target.trigger, exact: true }).click();
+            await view.getByRole("button", { name: target.confirm, exact: true }).click();
+            try {
+              await expect.poll(() => requests).toBe(1);
+              if (mobile) await dismissInspector(page, mobile, "close");
+              if (leave === "settings") {
+                await view.getByRole("button", { name: "Close settings", exact: true }).click();
+                await openSettings(page, target.tab);
+              } else {
+                await view.getByRole("tab", { name: "General", exact: true }).click();
+                await view.getByRole("tab", { name: target.tab, exact: true }).click();
+              }
+              await showSettingsInspector(page);
+              await expect(view.getByRole("button", { name: target.trigger, exact: true })).toBeDisabled();
+              expect(requests).toBe(1);
+            } finally { release(); }
+            if (outcome === "success") await expect(view.getByRole("status")).toContainText(target.success);
+            else await expect(view.getByRole("alert")).toHaveText(target.error);
+            expect(requests).toBe(1);
+          });
+        }
+      }
     }
   });
 }
