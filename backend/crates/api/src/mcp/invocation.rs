@@ -51,11 +51,8 @@ pub(crate) async fn execute_call(
     };
 
     let started = Instant::now();
-    let metrics = CommandInvocationMetrics::start(
-        state.config.metrics_enabled,
-        "mcp",
-        metric_tool_name(tool),
-    );
+    let metrics =
+        CommandInvocationMetrics::start(state.config.metrics_enabled, "mcp", canonical_tool(tool));
     let result = match purpose_validation {
         Ok(_) => future.await,
         Err(error) => Err(error),
@@ -184,10 +181,6 @@ fn tool_result_error_code(result: &CallToolResult) -> String {
     } else {
         "tool_error".to_owned()
     }
-}
-
-fn metric_tool_name(tool: &str) -> &'static str {
-    canonical_tool(tool)
 }
 
 fn error_code(error: &ErrorData) -> String {

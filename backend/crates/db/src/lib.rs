@@ -23,8 +23,7 @@ pub mod connection_repo;
 mod event_history_query;
 mod file_change_event_repo;
 mod file_change_events;
-pub mod files;
-pub mod files_repo;
+mod files_repo;
 pub mod key_epoch_repo;
 pub mod link_graph_repo;
 mod link_graph_state;
@@ -52,7 +51,7 @@ pub use browser_session_repo::BrowserSessionRepo;
 pub use command_invocation_repo::{CommandInvocationRepo, NewCommandInvocation};
 pub use connection_repo::ConnectionRepo;
 pub use file_change_event_repo::{ChangeHistoryRepo, FileChangeSyncRows};
-pub use files_repo::{FilesRepo, TextMutationKind};
+pub use files_repo::{FilesRepo, TextMutationKind, files};
 pub use key_epoch_repo::CryptoKeyEpochRepo;
 pub use link_graph_repo::{
     LinkGraphIncomingReference, LinkGraphNodeReadModel, LinkGraphOutgoingReference,

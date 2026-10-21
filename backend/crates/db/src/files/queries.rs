@@ -1,9 +1,8 @@
 //! Read queries for the file tree.
 
-pub mod text {
+mod text {
     //! Text reads: load live text content and metrics.
 
-    use notegate_core::security::PiiCrypto;
     use notegate_core::{Error, Result};
     use notegate_model::files::{TextRead, TextStats};
     use notegate_model::{Node, TextAtRestEncryption, TextObject, TextStorageFormat};
@@ -13,83 +12,6 @@ pub mod text {
 
     use super::super::error::map_sqlx_error;
     use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
-
-    /// Load live text metrics without the content body.
-    pub async fn text_stats(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<Option<TextStats>> {
-        let row: Option<(String, i64, i32, String, String)> = sqlx::query_as(
-            "SELECT d.content_sha256, d.byte_len, d.line_count, d.storage_format, d.at_rest_encryption \
-             FROM text_objects d \
-         JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
-         WHERE d.space_id = $1 AND d.node_id = $2 \
-           AND n.deleted_at IS NULL AND n.kind = 'text'",
-        )
-        .bind(space_id)
-        .bind(node_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        row.map(
-            |(content_sha256, byte_len, line_count, storage_format, at_rest)| {
-                parse_text_stats(
-                    content_sha256,
-                    byte_len,
-                    line_count,
-                    &storage_format,
-                    &at_rest,
-                )
-            },
-        )
-        .transpose()
-    }
-
-    /// Load live text metrics for a bounded set of node ids.
-    pub async fn text_stats_many(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, TextStats>> {
-        if node_ids.is_empty() {
-            return Ok(HashMap::new());
-        }
-
-        let rows: Vec<(Uuid, String, i64, i32, String, String)> = sqlx::query_as(
-            "SELECT d.node_id, d.content_sha256, d.byte_len, d.line_count, \
-                    d.storage_format, d.at_rest_encryption \
-             FROM text_objects d \
-             JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
-             WHERE d.space_id = $1 \
-               AND d.node_id = ANY($2) \
-               AND n.deleted_at IS NULL \
-               AND n.kind = 'text'",
-        )
-        .bind(space_id)
-        .bind(node_ids.to_vec())
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        rows.into_iter()
-            .map(
-                |(node_id, content_sha256, byte_len, line_count, storage_format, at_rest)| {
-                    Ok((
-                        node_id,
-                        parse_text_stats(
-                            content_sha256,
-                            byte_len,
-                            line_count,
-                            &storage_format,
-                            &at_rest,
-                        )?,
-                    ))
-                },
-            )
-            .collect::<Result<HashMap<_, _>>>()
-    }
 
     fn parse_text_stats(
         content_sha256: String,
@@ -113,46 +35,6 @@ pub mod text {
                 },
             )?,
         })
-    }
-
-    /// Load a live text (its node + content) by node id, or `None` when the node
-    /// is missing, soft-deleted, or a folder.
-    pub async fn find_text(
-        pool: &PgPool,
-        crypto: &PiiCrypto,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<Option<(Node, TextObject)>> {
-        find_text_row(pool, space_id, node_id, None)
-            .await?
-            .map(|(node, row)| Ok((node, row.into_text(crypto)?)))
-            .transpose()
-    }
-
-    /// Compare the hash and select the body in the same SQL snapshot. A match
-    /// avoids transferring large values and never enters the decryption path.
-    pub async fn find_text_for_read(
-        pool: &PgPool,
-        crypto: &PiiCrypto,
-        space_id: Uuid,
-        node_id: Uuid,
-        if_none_match: Option<&str>,
-    ) -> Result<Option<(Node, TextRead)>> {
-        let Some((node, row)) = find_text_row(pool, space_id, node_id, if_none_match).await? else {
-            return Ok(None);
-        };
-        let text = if if_none_match == Some(row.content_sha256.as_str()) {
-            TextRead::Unchanged(parse_text_stats(
-                row.content_sha256,
-                row.byte_len,
-                row.line_count,
-                &row.storage_format,
-                &row.at_rest_encryption,
-            )?)
-        } else {
-            TextRead::Content(Box::new(row.into_text(crypto)?))
-        };
-        Ok(Some((node, text)))
     }
 
     async fn find_text_row(
@@ -198,240 +80,311 @@ pub mod text {
             .transpose()
     }
 
-    pub async fn find_text_object(
-        pool: &PgPool,
-        crypto: &PiiCrypto,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<Option<TextObject>> {
-        let columns = TEXT_COLUMNS
-            .split(',')
-            .map(|column| format!("d.{}", column.trim()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let row = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT {columns} FROM text_objects d \
+    impl crate::FilesRepo {
+        /// Load live text metrics without the content body.
+        pub async fn text_stats(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<TextStats>> {
+            let row: Option<(String, i64, i32, String, String)> = sqlx::query_as(
+                "SELECT d.content_sha256, d.byte_len, d.line_count, d.storage_format, d.at_rest_encryption \
+                 FROM text_objects d \
              JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
              WHERE d.space_id = $1 AND d.node_id = $2 \
-               AND n.deleted_at IS NULL AND n.kind = 'text'"
-        )))
-        .bind(space_id)
-        .bind(node_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(map_sqlx_error)?;
+               AND n.deleted_at IS NULL AND n.kind = 'text'",
+            )
+            .bind(space_id)
+            .bind(node_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
 
-        row.map(|row| row.into_text(crypto)).transpose()
-    }
-
-    /// Load live text objects for a bounded set of node ids.
-    ///
-    /// The caller already has the live node summaries, so this returns only the
-    /// text objects keyed by node id. Missing rows are omitted.
-    pub async fn find_texts(
-        pool: &PgPool,
-        crypto: &PiiCrypto,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, TextObject>> {
-        if node_ids.is_empty() {
-            return Ok(HashMap::new());
+            row.map(
+                |(content_sha256, byte_len, line_count, storage_format, at_rest)| {
+                    parse_text_stats(
+                        content_sha256,
+                        byte_len,
+                        line_count,
+                        &storage_format,
+                        &at_rest,
+                    )
+                },
+            )
+            .transpose()
         }
 
-        let columns = TEXT_COLUMNS
-            .split(',')
-            .map(|c| format!("d.{}", c.trim()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let rows: Vec<TextRow> = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT {columns} FROM text_objects d \
-             JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
-             WHERE d.space_id = $1 \
-               AND d.node_id = ANY($2) \
-               AND n.deleted_at IS NULL \
-               AND n.kind = 'text'"
-        )))
-        .bind(space_id)
-        .bind(node_ids.to_vec())
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx_error)?;
+        /// Load live text metrics for a bounded set of node ids.
+        pub async fn text_stats_many(
+            &self,
+            space_id: Uuid,
+            node_ids: &[Uuid],
+        ) -> Result<HashMap<Uuid, TextStats>> {
+            if node_ids.is_empty() {
+                return Ok(HashMap::new());
+            }
 
-        let mut texts = HashMap::with_capacity(rows.len());
-        for row in rows {
-            let text = row.into_text(crypto)?;
-            texts.insert(text.node_id, text);
+            let rows: Vec<(Uuid, String, i64, i32, String, String)> = sqlx::query_as(
+                "SELECT d.node_id, d.content_sha256, d.byte_len, d.line_count, \
+                        d.storage_format, d.at_rest_encryption \
+                 FROM text_objects d \
+                 JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
+                 WHERE d.space_id = $1 \
+                   AND d.node_id = ANY($2) \
+                   AND n.deleted_at IS NULL \
+                   AND n.kind = 'text'",
+            )
+            .bind(space_id)
+            .bind(node_ids.to_vec())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            rows.into_iter()
+                .map(
+                    |(node_id, content_sha256, byte_len, line_count, storage_format, at_rest)| {
+                        Ok((
+                            node_id,
+                            parse_text_stats(
+                                content_sha256,
+                                byte_len,
+                                line_count,
+                                &storage_format,
+                                &at_rest,
+                            )?,
+                        ))
+                    },
+                )
+                .collect::<Result<HashMap<_, _>>>()
         }
-        Ok(texts)
+
+        /// Load a live text (its node + content) by node id, or `None` when the node
+        /// is missing, soft-deleted, or a folder.
+        pub async fn find_text(
+            &self,
+            space_id: Uuid,
+            node_id: Uuid,
+        ) -> Result<Option<(Node, TextObject)>> {
+            find_text_row(&self.pool, space_id, node_id, None)
+                .await?
+                .map(|(node, row)| Ok((node, row.into_text(&self.crypto)?)))
+                .transpose()
+        }
+
+        /// Compare the hash and select the body in the same SQL snapshot. A match
+        /// avoids transferring large values and never enters the decryption path.
+        pub async fn find_text_for_read(
+            &self,
+            space_id: Uuid,
+            node_id: Uuid,
+            if_none_match: Option<&str>,
+        ) -> Result<Option<(Node, TextRead)>> {
+            let Some((node, row)) =
+                find_text_row(&self.pool, space_id, node_id, if_none_match).await?
+            else {
+                return Ok(None);
+            };
+            let text = if if_none_match == Some(row.content_sha256.as_str()) {
+                TextRead::Unchanged(parse_text_stats(
+                    row.content_sha256,
+                    row.byte_len,
+                    row.line_count,
+                    &row.storage_format,
+                    &row.at_rest_encryption,
+                )?)
+            } else {
+                TextRead::Content(Box::new(row.into_text(&self.crypto)?))
+            };
+            Ok(Some((node, text)))
+        }
+
+        pub async fn find_text_object(
+            &self,
+            space_id: Uuid,
+            node_id: Uuid,
+        ) -> Result<Option<TextObject>> {
+            let columns = TEXT_COLUMNS
+                .split(',')
+                .map(|column| format!("d.{}", column.trim()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let row = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
+                "SELECT {columns} FROM text_objects d \
+                 JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
+                 WHERE d.space_id = $1 AND d.node_id = $2 \
+                   AND n.deleted_at IS NULL AND n.kind = 'text'"
+            )))
+            .bind(space_id)
+            .bind(node_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            row.map(|row| row.into_text(&self.crypto)).transpose()
+        }
     }
 }
 
-pub mod file {
+mod file {
     //! File metadata reads.
 
     use notegate_core::Result;
     use notegate_model::files::FileStats;
     use notegate_model::{FileObject, Node};
-    use sqlx::PgPool;
+    use std::collections::HashMap;
     use uuid::Uuid;
 
     use super::super::error::map_sqlx_error;
     use super::super::rows::{FILE_COLUMNS, FileRow, NODE_COLUMNS, NodeRow};
 
-    pub async fn file_stats(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<Option<FileStats>> {
-        let columns = FILE_COLUMNS
-            .split(',')
-            .map(|c| format!("f.{}", c.trim()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let row: Option<FileRow> = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT {columns} FROM file_objects f \
-         JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
-         WHERE f.space_id = $1 AND f.node_id = $2 AND n.deleted_at IS NULL"
-        )))
-        .bind(space_id)
-        .bind(node_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        row.map(|row| {
-            let file = row.into_file()?;
-            Ok(FileStats {
-                media_type: file.media_type,
-                detected_media_type: file.detected_media_type,
-                byte_len: file.byte_len,
-                original_filename: file.original_filename,
-                encryption_mode: file.encryption_mode,
-                encryption_metadata: file.encryption_metadata,
-            })
-        })
-        .transpose()
-    }
-
-    pub async fn file_stats_many(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<std::collections::HashMap<Uuid, FileStats>> {
-        if node_ids.is_empty() {
-            return Ok(std::collections::HashMap::new());
-        }
-
-        let columns = FILE_COLUMNS
-            .split(',')
-            .map(|c| format!("f.{}", c.trim()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let rows: Vec<FileRow> = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT {columns} FROM file_objects f \
+    impl crate::FilesRepo {
+        pub async fn file_stats(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<FileStats>> {
+            let columns = FILE_COLUMNS
+                .split(',')
+                .map(|c| format!("f.{}", c.trim()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let row: Option<FileRow> = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
+                "SELECT {columns} FROM file_objects f \
              JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
-             WHERE f.space_id = $1 \
-               AND f.node_id = ANY($2) \
-               AND n.deleted_at IS NULL \
-               AND n.kind = 'file'"
-        )))
-        .bind(space_id)
-        .bind(node_ids.to_vec())
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx_error)?;
+             WHERE f.space_id = $1 AND f.node_id = $2 AND n.deleted_at IS NULL"
+            )))
+            .bind(space_id)
+            .bind(node_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
 
-        let mut stats = std::collections::HashMap::with_capacity(rows.len());
-        for row in rows {
-            let file = row.into_file()?;
-            stats.insert(
-                file.node_id,
-                FileStats {
+            row.map(|row| {
+                let file = row.into_file()?;
+                Ok(FileStats {
                     media_type: file.media_type,
                     detected_media_type: file.detected_media_type,
                     byte_len: file.byte_len,
                     original_filename: file.original_filename,
                     encryption_mode: file.encryption_mode,
                     encryption_metadata: file.encryption_metadata,
-                },
-            );
-        }
-        Ok(stats)
-    }
-
-    pub async fn find_file(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<Option<(Node, FileObject)>> {
-        let node_row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT {NODE_COLUMNS} FROM nodes \
-         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL AND kind = 'file'"
-        )))
-        .bind(space_id)
-        .bind(node_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        let Some(node_row) = node_row else {
-            return Ok(None);
-        };
-
-        let file_row = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT {FILE_COLUMNS} FROM file_objects WHERE space_id = $1 AND node_id = $2"
-        )))
-        .bind(space_id)
-        .bind(node_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        match file_row {
-            Some(file_row) => Ok(Some((node_row.into_node()?, file_row.into_file()?))),
-            None => Ok(None),
-        }
-    }
-
-    /// Load live file objects for a bounded set of node ids.
-    pub async fn find_files(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<std::collections::HashMap<Uuid, FileObject>> {
-        if node_ids.is_empty() {
-            return Ok(std::collections::HashMap::new());
+                })
+            })
+            .transpose()
         }
 
-        let columns = FILE_COLUMNS
-            .split(',')
-            .map(|column| format!("f.{}", column.trim()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let rows: Vec<FileRow> = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT {columns} FROM file_objects f \
-             JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
-             WHERE f.space_id = $1 \
-               AND f.node_id = ANY($2) \
-               AND n.deleted_at IS NULL \
-               AND n.kind = 'file'"
-        )))
-        .bind(space_id)
-        .bind(node_ids.to_vec())
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx_error)?;
+        pub async fn file_stats_many(
+            &self,
+            space_id: Uuid,
+            node_ids: &[Uuid],
+        ) -> Result<HashMap<Uuid, FileStats>> {
+            if node_ids.is_empty() {
+                return Ok(std::collections::HashMap::new());
+            }
 
-        let mut files = std::collections::HashMap::with_capacity(rows.len());
-        for row in rows {
-            let file = row.into_file()?;
-            files.insert(file.node_id, file);
+            let columns = FILE_COLUMNS
+                .split(',')
+                .map(|c| format!("f.{}", c.trim()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let rows: Vec<FileRow> = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
+                "SELECT {columns} FROM file_objects f \
+                 JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
+                 WHERE f.space_id = $1 \
+                   AND f.node_id = ANY($2) \
+                   AND n.deleted_at IS NULL \
+                   AND n.kind = 'file'"
+            )))
+            .bind(space_id)
+            .bind(node_ids.to_vec())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            let mut stats = std::collections::HashMap::with_capacity(rows.len());
+            for row in rows {
+                let file = row.into_file()?;
+                stats.insert(
+                    file.node_id,
+                    FileStats {
+                        media_type: file.media_type,
+                        detected_media_type: file.detected_media_type,
+                        byte_len: file.byte_len,
+                        original_filename: file.original_filename,
+                        encryption_mode: file.encryption_mode,
+                        encryption_metadata: file.encryption_metadata,
+                    },
+                );
+            }
+            Ok(stats)
         }
-        Ok(files)
+
+        pub async fn find_file(
+            &self,
+            space_id: Uuid,
+            node_id: Uuid,
+        ) -> Result<Option<(Node, FileObject)>> {
+            let node_row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
+                "SELECT {NODE_COLUMNS} FROM nodes \
+             WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL AND kind = 'file'"
+            )))
+            .bind(space_id)
+            .bind(node_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            let Some(node_row) = node_row else {
+                return Ok(None);
+            };
+
+            let file_row = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
+                "SELECT {FILE_COLUMNS} FROM file_objects WHERE space_id = $1 AND node_id = $2"
+            )))
+            .bind(space_id)
+            .bind(node_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            match file_row {
+                Some(file_row) => Ok(Some((node_row.into_node()?, file_row.into_file()?))),
+                None => Ok(None),
+            }
+        }
+
+        /// Load live file objects for a bounded set of node ids.
+        pub async fn find_files(
+            &self,
+            space_id: Uuid,
+            node_ids: &[Uuid],
+        ) -> Result<HashMap<Uuid, FileObject>> {
+            if node_ids.is_empty() {
+                return Ok(std::collections::HashMap::new());
+            }
+
+            let columns = FILE_COLUMNS
+                .split(',')
+                .map(|column| format!("f.{}", column.trim()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let rows: Vec<FileRow> = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
+                "SELECT {columns} FROM file_objects f \
+                 JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
+                 WHERE f.space_id = $1 \
+                   AND f.node_id = ANY($2) \
+                   AND n.deleted_at IS NULL \
+                   AND n.kind = 'file'"
+            )))
+            .bind(space_id)
+            .bind(node_ids.to_vec())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            let mut files = std::collections::HashMap::with_capacity(rows.len());
+            for row in rows {
+                let file = row.into_file()?;
+                files.insert(file.node_id, file);
+            }
+            Ok(files)
+        }
     }
 }
 
-pub mod node {
+pub(crate) mod node {
     //! Node reads, counts, depth/subtree/ancestor checks, and path derivation.
     //!
     //! Nodes have no stored path. The display path is derived by a recursive CTE
@@ -440,189 +393,18 @@ pub mod node {
 
     use chrono::{DateTime, Utc};
     use notegate_core::{Error, Result};
-    use notegate_model::files::NodeListSort;
-    use notegate_model::{Node, NodeKind, NodeSummary};
-    use sqlx::{Executor, PgPool, Postgres};
+    use notegate_model::files::{ChildrenCursor, NodeListCursor, NodeListSort};
+    use notegate_model::{Node, NodeKind, NodeSummary, Permission};
+    use sqlx::{Executor, Postgres};
     use std::collections::{HashMap, HashSet};
     use uuid::Uuid;
 
     use super::super::error::map_sqlx_error;
     use super::super::rows::{NODE_COLUMNS, NODE_SUMMARY_COLUMNS, NodeRow, NodeSummaryRow};
-    use crate::to_usize;
-
-    pub async fn permission_for(
-        pool: &PgPool,
-        space_id: Uuid,
-        account_id: Uuid,
-    ) -> Result<Option<notegate_model::Permission>> {
-        crate::space_permission::permission_for(pool, space_id, account_id).await
-    }
-
-    /// Load a live node by id within a space.
-    pub async fn find_node(pool: &PgPool, space_id: Uuid, node_id: Uuid) -> Result<Option<Node>> {
-        let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT {NODE_COLUMNS} FROM nodes \
-         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL"
-        )))
-        .bind(space_id)
-        .bind(node_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        row.map(NodeRow::into_node).transpose()
-    }
-
-    /// Load a bounded set of live nodes by id within a space.
-    pub async fn find_nodes(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, Node>> {
-        if node_ids.is_empty() {
-            return Ok(HashMap::new());
-        }
-        let rows: Vec<NodeRow> = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
-            "SELECT {NODE_COLUMNS} FROM nodes \
-             WHERE space_id = $1 AND id = ANY($2) AND deleted_at IS NULL"
-        )))
-        .bind(space_id)
-        .bind(node_ids.to_vec())
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        let mut nodes = HashMap::with_capacity(rows.len());
-        for row in rows {
-            let node = row.into_node()?;
-            nodes.insert(node.id, node);
-        }
-        Ok(nodes)
-    }
-
-    /// The derived absolute display path of a live node (root = `/`), or `None`.
-    ///
-    /// Walks the parent chain upward via a recursive CTE, prepending each ancestor's
-    /// name. The chain is bounded by the depth limit (≤7 below root) so the recursion
-    /// terminates well within Postgres limits.
-    pub async fn node_path(pool: &PgPool, space_id: Uuid, node_id: Uuid) -> Result<Option<String>> {
-        derive_path(pool, space_id, node_id).await
-    }
-
-    /// Derived absolute display paths for a bounded set of live nodes.
-    pub async fn node_paths_many(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<std::collections::HashMap<Uuid, String>> {
-        if node_ids.is_empty() {
-            return Ok(std::collections::HashMap::new());
-        }
-
-        let rows: Vec<(Uuid, String)> = sqlx::query_as(
-            "WITH RECURSIVE chain AS ( \
-                SELECT id AS target_id, id, parent_id, name, 0 AS depth \
-                FROM nodes \
-                WHERE space_id = $1 AND id = ANY($2) AND deleted_at IS NULL \
-                UNION ALL \
-                SELECT c.target_id, n.id, n.parent_id, n.name, c.depth + 1 \
-                FROM nodes n \
-                JOIN chain c ON n.id = c.parent_id \
-                WHERE n.space_id = $1 AND n.deleted_at IS NULL \
-             ) \
-             SELECT target_id, \
-                    CASE WHEN max(depth) = 0 THEN '/' \
-                         ELSE '/' || string_agg(name, '/' ORDER BY depth DESC) \
-                              FILTER (WHERE parent_id IS NOT NULL) \
-                    END AS path \
-             FROM chain \
-             GROUP BY target_id",
-        )
-        .bind(space_id)
-        .bind(node_ids.to_vec())
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        Ok(rows.into_iter().collect())
-    }
-
-    /// Live ancestor chain from root to `node_id`, including the target.
-    ///
-    /// Returns an empty vector when the target is missing or soft-deleted. The
-    /// caller can use the result to reveal a node in a lazily loaded tree.
-    pub async fn ancestor_chain(pool: &PgPool, space_id: Uuid, node_id: Uuid) -> Result<Vec<Node>> {
-        let rows: Vec<NodeRow> = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
-            "WITH RECURSIVE chain AS ( \
-                SELECT {NODE_COLUMNS}, 0 AS depth \
-                FROM nodes \
-                WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
-                UNION ALL \
-                SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, \
-                       n.external_access_enabled, n.write_locked, \
-                       n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
-                       n.purge_after, n.created_at, n.updated_at, n.deleted_at, c.depth + 1 AS depth \
-                FROM nodes n \
-                JOIN chain c ON n.id = c.parent_id \
-                WHERE n.space_id = $1 AND n.deleted_at IS NULL \
-            ) \
-            SELECT {NODE_COLUMNS} FROM chain ORDER BY depth DESC"
-        )))
-        .bind(space_id)
-        .bind(node_id)
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        rows.into_iter().map(NodeRow::into_node).collect()
-    }
-
-    /// Directly locked ancestors for a bounded set of live nodes, ordered from
-    /// the root toward each requested node.
-    pub async fn direct_write_lock_ancestors_many(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, Vec<(Uuid, String, bool)>>> {
-        if node_ids.is_empty() {
-            return Ok(HashMap::new());
-        }
-
-        let rows: Vec<(Uuid, Uuid, String, bool)> = sqlx::query_as(
-            "WITH RECURSIVE chain AS ( \
-                SELECT id AS target_id, id, parent_id, name, write_locked, external_access_enabled, 0 AS depth \
-                FROM nodes \
-                WHERE space_id = $1 AND id = ANY($2) AND deleted_at IS NULL \
-                UNION ALL \
-                SELECT c.target_id, n.id, n.parent_id, n.name, n.write_locked, n.external_access_enabled, c.depth + 1 \
-                FROM nodes n \
-                JOIN chain c ON n.id = c.parent_id \
-                WHERE n.space_id = $1 AND n.deleted_at IS NULL \
-             ) \
-             SELECT target_id, id, name, external_access_enabled \
-             FROM chain \
-             WHERE write_locked \
-             ORDER BY target_id, depth DESC",
-        )
-        .bind(space_id)
-        .bind(node_ids.to_vec())
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        let mut sources = HashMap::new();
-        for (target_id, source_id, name, external_access_enabled) in rows {
-            sources.entry(target_id).or_insert_with(Vec::new).push((
-                source_id,
-                name,
-                external_access_enabled,
-            ));
-        }
-        Ok(sources)
-    }
 
     /// Shared path-derivation CTE used by pool and transaction callers.
     /// Returns the absolute path of a live node, or `None` if it is missing/deleted.
-    pub async fn derive_path<'e, E>(
+    pub(crate) async fn derive_path<'e, E>(
         executor: E,
         space_id: Uuid,
         node_id: Uuid,
@@ -660,425 +442,624 @@ pub mod node {
         Ok(path.map(|p| if p == "/" { p } else { format!("/{p}") }))
     }
 
-    /// Whether a node has any live direct children.
-    pub async fn has_children(
-        pool: &PgPool,
-        external_only: bool,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<bool> {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS ( \
-            SELECT 1 FROM nodes \
-            WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL AND (NOT $3 OR node_external_access_allowed(space_id, id)) \
-         )",
-        )
-        .bind(space_id)
-        .bind(node_id)
-        .bind(external_only)
-        .fetch_one(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        Ok(exists)
-    }
-
-    /// Whether each node in a bounded set has any live direct children.
-    pub async fn has_children_many(
-        pool: &PgPool,
-        external_only: bool,
-        space_id: Uuid,
-        node_ids: &[Uuid],
-    ) -> Result<std::collections::HashMap<Uuid, bool>> {
-        if node_ids.is_empty() {
-            return Ok(std::collections::HashMap::new());
-        }
-
-        let rows: Vec<(Uuid,)> = sqlx::query_as(
-            "SELECT parent_id::uuid \
-             FROM nodes \
-             WHERE space_id = $1 \
-               AND parent_id = ANY($2) \
-               AND deleted_at IS NULL AND (NOT $3 OR node_external_access_allowed(space_id, id)) \
-             GROUP BY parent_id",
-        )
-        .bind(space_id)
-        .bind(node_ids.to_vec())
-        .bind(external_only)
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        Ok(rows.into_iter().map(|(node_id,)| (node_id, true)).collect())
-    }
-
-    /// A page of live direct children, keyset-ordered by `(sort_order, name, id)`.
-    /// Fetches `limit + 1` rows to detect whether more follow.
-    pub async fn paged_child_summaries(
-        pool: &PgPool,
-        external_only: bool,
-        space_id: Uuid,
-        parent_node_id: Uuid,
-        limit: i64,
-        cursor: Option<(i32, &str, Uuid)>,
-    ) -> Result<(Vec<NodeSummary>, bool)> {
-        let access_filter = if external_only {
-            "AND node_external_access_allowed(space_id, id)"
-        } else {
-            ""
-        };
-        let fetch = limit + 1;
-        let rows: Vec<NodeSummaryRow> = match cursor {
-            None => {
-                sqlx::query_as::<_, NodeSummaryRow>(sqlx::AssertSqlSafe(format!(
-                    "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
-                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
-                 ORDER BY sort_order, name, id \
-                 LIMIT $3"
-                )))
-                .bind(space_id)
-                .bind(parent_node_id)
-                .bind(fetch)
-                .fetch_all(pool)
-                .await
-            }
-            Some((sort_order, name, id)) => {
-                sqlx::query_as::<_, NodeSummaryRow>(sqlx::AssertSqlSafe(format!(
-                    "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
-                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
-                   AND (sort_order, name, id) > ($3, $4, $5) \
-                 ORDER BY sort_order, name, id \
-                 LIMIT $6"
-                )))
-                .bind(space_id)
-                .bind(parent_node_id)
-                .bind(sort_order)
-                .bind(name)
-                .bind(id)
-                .bind(fetch)
-                .fetch_all(pool)
-                .await
-            }
-        }
-        .map_err(map_sqlx_error)?;
-
-        let has_more = rows.len() as i64 > limit;
-        let mut nodes: Vec<NodeSummary> = rows
-            .into_iter()
-            .take(limit as usize)
-            .map(NodeSummaryRow::into_summary)
-            .collect::<Result<_>>()?;
-        nodes.shrink_to_fit();
-        Ok((nodes, has_more))
-    }
-
-    /// Canonical child nodes for internal tree traversal. Collection endpoints
-    /// use `paged_child_summaries` to avoid loading large metadata columns.
-    pub async fn paged_children(
-        pool: &PgPool,
-        external_only: bool,
-        space_id: Uuid,
-        parent_node_id: Uuid,
-        limit: i64,
-        cursor: Option<(i32, &str, Uuid)>,
-    ) -> Result<(Vec<Node>, bool)> {
-        let access_filter = if external_only {
-            "AND node_external_access_allowed(space_id, id)"
-        } else {
-            ""
-        };
-        let fetch = limit + 1;
-        let rows: Vec<NodeRow> = match cursor {
-            None => {
-                sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
-                    "SELECT {NODE_COLUMNS} FROM nodes \
-                     WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
-                     ORDER BY sort_order, name, id \
-                     LIMIT $3"
-                )))
-                .bind(space_id)
-                .bind(parent_node_id)
-                .bind(fetch)
-                .fetch_all(pool)
-                .await
-            }
-            Some((sort_order, name, id)) => {
-                sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
-                    "SELECT {NODE_COLUMNS} FROM nodes \
-                     WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
-                       AND (sort_order, name, id) > ($3, $4, $5) \
-                     ORDER BY sort_order, name, id \
-                     LIMIT $6"
-                )))
-                .bind(space_id)
-                .bind(parent_node_id)
-                .bind(sort_order)
-                .bind(name)
-                .bind(id)
-                .bind(fetch)
-                .fetch_all(pool)
-                .await
-            }
-        }
-        .map_err(map_sqlx_error)?;
-
-        let has_more = rows.len() as i64 > limit;
-        let mut nodes: Vec<Node> = rows
-            .into_iter()
-            .take(limit as usize)
-            .map(NodeRow::into_node)
-            .collect::<Result<_>>()?;
-        nodes.shrink_to_fit();
-        Ok((nodes, has_more))
-    }
-
-    /// First children page for each parent in a bounded ordered set.
-    pub async fn first_children_pages(
-        pool: &PgPool,
-        external_only: bool,
-        space_id: Uuid,
-        parent_node_ids: &[Uuid],
-        limit: i64,
-    ) -> Result<(HashMap<Uuid, Vec<NodeSummary>>, HashSet<Uuid>)> {
-        if parent_node_ids.is_empty() {
-            return Ok((HashMap::new(), HashSet::new()));
-        }
-        let access_filter = if external_only {
-            "AND node_external_access_allowed(space_id, id)"
-        } else {
-            ""
-        };
-        let fetch = limit + 1;
-        let rows: Vec<NodeSummaryRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT child.* \
-                 FROM UNNEST($2::uuid[]) WITH ORDINALITY AS requested(parent_id, position) \
-                 CROSS JOIN LATERAL ( \
-                   SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
-                   WHERE space_id = $1 \
-                     AND parent_id = requested.parent_id \
-                     AND deleted_at IS NULL {access_filter} \
-                   ORDER BY sort_order, name, id \
-                   LIMIT $3 \
-                 ) AS child \
-                 ORDER BY requested.position, child.sort_order, child.name, child.id"
-        )))
-        .bind(space_id)
-        .bind(parent_node_ids.to_vec())
-        .bind(fetch)
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        let mut children_by_parent = HashMap::with_capacity(parent_node_ids.len());
-        for row in rows {
-            let node = row.into_summary()?;
-            if let Some(parent_id) = node.parent_id {
-                children_by_parent
-                    .entry(parent_id)
-                    .or_insert_with(Vec::new)
-                    .push(node);
-            }
-        }
-
-        let mut parents_with_more = HashSet::new();
-        for parent_id in parent_node_ids {
-            let children = children_by_parent.entry(*parent_id).or_default();
-            if children.len() as i64 > limit {
-                children.truncate(limit as usize);
-                children.shrink_to_fit();
-                parents_with_more.insert(*parent_id);
-            }
-        }
-        Ok((children_by_parent, parents_with_more))
-    }
-
-    /// A page of live non-root nodes in a space, ordered for list-style views.
-    ///
-    /// This is intentionally space-wide and does not replace `paged_children`,
-    /// which remains the tree/navigation query.
-    pub async fn paged_node_summaries(
-        pool: &PgPool,
-        external_only: bool,
-        space_id: Uuid,
-        kind: Option<NodeKind>,
-        sort: NodeListSort,
-        limit: i64,
-        cursor: Option<NodeListDbCursor<'_>>,
-    ) -> Result<(Vec<NodeSummary>, bool)> {
-        let access_filter = if external_only {
-            "AND node_external_access_allowed(space_id, id)"
-        } else {
-            ""
-        };
-        let fetch = limit + 1;
-        let kind = kind.map(|kind| kind.as_str().to_owned());
-
-        let order_by = match sort {
-            NodeListSort::UpdatedAtDesc => "updated_at DESC, id DESC",
-            NodeListSort::NameAsc => "name, id",
-        };
-        let cursor_predicate = match (sort, cursor) {
-            (NodeListSort::UpdatedAtDesc, None) | (NodeListSort::NameAsc, None) => "",
-            (NodeListSort::UpdatedAtDesc, Some(NodeListDbCursor::UpdatedAtDesc { .. })) => {
-                "AND (updated_at, id) < ($3, $4) "
-            }
-            (NodeListSort::NameAsc, Some(NodeListDbCursor::NameAsc { .. })) => {
-                "AND (name, id) > ($3, $4) "
-            }
-            _ => return Err(Error::internal("node list cursor sort mismatch")),
-        };
-        let limit_placeholder = if cursor.is_some() { "$5" } else { "$3" };
-
-        let sql = format!(
-            "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
-             WHERE space_id = $1 \
-               AND deleted_at IS NULL {access_filter} \
-               AND parent_id IS NOT NULL \
-               AND ($2::text IS NULL OR kind = $2) \
-               {cursor_predicate}\
-             ORDER BY {order_by} \
-             LIMIT {limit_placeholder}"
-        );
-        let query = sqlx::query_as::<_, NodeSummaryRow>(sqlx::AssertSqlSafe(sql))
-            .bind(space_id)
-            .bind(kind.as_deref());
-
-        let rows: Vec<NodeSummaryRow> = match cursor {
-            None => query.bind(fetch).fetch_all(pool).await,
-            Some(NodeListDbCursor::UpdatedAtDesc { updated_at, id }) => {
-                query
-                    .bind(updated_at)
-                    .bind(id)
-                    .bind(fetch)
-                    .fetch_all(pool)
-                    .await
-            }
-            Some(NodeListDbCursor::NameAsc { name, id }) => {
-                query.bind(name).bind(id).bind(fetch).fetch_all(pool).await
-            }
-        }
-        .map_err(map_sqlx_error)?;
-
-        let has_more = rows.len() as i64 > limit;
-        let mut nodes: Vec<NodeSummary> = rows
-            .into_iter()
-            .take(limit as usize)
-            .map(NodeSummaryRow::into_summary)
-            .collect::<Result<_>>()?;
-        nodes.shrink_to_fit();
-        Ok((nodes, has_more))
-    }
-
-    /// Canonical nodes for the full REST collection view.
-    pub async fn paged_nodes(
-        pool: &PgPool,
-        external_only: bool,
-        space_id: Uuid,
-        kind: Option<NodeKind>,
-        sort: NodeListSort,
-        limit: i64,
-        cursor: Option<NodeListDbCursor<'_>>,
-    ) -> Result<(Vec<Node>, bool)> {
-        let access_filter = if external_only {
-            "AND node_external_access_allowed(space_id, id)"
-        } else {
-            ""
-        };
-        let fetch = limit + 1;
-        let kind = kind.map(|kind| kind.as_str().to_owned());
-        let order_by = match sort {
-            NodeListSort::UpdatedAtDesc => "updated_at DESC, id DESC",
-            NodeListSort::NameAsc => "name, id",
-        };
-        let cursor_predicate = match (sort, cursor) {
-            (NodeListSort::UpdatedAtDesc, None) | (NodeListSort::NameAsc, None) => "",
-            (NodeListSort::UpdatedAtDesc, Some(NodeListDbCursor::UpdatedAtDesc { .. })) => {
-                "AND (updated_at, id) < ($3, $4) "
-            }
-            (NodeListSort::NameAsc, Some(NodeListDbCursor::NameAsc { .. })) => {
-                "AND (name, id) > ($3, $4) "
-            }
-            _ => return Err(Error::internal("node list cursor sort mismatch")),
-        };
-        let limit_placeholder = if cursor.is_some() { "$5" } else { "$3" };
-        let sql = format!(
-            "SELECT {NODE_COLUMNS} FROM nodes \
-             WHERE space_id = $1 \
-               AND deleted_at IS NULL {access_filter} \
-               AND parent_id IS NOT NULL \
-               AND ($2::text IS NULL OR kind = $2) \
-               {cursor_predicate}\
-             ORDER BY {order_by} \
-             LIMIT {limit_placeholder}"
-        );
-        let query = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(sql))
-            .bind(space_id)
-            .bind(kind.as_deref());
-        let rows: Vec<NodeRow> = match cursor {
-            None => query.bind(fetch).fetch_all(pool).await,
-            Some(NodeListDbCursor::UpdatedAtDesc { updated_at, id }) => {
-                query
-                    .bind(updated_at)
-                    .bind(id)
-                    .bind(fetch)
-                    .fetch_all(pool)
-                    .await
-            }
-            Some(NodeListDbCursor::NameAsc { name, id }) => {
-                query.bind(name).bind(id).bind(fetch).fetch_all(pool).await
-            }
-        }
-        .map_err(map_sqlx_error)?;
-
-        let has_more = rows.len() as i64 > limit;
-        let mut nodes: Vec<Node> = rows
-            .into_iter()
-            .take(limit as usize)
-            .map(NodeRow::into_node)
-            .collect::<Result<_>>()?;
-        nodes.shrink_to_fit();
-        Ok((nodes, has_more))
-    }
-
     #[derive(Debug, Clone, Copy)]
-    pub enum NodeListDbCursor<'a> {
+    enum NodeListDbCursor<'a> {
         UpdatedAtDesc { updated_at: DateTime<Utc>, id: Uuid },
         NameAsc { name: &'a str, id: Uuid },
     }
 
-    /// Count of live nodes in the subtree rooted at `node_id` (including itself).
-    pub async fn subtree_live_count(pool: &PgPool, space_id: Uuid, node_id: Uuid) -> Result<usize> {
-        let count: i64 = sqlx::query_scalar(
-            "WITH RECURSIVE subtree AS ( \
-            SELECT id \
-            FROM nodes \
-            WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
-            UNION ALL \
-            SELECT n.id \
-            FROM nodes n \
-            JOIN subtree s ON n.parent_id = s.id \
-            WHERE n.space_id = $1 AND n.deleted_at IS NULL \
-         ) \
-         SELECT count(*) FROM subtree",
-        )
-        .bind(space_id)
-        .bind(node_id)
-        .fetch_one(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        to_usize(count, "subtree node")
+    impl crate::FilesRepo {
+        /// Canonical child nodes for internal tree traversal. Collection endpoints
+        /// use `paged_child_summaries` to avoid loading large metadata columns.
+        pub async fn paged_children(
+            &self,
+            space_id: Uuid,
+            parent_node_id: Uuid,
+            limit: i64,
+            cursor: Option<&ChildrenCursor>,
+        ) -> Result<(Vec<Node>, bool)> {
+            let cursor = cursor.map(|c| (c.sort_order, c.name.as_str(), c.id));
+
+            let access_filter = if self.external_only {
+                "AND node_external_access_allowed(space_id, id)"
+            } else {
+                ""
+            };
+            let fetch = limit + 1;
+            let rows: Vec<NodeRow> = match cursor {
+                None => {
+                    sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
+                        "SELECT {NODE_COLUMNS} FROM nodes \
+                     WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
+                     ORDER BY sort_order, name, id \
+                     LIMIT $3"
+                    )))
+                    .bind(space_id)
+                    .bind(parent_node_id)
+                    .bind(fetch)
+                    .fetch_all(&self.pool)
+                    .await
+                }
+                Some((sort_order, name, id)) => {
+                    sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
+                        "SELECT {NODE_COLUMNS} FROM nodes \
+                     WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
+                       AND (sort_order, name, id) > ($3, $4, $5) \
+                     ORDER BY sort_order, name, id \
+                     LIMIT $6"
+                    )))
+                    .bind(space_id)
+                    .bind(parent_node_id)
+                    .bind(sort_order)
+                    .bind(name)
+                    .bind(id)
+                    .bind(fetch)
+                    .fetch_all(&self.pool)
+                    .await
+                }
+            }
+            .map_err(map_sqlx_error)?;
+
+            let has_more = rows.len() as i64 > limit;
+            let mut nodes: Vec<Node> = rows
+                .into_iter()
+                .take(limit as usize)
+                .map(NodeRow::into_node)
+                .collect::<Result<_>>()?;
+            nodes.shrink_to_fit();
+            Ok((nodes, has_more))
+        }
+
+        /// A page of live direct children, keyset-ordered by `(sort_order, name, id)`.
+        /// Fetches `limit + 1` rows to detect whether more follow.
+        pub async fn paged_child_summaries(
+            &self,
+            space_id: Uuid,
+            parent_node_id: Uuid,
+            limit: i64,
+            cursor: Option<&ChildrenCursor>,
+        ) -> Result<(Vec<NodeSummary>, bool)> {
+            let cursor = cursor.map(|c| (c.sort_order, c.name.as_str(), c.id));
+
+            let access_filter = if self.external_only {
+                "AND node_external_access_allowed(space_id, id)"
+            } else {
+                ""
+            };
+            let fetch = limit + 1;
+            let rows: Vec<NodeSummaryRow> = match cursor {
+                None => {
+                    sqlx::query_as::<_, NodeSummaryRow>(sqlx::AssertSqlSafe(format!(
+                        "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
+                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
+                 ORDER BY sort_order, name, id \
+                 LIMIT $3"
+                    )))
+                    .bind(space_id)
+                    .bind(parent_node_id)
+                    .bind(fetch)
+                    .fetch_all(&self.pool)
+                    .await
+                }
+                Some((sort_order, name, id)) => {
+                    sqlx::query_as::<_, NodeSummaryRow>(sqlx::AssertSqlSafe(format!(
+                        "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
+                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
+                   AND (sort_order, name, id) > ($3, $4, $5) \
+                 ORDER BY sort_order, name, id \
+                 LIMIT $6"
+                    )))
+                    .bind(space_id)
+                    .bind(parent_node_id)
+                    .bind(sort_order)
+                    .bind(name)
+                    .bind(id)
+                    .bind(fetch)
+                    .fetch_all(&self.pool)
+                    .await
+                }
+            }
+            .map_err(map_sqlx_error)?;
+
+            let has_more = rows.len() as i64 > limit;
+            let mut nodes: Vec<NodeSummary> = rows
+                .into_iter()
+                .take(limit as usize)
+                .map(NodeSummaryRow::into_summary)
+                .collect::<Result<_>>()?;
+            nodes.shrink_to_fit();
+            Ok((nodes, has_more))
+        }
+
+        /// A page of live non-root nodes in a space, ordered for list-style views.
+        ///
+        /// This is intentionally space-wide and does not replace `paged_children`,
+        /// which remains the tree/navigation query.
+        pub async fn paged_node_summaries(
+            &self,
+            space_id: Uuid,
+            kind: Option<NodeKind>,
+            sort: NodeListSort,
+            limit: i64,
+            cursor: Option<&NodeListCursor>,
+        ) -> Result<(Vec<NodeSummary>, bool)> {
+            let cursor = match cursor {
+                Some(NodeListCursor::UpdatedAtDesc { updated_at, id, .. }) => {
+                    Some(NodeListDbCursor::UpdatedAtDesc {
+                        updated_at: *updated_at,
+                        id: *id,
+                    })
+                }
+                Some(NodeListCursor::NameAsc { name, id, .. }) => Some(NodeListDbCursor::NameAsc {
+                    name: name.as_str(),
+                    id: *id,
+                }),
+                None => None,
+            };
+
+            let access_filter = if self.external_only {
+                "AND node_external_access_allowed(space_id, id)"
+            } else {
+                ""
+            };
+            let fetch = limit + 1;
+            let kind = kind.map(|kind| kind.as_str().to_owned());
+
+            let order_by = match sort {
+                NodeListSort::UpdatedAtDesc => "updated_at DESC, id DESC",
+                NodeListSort::NameAsc => "name, id",
+            };
+            let cursor_predicate = match (sort, cursor) {
+                (NodeListSort::UpdatedAtDesc, None) | (NodeListSort::NameAsc, None) => "",
+                (NodeListSort::UpdatedAtDesc, Some(NodeListDbCursor::UpdatedAtDesc { .. })) => {
+                    "AND (updated_at, id) < ($3, $4) "
+                }
+                (NodeListSort::NameAsc, Some(NodeListDbCursor::NameAsc { .. })) => {
+                    "AND (name, id) > ($3, $4) "
+                }
+                _ => return Err(Error::internal("node list cursor sort mismatch")),
+            };
+            let limit_placeholder = if cursor.is_some() { "$5" } else { "$3" };
+
+            let sql = format!(
+                "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
+             WHERE space_id = $1 \
+               AND deleted_at IS NULL {access_filter} \
+               AND parent_id IS NOT NULL \
+               AND ($2::text IS NULL OR kind = $2) \
+               {cursor_predicate}\
+             ORDER BY {order_by} \
+             LIMIT {limit_placeholder}"
+            );
+            let query = sqlx::query_as::<_, NodeSummaryRow>(sqlx::AssertSqlSafe(sql))
+                .bind(space_id)
+                .bind(kind.as_deref());
+
+            let rows: Vec<NodeSummaryRow> = match cursor {
+                None => query.bind(fetch).fetch_all(&self.pool).await,
+                Some(NodeListDbCursor::UpdatedAtDesc { updated_at, id }) => {
+                    query
+                        .bind(updated_at)
+                        .bind(id)
+                        .bind(fetch)
+                        .fetch_all(&self.pool)
+                        .await
+                }
+                Some(NodeListDbCursor::NameAsc { name, id }) => {
+                    query
+                        .bind(name)
+                        .bind(id)
+                        .bind(fetch)
+                        .fetch_all(&self.pool)
+                        .await
+                }
+            }
+            .map_err(map_sqlx_error)?;
+
+            let has_more = rows.len() as i64 > limit;
+            let mut nodes: Vec<NodeSummary> = rows
+                .into_iter()
+                .take(limit as usize)
+                .map(NodeSummaryRow::into_summary)
+                .collect::<Result<_>>()?;
+            nodes.shrink_to_fit();
+            Ok((nodes, has_more))
+        }
+
+        /// Canonical nodes for the full REST collection view.
+        pub async fn paged_nodes(
+            &self,
+            space_id: Uuid,
+            kind: Option<NodeKind>,
+            sort: NodeListSort,
+            limit: i64,
+            cursor: Option<&NodeListCursor>,
+        ) -> Result<(Vec<Node>, bool)> {
+            let cursor = match cursor {
+                Some(NodeListCursor::UpdatedAtDesc { updated_at, id, .. }) => {
+                    Some(NodeListDbCursor::UpdatedAtDesc {
+                        updated_at: *updated_at,
+                        id: *id,
+                    })
+                }
+                Some(NodeListCursor::NameAsc { name, id, .. }) => Some(NodeListDbCursor::NameAsc {
+                    name: name.as_str(),
+                    id: *id,
+                }),
+                None => None,
+            };
+
+            let access_filter = if self.external_only {
+                "AND node_external_access_allowed(space_id, id)"
+            } else {
+                ""
+            };
+            let fetch = limit + 1;
+            let kind = kind.map(|kind| kind.as_str().to_owned());
+            let order_by = match sort {
+                NodeListSort::UpdatedAtDesc => "updated_at DESC, id DESC",
+                NodeListSort::NameAsc => "name, id",
+            };
+            let cursor_predicate = match (sort, cursor) {
+                (NodeListSort::UpdatedAtDesc, None) | (NodeListSort::NameAsc, None) => "",
+                (NodeListSort::UpdatedAtDesc, Some(NodeListDbCursor::UpdatedAtDesc { .. })) => {
+                    "AND (updated_at, id) < ($3, $4) "
+                }
+                (NodeListSort::NameAsc, Some(NodeListDbCursor::NameAsc { .. })) => {
+                    "AND (name, id) > ($3, $4) "
+                }
+                _ => return Err(Error::internal("node list cursor sort mismatch")),
+            };
+            let limit_placeholder = if cursor.is_some() { "$5" } else { "$3" };
+            let sql = format!(
+                "SELECT {NODE_COLUMNS} FROM nodes \
+             WHERE space_id = $1 \
+               AND deleted_at IS NULL {access_filter} \
+               AND parent_id IS NOT NULL \
+               AND ($2::text IS NULL OR kind = $2) \
+               {cursor_predicate}\
+             ORDER BY {order_by} \
+             LIMIT {limit_placeholder}"
+            );
+            let query = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(sql))
+                .bind(space_id)
+                .bind(kind.as_deref());
+            let rows: Vec<NodeRow> = match cursor {
+                None => query.bind(fetch).fetch_all(&self.pool).await,
+                Some(NodeListDbCursor::UpdatedAtDesc { updated_at, id }) => {
+                    query
+                        .bind(updated_at)
+                        .bind(id)
+                        .bind(fetch)
+                        .fetch_all(&self.pool)
+                        .await
+                }
+                Some(NodeListDbCursor::NameAsc { name, id }) => {
+                    query
+                        .bind(name)
+                        .bind(id)
+                        .bind(fetch)
+                        .fetch_all(&self.pool)
+                        .await
+                }
+            }
+            .map_err(map_sqlx_error)?;
+
+            let has_more = rows.len() as i64 > limit;
+            let mut nodes: Vec<Node> = rows
+                .into_iter()
+                .take(limit as usize)
+                .map(NodeRow::into_node)
+                .collect::<Result<_>>()?;
+            nodes.shrink_to_fit();
+            Ok((nodes, has_more))
+        }
+
+        pub async fn externally_accessible_node_ids(
+            &self,
+            space_id: Uuid,
+            node_ids: &[Uuid],
+            include_deleted: bool,
+        ) -> Result<HashSet<Uuid>> {
+            if node_ids.is_empty() {
+                return Ok(HashSet::new());
+            }
+            let ids: Vec<Uuid> = sqlx::query_scalar(
+                "SELECT id FROM nodes WHERE space_id = $1 AND id = ANY($2) \
+             AND ($3 OR deleted_at IS NULL) AND node_external_access_allowed(space_id, id)",
+            )
+            .bind(space_id)
+            .bind(node_ids)
+            .bind(include_deleted)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(crate::map_sqlx_error)?;
+            Ok(ids.into_iter().collect())
+        }
+
+        /// Load a live node by id within a space.
+        pub async fn find_node(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<Node>> {
+            let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
+                "SELECT {NODE_COLUMNS} FROM nodes \
+             WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL"
+            )))
+            .bind(space_id)
+            .bind(node_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+            row.map(NodeRow::into_node).transpose()
+        }
+
+        /// Load a bounded set of live nodes by id within a space.
+        pub async fn find_nodes(
+            &self,
+            space_id: Uuid,
+            node_ids: &[Uuid],
+        ) -> Result<HashMap<Uuid, Node>> {
+            if node_ids.is_empty() {
+                return Ok(HashMap::new());
+            }
+            let rows: Vec<NodeRow> = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
+                "SELECT {NODE_COLUMNS} FROM nodes \
+                 WHERE space_id = $1 AND id = ANY($2) AND deleted_at IS NULL"
+            )))
+            .bind(space_id)
+            .bind(node_ids.to_vec())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            let mut nodes = HashMap::with_capacity(rows.len());
+            for row in rows {
+                let node = row.into_node()?;
+                nodes.insert(node.id, node);
+            }
+            Ok(nodes)
+        }
+
+        /// The derived absolute display path of a live node (root = `/`), or `None`.
+        ///
+        /// Walks the parent chain upward via a recursive CTE, prepending each ancestor's
+        /// name. The chain is bounded by the depth limit (≤7 below root) so the recursion
+        /// terminates well within Postgres limits.
+        pub async fn node_path(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<String>> {
+            derive_path(&self.pool, space_id, node_id).await
+        }
+
+        /// Derived absolute display paths for a bounded set of live nodes.
+        pub async fn node_paths_many(
+            &self,
+            space_id: Uuid,
+            node_ids: &[Uuid],
+        ) -> Result<HashMap<Uuid, String>> {
+            if node_ids.is_empty() {
+                return Ok(std::collections::HashMap::new());
+            }
+
+            let rows: Vec<(Uuid, String)> = sqlx::query_as(
+                "WITH RECURSIVE chain AS ( \
+                    SELECT id AS target_id, id, parent_id, name, 0 AS depth \
+                    FROM nodes \
+                    WHERE space_id = $1 AND id = ANY($2) AND deleted_at IS NULL \
+                    UNION ALL \
+                    SELECT c.target_id, n.id, n.parent_id, n.name, c.depth + 1 \
+                    FROM nodes n \
+                    JOIN chain c ON n.id = c.parent_id \
+                    WHERE n.space_id = $1 AND n.deleted_at IS NULL \
+                 ) \
+                 SELECT target_id, \
+                        CASE WHEN max(depth) = 0 THEN '/' \
+                             ELSE '/' || string_agg(name, '/' ORDER BY depth DESC) \
+                                  FILTER (WHERE parent_id IS NOT NULL) \
+                        END AS path \
+                 FROM chain \
+                 GROUP BY target_id",
+            )
+            .bind(space_id)
+            .bind(node_ids.to_vec())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            Ok(rows.into_iter().collect())
+        }
+
+        /// Live ancestor chain from root to `node_id`, including the target.
+        ///
+        /// Returns an empty vector when the target is missing or soft-deleted. The
+        /// caller can use the result to reveal a node in a lazily loaded tree.
+        pub async fn ancestor_chain(&self, space_id: Uuid, node_id: Uuid) -> Result<Vec<Node>> {
+            let rows: Vec<NodeRow> = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
+                "WITH RECURSIVE chain AS ( \
+                    SELECT {NODE_COLUMNS}, 0 AS depth \
+                    FROM nodes \
+                    WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+                    UNION ALL \
+                    SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, \
+                           n.external_access_enabled, n.write_locked, \
+                           n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
+                           n.purge_after, n.created_at, n.updated_at, n.deleted_at, c.depth + 1 AS depth \
+                    FROM nodes n \
+                    JOIN chain c ON n.id = c.parent_id \
+                    WHERE n.space_id = $1 AND n.deleted_at IS NULL \
+                ) \
+                SELECT {NODE_COLUMNS} FROM chain ORDER BY depth DESC"
+            )))
+            .bind(space_id)
+            .bind(node_id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            rows.into_iter().map(NodeRow::into_node).collect()
+        }
+
+        /// Directly locked ancestors for a bounded set of live nodes, ordered from
+        /// the root toward each requested node.
+        pub async fn direct_write_lock_ancestors_many(
+            &self,
+            space_id: Uuid,
+            node_ids: &[Uuid],
+        ) -> Result<HashMap<Uuid, Vec<(Uuid, String, bool)>>> {
+            if node_ids.is_empty() {
+                return Ok(HashMap::new());
+            }
+
+            let rows: Vec<(Uuid, Uuid, String, bool)> = sqlx::query_as(
+                "WITH RECURSIVE chain AS ( \
+                    SELECT id AS target_id, id, parent_id, name, write_locked, external_access_enabled, 0 AS depth \
+                    FROM nodes \
+                    WHERE space_id = $1 AND id = ANY($2) AND deleted_at IS NULL \
+                    UNION ALL \
+                    SELECT c.target_id, n.id, n.parent_id, n.name, n.write_locked, n.external_access_enabled, c.depth + 1 \
+                    FROM nodes n \
+                    JOIN chain c ON n.id = c.parent_id \
+                    WHERE n.space_id = $1 AND n.deleted_at IS NULL \
+                 ) \
+                 SELECT target_id, id, name, external_access_enabled \
+                 FROM chain \
+                 WHERE write_locked \
+                 ORDER BY target_id, depth DESC",
+            )
+            .bind(space_id)
+            .bind(node_ids.to_vec())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            let mut sources = HashMap::new();
+            for (target_id, source_id, name, external_access_enabled) in rows {
+                sources.entry(target_id).or_insert_with(Vec::new).push((
+                    source_id,
+                    name,
+                    external_access_enabled,
+                ));
+            }
+            Ok(sources)
+        }
+
+        /// Whether a node has any live direct children.
+        pub async fn has_children(&self, space_id: Uuid, node_id: Uuid) -> Result<bool> {
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS ( \
+                SELECT 1 FROM nodes \
+                WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL AND (NOT $3 OR node_external_access_allowed(space_id, id)) \
+             )",
+            )
+            .bind(space_id)
+            .bind(node_id)
+            .bind(self.external_only)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+            Ok(exists)
+        }
+
+        /// Whether each node in a bounded set has any live direct children.
+        pub async fn has_children_many(
+            &self,
+            space_id: Uuid,
+            node_ids: &[Uuid],
+        ) -> Result<HashMap<Uuid, bool>> {
+            if node_ids.is_empty() {
+                return Ok(std::collections::HashMap::new());
+            }
+
+            let rows: Vec<(Uuid,)> = sqlx::query_as(
+                "SELECT parent_id::uuid \
+                 FROM nodes \
+                 WHERE space_id = $1 \
+                   AND parent_id = ANY($2) \
+                   AND deleted_at IS NULL AND (NOT $3 OR node_external_access_allowed(space_id, id)) \
+                 GROUP BY parent_id",
+            )
+            .bind(space_id)
+            .bind(node_ids.to_vec())
+            .bind(self.external_only)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            Ok(rows.into_iter().map(|(node_id,)| (node_id, true)).collect())
+        }
+
+        /// First children page for each parent in a bounded ordered set.
+        pub async fn first_children_pages(
+            &self,
+            space_id: Uuid,
+            parent_node_ids: &[Uuid],
+            limit: i64,
+        ) -> Result<(HashMap<Uuid, Vec<NodeSummary>>, HashSet<Uuid>)> {
+            if parent_node_ids.is_empty() {
+                return Ok((HashMap::new(), HashSet::new()));
+            }
+            let access_filter = if self.external_only {
+                "AND node_external_access_allowed(space_id, id)"
+            } else {
+                ""
+            };
+            let fetch = limit + 1;
+            let rows: Vec<NodeSummaryRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                "SELECT child.* \
+                     FROM UNNEST($2::uuid[]) WITH ORDINALITY AS requested(parent_id, position) \
+                     CROSS JOIN LATERAL ( \
+                       SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
+                       WHERE space_id = $1 \
+                         AND parent_id = requested.parent_id \
+                         AND deleted_at IS NULL {access_filter} \
+                       ORDER BY sort_order, name, id \
+                       LIMIT $3 \
+                     ) AS child \
+                     ORDER BY requested.position, child.sort_order, child.name, child.id"
+            )))
+            .bind(space_id)
+            .bind(parent_node_ids.to_vec())
+            .bind(fetch)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            let mut children_by_parent = HashMap::with_capacity(parent_node_ids.len());
+            for row in rows {
+                let node = row.into_summary()?;
+                if let Some(parent_id) = node.parent_id {
+                    children_by_parent
+                        .entry(parent_id)
+                        .or_insert_with(Vec::new)
+                        .push(node);
+                }
+            }
+
+            let mut parents_with_more = HashSet::new();
+            for parent_id in parent_node_ids {
+                let children = children_by_parent.entry(*parent_id).or_default();
+                if children.len() as i64 > limit {
+                    children.truncate(limit as usize);
+                    children.shrink_to_fit();
+                    parents_with_more.insert(*parent_id);
+                }
+            }
+            Ok((children_by_parent, parents_with_more))
+        }
+
+        pub async fn permission_for(
+            &self,
+            space_id: Uuid,
+            account_id: Uuid,
+        ) -> Result<Option<Permission>> {
+            crate::space_permission::permission_for(&self.pool, space_id, account_id).await
+        }
     }
 }
 
-pub mod search {
+pub(crate) mod search {
     //! Path scope resolution and subtree candidate scans for file-tree commands.
 
-    use chrono::{DateTime, Utc};
     use notegate_core::Result;
-    use notegate_core::security::PiiCrypto;
     use notegate_model::search::{SearchDateFilters, SearchNodeCandidate, SearchTextCandidate};
-    use notegate_model::{TextAtRestEncryption, TextObject};
-    use serde_json::Value;
-    use sqlx::{Executor, FromRow, PgPool, Postgres};
+    use notegate_model::{Node, NodeKind, TextAtRestEncryption, TextObject};
+    use sqlx::{Executor, FromRow, Postgres};
     use std::collections::HashMap;
     use std::time::Instant;
     use uuid::Uuid;
@@ -1112,73 +1093,24 @@ pub mod search {
 
     #[derive(Debug, FromRow)]
     struct ResolvedNodePathRow {
+        #[sqlx(flatten)]
+        node: NodeRow,
         input_index: i64,
         input_path: String,
-        id: Uuid,
-        space_id: Uuid,
-        parent_id: Option<Uuid>,
-        name: String,
-        kind: String,
-        sort_order: i32,
-        metadata: Value,
-        external_access_enabled: bool,
-        write_locked: bool,
-        created_by_account_id: Uuid,
-        updated_by_account_id: Uuid,
-        deleted_by_account_id: Option<Uuid>,
-        purge_after: Option<DateTime<Utc>>,
-        created_at: DateTime<Utc>,
-        updated_at: DateTime<Utc>,
-        deleted_at: Option<DateTime<Utc>>,
     }
 
     #[derive(Debug, FromRow)]
     struct NodeCandidateRow {
-        id: Uuid,
-        space_id: Uuid,
-        parent_id: Option<Uuid>,
-        name: String,
-        kind: String,
-        sort_order: i32,
-        metadata: Value,
-        external_access_enabled: bool,
-        write_locked: bool,
-        created_by_account_id: Uuid,
-        updated_by_account_id: Uuid,
-        deleted_by_account_id: Option<Uuid>,
-        purge_after: Option<DateTime<Utc>>,
-        created_at: DateTime<Utc>,
-        updated_at: DateTime<Utc>,
-        deleted_at: Option<DateTime<Utc>>,
+        #[sqlx(flatten)]
+        node: NodeRow,
         path: String,
         sort_path: String,
     }
 
     impl NodeCandidateRow {
-        fn node_row(&self) -> NodeRow {
-            NodeRow {
-                id: self.id,
-                space_id: self.space_id,
-                parent_id: self.parent_id,
-                name: self.name.clone(),
-                kind: self.kind.clone(),
-                sort_order: self.sort_order,
-                metadata: self.metadata.clone(),
-                external_access_enabled: self.external_access_enabled,
-                write_locked: self.write_locked,
-                created_by_account_id: self.created_by_account_id,
-                updated_by_account_id: self.updated_by_account_id,
-                deleted_by_account_id: self.deleted_by_account_id,
-                purge_after: self.purge_after,
-                created_at: self.created_at,
-                updated_at: self.updated_at,
-                deleted_at: self.deleted_at,
-            }
-        }
-
         fn into_candidate(self) -> Result<SearchNodeCandidate> {
             Ok(SearchNodeCandidate {
-                node: self.node_row().into_node()?,
+                node: self.node.into_node()?,
                 path: self.path,
                 sort_path: self.sort_path,
             })
@@ -1187,22 +1119,8 @@ pub mod search {
 
     #[derive(Debug, FromRow)]
     struct TextCandidateRow {
-        id: Uuid,
-        space_id: Uuid,
-        parent_id: Option<Uuid>,
-        name: String,
-        kind: String,
-        sort_order: i32,
-        metadata: Value,
-        external_access_enabled: bool,
-        write_locked: bool,
-        created_by_account_id: Uuid,
-        updated_by_account_id: Uuid,
-        deleted_by_account_id: Option<Uuid>,
-        purge_after: Option<DateTime<Utc>>,
-        created_at: DateTime<Utc>,
-        updated_at: DateTime<Utc>,
-        deleted_at: Option<DateTime<Utc>>,
+        #[sqlx(flatten)]
+        node: NodeRow,
         path: String,
         sort_path: String,
         text_content_sha256: String,
@@ -1220,25 +1138,7 @@ pub mod search {
                         self.text_at_rest_encryption
                     ))
                 })?;
-            let node = NodeRow {
-                id: self.id,
-                space_id: self.space_id,
-                parent_id: self.parent_id,
-                name: self.name,
-                kind: self.kind,
-                sort_order: self.sort_order,
-                metadata: self.metadata,
-                external_access_enabled: self.external_access_enabled,
-                write_locked: self.write_locked,
-                created_by_account_id: self.created_by_account_id,
-                updated_by_account_id: self.updated_by_account_id,
-                deleted_by_account_id: self.deleted_by_account_id,
-                purge_after: self.purge_after,
-                created_at: self.created_at,
-                updated_at: self.updated_at,
-                deleted_at: self.deleted_at,
-            }
-            .into_node()?;
+            let node = self.node.into_node()?;
             Ok(SearchTextCandidate {
                 node,
                 path: self.path,
@@ -1251,52 +1151,7 @@ pub mod search {
         }
     }
 
-    /// Resolve a scope path (e.g. `/projects/notes`) to a live node id within
-    /// the space, or `None` if it does not resolve to a live node. The root path
-    /// (`/` or empty) resolves to the space root.
-    pub async fn resolve_scope_node(
-        pool: &PgPool,
-        space_id: Uuid,
-        scope_path: &str,
-    ) -> Result<Option<Uuid>> {
-        // Keep the single-path resolver's existing trim/empty-segment behavior.
-        let segments = scope_path
-            .trim()
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>();
-        // Root lookup already needs one query; avoid a recursive plan for it.
-        if segments.is_empty() {
-            return sqlx::query_scalar(
-                "SELECT id FROM nodes \
-                 WHERE space_id = $1 AND parent_id IS NULL AND deleted_at IS NULL",
-            )
-            .bind(space_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(map_sqlx_error);
-        }
-        let path = format!("/{}", segments.join("/"));
-        let mut resolved = resolve_node_ids_by_paths_with(pool, space_id, &[path]).await?;
-        Ok(resolved.pop().map(|(_, node_id)| node_id))
-    }
-
-    /// Resolve a bounded ordered path set with one recursive SQL query.
-    ///
-    /// Input paths must already be canonical. Returned paths are the matching
-    /// input paths rather than paths re-derived from the resolved nodes.
-    ///
-    /// Missing paths are omitted. `input_index` lets the caller restore request
-    /// order without issuing one query per path or path segment.
-    pub async fn resolve_nodes_by_paths(
-        pool: &PgPool,
-        space_id: Uuid,
-        paths: &[String],
-    ) -> Result<Vec<(usize, String, notegate_model::Node)>> {
-        resolve_nodes_by_paths_with(pool, space_id, paths).await
-    }
-
-    pub(crate) async fn resolve_nodes_by_paths_with<'e, E>(
+    async fn resolve_nodes_by_paths_with<'e, E>(
         executor: E,
         space_id: Uuid,
         paths: &[String],
@@ -1330,25 +1185,7 @@ pub mod search {
             .map(|row| {
                 let index = usize::try_from(row.input_index - 1)
                     .map_err(|_| notegate_core::Error::internal("invalid path input index"))?;
-                let node = NodeRow {
-                    id: row.id,
-                    space_id: row.space_id,
-                    parent_id: row.parent_id,
-                    name: row.name,
-                    kind: row.kind,
-                    sort_order: row.sort_order,
-                    metadata: row.metadata,
-                    external_access_enabled: row.external_access_enabled,
-                    write_locked: row.write_locked,
-                    created_by_account_id: row.created_by_account_id,
-                    updated_by_account_id: row.updated_by_account_id,
-                    deleted_by_account_id: row.deleted_by_account_id,
-                    purge_after: row.purge_after,
-                    created_at: row.created_at,
-                    updated_at: row.updated_at,
-                    deleted_at: row.deleted_at,
-                }
-                .into_node()?;
+                let node = row.node.into_node()?;
                 Ok((index, row.input_path, node))
             })
             .collect()
@@ -1377,197 +1214,6 @@ pub mod search {
         .map_err(map_sqlx_error)
     }
 
-    pub async fn node_candidates(
-        pool: &PgPool,
-        space_id: Uuid,
-        scope_node_id: Uuid,
-        scope_path: &str,
-        after_sort_path: Option<&str>,
-        date_filters: &SearchDateFilters,
-        limit: i64,
-    ) -> Result<Vec<SearchNodeCandidate>> {
-        let rows: Vec<NodeCandidateRow> = sqlx::query_as(sqlx::AssertSqlSafe(candidate_cte(
-            "SELECT id, path, sort_path \
-                 FROM subtree \
-                 WHERE id <> $2 AND external_access_enabled = true \
-                   AND ($4::text IS NULL OR sort_path > $4) \
-                   AND ($6::timestamptz IS NULL OR created_at >= $6) \
-                   AND ($7::timestamptz IS NULL OR created_at < $7) \
-                   AND ($8::timestamptz IS NULL OR updated_at >= $8) \
-                   AND ($9::timestamptz IS NULL OR updated_at < $9) \
-                 ORDER BY sort_path \
-                 LIMIT $5",
-            "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.external_access_enabled, n.write_locked, \
-                        n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
-                        n.purge_after, n.created_at, n.updated_at, n.deleted_at, s.path, s.sort_path \
-                 FROM selected s \
-                 JOIN nodes n ON n.space_id = $1 AND n.id = s.id \
-                 ORDER BY s.sort_path",
-        )))
-        .bind(space_id)
-        .bind(scope_node_id)
-        .bind(scope_path)
-        .bind(after_sort_path)
-        .bind(limit)
-        .bind(date_filters.created_from)
-        .bind(date_filters.created_to)
-        .bind(date_filters.updated_from)
-        .bind(date_filters.updated_to)
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        rows.into_iter()
-            .map(NodeCandidateRow::into_candidate)
-            .collect()
-    }
-
-    pub async fn text_candidates(
-        pool: &PgPool,
-        space_id: Uuid,
-        scope_node_id: Uuid,
-        scope_path: &str,
-        after_sort_path: Option<&str>,
-        date_filters: &SearchDateFilters,
-        limit: i64,
-    ) -> Result<Vec<SearchTextCandidate>> {
-        let rows: Vec<TextCandidateRow> = sqlx::query_as(
-            sqlx::AssertSqlSafe(candidate_cte(
-                "SELECT s.id, s.path, s.sort_path, \
-                        t.content_sha256 AS text_content_sha256, \
-                        t.byte_len AS text_byte_len, \
-                        t.line_count AS text_line_count, \
-                        t.at_rest_encryption AS text_at_rest_encryption \
-                 FROM subtree s \
-                 JOIN text_objects t ON t.space_id = $1 AND t.node_id = s.id \
-                 WHERE s.id <> $2 \
-                   AND s.kind = 'text' \
-                   AND s.external_access_enabled = true \
-                   AND t.storage_format = 'plain' \
-                   AND ($4::text IS NULL OR s.sort_path > $4) \
-                   AND ($6::timestamptz IS NULL OR s.created_at >= $6) \
-                   AND ($7::timestamptz IS NULL OR s.created_at < $7) \
-                   AND ($8::timestamptz IS NULL OR s.updated_at >= $8) \
-                   AND ($9::timestamptz IS NULL OR s.updated_at < $9) \
-                 ORDER BY s.sort_path \
-                 LIMIT $5",
-                "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.external_access_enabled, n.write_locked, \
-                        n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
-                        n.purge_after, n.created_at, n.updated_at, n.deleted_at, s.path, s.sort_path, \
-                        s.text_content_sha256, s.text_byte_len, s.text_line_count, s.text_at_rest_encryption \
-                 FROM selected s \
-                 JOIN nodes n ON n.space_id = $1 AND n.id = s.id \
-                 ORDER BY s.sort_path",
-            )),
-        )
-        .bind(space_id)
-        .bind(scope_node_id)
-        .bind(scope_path)
-        .bind(after_sort_path)
-        .bind(limit)
-        .bind(date_filters.created_from)
-        .bind(date_filters.created_to)
-        .bind(date_filters.updated_from)
-        .bind(date_filters.updated_to)
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        rows.into_iter()
-            .map(TextCandidateRow::into_candidate)
-            .collect()
-    }
-
-    /// Load an ordered prefix of unchanged live plain-text bodies whose expected
-    /// total byte length fits within `max_bytes`.
-    pub async fn text_bodies_within_budget(
-        pool: &PgPool,
-        crypto: &PiiCrypto,
-        space_id: Uuid,
-        candidates: &[(Uuid, String, i64)],
-        max_bytes: i64,
-        metrics_enabled: bool,
-    ) -> Result<HashMap<Uuid, TextObject>> {
-        if candidates.is_empty() {
-            return Ok(HashMap::new());
-        }
-
-        let node_ids = candidates
-            .iter()
-            .map(|candidate| candidate.0)
-            .collect::<Vec<_>>();
-        let content_sha256s = candidates
-            .iter()
-            .map(|candidate| candidate.1.clone())
-            .collect::<Vec<_>>();
-        let byte_lengths = candidates
-            .iter()
-            .map(|candidate| candidate.2)
-            .collect::<Vec<_>>();
-        let columns = TEXT_COLUMNS
-            .split(',')
-            .map(|column| format!("t.{}", column.trim()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let rows: Vec<TextRow> = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
-            "WITH requested AS MATERIALIZED ( \
-                SELECT node_id, content_sha256, byte_len, ordinality \
-                FROM unnest($2::uuid[], $3::text[], $4::bigint[]) WITH ORDINALITY \
-                     AS r(node_id, content_sha256, byte_len, ordinality) \
-            ), budgeted AS MATERIALIZED ( \
-                SELECT node_id, content_sha256, byte_len, ordinality, \
-                       SUM(byte_len) OVER (ORDER BY ordinality) AS cumulative_bytes \
-                FROM requested \
-                WHERE byte_len >= 0 \
-            ), selected AS MATERIALIZED ( \
-                SELECT node_id, content_sha256, byte_len, ordinality \
-                FROM budgeted \
-                WHERE cumulative_bytes <= $5 \
-            ) \
-            SELECT {columns} \
-            FROM selected s \
-            JOIN nodes n ON n.id = s.node_id AND n.space_id = $1 \
-            JOIN text_objects t ON t.node_id = s.node_id AND t.space_id = $1 \
-            WHERE n.deleted_at IS NULL \
-              AND n.kind = 'text' \
-              AND node_external_access_allowed(n.space_id, n.id) \
-              AND t.storage_format = 'plain' \
-              AND t.content_sha256 = s.content_sha256 \
-              AND t.byte_len = s.byte_len \
-            ORDER BY s.ordinality"
-        )))
-        .bind(space_id)
-        .bind(node_ids)
-        .bind(content_sha256s)
-        .bind(byte_lengths)
-        .bind(max_bytes)
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        let mut texts = HashMap::with_capacity(rows.len());
-        for row in rows {
-            let byte_len = u64::try_from(row.byte_len).unwrap_or(0);
-            let started =
-                (metrics_enabled && row.at_rest_encryption == "server").then(Instant::now);
-            let result = row.into_text(crypto);
-            if let Some(started) = started {
-                let outcome = if result.is_ok() { "success" } else { "error" };
-                tracing::trace!(
-                    target: "notegate_db::crypto",
-                    event = "text.decrypt",
-                    boundary = "search_body_load",
-                    outcome,
-                    byte_len,
-                    duration_seconds = started.elapsed().as_secs_f64(),
-                );
-            }
-            let text = result?;
-            texts.insert(text.node_id, text);
-        }
-        Ok(texts)
-    }
-
     fn candidate_cte(selected_sql: &'static str, result_sql: &'static str) -> String {
         format!(
             "WITH RECURSIVE subtree AS ( \
@@ -1592,5 +1238,261 @@ pub mod search {
             ) \
             {result_sql}"
         )
+    }
+
+    impl crate::FilesRepo {
+        /// Load an ordered prefix of unchanged live plain-text bodies whose expected
+        /// total byte length fits within `max_bytes`.
+        pub async fn search_text_bodies_within_budget(
+            &self,
+            space_id: Uuid,
+            candidates: &[(Uuid, String, i64)],
+            max_bytes: usize,
+        ) -> Result<HashMap<Uuid, TextObject>> {
+            let max_bytes = i64::try_from(max_bytes).map_err(|_| {
+                notegate_core::Error::internal("text search byte budget exceeds i64")
+            })?;
+
+            if candidates.is_empty() {
+                return Ok(HashMap::new());
+            }
+
+            let node_ids = candidates
+                .iter()
+                .map(|candidate| candidate.0)
+                .collect::<Vec<_>>();
+            let content_sha256s = candidates
+                .iter()
+                .map(|candidate| candidate.1.clone())
+                .collect::<Vec<_>>();
+            let byte_lengths = candidates
+                .iter()
+                .map(|candidate| candidate.2)
+                .collect::<Vec<_>>();
+            let columns = TEXT_COLUMNS
+                .split(',')
+                .map(|column| format!("t.{}", column.trim()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let rows: Vec<TextRow> = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
+                "WITH requested AS MATERIALIZED ( \
+                SELECT node_id, content_sha256, byte_len, ordinality \
+                FROM unnest($2::uuid[], $3::text[], $4::bigint[]) WITH ORDINALITY \
+                     AS r(node_id, content_sha256, byte_len, ordinality) \
+            ), budgeted AS MATERIALIZED ( \
+                SELECT node_id, content_sha256, byte_len, ordinality, \
+                       SUM(byte_len) OVER (ORDER BY ordinality) AS cumulative_bytes \
+                FROM requested \
+                WHERE byte_len >= 0 \
+            ), selected AS MATERIALIZED ( \
+                SELECT node_id, content_sha256, byte_len, ordinality \
+                FROM budgeted \
+                WHERE cumulative_bytes <= $5 \
+            ) \
+            SELECT {columns} \
+            FROM selected s \
+            JOIN nodes n ON n.id = s.node_id AND n.space_id = $1 \
+            JOIN text_objects t ON t.node_id = s.node_id AND t.space_id = $1 \
+            WHERE n.deleted_at IS NULL \
+              AND n.kind = 'text' \
+              AND node_external_access_allowed(n.space_id, n.id) \
+              AND t.storage_format = 'plain' \
+              AND t.content_sha256 = s.content_sha256 \
+              AND t.byte_len = s.byte_len \
+            ORDER BY s.ordinality"
+            )))
+            .bind(space_id)
+            .bind(node_ids)
+            .bind(content_sha256s)
+            .bind(byte_lengths)
+            .bind(max_bytes)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            let mut texts = HashMap::with_capacity(rows.len());
+            for row in rows {
+                let byte_len = u64::try_from(row.byte_len).unwrap_or(0);
+                let started =
+                    (self.metrics_enabled && row.at_rest_encryption == "server").then(Instant::now);
+                let result = row.into_text(&self.crypto);
+                if let Some(started) = started {
+                    let outcome = if result.is_ok() { "success" } else { "error" };
+                    tracing::trace!(
+                        target: "notegate_db::crypto",
+                        event = "text.decrypt",
+                        boundary = "search_body_load",
+                        outcome,
+                        byte_len,
+                        duration_seconds = started.elapsed().as_secs_f64(),
+                    );
+                }
+                let text = result?;
+                texts.insert(text.node_id, text);
+            }
+            Ok(texts)
+        }
+
+        /// Resolve one search scope through the shared bounded path resolver.
+        ///
+        /// Hydrating one node is deliberate: search needs its id and kind, and
+        /// reusing the bulk resolver keeps path-walk semantics in one SQL query
+        /// implementation and one database round trip.
+        pub async fn resolve_search_scope(
+            &self,
+            space_id: Uuid,
+            path: &str,
+        ) -> Result<Option<(Uuid, NodeKind, String)>> {
+            let path = notegate_core::validation::normalize_path(path.trim())
+                .map_err(notegate_core::Error::validation)?;
+            let paths = [path];
+            let mut resolved = self.resolve_nodes_by_paths(space_id, &paths).await?;
+            Ok(resolved
+                .pop()
+                .map(|(_, path, node)| (node.id, node.kind, path)))
+        }
+
+        /// Resolve a scope path (e.g. `/projects/notes`) to a live node id within
+        /// the space, or `None` if it does not resolve to a live node. The root path
+        /// (`/` or empty) resolves to the space root.
+        pub async fn resolve_path(&self, space_id: Uuid, path: &str) -> Result<Option<Uuid>> {
+            // Keep the single-path resolver's existing trim/empty-segment behavior.
+            let segments = path
+                .trim()
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>();
+            // Root lookup already needs one query; avoid a recursive plan for it.
+            if segments.is_empty() {
+                return sqlx::query_scalar(
+                    "SELECT id FROM nodes \
+                     WHERE space_id = $1 AND parent_id IS NULL AND deleted_at IS NULL",
+                )
+                .bind(space_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(map_sqlx_error);
+            }
+            let path = format!("/{}", segments.join("/"));
+            let mut resolved =
+                resolve_node_ids_by_paths_with(&self.pool, space_id, &[path]).await?;
+            Ok(resolved.pop().map(|(_, node_id)| node_id))
+        }
+
+        /// Resolve a bounded ordered path set with one recursive SQL query.
+        ///
+        /// Input paths must already be canonical. Returned paths are the matching
+        /// input paths rather than paths re-derived from the resolved nodes.
+        ///
+        /// Missing paths are omitted. `input_index` lets the caller restore request
+        /// order without issuing one query per path or path segment.
+        pub async fn resolve_nodes_by_paths(
+            &self,
+            space_id: Uuid,
+            paths: &[String],
+        ) -> Result<Vec<(usize, String, Node)>> {
+            resolve_nodes_by_paths_with(&self.pool, space_id, paths).await
+        }
+
+        pub async fn search_node_candidates(
+            &self,
+            space_id: Uuid,
+            scope_node_id: Uuid,
+            scope_path: &str,
+            after_sort_path: Option<&str>,
+            date_filters: &SearchDateFilters,
+            limit: i64,
+        ) -> Result<Vec<SearchNodeCandidate>> {
+            let rows: Vec<NodeCandidateRow> = sqlx::query_as(sqlx::AssertSqlSafe(candidate_cte(
+                "SELECT id, path, sort_path \
+                     FROM subtree \
+                     WHERE id <> $2 AND external_access_enabled = true \
+                       AND ($4::text IS NULL OR sort_path > $4) \
+                       AND ($6::timestamptz IS NULL OR created_at >= $6) \
+                       AND ($7::timestamptz IS NULL OR created_at < $7) \
+                       AND ($8::timestamptz IS NULL OR updated_at >= $8) \
+                       AND ($9::timestamptz IS NULL OR updated_at < $9) \
+                     ORDER BY sort_path \
+                     LIMIT $5",
+                "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.external_access_enabled, n.write_locked, \
+                            n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
+                            n.purge_after, n.created_at, n.updated_at, n.deleted_at, s.path, s.sort_path \
+                     FROM selected s \
+                     JOIN nodes n ON n.space_id = $1 AND n.id = s.id \
+                     ORDER BY s.sort_path",
+            )))
+            .bind(space_id)
+            .bind(scope_node_id)
+            .bind(scope_path)
+            .bind(after_sort_path)
+            .bind(limit)
+            .bind(date_filters.created_from)
+            .bind(date_filters.created_to)
+            .bind(date_filters.updated_from)
+            .bind(date_filters.updated_to)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            rows.into_iter()
+                .map(NodeCandidateRow::into_candidate)
+                .collect()
+        }
+
+        pub async fn search_text_candidates(
+            &self,
+            space_id: Uuid,
+            scope_node_id: Uuid,
+            scope_path: &str,
+            after_sort_path: Option<&str>,
+            date_filters: &SearchDateFilters,
+            limit: i64,
+        ) -> Result<Vec<SearchTextCandidate>> {
+            let rows: Vec<TextCandidateRow> = sqlx::query_as(
+                sqlx::AssertSqlSafe(candidate_cte(
+                    "SELECT s.id, s.path, s.sort_path, \
+                            t.content_sha256 AS text_content_sha256, \
+                            t.byte_len AS text_byte_len, \
+                            t.line_count AS text_line_count, \
+                            t.at_rest_encryption AS text_at_rest_encryption \
+                     FROM subtree s \
+                     JOIN text_objects t ON t.space_id = $1 AND t.node_id = s.id \
+                     WHERE s.id <> $2 \
+                       AND s.kind = 'text' \
+                       AND s.external_access_enabled = true \
+                       AND t.storage_format = 'plain' \
+                       AND ($4::text IS NULL OR s.sort_path > $4) \
+                       AND ($6::timestamptz IS NULL OR s.created_at >= $6) \
+                       AND ($7::timestamptz IS NULL OR s.created_at < $7) \
+                       AND ($8::timestamptz IS NULL OR s.updated_at >= $8) \
+                       AND ($9::timestamptz IS NULL OR s.updated_at < $9) \
+                     ORDER BY s.sort_path \
+                     LIMIT $5",
+                    "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.external_access_enabled, n.write_locked, \
+                            n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
+                            n.purge_after, n.created_at, n.updated_at, n.deleted_at, s.path, s.sort_path, \
+                            s.text_content_sha256, s.text_byte_len, s.text_line_count, s.text_at_rest_encryption \
+                     FROM selected s \
+                     JOIN nodes n ON n.space_id = $1 AND n.id = s.id \
+                     ORDER BY s.sort_path",
+                )),
+            )
+            .bind(space_id)
+            .bind(scope_node_id)
+            .bind(scope_path)
+            .bind(after_sort_path)
+            .bind(limit)
+            .bind(date_filters.created_from)
+            .bind(date_filters.created_to)
+            .bind(date_filters.updated_from)
+            .bind(date_filters.updated_to)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+            rows.into_iter()
+                .map(TextCandidateRow::into_candidate)
+                .collect()
+        }
     }
 }

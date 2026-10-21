@@ -596,25 +596,11 @@ fn classify_request_log(
         return RequestLogLevel::Info;
     }
 
-    if is_static_or_spa_success(status, method, route, path) {
-        return RequestLogLevel::Debug;
-    }
-
     RequestLogLevel::Debug
 }
 
 fn is_control_plane_probe(route: &str, path: &str) -> bool {
     matches!(route, "/health" | "/ready") || matches!(path, "/health" | "/ready")
-}
-
-fn is_static_or_spa_success(status: u16, method: &Method, route: &str, path: &str) -> bool {
-    status < 400
-        && method == Method::GET
-        && route.is_empty()
-        && !path.starts_with("/api/")
-        && !path.starts_with("/auth/")
-        && !matches!(path, "/mcp" | "/mcp/v2")
-        && !path.starts_with("/.well-known/")
 }
 
 fn is_mutating_method(method: &Method) -> bool {
