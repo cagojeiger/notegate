@@ -3,9 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { UpdateSpaceInput } from "../../api/spaces";
 import type { Space } from "../../api/types";
 import type { CurrentUserUsage } from "../../api/usage";
-import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
 import { formatBytes } from "../../shared/lib/formatBytes";
-import { Card, Modal, PanelHeader } from "../../shared/ui";
+import { Card, WorkbenchSurface } from "../../shared/ui";
 import { SortableSpaceGrid } from "./SortableSpaceGrid";
 import { SpaceInspector, type SpaceInspectorProps } from "./SpaceInspector";
 import { useReorderSpacesMutation, useUpdateSpaceMutation } from "./useSpaceQueries";
@@ -97,70 +96,45 @@ export function SpaceLibrary({
   };
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg">
-      <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <PanelHeader tabs>
-          <h1 className="-mb-px flex h-[calc(var(--ng-workbench-header-size)-4px)] items-center gap-1.5 border-b-2 border-primary px-2 text-workbench font-medium">
-            Spaces <span className="font-normal text-muted">{spaces.length}</span>
-          </h1>
-        </PanelHeader>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-7 lg:px-10">
-          <div className="w-full">
-            {spaces.length === 0 ? (
-              <div className="mb-4">
-                <h2 className="font-semibold">No spaces yet</h2>
-                <p className="mt-1 text-sm text-muted">{canCreateSpace ? "Create a space to start organizing your notes and files." : "No spaces are available for this account."}</p>
-              </div>
-            ) : null}
-            <section aria-label="Spaces">
-              <SortableSpaceGrid
-                spaces={spaces}
-                selectedSpaceId={selectedSpace?.id ?? null}
-                usageBySpaceId={usageBySpaceId}
-                updatePending={updatePending || reorderSpaces.isPending}
-                reorderPending={reorderSpaces.isPending || updatePending}
-                onSelect={inspectSpace}
-                onOpen={onOpenSpace}
-                onToggleNavigationPin={toggleNavigationPin}
-                onReorder={(orderedSpaces) => reorderSpaces.mutate({ spaces: orderedSpaces })}
-                onCreateSpace={canCreateSpace ? onCreateSpace : undefined}
-              />
-            </section>
-            {deletedStorage && deletedStorage.count > 0 ? (
-              <section aria-label="Retained storage" className="mt-6 space-y-3">
-                <h2 className="text-sm font-medium">Retained storage</h2>
-                <Card className="space-y-2 p-4 text-xs">
-                  <p>{deletedStorage.count} deleted {deletedStorage.count === 1 ? "space" : "spaces"} still use storage while in trash or awaiting file deletion.</p>
-                  <p className="text-muted">Text {formatBytes(deletedStorage.text_bytes)} · Files {formatBytes(deletedStorage.file_bytes)}</p>
-                </Card>
-              </section>
-            ) : null}
+    <WorkbenchSurface title={`Spaces ${spaces.length}`}
+      tabs={[{ id: "spaces", label: "Spaces", count: spaces.length, controls: "workspace-spaces-panel" }]}
+      value="spaces" onChange={() => undefined} navigationLabel="Workspace views" isMobile={isMobile}
+      inspector={!isMobile || selectedSpace ? {
+        title: "Space Inspector", label: "Space inspector", closeLabel: "Close space inspector",
+        open: inspectorOpen, onClose: onCloseInspector, children: <SpaceInspector {...inspectorProps} showHeader={false} />
+      } : undefined}>
+      <div className="w-full">
+        {spaces.length === 0 ? (
+          <div className="mb-4">
+            <h2 className="font-semibold">No spaces yet</h2>
+            <p className="mt-1 text-sm text-muted">{canCreateSpace ? "Create a space to start organizing your notes and files." : "No spaces are available for this account."}</p>
           </div>
-        </div>
-      </section>
-
-      {!isMobile && inspectorOpen ? (
-        <aside
-          aria-label="Space inspector"
-          className="flex h-full min-h-0 shrink-0 overflow-hidden"
-          style={{ width: WORKBENCH_LAYOUT.defaultAuxiliaryWidth }}
-        >
-          <SpaceInspector {...inspectorProps} />
-        </aside>
-      ) : null}
-
-      {isMobile && inspectorOpen && selectedSpace ? (
-        <Modal
-          title="Space Inspector"
-          placement="bottom"
-          width="max-w-none"
-          onClose={onCloseInspector}
-        >
-          <SpaceInspector {...inspectorProps} showHeader={false} />
-        </Modal>
-      ) : null}
-    </div>
+        ) : null}
+        <section aria-label="Spaces">
+          <SortableSpaceGrid
+            spaces={spaces}
+            selectedSpaceId={selectedSpace?.id ?? null}
+            usageBySpaceId={usageBySpaceId}
+            updatePending={updatePending || reorderSpaces.isPending}
+            reorderPending={reorderSpaces.isPending || updatePending}
+            onSelect={inspectSpace}
+            onOpen={onOpenSpace}
+            onToggleNavigationPin={toggleNavigationPin}
+            onReorder={(orderedSpaces) => reorderSpaces.mutate({ spaces: orderedSpaces })}
+            onCreateSpace={canCreateSpace ? onCreateSpace : undefined}
+          />
+        </section>
+        {deletedStorage && deletedStorage.count > 0 ? (
+          <section aria-label="Retained storage" className="mt-6 space-y-3">
+            <h2 className="text-sm font-medium">Retained storage</h2>
+            <Card className="space-y-2 p-4 text-xs">
+              <p>{deletedStorage.count} deleted {deletedStorage.count === 1 ? "space" : "spaces"} still use storage while in trash or awaiting file deletion.</p>
+              <p className="text-muted">Text {formatBytes(deletedStorage.text_bytes)} · Files {formatBytes(deletedStorage.file_bytes)}</p>
+            </Card>
+          </section>
+        ) : null}
+      </div>
+    </WorkbenchSurface>
   );
 }
 

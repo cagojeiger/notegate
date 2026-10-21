@@ -152,6 +152,34 @@ for (const width of [1440, 390, 320]) {
   });
 }
 
+for (const width of [1440, 390]) {
+  test(`Workspace and Settings share tab alignment and body gutters at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    await page.getByRole("button", { name: "Open space library", exact: true }).click();
+    const spaces = page.getByRole("tab", { name: "Spaces 1", exact: true });
+    await expect(spaces).toHaveAttribute("aria-selected", "true");
+    const workspaceHeader = page.locator("[data-panel-header]").filter({ has: spaces });
+    const workspaceBounds = await workspaceHeader.boundingBox();
+    const workspacePadding = await page.getByRole("tabpanel", { name: "Spaces 1", exact: true })
+      .evaluate((element) => { const style = getComputedStyle(element); return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft]; });
+
+    const settings = await openSettings(page);
+    const general = settings.getByRole("tab", { name: "General", exact: true });
+    await expect(general).toHaveAttribute("aria-selected", "true");
+    const settingsHeader = settings.locator("[data-panel-header]").filter({ has: page.getByRole("tab", { name: "General", exact: true }) });
+    const settingsBounds = await settingsHeader.boundingBox();
+    expect(workspaceBounds).not.toBeNull();
+    expect(settingsBounds).not.toBeNull();
+    expect({ x: settingsBounds!.x, y: settingsBounds!.y, height: settingsBounds!.height })
+      .toEqual({ x: workspaceBounds!.x, y: workspaceBounds!.y, height: workspaceBounds!.height });
+    expect(await settings.getByRole("tabpanel", { name: "General", exact: true })
+      .evaluate((element) => { const style = getComputedStyle(element); return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft]; }))
+      .toEqual(workspacePadding);
+  });
+}
+
 test("settings sections remain discoverable and keep the selected tab visible after resizing", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockWorkbench(page);

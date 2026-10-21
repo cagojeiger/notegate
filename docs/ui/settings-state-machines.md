@@ -25,7 +25,7 @@ stateDiagram-v2
 
 표시 상태는 `available`, 현재 viewport의 `open`, `isMobile`에서 계산한다. 사용 가능한 화면으로 돌아올 때 desktop의 열림 선호는 다시 적용할 수 있다. Mobile에서 Inspector를 제공하지 않는 화면으로 이동하면 열림 상태를 해제한다.
 
-- Workbench는 표시 위치·열림 상태와 portal container를 소유한다.
+- 공통 `WorkbenchSurface`는 탭·본문과 Inspector의 표시 위치를 소유한다. Settings Workbench는 Inspector의 제공 여부·열림 상태와 portal container를 연결한다. Layout을 공유해도 선택·확인·요청 상태의 소유자는 바뀌지 않는다.
 - Feature는 선택 대상·확인 UI를 소유한다. Portal의 unmount를 feature의 unmount로 간주하지 않는다.
 - 요청의 진행 상태·대상·결과는 인증별 query cache가 소유한다. Feature는 현재 작업을 구독해 잠금과 결과 안내를 복원한다.
 - Inspector가 닫혀도 본문의 탐색·추가·필터는 사용할 수 있다. 진행 중 요청 때문에 일시적으로 비활성화하는 경우는 다음 FSM을 따른다.

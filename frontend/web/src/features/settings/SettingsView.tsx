@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { X } from "lucide-react";
 
 import type { Me, Space } from "../../api/types";
 import { canManageAgents, canViewAuditEvents } from "../../auth/permissions";
-import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
-import { IconButton, Modal, PanelHeader, Tabs } from "../../shared/ui";
+import { IconButton, WorkbenchSurface } from "../../shared/ui";
 import { EventHistoryPanel } from "../events/EventHistoryPanel";
 import { TrashPanel } from "../trash/TrashPanel";
 import { AccountTab } from "./AccountTab";
@@ -60,6 +59,7 @@ function SettingsWorkbench({ me, spaces = [], initialSpaceId = null, onClose, on
     (item.id !== "agents" || showAgents) && (item.id !== "trash" || me.account.kind === "user")
   ), [showAgents, me.account.kind]);
   const current = tabs.find((item) => item.id === tab) ?? tabs[0];
+  const bodyScroll = useSettingsScroll(`settings-body-${current.id}`);
   const inspector = useMemo(() => ({
     id: inspectorId, open: inspectorOpen && inspectorAvailable, container,
     onOpen: () => {
@@ -87,75 +87,21 @@ function SettingsWorkbench({ me, spaces = [], initialSpaceId = null, onClose, on
   return (
     <SettingsInspectorContext value={inspector}>
       <div data-settings-view className="ng-settings-view flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg">
-        <section aria-label="Settings" className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <h1 className="sr-only">Settings</h1>
-          <PanelHeader tabs>
-            <SettingsSectionTabs items={tabs} value={current.id} onChange={setTab} />
-            <div className="flex h-full shrink-0 items-center"><IconButton label="Close settings" onClick={onClose}><X size={16} /></IconButton></div>
-          </PanelHeader>
-          <SettingsBody key={current.id} tab={current}>
-            {current.id === "general" ? <GeneralTab onResetSavedWorkspace={onResetSavedWorkspace} /> : null}
-            {current.id === "account" ? <AccountTab me={me} onSignOut={onSignOut} /> : null}
-            {current.id === "connections" ? <ConnectionsTab me={me} onSignOut={onSignOut} /> : null}
-            {current.id === "agents" ? <AgentsTab canManageAgents={showAgents} /> : null}
-            {current.id === "history" ? <EventHistoryPanel spaces={spaces} initialSpaceId={initialSpaceId} canViewAuditEvents={canViewAuditEvents(me)} /> : null}
-            {current.id === "trash" ? <TrashPanel /> : null}
-          </SettingsBody>
-        </section>
-        {inspectorAvailable && !isMobile ? (
-          <aside aria-label={`${current.label} Inspector`} className={inspectorOpen ? "flex min-h-0 shrink-0 flex-col border-l border-seam bg-surface" : "hidden"} style={{ width: WORKBENCH_LAYOUT.defaultAuxiliaryWidth }}>
-            <PanelHeader><h2 className="font-medium">{current.label} Inspector</h2><IconButton label="Close settings inspector" onClick={onCloseInspector}><X size={16} /></IconButton></PanelHeader>
-            {inspectorContents}
-          </aside>
-        ) : inspectorAvailable && inspectorOpen ? (
-          <Modal title={`${current.label} Inspector`} placement="bottom" width="max-w-none" onClose={onCloseInspector}>{inspectorContents}</Modal>
-        ) : null}
+        <WorkbenchSurface title="Settings" tabs={tabs} value={current.id} onChange={setTab}
+          navigationLabel="Settings sections" isMobile={isMobile} bodyRef={bodyScroll} bodyClassName="ng-settings-body"
+          headerActions={<IconButton label="Close settings" onClick={onClose}><X size={16} /></IconButton>}
+          inspector={inspectorAvailable ? {
+            title: `${current.label} Inspector`, closeLabel: "Close settings inspector", open: inspectorOpen,
+            onClose: onCloseInspector, keepMounted: true, children: inspectorContents
+          } : undefined}>
+          {current.id === "general" ? <GeneralTab onResetSavedWorkspace={onResetSavedWorkspace} /> : null}
+          {current.id === "account" ? <AccountTab me={me} onSignOut={onSignOut} /> : null}
+          {current.id === "connections" ? <ConnectionsTab me={me} onSignOut={onSignOut} /> : null}
+          {current.id === "agents" ? <AgentsTab canManageAgents={showAgents} /> : null}
+          {current.id === "history" ? <EventHistoryPanel spaces={spaces} initialSpaceId={initialSpaceId} canViewAuditEvents={canViewAuditEvents(me)} /> : null}
+          {current.id === "trash" ? <TrashPanel /> : null}
+        </WorkbenchSurface>
       </div>
     </SettingsInspectorContext>
   );
-}
-
-function SettingsSectionTabs({ items, value, onChange }: { items: typeof TABS; value: Tab; onChange: (tab: Tab) => void }) {
-  const frame = useRef<HTMLDivElement>(null);
-  const [edges, setEdges] = useState({ overflow: false, before: false, after: false });
-  const revealSelected = useCallback(() => {
-    const list = frame.current?.querySelector<HTMLDivElement>('[role="tablist"]');
-    const active = list?.querySelector<HTMLButtonElement>('[aria-selected="true"]');
-    if (!list || !active) return;
-    const visible = list.getBoundingClientRect();
-    const selected = active.getBoundingClientRect();
-    if (selected.left < visible.left) list.scrollLeft -= Math.ceil(visible.left - selected.left);
-    else if (selected.right > visible.right) list.scrollLeft += Math.ceil(selected.right - visible.right);
-  }, []);
-  useLayoutEffect(() => {
-    const outer = frame.current!;
-    const list = outer.querySelector<HTMLDivElement>('[role="tablist"]')!;
-    const update = () => {
-      const next = { overflow: list.scrollWidth > outer.clientWidth + 1, before: list.scrollLeft > 1,
-        after: list.scrollWidth - list.clientWidth - list.scrollLeft > 1 };
-      setEdges((current) => current.overflow === next.overflow && current.before === next.before && current.after === next.after ? current : next);
-    };
-    update();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => { revealSelected(); update(); });
-    observer?.observe(outer);
-    observer?.observe(list);
-    list.addEventListener("scroll", update);
-    return () => { observer?.disconnect(); list.removeEventListener("scroll", update); };
-  }, [items, revealSelected]);
-  useLayoutEffect(() => { revealSelected(); }, [value, edges.overflow, revealSelected]);
-  const scroll = (direction: number) => {
-    const list = frame.current?.querySelector<HTMLDivElement>('[role="tablist"]');
-    if (list) list.scrollLeft += direction * list.clientWidth * 0.75;
-  };
-  return <div ref={frame} className="flex h-full min-w-0 flex-1 items-center">
-    {edges.overflow ? <IconButton label="Previous settings sections" disabled={!edges.before} onClick={() => scroll(-1)}><ChevronLeft size={16} /></IconButton> : null}
-    <div className="h-full min-w-0 flex-1"><Tabs items={items} value={value} onChange={onChange} label="Settings sections" variant="header" /></div>
-    {edges.overflow ? <IconButton label="More settings sections" disabled={!edges.after} onClick={() => scroll(1)}><ChevronRight size={16} /></IconButton> : null}
-  </div>;
-}
-
-function SettingsBody({ tab, children }: { tab: typeof TABS[number]; children: ReactNode }) {
-  const scroll = useSettingsScroll(`settings-body-${tab.id}`);
-  return <div ref={scroll} id={tab.controls} role="tabpanel" aria-labelledby={`${tab.controls}-tab`}
-    className="ng-settings-body min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 md:p-5">{children}</div>;
 }

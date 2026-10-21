@@ -1,10 +1,11 @@
 import { useRef, useState, type KeyboardEvent } from "react";
 
-type TabItem<T extends string> = {
+export type TabItem<T extends string> = {
   id: T;
   label: string;
   disabled?: boolean;
   controls?: string;
+  count?: number;
 };
 
 type TabsProps<T extends string> = {
@@ -81,6 +82,7 @@ export function Tabs<T extends string>({ items, value, onChange, label = "Tabs",
           className={`${vertical ? "border-l-2 px-3 py-2 text-left" : `-mb-px rounded-t-workbench-surface border-b-2 ${variant === "header" ? "flex h-[calc(var(--ng-workbench-header-size)-4px)] items-center px-2" : "px-2.5 py-1.5"}`} min-h-[var(--ng-min-target-size)] shrink-0 text-workbench font-medium transition ${value === item.id ? `border-primary text-text ${vertical ? "bg-[var(--ng-selection)]" : ""}` : item.disabled ? "border-transparent text-muted" : "border-transparent text-muted hover:bg-[var(--ng-hover)] hover:text-text"}${item.disabled ? " cursor-not-allowed opacity-50" : ""}`}
         >
           {item.label}
+          {item.count !== undefined ? <> <span className="ml-1.5 font-normal text-muted">{item.count}</span></> : null}
         </button>
       ))}
     </div>

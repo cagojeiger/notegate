@@ -7,6 +7,7 @@
 - 문서 읽기·편집을 우선한다. 창이 좁아져도 열린 문서와 editor group을 버리지 않고 보조 패널을 overlay로 전환한다. 표시 폭을 줄였다고 사용자가 저장한 선호 폭을 덮어쓰지 않는다.
 - 시각 변경을 이유로 기존 동작·상태·metadata를 제거하거나 새 기능을 추가하지 않는다.
 - 색상·치수는 semantic token, 반복되는 chrome은 공통 UI가 소유한다. 문서 typography는 Workbench 밀도와 독립적이다. 외부 font CDN과 별도 theme/icon 체계를 추가하지 않는다.
+- Workspace와 Settings는 같은 상단 탭·본문·선택형 오른쪽 Inspector 틀을 사용한다. 탭은 현재 영역의 화면을 전환하고 Inspector는 그 화면의 선택 대상에 속한다. Mobile에서도 이 관계를 유지하되 Inspector를 아래쪽 sheet로 표시한다.
 - 사용자에게 내부 `node`나 인증 구현 대신 구체적인 Document·Folder·File과 다음 행동을 보여준다. 유지보수 실행 가능 시각은 서버가 판단한다.
 
 ## 상태와 개인정보

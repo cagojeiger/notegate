@@ -104,7 +104,7 @@ export function SpaceInspector({
     || reindexPending;
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-surface font-ui text-workbench md:border-l md:border-seam">
+    <div className={`flex h-full min-h-0 w-full flex-col bg-surface font-ui text-workbench ${showHeader ? "md:border-l md:border-seam" : ""}`}>
       {showHeader ? (
         <PanelHeader><span className="font-medium">Space Inspector</span></PanelHeader>
       ) : null}
