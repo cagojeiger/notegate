@@ -1,7 +1,7 @@
 //! DB-level invariant tests: the schema's final defense line (CHECK
 //! constraints + unique indexes). Service-layer guards are unit-tested
 //! separately; these assert the database rejects violations even if a bug
-//! bypassed the service. Skipped when `NOTEGATE_TEST_DATABASE_URL` is unset.
+//! bypassed the service.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod common;
