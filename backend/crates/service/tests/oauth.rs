@@ -1167,9 +1167,20 @@ async fn revoke_and_account_deletion_immediately_disable_existing_tokens()
     );
     approved(&db, user, "second", "mcp offline_access", t).await?;
     let tokens = issued(exchange(&svc, "second", t).await?);
+    let previous = tokens.refresh_token.ok_or("missing refresh token")?;
+    let tokens = issued(svc.refresh(&previous, CLIENT, RESOURCE, t).await?);
+    let cached: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM oauth_credentials WHERE private_refresh_response IS NOT NULL",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(cached, 1);
     notegate_db::AccountRepo::new(db.pool.clone())
         .soft_delete_user(user, user)
         .await?;
+    let cached: i64 = sqlx::query_scalar("SELECT count(*) FROM oauth_credentials WHERE private_refresh_response IS NOT NULL OR refresh_retry_until IS NOT NULL")
+        .fetch_one(&db.pool).await?;
+    assert_eq!(cached, 0);
     assert_eq!(
         svc.access_user(&tokens.access_token, RESOURCE, "mcp", t)
             .await?,
