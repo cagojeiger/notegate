@@ -34,8 +34,9 @@ type WorkbenchSurfaceProps<T extends string> = {
 export function WorkbenchSurface<T extends string>({ title, tabs, value, onChange, navigationLabel,
   headerActions, bodyRef, bodyClassName = "", children, isMobile, inspector
 }: WorkbenchSurfaceProps<T>) {
+  const surface = useRef<HTMLDivElement>(null);
   const current = tabs.find((tab) => tab.id === value);
-  return <div data-workbench-surface className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg">
+  return <div ref={surface} data-workbench-surface className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg">
     <section aria-label={title} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <h1 className="sr-only">{title}</h1>
       <PanelHeader tabs>
@@ -54,8 +55,8 @@ export function WorkbenchSurface<T extends string>({ title, tabs, value, onChang
         style={{ width: WORKBENCH_LAYOUT.defaultAuxiliaryWidth }}>
         <PanelHeader>
           <h2 className="font-medium">{inspector.title}</h2>
-          <IconButton label={inspector.closeLabel} onClick={(event) => {
-            event.currentTarget.closest("[data-workbench-surface]")
+          <IconButton label={inspector.closeLabel} onClick={() => {
+            surface.current
               ?.querySelector<HTMLButtonElement>('[role="tablist"] [aria-selected="true"]')?.focus();
             inspector.onClose();
           }}><X size={16} /></IconButton>
