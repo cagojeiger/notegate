@@ -161,6 +161,7 @@ async fn session_preparation_is_atomic_idempotent_and_binds_the_previous_issuer(
     let third = prepare_browser_sessions(&db.pool, &PiiCrypto::test(), OLD_ISSUER).await?;
     assert_eq!((third.recorded, third.revoked), (1, 0));
     db.apply_migration(62).await?;
+    db.apply_migration(63).await?;
     notegate_db::check_readiness(&db.pool).await?;
     db.cleanup().await;
     Ok(())
@@ -251,7 +252,6 @@ async fn provider_migration_preserves_accounts_sessions_documents_and_both_oauth
     assert_eq!((result.recorded, result.revoked), (6, 2));
     let prepared = rows(&db, "browser_sessions", true).await?;
     db.apply_migration(62).await?;
-    notegate_db::check_readiness(&db.pool).await?;
     assert_eq!(rows(&db, "browser_sessions", false).await?, prepared);
     let live_after: Value =
         sqlx::query_scalar("SELECT to_jsonb(t) FROM browser_sessions t WHERE id=$1")
@@ -262,6 +262,8 @@ async fn provider_migration_preserves_accounts_sessions_documents_and_both_oauth
     for (table, expected) in before {
         assert_eq!(rows(&db, table, false).await?, expected, "{table}");
     }
+    db.apply_migration(63).await?;
+    notegate_db::check_readiness(&db.pool).await?;
     let audit = rows(&db, "audit_events", false).await?;
     for event in old_audit.as_array().ok_or("missing Audit")? {
         assert!(audit.as_array().ok_or("missing Audit")?.contains(event));
@@ -328,6 +330,7 @@ async fn provider_migration_preserves_accounts_sessions_documents_and_both_oauth
                     access_expires_at: now + chrono::Duration::minutes(10),
                     grant_expires_at: now + chrono::Duration::days(7),
                     idle_expires_at: now + chrono::Duration::days(7),
+                    private_refresh_response: None,
                 },
                 now,
             )

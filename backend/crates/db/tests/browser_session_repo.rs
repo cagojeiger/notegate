@@ -458,6 +458,7 @@ async fn dropping_browser_refresh_storage_preserves_sessions_and_owned_data()
             .await?;
     assert_eq!(issuer, None);
 
+    db.apply_migration(63).await?;
     let oauth = OAuthRepo::new(db.pool.clone());
     assert_eq!(
         oauth.access_user(&access, resource, "cli", now).await?,
@@ -478,6 +479,7 @@ async fn dropping_browser_refresh_storage_preserves_sessions_and_owned_data()
                 access_expires_at: now + Duration::minutes(10),
                 grant_expires_at: now + Duration::days(7),
                 idle_expires_at: now + Duration::days(7),
+                private_refresh_response: None,
             },
             now,
         )

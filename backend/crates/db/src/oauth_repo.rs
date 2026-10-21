@@ -9,6 +9,8 @@ use uuid::Uuid;
 
 use crate::map_sqlx_error;
 
+pub const REFRESH_RETRY_SECONDS: i64 = 10;
+
 #[derive(Clone, Debug)]
 pub struct OAuthRepo {
     pool: PgPool,
@@ -56,10 +58,16 @@ pub struct CredentialIssue<'a> {
     pub access_expires_at: DateTime<Utc>,
     pub grant_expires_at: DateTime<Utc>,
     pub idle_expires_at: DateTime<Utc>,
+    pub private_refresh_response: Option<&'a Value>,
 }
 
 pub enum ExchangeOutcome {
     Issued(OAuthGrant),
+    Replayed {
+        grant: OAuthGrant,
+        credential_hash: String,
+        private_response: Value,
+    },
     Rejected(&'static str),
 }
 
@@ -241,6 +249,7 @@ impl OAuthRepo {
         issue: &CredentialIssue<'_>,
         now: DateTime<Utc>,
     ) -> Result<ExchangeOutcome> {
+        let started = std::time::Instant::now();
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let owner:Option<(Uuid,Uuid)>=sqlx::query_as("SELECT g.user_id,g.id FROM oauth_credentials c JOIN oauth_grants g ON g.id=c.grant_id WHERE c.token_hash=$1 AND c.kind='refresh'")
             .bind(hash).fetch_optional(&mut *tx).await.map_err(map_sqlx_error)?;
@@ -255,32 +264,75 @@ impl OAuthRepo {
             .fetch_one(&mut *tx)
             .await
             .map_err(map_sqlx_error)?;
-        if grant.client_id != client || grant.resource != resource || !grant.is_live(now) {
-            return Ok(ExchangeOutcome::Rejected("invalid_grant"));
-        }
-
-        let (expires, consumed): (DateTime<Utc>, Option<DateTime<Utc>>) = sqlx::query_as(
-            "SELECT expires_at,consumed_at FROM oauth_credentials WHERE token_hash=$1",
-        )
-        .bind(hash)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        if consumed.is_some() {
-            revoke_grant(&mut tx, &grant, now, "refresh_reuse").await?;
-            // This is deliberately committed: returning an error must not undo revocation.
-            tx.commit().await.map_err(map_sqlx_error)?;
+        let retry_now = now
+            + chrono::Duration::from_std(started.elapsed())
+                .map_err(|_| notegate_core::Error::internal("refresh request duration overflow"))?;
+        if grant.client_id != client || grant.resource != resource || !grant.is_live(retry_now) {
             return Ok(ExchangeOutcome::Rejected("invalid_grant"));
         }
         if requested_scope.is_some_and(|scope| scope != grant.scope) {
             return Ok(ExchangeOutcome::Rejected("invalid_scope"));
         }
-        if expires <= now {
+        let (expires, consumed, private_response): (
+            DateTime<Utc>,
+            Option<DateTime<Utc>>,
+            Option<Value>,
+        ) = sqlx::query_as(
+            "SELECT expires_at,consumed_at,private_refresh_response FROM oauth_credentials WHERE token_hash=$1",
+        )
+        .bind(hash)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        if let Some(consumed) = consumed {
+            if expires > retry_now
+                && consumed <= retry_now
+                && retry_now < consumed + chrono::Duration::seconds(REFRESH_RETRY_SECONDS)
+                && let Some(private_response) = private_response
+            {
+                tx.commit().await.map_err(map_sqlx_error)?;
+                return Ok(ExchangeOutcome::Replayed {
+                    grant,
+                    credential_hash: hash.to_owned(),
+                    private_response,
+                });
+            }
+            revoke_grant(&mut tx, &grant, now, "refresh_reuse").await?;
+            // This is deliberately committed: returning an error must not undo revocation.
+            tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(ExchangeOutcome::Rejected("invalid_grant"));
         }
-        sqlx::query("UPDATE oauth_credentials SET consumed_at=$2 WHERE token_hash=$1")
+        if expires <= retry_now {
+            return Ok(ExchangeOutcome::Rejected("invalid_grant"));
+        }
+        // Coalesce the new token's immediate refreshes too, so out-of-order
+        // responses from a retry burst all carry the same successor token.
+        let recent: Option<(String, Value)> = sqlx::query_as(
+            "SELECT token_hash,private_refresh_response FROM oauth_credentials \
+             WHERE grant_id=$1 AND kind='refresh' AND private_refresh_response IS NOT NULL \
+               AND private_refresh_response->>'refresh_hash'=$2 \
+               AND consumed_at<=$3 AND consumed_at>$4 \
+             ORDER BY consumed_at DESC LIMIT 1",
+        )
+        .bind(id)
+        .bind(hash)
+        .bind(retry_now)
+        .bind(retry_now - chrono::Duration::seconds(REFRESH_RETRY_SECONDS))
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        if let Some((credential_hash, private_response)) = recent {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return Ok(ExchangeOutcome::Replayed {
+                grant,
+                credential_hash,
+                private_response,
+            });
+        }
+        sqlx::query("UPDATE oauth_credentials SET consumed_at=$2,private_refresh_response=$3 WHERE token_hash=$1")
             .bind(hash)
             .bind(now)
+            .bind(issue.private_refresh_response)
             .execute(&mut *tx)
             .await
             .map_err(map_sqlx_error)?;
@@ -588,6 +640,11 @@ async fn revoke_grant(
         sqlx::query("UPDATE oauth_grants SET revoked_at=$2 WHERE id=$1")
             .bind(grant.id)
             .bind(now)
+            .execute(&mut *conn)
+            .await
+            .map_err(map_sqlx_error)?;
+        sqlx::query("UPDATE oauth_credentials SET private_refresh_response=NULL WHERE grant_id=$1 AND private_refresh_response IS NOT NULL")
+            .bind(grant.id)
             .execute(&mut *conn)
             .await
             .map_err(map_sqlx_error)?;

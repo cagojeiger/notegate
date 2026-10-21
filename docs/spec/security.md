@@ -70,9 +70,9 @@ session_hash      = HMAC(SESSION_TOKEN_SUBKEY, "browser-session:v1:" || session_
 
 ## Local OAuth credentials
 
-NoteGate는 MCP·CLI용 256-bit opaque access/refresh token을 발급한다. LOOKUP root의 별도 HKDF label(`notegate/lookup/oauth-credential/v1`)과 목적별 domain으로 token/code/cookie/device/user-code를 HMAC하며 원문은 보관하지 않는다. Login flow와 client state는 ENC root의 별도 label(`notegate/enc/oauth-state/v1`)로 암호화하고 record ID와 key ID를 AAD에 포함한다. 기존 PII·문서·API key의 label과 AAD는 변경하지 않는다. `PiiCrypto` Debug 출력에는 key ID만 포함한다.
+NoteGate는 MCP·CLI용 256-bit opaque access/refresh token을 발급한다. LOOKUP root의 별도 HKDF label(`notegate/lookup/oauth-credential/v1`)과 목적별 domain으로 token/code/cookie/device/user-code를 HMAC하며 평문은 보관하지 않는다. Login flow와 client state는 ENC root의 별도 label(`notegate/enc/oauth-state/v1`)로 암호화하고 record ID와 key ID를 AAD에 포함한다. Refresh 재시도의 동일 응답도 이 키로 암호화하되 AAD를 `refresh-retry:`와 소비된 credential HMAC에 묶는다. 이 캐시는 최초 회전 후 10초만 반환할 수 있고 만료 후 bounded purge로 제거한다. 기존 PII·문서·API key의 label과 AAD는 변경하지 않는다. `PiiCrypto` Debug 출력에는 key ID만 포함한다.
 
-외부 OIDC ID token은 로그인 신원 확인용이며 MCP·CLI bearer로 받지 않는다. 로컬 bearer는 resource/scope·계정 활성 상태·grant 철회와 만료를 확인한다. Refresh는 회전하며 사용한 token 재사용을 확인하면 해당 연결을 철회한다. CIMD는 public HTTPS endpoint만 읽고 DNS를 고정하며 redirect·proxy·과도한 body와 동시 요청을 차단한다. 상세 계약은 [REST 인증](rest/auth.md)을 따른다.
+외부 OIDC ID token은 로그인 신원 확인용이며 MCP·CLI bearer로 받지 않는다. 로컬 bearer는 resource/scope·계정 활성 상태·grant 철회와 만료를 확인한다. Refresh는 회전하며 고정 10초 재시도 구간 안의 요청은 동일 응답을 반환한다. 이 기간에는 유출된 동일 token의 재사용도 정상 재시도와 구분할 수 없으며, 구간 밖의 재사용은 연결 전체를 철회한다. 재전달은 유예·idle·absolute 수명을 연장하거나 폐기된 연결을 복구하지 않는다. CIMD는 public HTTPS endpoint만 읽고 DNS를 고정하며 redirect·proxy·과도한 body와 동시 요청을 차단한다. 상세 계약은 [REST 인증](rest/auth.md)을 따른다.
 
 ## Text content encryption
 
