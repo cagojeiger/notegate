@@ -409,7 +409,7 @@ test("backs off idle usage polling with one owner while the desktop Space Librar
 
   await page.clock.runFor(10_000);
   await page.getByRole("button", { name: "Open space library" }).click();
-  await expect(page.getByRole("heading", { name: /Spaces 1/ })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Spaces 1", exact: true })).toBeVisible();
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
 
   for (const [elapsedMs, expectedRequests] of [
