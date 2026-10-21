@@ -76,7 +76,8 @@ async fn unlinked_active_and_pending_deleted_accounts_block_identity_migration()
         bind_original_issuer(&db.pool).await?;
         let repo = AccountRepo::new(db.pool.clone());
         if deleted {
-            repo.soft_delete_user(owner, owner).await?;
+            sqlx::query("UPDATE accounts SET is_active=false,deleted_at=now(),deleted_by_account_id=$1 WHERE id=$1")
+                .bind(owner).execute(&db.pool).await?;
         }
         assert!(db.apply_migration(58).await.is_err());
         let columns: i64 = sqlx::query_scalar(
@@ -298,7 +299,12 @@ async fn identity_migration_preserves_ownership_pii_documents_sessions_and_oauth
         link(deleted, ISSUER, "deleted-subject"),
     ])
     .await?;
-    repo.soft_delete_user(deleted, deleted).await?;
+    sqlx::query(
+        "UPDATE accounts SET is_active=false,deleted_at=now(),deleted_by_account_id=$1 WHERE id=$1",
+    )
+    .bind(deleted)
+    .execute(&db.pool)
+    .await?;
     let before_caller = repo
         .find_caller_by_account_id(owner)
         .await?

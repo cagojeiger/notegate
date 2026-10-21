@@ -56,12 +56,15 @@ Redirect는 등록 값과 일치해야 한다. HTTP loopback redirect는 port만
 |---|---|
 | Authorization code | 승인 후 60초, 한 번 교환, client/resource/redirect/PKCE에 연결 |
 | Access token | 256-bit opaque secret, 최대 10분, resource + scope + 활성 계정 + grant 철회 확인 |
-| Refresh token | `offline_access`에서만 발급, 매번 회전, idle 7일 / absolute 30일 |
-| Code/refresh 재사용 | 보존된 사용 기록으로 확인하면 해당 grant와 연결된 모든 token을 철회 |
+| Refresh token | `offline_access`에서만 발급, 회전, idle 7일 / absolute 30일 |
+| Refresh 재시도 | 회전 후 고정 10초 동안 이전 token 또는 발급된 successor의 요청은 동일한 token pair를 반환; 추가 발급·만료 연장 없음 |
+| Code/refresh 재사용 | Code 재사용 또는 유예 구간 밖의 사용한 refresh token 재사용은 해당 grant와 연결된 모든 token을 철회 |
 | Scope | MCP는 `mcp`, CLI는 `cli`, 선택적 `offline_access`; 기존 Space·node 권한도 적용 |
 | 연결 수 | 사용자당 활성 grant 최대 100개; 동시 승인에도 같은 한도 적용 |
 
-토큰 원문은 응답에서만 전달하고 DB에는 별도 목적 키로 HMAC 저장한다. 외부 OIDC 토큰을 API bearer로 받지 않는다. Refresh 요청은 원래 scope를 반복할 수 있으며 scope 변경은 거부한다. 토큰·철회·실패 응답은 no-store다. 승인 화면의 Referrer-Policy는 `same-origin`으로 동일 출처 form POST의 Origin 검증을 유지하면서 외부 redirect에는 Referer를 보내지 않는다.
+토큰 검증값은 별도 목적 키의 HMAC으로 저장한다. Refresh 응답 재전달을 위해 token pair와 access 만료를 기존 OAuth state 키로 암호화하여 소비된 credential 행의 `private_refresh_response`에 보관한다. AAD는 `refresh-retry:`와 해당 credential HMAC에 묶는다. 원문 token은 DB·log·Audit에 저장하지 않는다. 재시도는 동일 account/client/resource/scope와 계정 활성·grant 철회·두 만료를 다시 확인한다. `refresh_retry_until`은 회전 transaction의 PostgreSQL 시계로 정하며 lock 취득 후 같은 DB 시계로 검사한다. Pod 시계 차이와 lock 대기로 유예가 늘어나지 않으며 재전달로 기한을 갱신하지 않는다. 응답의 `expires_in`은 원래 만료까지 남은 시간으로 줄인다. 10초 이후 캐시는 사용할 수 없으며 기존 bounded purge가 암호문과 기한을 제거하되 재사용 탐지용 HMAC은 유지한다. 연결 철회 시 캐시도 같은 transaction에서 제거한다.
+
+외부 OIDC 토큰을 API bearer로 받지 않는다. Refresh 요청은 원래 scope를 반복할 수 있으며 scope 변경은 거부한다. 토큰·철회·실패 응답은 no-store다. 승인 화면의 Referrer-Policy는 `same-origin`으로 동일 출처 form POST의 Origin 검증을 유지하면서 외부 redirect에는 Referer를 보내지 않는다.
 
 CLI는 정적으로 설정한 public client ID로 `POST /oauth/device/authorize`를 호출한다. `cli offline_access`를 요청하고 browser에서 `/oauth/device`에 표시된 요청을 승인한다. Device code는 5분, 기본 poll 간격은 5초다. 빠른 poll은 `slow_down`과 간격 증가를 반환한다. 승인·거절·만료·소비 상태를 DB에서 판정한다. CLI resource는 NoteGate public URL의 `/cli`로 고정한다.
 

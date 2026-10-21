@@ -109,7 +109,10 @@ pub(crate) async fn soft_delete_user(
     .await
     .map_err(map_sqlx_error)?;
 
-    sqlx::query("UPDATE oauth_grants SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL")
+    sqlx::query("WITH revoked AS ( \
+        UPDATE oauth_grants SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL RETURNING id \
+        ) UPDATE oauth_credentials SET private_refresh_response=NULL,refresh_retry_until=NULL \
+        WHERE grant_id IN (SELECT id FROM revoked) AND private_refresh_response IS NOT NULL")
         .bind(account_id)
         .execute(&mut *tx)
         .await

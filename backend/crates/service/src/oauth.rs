@@ -90,7 +90,7 @@ impl OAuthService {
                 now,
             )
             .await?;
-        Ok(self.response(tokens, outcome, now))
+        self.response(tokens, outcome, now)
     }
 
     pub async fn refresh(
@@ -113,19 +113,27 @@ impl OAuthService {
         now: DateTime<Utc>,
     ) -> Result<TokenOutcome> {
         let tokens = self.tokens()?;
-        let issue = self.issue(&tokens, now);
+        let hash = self.crypto.oauth_hash("token", token)?;
+        let encrypted = self.crypto.encrypt_oauth_state(
+            &format!("refresh-retry:{hash}"),
+            &serde_json::to_string(&(
+                &tokens.access,
+                &tokens.refresh,
+                now + Duration::seconds(ACCESS_SECONDS),
+            ))
+            .map_err(|_| notegate_core::Error::internal("refresh response encoding failed"))?,
+        )?;
+        let private_response = serde_json::json!({
+            "refresh_hash": tokens.refresh_hash,
+            "tokens": encrypted,
+        });
+        let mut issue = self.issue(&tokens, now);
+        issue.private_refresh_response = Some(&private_response);
         let outcome = self
             .store
-            .rotate_refresh(
-                &self.crypto.oauth_hash("token", token)?,
-                client,
-                resource,
-                scope,
-                &issue,
-                now,
-            )
+            .rotate_refresh(&hash, client, resource, scope, &issue, now)
             .await?;
-        Ok(self.response(tokens, outcome, now))
+        self.response(tokens, outcome, now)
     }
 
     pub async fn device(
@@ -209,7 +217,7 @@ impl OAuthService {
                 now,
             )
             .await?;
-        Ok(self.response(tokens, outcome, now))
+        self.response(tokens, outcome, now)
     }
 
     pub async fn access_user(
@@ -259,6 +267,7 @@ impl OAuthService {
             access_expires_at: now + Duration::seconds(ACCESS_SECONDS),
             grant_expires_at: now + Duration::days(REFRESH_MAX_DAYS),
             idle_expires_at: now + Duration::days(REFRESH_IDLE_DAYS),
+            private_refresh_response: None,
         }
     }
 
@@ -267,10 +276,10 @@ impl OAuthService {
         tokens: Tokens,
         outcome: ExchangeOutcome,
         now: DateTime<Utc>,
-    ) -> TokenOutcome {
+    ) -> Result<TokenOutcome> {
         match outcome {
-            ExchangeOutcome::Rejected(error) => TokenOutcome::Rejected(error),
-            ExchangeOutcome::Issued(grant) => TokenOutcome::Issued(TokenResponse {
+            ExchangeOutcome::Rejected(error) => Ok(TokenOutcome::Rejected(error)),
+            ExchangeOutcome::Issued(grant) => Ok(TokenOutcome::Issued(TokenResponse {
                 access_token: tokens.access,
                 token_type: "Bearer",
                 expires_in: ACCESS_SECONDS.min((grant.expires_at - now).num_seconds()),
@@ -280,7 +289,32 @@ impl OAuthService {
                     .any(|s| s == "offline_access")
                     .then_some(tokens.refresh),
                 scope: grant.scope,
-            }),
+            })),
+            ExchangeOutcome::Replayed {
+                grant,
+                credential_hash,
+                private_response,
+            } => {
+                let encrypted = serde_json::from_value(
+                    private_response.get("tokens").cloned().unwrap_or_default(),
+                )
+                .map_err(|_| notegate_core::Error::internal("invalid refresh response cache"))?;
+                let plaintext = self
+                    .crypto
+                    .decrypt_oauth_state(&format!("refresh-retry:{credential_hash}"), &encrypted)?;
+                let (access, refresh, expires): (String, String, DateTime<Utc>) =
+                    serde_json::from_str(&plaintext)
+                        .map_err(|_| notegate_core::Error::internal("invalid refresh response"))?;
+                Ok(TokenOutcome::Issued(TokenResponse {
+                    access_token: access,
+                    token_type: "Bearer",
+                    expires_in: ACCESS_SECONDS
+                        .min((expires.min(grant.expires_at) - now).num_seconds())
+                        .max(0),
+                    refresh_token: Some(refresh),
+                    scope: grant.scope,
+                }))
+            }
         }
     }
 }

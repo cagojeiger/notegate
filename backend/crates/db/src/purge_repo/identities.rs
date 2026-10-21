@@ -123,6 +123,16 @@ pub(super) async fn purge(pool: &PgPool) -> Result<PurgedIdentities> {
     .map_err(map_sqlx_error)?
     .rows_affected();
 
+    sqlx::query(
+        "UPDATE oauth_credentials SET private_refresh_response=NULL,refresh_retry_until=NULL WHERE token_hash IN ( \
+         SELECT token_hash FROM oauth_credentials WHERE private_refresh_response IS NOT NULL \
+           AND refresh_retry_until<=clock_timestamp() \
+         ORDER BY refresh_retry_until,token_hash LIMIT 1000)",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+
     // Expiry is enforced synchronously at lookup; these bounded batches only reclaim storage.
     for table in [
         "oidc_login_flows",

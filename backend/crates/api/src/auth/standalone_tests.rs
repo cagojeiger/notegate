@@ -149,6 +149,22 @@ async fn device_http_flow_rejects_csrf_and_uses_own_tokens_without_authgate()
     )
     .await;
     assert_eq!(first.status(), StatusCode::OK);
+    let rotated = body(first).await;
+    let repeated = post(
+        &router,
+        "/oauth/token",
+        &format!("grant_type=refresh_token&client_id=notegate-cli-local&refresh_token={refresh}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(repeated.status(), StatusCode::OK);
+    assert_eq!(repeated.headers()[header::CACHE_CONTROL], "no-store");
+    let repeated = body(repeated).await;
+    assert!(repeated["access_token"] == rotated["access_token"]);
+    assert!(repeated["refresh_token"] == rotated["refresh_token"]);
+    sqlx::query("UPDATE oauth_credentials SET refresh_retry_until=clock_timestamp()-interval '1 second' WHERE private_refresh_response IS NOT NULL")
+        .execute(&db.pool).await?;
     assert_eq!(
         post(
             &router,
@@ -163,7 +179,6 @@ async fn device_http_flow_rejects_csrf_and_uses_own_tokens_without_authgate()
         .status(),
         StatusCode::BAD_REQUEST
     );
-    let rotated = body(first).await;
     assert!(
         crate::auth::bearer::verify_bearer_command(
             &state,
