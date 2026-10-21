@@ -2,6 +2,8 @@
 # Run the complete Rust suite, then remove only this run's leftover DB schemas.
 set -euo pipefail
 
+unset NOTEGATE_TEST_SKIP_INTEGRATION
+
 for name in NOTEGATE_TEST_DATABASE_URL NOTEGATE_TEST_S3_ENDPOINT; do
   value="${!name:-}"
   if [[ -z "${value//[[:space:]]/}" ]]; then

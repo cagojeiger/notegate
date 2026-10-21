@@ -9,6 +9,7 @@ export default defineConfig({
   testDir: "./security",
   outputDir: resolve(import.meta.dirname, "../../security-results/browser-output"),
   timeout: 45_000,
+  forbidOnly: true,
   globalTimeout: 240_000,
   expect: { timeout: 10_000 },
   workers: 1,

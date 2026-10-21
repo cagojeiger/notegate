@@ -193,8 +193,11 @@ deploy/ci/test-rust.sh -p notegate-api rest::file_upload_tests
 |---|---|
 | 통합 실행 | 고유 `NOTEGATE_TEST_RUN_ID`, 테스트별 독립 schema. 개별 cleanup 후 cargo 종료 시 해당 run 잔여 schema만 정리; 다른 실행/기존 schema 유지 |
 | 실패 정리 | Assertion/반환 오류/migration 오류도 대상. Cleanup 실패는 명령 실패. SIGKILL/DB 장애는 보장 불가; S3는 개별 테스트가 정리 |
-| `make test-fast` | DB/S3 환경변수를 해제하고 통합 테스트 제외 안내; 전체 검증으로 취급하지 않음 |
-| 직접 `cargo test` | 환경변수 없는 통합 테스트가 조기 종료할 수 있고 run 종료 cleanup은 통합 실행 명령에만 적용 |
+| `make test-fast` | 로컬에서만 `NOTEGATE_TEST_SKIP_INTEGRATION=1`로 DB/S3 테스트를 명시적으로 제외; 전체 검증으로 취급하지 않음. CI에서는 이 우회를 거부 |
+| 직접 `cargo test` | 필요한 DB/S3 환경변수가 없거나 비어 있으면 해당 테스트 실패. Run 종료 cleanup은 통합 실행 명령에만 적용 |
+
+브라우저 CI는 `.only`와 재시도로 통과한 flaky test도 실패로 처리한다. 재시도는 진단을
+위해 한 번 유지한다. 실제 dashboard smoke는 테스트 세션이 없으면 건너뛰지 않고 실패한다.
 
 `make frontend-check`는 dependency audit, theme contrast, typecheck, lint, unit test와 production build를 실행한다.
 

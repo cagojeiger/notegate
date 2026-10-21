@@ -40,9 +40,13 @@ use crate::rest::test_support::{
     caller_and_space, empty_request, json_request, rest_app, state, state_with_s3,
 };
 
-fn test_s3_config() -> Option<S3Config> {
-    let endpoint = std::env::var("NOTEGATE_TEST_S3_ENDPOINT").ok()?;
-    Some(S3Config {
+fn test_s3_config() -> Result<Option<S3Config>, std::io::Error> {
+    let Some(endpoint) =
+        notegate_db::test_support::integration_test_env("NOTEGATE_TEST_S3_ENDPOINT")?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(S3Config {
         public_endpoint: Some(
             std::env::var("NOTEGATE_TEST_S3_PUBLIC_ENDPOINT").unwrap_or_else(|_| endpoint.clone()),
         ),
@@ -57,14 +61,14 @@ fn test_s3_config() -> Option<S3Config> {
                 .unwrap_or_else(|_| "notegate-secret".to_owned()),
         ),
         force_path_style: true,
-    })
+    }))
 }
 
 // Keep setup local to the upload suite; each call still owns an isolated schema.
 type UploadTest = (TestDb, crate::state::AppState, Caller, Uuid, Uuid);
 
 async fn upload_test() -> Result<Option<UploadTest>, Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some(s3) = test_s3_config()? else {
         return Ok(None);
     };
     let Some(db) = TestDb::setup().await? else {
@@ -402,7 +406,7 @@ async fn verified_docx_bytes_use_the_dedicated_preview_url()
 -> Result<(), Box<dyn std::error::Error>> {
     const DOCX_MEDIA_TYPE: &str =
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-    let Some(s3) = test_s3_config() else {
+    let Some(s3) = test_s3_config()? else {
         return Ok(());
     };
     let Some(db) = TestDb::setup().await? else {
@@ -1398,7 +1402,7 @@ async fn multipart_abort_cleanup_closes_the_provider_upload()
 #[tokio::test]
 async fn begin_counts_expiry_pending_uploads_toward_the_cap()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some(s3) = test_s3_config()? else {
         return Ok(());
     };
     let Some(db) = TestDb::setup().await? else {
@@ -1617,7 +1621,7 @@ async fn concurrent_completion_attaches_one_file_idempotently()
 #[tokio::test]
 async fn completion_recovers_after_temporary_storage_failure()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some(s3) = test_s3_config()? else {
         return Ok(());
     };
     let Some(db) = TestDb::setup().await? else {
@@ -1654,7 +1658,7 @@ async fn completion_recovers_after_temporary_storage_failure()
 #[tokio::test]
 async fn cleanup_retries_after_temporary_storage_failure() -> Result<(), Box<dyn std::error::Error>>
 {
-    let Some(s3) = test_s3_config() else {
+    let Some(s3) = test_s3_config()? else {
         return Ok(());
     };
     let Some(db) = TestDb::setup().await? else {
@@ -1716,7 +1720,7 @@ async fn cleanup_retries_after_temporary_storage_failure() -> Result<(), Box<dyn
 #[tokio::test]
 async fn attached_file_quota_survives_s3_failure_and_crash_before_completion_commit()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some(s3) = test_s3_config()? else {
         return Ok(());
     };
     let Some(db) = TestDb::setup().await? else {
@@ -2038,7 +2042,7 @@ async fn mcp_upload_continuations_follow_current_user_pin_but_not_agent_pin()
 #[tokio::test]
 async fn mcp_multipart_upload_and_presigned_download_round_trip()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
+    let Some(s3) = test_s3_config()? else {
         return Ok(());
     };
     let Some(db) = TestDb::setup().await? else {
