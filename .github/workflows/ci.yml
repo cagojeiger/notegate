@@ -109,12 +109,13 @@ jobs:
               cat "$log"
               exit 1
             fi
+            echo "Confirmed $setting is required by the selected integration test"
           }
           assert_missing_setting_fails NOTEGATE_TEST_DATABASE_URL \
             cargo test --locked -p notegate-db --test files_commands \
             resolved_paths_and_search_candidates_preserve_all_node_fields -- --exact
           assert_missing_setting_fails NOTEGATE_TEST_S3_ENDPOINT \
-            cargo test --locked -p notegate-api --lib \
+            cargo test --locked -p notegate-api --bin notegate-api \
             rest::file_upload_tests::verified_docx_bytes_use_the_dedicated_preview_url -- --exact
 
       - name: Measure search date candidate filtering
