@@ -4,10 +4,9 @@ import { useRef, useState } from "react";
 
 import type { ApiKeyListResponse, MintedKey } from "../../api/keys";
 import { copyText } from "../../shared/lib/clipboard";
-import { Button, Card, EmptyState, IconButton, SelectField, TextField } from "../../shared/ui";
+import { AddButton, Button, Card, EmptyState, IconButton, SelectField, TextField } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
 import { useApiKeysQuery, useCreateApiKeyMutation, useRevokeApiKeyMutation } from "./useSettingsQueries";
-import { SettingsAddButton } from "./SettingsAddButton";
 
 function expiryOptions(maxTtlDays: number) {
   const presets = maxTtlDays > 30 ? [7, 14, 30, 90, 180, maxTtlDays] : [7, 14, maxTtlDays];
@@ -87,7 +86,7 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
       ) : (
         <Card padding="none" as="ul" className="divide-y divide-seam">
           {keys.map((key) => (
-            <li key={key.id} className="flex items-center gap-3 px-4 py-3 text-sm">
+            <li key={key.id} className="flex items-center gap-3 px-3 py-3 text-workbench">
               <KeyRound size={15} className="shrink-0 text-muted" />
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{key.name}</div>
@@ -122,7 +121,7 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
           <Button type="submit" disabled={!canCreate}><Plus size={15} /> Create</Button>
           <Button secondary disabled={createMutation.isPending} onClick={() => { setAdding(false); setName(""); returnToAdd(); }}>Cancel</Button>
         </div>
-      </form> : <SettingsAddButton ref={addButtonRef} onClick={() => setAdding(true)}>Add API key</SettingsAddButton>}
+      </form> : <AddButton label="Add API key" ref={addButtonRef} onClick={() => setAdding(true)} />}
     </div>
   );
 }

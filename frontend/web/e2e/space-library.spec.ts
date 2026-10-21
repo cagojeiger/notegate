@@ -61,6 +61,7 @@ test("an empty library creates its first Space from the plus card", async ({ pag
 
   await expect(page.getByRole("tab", { name: "Spaces 0", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "No spaces yet" })).toBeVisible();
+  expect((await page.getByRole("button", { name: "Create space", exact: true }).boundingBox())?.height).toBeGreaterThanOrEqual(144);
   await page.getByRole("list", { name: "All spaces" }).getByRole("button", { name: "Create space" }).click();
   await expect(page.getByRole("dialog", { name: "New space" }).getByLabel("Space name")).toBeFocused();
 });

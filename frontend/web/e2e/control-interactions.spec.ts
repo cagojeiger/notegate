@@ -153,7 +153,7 @@ for (const width of [1440, 390, 320]) {
 }
 
 for (const width of [1440, 390]) {
-  test(`Workspace and Settings share tab alignment and body gutters at ${width}px`, async ({ page }) => {
+  test(`Space Library and Settings share tabs, gutters and control geometry at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await mockWorkbench(page);
     await page.goto("/");
@@ -162,6 +162,8 @@ for (const width of [1440, 390]) {
     await expect(spaces).toHaveAttribute("aria-selected", "true");
     const workspaceHeader = page.locator("[data-panel-header]").filter({ has: spaces });
     const workspaceBounds = await workspaceHeader.boundingBox();
+    const addRadius = await page.getByRole("button", { name: "Create space", exact: true })
+      .evaluate((element) => getComputedStyle(element).borderRadius);
     const workspacePadding = await page.getByRole("tabpanel", { name: "Spaces 1", exact: true })
       .evaluate((element) => { const style = getComputedStyle(element); return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft]; });
 
@@ -177,6 +179,20 @@ for (const width of [1440, 390]) {
     expect(await settings.getByRole("tabpanel", { name: "General", exact: true })
       .evaluate((element) => { const style = getComputedStyle(element); return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft]; }))
       .toEqual(workspacePadding);
+
+    const reset = settings.getByRole("button", { name: "Reset", exact: true });
+    const buttonHeight = await reset.evaluate((element) => element.getBoundingClientRect().height);
+    expect(buttonHeight).toBe(width < 768 ? 44 : 28);
+    expect(await reset.evaluate((element) => getComputedStyle(element).borderRadius)).toBe(addRadius);
+    await settings.getByRole("tab", { name: "History", exact: true }).click();
+    expect(await settings.getByRole("combobox", { name: "History type", exact: true })
+      .evaluate((element) => element.getBoundingClientRect().height)).toBe(buttonHeight);
+
+    await settings.getByRole("button", { name: "Close settings", exact: true }).click();
+    await page.getByRole("button", { name: "Create space", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "New space", exact: true });
+    expect(await dialog.getByRole("textbox", { name: "Space name", exact: true })
+      .evaluate((element) => element.getBoundingClientRect().height)).toBe(buttonHeight);
   });
 }
 
@@ -342,12 +358,14 @@ for (const profile of [
       await expect(settings.getByRole("button", { name: "Add agent", exact: true })).toHaveCSS("height", "48px");
       await settings.getByRole("button", { name: "Add agent", exact: true }).click();
       const field = settings.getByRole("textbox", { name: "New agent name" });
-      expect((await field.boundingBox())?.height).toBe(profile.hasTouch ? 44 : 38);
+      expect((await field.boundingBox())?.height).toBe(profile.hasTouch ? 44 : 28);
       await expect(field).toBeFocused();
       await page.keyboard.press("Tab");
       await page.keyboard.press("Shift+Tab");
       await expect(field).toBeFocused();
-      expect(await field.evaluate((element) => ({ visible: element.matches(":focus-visible"), style: getComputedStyle(element).outlineStyle, width: getComputedStyle(element).outlineWidth }))).toEqual({ visible: true, style: "solid", width: "2px" });
+      const focus = await field.evaluate((element) => ({ visible: element.matches(":focus-visible"), shadow: getComputedStyle(element).boxShadow }));
+      expect(focus.visible).toBe(true);
+      expect(focus.shadow).not.toBe("none");
     });
 
     if (profile.name === "touch tablet") {

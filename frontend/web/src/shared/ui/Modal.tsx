@@ -111,8 +111,8 @@ export function Modal({
         tabIndex={-1}
         className={`relative w-full ${width} border border-border bg-panel font-ui text-workbench shadow-[var(--ng-focus-shadow)] ${
           bottomSheet
-            ? "flex h-[82dvh] flex-col overflow-hidden rounded-t-2xl border-b-0"
-            : `${centeredLayout} rounded-lg p-6`
+            ? "flex h-[82dvh] flex-col overflow-hidden rounded-t-workbench-surface border-b-0"
+            : `${centeredLayout} rounded-workbench-surface p-6`
         }`}
       >
         <div className={`flex shrink-0 items-center justify-between ${bottomSheet ? "h-12 border-b border-seam px-3" : "mb-4"}`}>

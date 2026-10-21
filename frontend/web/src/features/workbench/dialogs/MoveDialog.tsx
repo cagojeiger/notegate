@@ -61,7 +61,7 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
             <button
               type="button"
               onClick={() => setStack((prev) => prev.slice(0, index + 1))}
-              className={`rounded px-1 py-0.5 hover:bg-surface hover:text-text ${index === stack.length - 1 ? "font-semibold text-text" : ""}`}
+              className={`rounded-workbench px-1 py-0.5 hover:bg-surface hover:text-text ${index === stack.length - 1 ? "font-semibold text-text" : ""}`}
             >
               {crumb.name === "/" ? "Root" : crumb.name}
             </button>
@@ -89,7 +89,7 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
                 onClick={() => setStack((prev) => [...prev, { id: folder.id, name: folder.name }])}
                 disabled={folder.effective_write_locked}
                 title={folder.effective_write_locked ? "Write locked" : undefined}
-                className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-muted hover:bg-panel hover:text-text disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted"
+                className="flex w-full items-center justify-between rounded-workbench-surface px-3 py-2 text-left text-sm text-muted hover:bg-panel hover:text-text disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted"
               >
                 <span className="flex min-w-0 items-center gap-2"><Folder size={14} className="shrink-0" /><span className="truncate">{folder.name}</span></span>
                 {folder.effective_write_locked

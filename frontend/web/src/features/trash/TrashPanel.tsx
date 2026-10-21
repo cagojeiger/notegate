@@ -7,7 +7,7 @@ import { ApiError } from "../../api/errors";
 import { queryKeys } from "../../api/queryKeys";
 import { invalidateAuditEvents, invalidateFileSyncFallback, invalidateSpacesList } from "../../api/queryInvalidation";
 import { listTrash, purgeTrash, restoreTrash, type TrashItem } from "../../api/trash";
-import { Button, Card, IconButton } from "../../shared/ui";
+import { Button, Card, IconButton, ListItemButton, PanelSection } from "../../shared/ui";
 
 import { SettingsControls, SettingsInspectorSection, useSettingsInspector } from "../settings/SettingsInspector";
 
@@ -105,27 +105,26 @@ export function TrashPanel() {
   return (
     <SettingsPage label="Trash" title="Deleted items" inspectorLabel="Open trash actions" scrollKey="trash" contained disabled={mutation.isPending}
       actions={<div className="flex items-center gap-2 text-xs text-muted"><span>Newest first</span><IconButton label="Refresh" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void queryClient.invalidateQueries({ queryKey: queryKeys.trash }); }}><RefreshCw size={16} aria-hidden="true" /></IconButton></div>}>
-      <SettingsControls><p className="text-xs text-muted">Deleted items are kept for 30 days.</p></SettingsControls>
+      <SettingsControls><PanelSection><p className="text-xs text-muted">Deleted items are kept for 30 days.</p></PanelSection></SettingsControls>
       {mutation.isPending ? <p role="status" className="text-xs text-muted">{operation?.action === "restore" ? "Restoring…" : "Requesting deletion…"}</p> : null}
       <div role="region" aria-label="Trash contents" className="flex min-h-0 flex-1 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1">
-        <Card padding="sm" className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {query.isPending ? <p role="status">Loading trash…</p> : null}
-          {query.error ? <p role="alert" className="text-danger">Could not load trash. Try refreshing.</p> : null}
-          {!query.isPending && !query.error && items.length === 0 ? <p className="text-muted">Trash is empty.</p> : null}
+        <Card padding="none" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {query.isPending ? <p role="status" className="p-3">Loading trash…</p> : null}
+          {query.error ? <p role="alert" className="p-3 text-danger">Could not load trash. Try refreshing.</p> : null}
+          {!query.isPending && !query.error && items.length === 0 ? <p className="p-3 text-muted">Trash is empty.</p> : null}
           {/* Keep absolutely positioned screen-reader text inside the list's scroll area. */}
-          <ul ref={listScroll} aria-label="Deleted items" className="relative min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain empty:hidden">
+          <ul ref={listScroll} aria-label="Deleted items" className="relative min-h-0 flex-1 divide-y divide-seam overflow-y-auto overscroll-contain empty:hidden">
             {items.map((item) => {
               const key = `${item.kind}:${item.id}`;
               const ItemIcon = itemAppearance[item.kind].icon;
               return (
                 <li key={key}>
-                  <button
-                    type="button"
-                    aria-pressed={selected === item}
+                  <ListItemButton
+                    selected={selected === item}
                     disabled={mutation.isPending || !!confirmation}
                     onClick={() => { mutation.reset(); setSelectedKey(key); inspector?.onOpen(); }}
-                    className={`flex w-full items-start gap-2 rounded-workbench border-l-2 px-2 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-not-allowed ${selected === item ? "border-[var(--ng-active-border)] bg-[var(--ng-selection)]" : "border-transparent hover:bg-[var(--ng-hover)]"}`}
+                    className="items-start"
                   >
                     <span className="sr-only">Select</span>{" "}
                     <ItemIcon size={16} aria-hidden="true" className={`mt-0.5 ${selected === item ? "text-primary" : "text-muted"}`} />
@@ -137,12 +136,12 @@ export function TrashPanel() {
                         {" "}<span className="sr-only">Deleted {new Date(item.deleted_at).toLocaleString()}.</span>
                       </span>
                     </span>
-                  </button>
+                  </ListItemButton>
                 </li>
               );
             })}
           </ul>
-          {query.hasNextPage ? <Button secondary className="mt-2 shrink-0" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void query.fetchNextPage(); }}>{query.isFetchingNextPage ? "Loading…" : "Load more"}</Button> : null}
+          {query.hasNextPage ? <Button secondary className="m-3 shrink-0" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void query.fetchNextPage(); }}>{query.isFetchingNextPage ? "Loading…" : "Load more"}</Button> : null}
         </Card>
         <SettingsControls><SettingsInspectorSection title="Selected item"><div ref={detailsRef} className="min-h-0 min-w-0 text-sm">
           {notice ? <p ref={noticeRef} role="status" tabIndex={-1} className="mb-3 break-words outline-none">{notice}</p> : null}

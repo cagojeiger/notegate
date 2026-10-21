@@ -81,7 +81,7 @@ function SettingsWorkbench({ me, spaces = [], initialSpaceId = null, onClose, on
   }, [container, current.id]);
 
   const inspectorContents = <div id={inspectorId} className="ng-settings-inspector-frame flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-    <div ref={setContainer} className="ng-settings-inspector min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain p-4 text-sm empty:hidden" />
+    <div ref={setContainer} className="ng-settings-inspector min-h-0 flex-1 overflow-y-auto overscroll-contain font-ui text-workbench empty:hidden" />
   </div>;
 
   return (

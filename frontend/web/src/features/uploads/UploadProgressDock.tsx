@@ -35,7 +35,7 @@ function UploadProgressPanel({ manager }: { manager: ReturnType<typeof useUpload
   return (
     <section
       aria-label="File uploads"
-      className="pointer-events-auto shrink-0 border-t border-seam bg-surface text-text md:overflow-hidden md:rounded-lg md:border md:border-border md:shadow-[var(--ng-focus-shadow)]"
+      className="pointer-events-auto shrink-0 border-t border-seam bg-surface text-text md:overflow-hidden md:rounded-workbench-surface md:border md:border-border md:shadow-[var(--ng-focus-shadow)]"
     >
       <button
         type="button"

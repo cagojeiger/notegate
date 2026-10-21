@@ -1,7 +1,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-import { SectionHeader } from "../../shared/ui";
+import { PanelSection, SectionHeader } from "../../shared/ui";
 
 type Inspector = {
   id: string;
@@ -26,7 +26,7 @@ export function SettingsControls({ children }: { children: ReactNode }) {
 }
 
 export function SettingsInspectorSection({ title, children }: { title: string; children: ReactNode }) {
-  return <section className="border-t border-seam pt-4 first:border-t-0 first:pt-0">
+  return <PanelSection>
     <SectionHeader title={title} />{children}
-  </section>;
+  </PanelSection>;
 }

@@ -17,7 +17,7 @@ export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, navigation
             aria-pressed={libraryActive}
             aria-current={libraryActive ? "page" : undefined}
             onClick={onOpenLibrary}
-            className={`grid size-workbench-control place-items-center rounded-xl transition active:bg-[var(--ng-selection)] disabled:cursor-not-allowed disabled:opacity-45 ${libraryActive ? "bg-[var(--ng-selection)] text-primary" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
+            className={`grid size-workbench-control place-items-center rounded-workbench-surface transition active:bg-[var(--ng-selection)] disabled:cursor-not-allowed disabled:opacity-45 ${libraryActive ? "bg-[var(--ng-selection)] text-primary" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
           >
             <LayoutGrid size={16} />
           </button>
@@ -36,7 +36,7 @@ export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, navigation
                 aria-label={space.name}
                 aria-current={active ? "page" : undefined}
                 onClick={() => onSelectSpace(space)}
-                className={`grid size-workbench-control place-items-center rounded-xl text-sm font-semibold transition active:bg-[var(--ng-selection)] disabled:cursor-not-allowed disabled:opacity-45 ${active ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
+                className={`grid size-workbench-control place-items-center rounded-workbench-surface text-sm font-semibold transition active:bg-[var(--ng-selection)] disabled:cursor-not-allowed disabled:opacity-45 ${active ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
               >
                 {space.name.slice(0, 1).toUpperCase()}
               </button>
@@ -46,14 +46,14 @@ export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, navigation
       </div>
       {canCreateSpace ? (
         <div className="shrink-0 border-l border-seam pl-2">
-          <button type="button" aria-label="Add space" onClick={onCreateSpace} className="grid size-workbench-control place-items-center rounded-xl text-muted hover:bg-[var(--ng-hover)] hover:text-text">
+          <button type="button" aria-label="Add space" onClick={onCreateSpace} className="grid size-workbench-control place-items-center rounded-workbench-surface text-muted hover:bg-[var(--ng-hover)] hover:text-text">
             <Plus size={16} />
           </button>
         </div>
       ) : null}
       <div className="relative ml-auto flex shrink-0 items-center gap-1 border-l border-seam pl-2">
         {settingsActive ? <span data-active-indicator className="absolute -top-2 left-4 right-2 h-[3px] rounded-b-full bg-primary" aria-hidden="true" /> : null}
-        <button type="button" disabled={navigationLocked} aria-label="Settings" aria-pressed={settingsActive} aria-current={settingsActive ? "page" : undefined} onClick={onOpenSettings} className={`grid size-workbench-control place-items-center rounded-xl disabled:cursor-not-allowed disabled:opacity-45 ${settingsActive ? "bg-[var(--ng-selection)] text-primary" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}>
+        <button type="button" disabled={navigationLocked} aria-label="Settings" aria-pressed={settingsActive} aria-current={settingsActive ? "page" : undefined} onClick={onOpenSettings} className={`grid size-workbench-control place-items-center rounded-workbench-surface disabled:cursor-not-allowed disabled:opacity-45 ${settingsActive ? "bg-[var(--ng-selection)] text-primary" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}>
           <Settings size={16} />
         </button>
       </div>

@@ -6,7 +6,7 @@ import { useApiClient } from "../../api/ApiProvider";
 import { invalidateAuditEvents } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import { listBrowserSessions, listOAuthGrants } from "../../api/sessions";
-import { Button, Card, SectionHeader } from "../../shared/ui";
+import { Button, Card, ListItemButton, PanelSection, SectionHeader } from "../../shared/ui";
 import { formatEventTime } from "../events/eventDisplay";
 import { SettingsControls, SettingsInspectorSection, useSettingsInspector } from "./SettingsInspector";
 
@@ -103,12 +103,12 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
           {rows.slice(0, visibleCount).map((row) => {
             const active = row.id === (session?.id ?? grant?.id);
             return <li key={row.id}>
-              <button type="button" aria-label={`Select ${row.label}${row.current ? " (this session)" : ""}`} aria-pressed={active} disabled={revoke.isPending}
-                onClick={() => select(row.id)} className={`flex min-h-[var(--ng-min-target-size)] w-full items-center gap-3 border-l-2 px-3 py-3 text-left disabled:cursor-not-allowed ${active ? "border-primary bg-[var(--ng-selection)]" : "border-transparent hover:bg-[var(--ng-hover)]"}`}>
+              <ListItemButton aria-label={`Select ${row.label}${row.current ? " (this session)" : ""}`} selected={active} disabled={revoke.isPending}
+                onClick={() => select(row.id)} className="items-center">
                 <RowIcon size={16} className="shrink-0 text-muted" />
                 <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="truncate text-sm font-medium">{row.label}</span>{row.current ? <span className="shrink-0 text-xs text-primary">This session</span> : null}</span><span className="block truncate text-xs text-muted" title={row.description}>{row.description}</span></span>
                 <ChevronRight size={15} className="shrink-0 text-muted" />
-              </button>
+              </ListItemButton>
             </li>;
           })}
         </Card>
@@ -144,7 +144,7 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
             </> : <p className="text-xs text-muted">Select a connection to view its details.</p>}
           </div>
         </SettingsInspectorSection>
-        {confirmation ? <div ref={confirmationRef} tabIndex={-1} role="group" aria-label="Confirm revocation" className="outline-none">
+        {confirmation ? <PanelSection><div ref={confirmationRef} tabIndex={-1} role="group" aria-label="Confirm revocation" className="outline-none">
           <Card className="space-y-3 text-sm">
             <p>{confirmation.label}?</p>
             <div className="flex flex-wrap gap-2">
@@ -152,7 +152,7 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
               <Button secondary disabled={revoke.isPending} onClick={() => { setConfirmation(null); requestAnimationFrame(() => actionRef.current?.focus()); }}>Cancel</Button>
             </div>
           </Card>
-        </div> : null}
+        </div></PanelSection> : null}
         <SettingsInspectorSection title={kind === "browser" ? "Browser actions" : `${kind.toUpperCase()} actions`}>
           <div className="flex flex-wrap gap-2">
             {kind === "browser" ? <>
@@ -162,7 +162,7 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
           </div>
           <p className="mt-3 text-xs text-muted">{kind === "browser" ? "Browser sign-out leaves CLI, MCP and Agent API keys connected." : `Revoking a ${kind.toUpperCase()} connection disables its access and refresh tokens.`}</p>
         </SettingsInspectorSection>
-        <p className="text-xs text-muted">Agent API keys are managed in the Agents tab. Sign-in and revocation events appear in Audit history.</p>
+        <PanelSection><p className="text-xs text-muted">Agent API keys are managed in the Agents tab. Sign-in and revocation events appear in Audit history.</p></PanelSection>
       </SettingsControls>
     </SettingsPage>
   );

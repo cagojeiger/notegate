@@ -129,7 +129,7 @@ export function PdfPreview({
         <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
           {pageCount > 0 ? `Page ${pageNumber} of ${pageCount}` : "PDF page count unavailable"}
         </p>
-        <div className="flex items-center gap-1 rounded-lg border border-seam bg-[var(--ng-editor)] px-1 py-0.5 shadow-sm">
+        <div className="flex items-center gap-1 rounded-workbench-surface border border-seam bg-[var(--ng-editor)] px-1 py-0.5 shadow-sm">
           <IconButton
             label="Previous page"
             size="sm"
@@ -158,7 +158,7 @@ export function PdfPreview({
                   event.currentTarget.blur();
                 }
               }}
-              className="h-7 w-10 rounded-md border border-seam bg-panel px-1 text-center text-xs tabular-nums text-text outline-none focus-visible:ring-2 focus-visible:ring-primary/45 disabled:opacity-50"
+              className="h-7 w-10 rounded-workbench-surface border border-seam bg-panel px-1 text-center text-xs tabular-nums text-text outline-none focus-visible:ring-2 focus-visible:ring-primary/45 disabled:opacity-50"
             />
             <span aria-live="polite">/ {pageCount || "–"}</span>
           </div>
@@ -171,7 +171,7 @@ export function PdfPreview({
             <ChevronRight size={16} />
           </IconButton>
         </div>
-        <div className="flex items-center gap-1 rounded-lg border border-seam bg-[var(--ng-editor)] px-1 py-0.5 shadow-sm">
+        <div className="flex items-center gap-1 rounded-workbench-surface border border-seam bg-[var(--ng-editor)] px-1 py-0.5 shadow-sm">
           <IconButton
             label="Zoom out"
             size="sm"
@@ -186,7 +186,7 @@ export function PdfPreview({
             title="Reset zoom"
             disabled={zoom === 1}
             onClick={() => setZoom(1)}
-            className="h-7 min-w-11 rounded-md px-1 text-workbench tabular-nums text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-default"
+            className="h-7 min-w-11 rounded-workbench-surface px-1 text-workbench tabular-nums text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-default"
           >
             {zoomPercent}%
           </button>

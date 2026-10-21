@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { ChevronRight } from "lucide-react";
 
+import { ListItemButton } from "../../shared/ui";
+
 import { useSettingsViewState } from "../settings/settingsViewState";
 import { SettingsControls, SettingsInspectorSection, useSettingsInspector } from "../settings/SettingsInspector";
 import type { CommandInvocation, CommandInvocationSurface } from "../../api/types";
@@ -28,7 +30,7 @@ export function CommandInvocationsPanel({ surface }: { surface: CommandInvocatio
         emptyLabel={`No ${surface.toUpperCase()} calls.`}
       />
       {invocations.length > 0 ? (
-        <ol className="rounded-workbench-surface border border-border bg-surface px-4">
+        <ol className="rounded-workbench-surface border border-border bg-surface">
           {invocations.map((invocation) => (
             <CommandInvocationRow key={invocation.id} invocation={invocation} selected={selectedId === invocation.id}
               onSelect={() => { setSelectedId(invocation.id); inspector?.onOpen(); }} />
@@ -66,8 +68,8 @@ function CommandInvocationRow({ invocation, selected, onSelect }: { invocation: 
   const { actor, operation, status, purpose } = invocationPresentation(invocation);
   return (
     <li className="group relative border-b border-seam last:border-b-0">
-      <button type="button" aria-label={`View ${invocation.surface.toUpperCase()} call ${invocation.id}: ${purpose}. ${actor}. ${status}`} aria-pressed={selected}
-        onClick={onSelect} className={`flex min-h-[var(--ng-min-target-size)] w-full gap-3 border-l-2 py-3 pl-2 text-left outline-none hover:bg-[var(--ng-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${selected ? "border-primary bg-[var(--ng-selection)]" : "border-transparent"}`}>
+      <ListItemButton aria-label={`View ${invocation.surface.toUpperCase()} call ${invocation.id}: ${purpose}. ${actor}. ${status}`} selected={selected}
+        onClick={onSelect} className="items-start">
         <div className="relative flex w-4 shrink-0 justify-center" aria-hidden="true">
           <span className="absolute bottom-[-0.75rem] top-3 w-px bg-seam group-last:hidden" />
           <span className={`relative mt-1.5 size-2 rounded-full ring-4 ring-surface ${invocation.outcome === "success" ? "bg-success" : "bg-danger"}`} />
@@ -93,7 +95,7 @@ function CommandInvocationRow({ invocation, selected, onSelect }: { invocation: 
           </div>
         </div>
         <ChevronRight size={15} className="mt-1 shrink-0 text-muted" />
-      </button>
+      </ListItemButton>
     </li>
   );
 }
@@ -133,12 +135,12 @@ function InvocationDetails({
     >
       <summary className="min-h-workbench-control cursor-pointer select-none content-center text-muted hover:text-text">{label}</summary>
       {open && value ? (
-        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg p-3 font-mono text-text">
+        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-workbench-surface bg-bg p-3 font-mono text-text">
           {JSON.stringify(value, null, 2)}
         </pre>
       ) : null}
       {open && !value ? (
-        <p className="mt-2 rounded-md bg-bg p-3 text-muted">
+        <p className="mt-2 rounded-workbench-surface bg-bg p-3 text-muted">
           Not recorded. This call predates response logging.
         </p>
       ) : null}

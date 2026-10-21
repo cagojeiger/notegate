@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Agent } from "../../api/agents";
 import type { Space } from "../../api/types";
 import { canWriteSpace } from "../../auth/permissions";
-import { Button, Card, EmptyState, IconButton, SectionHeader, TextField } from "../../shared/ui";
+import { AddButton, Button, Card, EmptyState, IconButton, ListItemButton, SectionHeader, Select, TextField } from "../../shared/ui";
 import {
   type AgentSpaceAccessValue, useAgentKeyManagerProps, useAgentsQuery, useConnectionsQuery,
   useCreateAgentMutation, useDeleteAgentMutation, useSetAgentSpaceAccessMutation, useSettingsSpacesQuery
@@ -13,7 +13,6 @@ import { KeyManager } from "./KeyManager";
 import { SettingsControls, SettingsInspectorSection, useSettingsInspector } from "./SettingsInspector";
 
 import { SettingsPage } from "./SettingsPage";
-import { SettingsAddButton } from "./SettingsAddButton";
 import { useSettingsViewState } from "./settingsViewState";
 
 export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
@@ -52,14 +51,14 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
           {agentsQuery.isSuccess && agents.length === 0 ? <p className="text-muted">No agents yet.</p> : null}
           <Card as="ul" aria-label="Agents" padding="none" className="divide-y divide-seam empty:hidden">
             {agents.map((agent) => <li key={agent.id}>
-              <button type="button" aria-label={`Select ${agent.name}`} disabled={deleteMutation.isPending || createMutation.isPending}
+              <ListItemButton aria-label={`Select ${agent.name}`} disabled={deleteMutation.isPending || createMutation.isPending}
                 onClick={() => { deleteMutation.reset(); setOpenId(agent.id); setConfirmId(null); }}
-                className="flex min-h-[var(--ng-min-target-size)] w-full items-center gap-3 px-4 py-3 text-left text-workbench hover:bg-[var(--ng-hover)]">
+                className="items-center">
                 <Bot size={15} className="shrink-0 text-muted" /><span className="min-w-0 flex-1 truncate">{agent.name}</span><ChevronRight size={15} className="shrink-0 text-muted" />
-              </button>
+              </ListItemButton>
             </li>)}
           </Card>
-          <div className="mt-3"><SettingsAddButton disabled={deleteMutation.isPending || createMutation.isPending} onClick={() => { deleteMutation.reset(); setCreating(true); setConfirmId(null); }}>Add agent</SettingsAddButton></div>
+          <div className="mt-3"><AddButton label="Add agent" disabled={deleteMutation.isPending || createMutation.isPending} onClick={() => { deleteMutation.reset(); setCreating(true); setConfirmId(null); }} /></div>
         </section>
       </> : null}
       <SettingsControls>
@@ -104,9 +103,9 @@ function AgentSpaceAccess({ agent }: { agent: Agent }) {
   if (spaces.length === 0) return <EmptyState>No writable spaces.</EmptyState>;
 
   return (
-    <ul className="max-h-72 divide-y divide-seam overflow-y-auto rounded-workbench-surface border border-border bg-surface">
+    <Card as="ul" padding="none" className="max-h-72 divide-y divide-seam overflow-y-auto">
       {spaces.map((space) => <SpaceAccessRow key={space.id} space={space} agent={agent} />)}
-    </ul>
+    </Card>
   );
 }
 
@@ -129,7 +128,7 @@ function SpaceAccessRow({ space, agent }: { space: Space; agent: Agent }) {
   };
 
   return (
-    <li className="flex items-center gap-3 px-4 py-3 text-sm max-sm:flex-col max-sm:items-stretch">
+    <li className="flex items-center gap-3 px-3 py-3 text-workbench max-sm:flex-col max-sm:items-stretch">
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium">{space.name}</div>
         {connectionsQuery.isSuccess ? <div className="text-xs text-muted">{ACCESS_LABELS[access]}</div> : null}
@@ -142,9 +141,8 @@ function SpaceAccessRow({ space, agent }: { space: Space; agent: Agent }) {
           <Button size="sm" secondary aria-label={`Retry ${space.name} permissions`} disabled={connectionsQuery.isFetching} onClick={() => { void connectionsQuery.refetch(); }}>Retry</Button>
         </div>
       ) : (
-        <select
+        <div className="w-36 shrink-0 max-sm:w-full"><Select
           aria-label={`${space.name} permission`}
-          className="h-9 min-h-[var(--ng-min-target-size)] w-36 shrink-0 rounded-workbench-surface border border-border-strong bg-surface px-3 text-sm text-text outline-none transition disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-full"
           value={access}
           disabled={setAccessMutation.isPending}
           onChange={(event) => updateAccess(event.currentTarget.value as AgentSpaceAccessValue)}
@@ -152,7 +150,7 @@ function SpaceAccessRow({ space, agent }: { space: Space; agent: Agent }) {
           <option value="none">{ACCESS_LABELS.none}</option>
           <option value="read">{ACCESS_LABELS.read}</option>
           <option value="write">{ACCESS_LABELS.write}</option>
-        </select>
+        </Select></div>
       )}
     </li>
   );

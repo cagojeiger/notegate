@@ -52,7 +52,7 @@ export function RecordingDock() {
   return (
     <section
       aria-label="Audio recorder"
-      className="pointer-events-auto shrink-0 border-t border-seam bg-surface text-text md:overflow-hidden md:rounded-lg md:border md:border-border md:shadow-[var(--ng-focus-shadow)]"
+      className="pointer-events-auto shrink-0 border-t border-seam bg-surface text-text md:overflow-hidden md:rounded-workbench-surface md:border md:border-border md:shadow-[var(--ng-focus-shadow)]"
     >
       <span className="sr-only" role="status">{recordingStatusAnnouncement(state.status)}</span>
       <button
