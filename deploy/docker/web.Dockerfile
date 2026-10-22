@@ -63,27 +63,21 @@ RUN pnpm --filter web build
 # Stage 4: dependency cache + application build.
 #
 # First cook dependencies from recipe.json, then copy the real source and build
-# the notegate-api binary. BuildKit cache mounts keep Cargo registry/git data,
-# sccache objects, and target artifacts outside the image layers but reusable
-# across local Docker builds.
+# the notegate-api binary. Keep Cargo registry/git data and target artifacts in
+# the dependency layer so the GitHub Actions cache can restore them on fresh
+# builders. The sccache mount remains a local build accelerator.
 FROM chef AS builder
 
 COPY --from=planner /app/recipe.json recipe.json
 # Queries are runtime-checked (no sqlx `query!`/`query_as!` macros), so the build
 # needs neither offline `.sqlx` metadata nor SQLX_OFFLINE / a live DB.
-RUN --mount=type=cache,id=notegate-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=notegate-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=notegate-sccache,target=/sccache,sharing=locked \
-    --mount=type=cache,id=notegate-target-release,target=/app/target,sharing=locked \
+RUN --mount=type=cache,id=notegate-sccache,target=/sccache,sharing=locked \
     cargo chef cook --release --locked --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY backend ./backend
 COPY frontend/web/src/design/theme.css ./frontend/web/src/design/theme.css
 COPY frontend/web/public/brand/svg/logo-horizontal-light.svg frontend/web/public/brand/svg/logo-horizontal-dark.svg ./frontend/web/public/brand/svg/
-RUN --mount=type=cache,id=notegate-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=notegate-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=notegate-sccache,target=/sccache,sharing=locked \
-    --mount=type=cache,id=notegate-target-release,target=/app/target,sharing=locked \
+RUN --mount=type=cache,id=notegate-sccache,target=/sccache,sharing=locked \
     cargo build --release --locked --bin notegate-api \
     && cp /app/target/release/notegate-api /usr/local/bin/notegate-api
 
