@@ -229,6 +229,14 @@
       "package": "notegate-api",
       "target_kind": "bin",
       "target": "notegate-api",
+      "test": "auth::bearer_tests::v2_exposes_agent_resources_but_not_management_routes",
+      "group": "external",
+      "note": "Authenticated v2 routes persist invocation records through a lazy PostgreSQL pool."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
       "test": "auth::bearer_tests::v2_routes_reject_browser_sessions",
       "group": "external",
       "note": "Creates TestDb in this otherwise mixed test module."

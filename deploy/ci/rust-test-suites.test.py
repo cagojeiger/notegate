@@ -2,6 +2,7 @@
 """Regression contracts for resource partitioning and observed test coverage."""
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -34,6 +35,13 @@ class SuiteContracts(unittest.TestCase):
         for rules in ([], [rule(group="typo")], [rule(package="other")]):
             with self.subTest(rules=rules), self.assertRaisesRegex(ValueError, "Unclassified"):
                 runner.classify([test()], rules)
+
+    def test_v2_resource_route_keeps_its_observed_database_requirement(self):
+        manifest = json.loads((runner.ROOT / "deploy/ci/rust-test-resources.json").read_text())
+        observed = test("auth::bearer_tests::v2_exposes_agent_resources_but_not_management_routes",
+                        package="notegate-api", target_kind="bin", target="notegate-api")
+        runner.classify([observed], manifest["rules"])
+        self.assertEqual(observed["group"], "external")
 
     def test_global_exact_filter_cannot_cross_resource_groups(self):
         cases = [test(), test(target_kind="bin", target="example-cli")]
