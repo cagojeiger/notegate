@@ -62,9 +62,8 @@ struct TestDbTiming {
 }
 
 impl TestDbTiming {
-    fn record(&self, schema: &str, mut record: serde_json::Value) {
+    fn record(&self, schema: &str, record: serde_json::Value) {
         static WRITE_LOCK: Mutex<()> = Mutex::new(());
-        record["schema"] = schema.into();
         let write = || -> std::io::Result<()> {
             if !self.path.is_absolute() {
                 return Err(std::io::Error::other(
@@ -162,6 +161,7 @@ impl TestDb {
             timing.record(
                 &schema,
                 serde_json::json!({
+                    "schema": schema.as_str(),
                     "phase": "setup",
                     "setup_total_ms": setup_finished.duration_since(started).as_secs_f64() * 1_000.0,
                     "migration_ms": migration_ms,
@@ -228,6 +228,7 @@ impl TestDb {
             timing.record(
                 &self.schema,
                 serde_json::json!({
+                    "schema": self.schema.as_str(),
                     "phase": "cleanup",
                     "fixture_lifetime_ms": started.duration_since(timing.setup_finished).as_secs_f64() * 1_000.0,
                     "cleanup_ms": started.elapsed().as_secs_f64() * 1_000.0,
