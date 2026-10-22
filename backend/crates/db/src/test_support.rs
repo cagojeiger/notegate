@@ -2,7 +2,12 @@
 //!
 //! Enabled only for crate tests and the `test-util` feature.
 
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Mutex;
+use std::time::Instant;
 
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{Connection, PgConnection, PgPool};
@@ -47,7 +52,43 @@ fn integration_test_env_value(
 pub struct TestDb {
     database_url: String,
     schema: String,
+    timing: Option<TestDbTiming>,
     pub pool: PgPool,
+}
+
+struct TestDbTiming {
+    path: PathBuf,
+    setup_finished: Instant,
+}
+
+impl TestDbTiming {
+    fn record(&self, schema: &str, mut record: serde_json::Value) {
+        static WRITE_LOCK: Mutex<()> = Mutex::new(());
+        record["schema"] = schema.into();
+        let write = || -> std::io::Result<()> {
+            if !self.path.is_absolute() {
+                return Err(std::io::Error::other(
+                    "NOTEGATE_TEST_TIMING_FILE must be an absolute path",
+                ));
+            }
+            let mut line = serde_json::to_vec(&record)?;
+            line.push(b'\n');
+            let _guard = WRITE_LOCK
+                .lock()
+                .map_err(|_| std::io::Error::other("test timing write lock is poisoned"))?;
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)?
+                .write_all(&line)
+        };
+        if let Err(err) = write() {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "failed to write test timing for {schema}: {err}"
+            );
+        }
+    }
 }
 
 impl TestDb {
@@ -69,6 +110,8 @@ impl TestDb {
         let Some(database_url) = integration_test_env("NOTEGATE_TEST_DATABASE_URL")? else {
             return Ok(None);
         };
+        let timing_path = std::env::var_os("NOTEGATE_TEST_TIMING_FILE").map(PathBuf::from);
+        let setup_started = timing_path.as_ref().map(|_| Instant::now());
         let run_id = std::env::var("NOTEGATE_TEST_RUN_ID").ok();
         let schema = schema_name(run_id.as_deref(), Uuid::new_v4())?;
         let mut admin = PgConnection::connect(&database_url).await?;
@@ -99,18 +142,39 @@ impl TestDb {
             .connect_with(options)
             .await?;
 
+        let migration_started = setup_started.map(|_| Instant::now());
         for migration in crate::MIGRATOR
             .iter()
             .filter(|migration| migration_version.is_none_or(|version| migration.version < version))
         {
             apply_migration_sql(&pool, migration).await?;
         }
+        let migration_ms = migration_started.map(|start| start.elapsed().as_secs_f64() * 1_000.0);
+        let fixture_started = setup_started.map(|_| Instant::now());
         seed_crypto_key_epochs(&pool).await?;
         record_migration_ledger(&pool, migration_version).await?;
+        let timing = timing_path.zip(setup_started).map(|(path, started)| {
+            let setup_finished = Instant::now();
+            let timing = TestDbTiming {
+                path,
+                setup_finished,
+            };
+            timing.record(
+                &schema,
+                serde_json::json!({
+                    "phase": "setup",
+                    "setup_total_ms": setup_finished.duration_since(started).as_secs_f64() * 1_000.0,
+                    "migration_ms": migration_ms,
+                    "fixture_ms": fixture_started.map(|start| setup_finished.duration_since(start).as_secs_f64() * 1_000.0),
+                }),
+            );
+            timing
+        });
 
         Ok(Some(Self {
             database_url,
             schema,
+            timing,
             pool,
         }))
     }
@@ -133,6 +197,7 @@ impl TestDb {
 
     /// Drop the isolated schema and close the pool.
     pub async fn cleanup(self) {
+        let cleanup_started = self.timing.as_ref().map(|_| Instant::now());
         self.pool.close().await;
         let mut admin = match PgConnection::connect(&self.database_url).await {
             Ok(conn) => conn,
@@ -141,19 +206,35 @@ impl TestDb {
                     "failed to connect for schema cleanup {}: {err}",
                     self.schema
                 );
+                self.record_cleanup(cleanup_started, false);
                 return;
             }
         };
-        if let Err(err) = sqlx::query(sqlx::AssertSqlSafe(format!(
+        let result = sqlx::query(sqlx::AssertSqlSafe(format!(
             "DROP SCHEMA IF EXISTS {} CASCADE",
             self.schema
         )))
         .execute(&mut admin)
-        .await
-        {
+        .await;
+        if let Err(err) = &result {
             eprintln!("failed to drop temporary schema {}: {err}", self.schema);
         }
         let _ = admin.close().await;
+        self.record_cleanup(cleanup_started, result.is_ok());
+    }
+
+    fn record_cleanup(&self, started: Option<Instant>, schema_dropped: bool) {
+        if let (Some(timing), Some(started)) = (&self.timing, started) {
+            timing.record(
+                &self.schema,
+                serde_json::json!({
+                    "phase": "cleanup",
+                    "fixture_lifetime_ms": started.duration_since(timing.setup_finished).as_secs_f64() * 1_000.0,
+                    "cleanup_ms": started.elapsed().as_secs_f64() * 1_000.0,
+                    "schema_dropped": schema_dropped,
+                }),
+            );
+        }
     }
 }
 
