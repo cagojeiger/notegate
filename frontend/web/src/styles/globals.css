@@ -47,7 +47,7 @@ button:not(:disabled):active {
 [role="switch"]:focus-visible > [data-switch-track],
 [data-docx-preview][data-frame-focused="true"] {
   outline: 2px solid var(--ng-control-focus-color, var(--ng-focus-ring));
-  outline-offset: -2px;
+  outline-offset: var(--ng-control-focus-offset, -2px);
 }
 
 /* The track owns the switch's visible surface; its hit area can be larger. */

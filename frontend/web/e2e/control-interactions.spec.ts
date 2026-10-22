@@ -77,6 +77,11 @@ for (const theme of ["light", "dark"] as const) {
       const primary = page.getByRole("button", { name: "New document", exact: true });
       await expect(primary).toBeFocused();
       await expectOutlineContrast(primary);
+      const focusGap = await primary.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return -parseFloat(style.outlineOffset) - parseFloat(style.outlineWidth);
+      });
+      expect(focusGap).toBeGreaterThanOrEqual(1);
       await page.screenshot({ path: testInfo.outputPath("primary-focus.png") });
       await primary.hover();
       await expectOutlineContrast(primary);

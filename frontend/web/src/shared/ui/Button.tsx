@@ -26,7 +26,7 @@ export function Button({
       ? "min-h-workbench-control px-2 text-workbench"
       : "min-h-workbench-control px-2.5 text-workbench";
   const variantClass = {
-    primary: "bg-primary text-primary-contrast [--ng-control-focus-color:var(--ng-primary-contrast)] shadow-[var(--ng-inset-shadow)] hover:bg-[var(--ng-primary-hover)]",
+    primary: "bg-primary text-primary-contrast [--ng-control-focus-color:var(--ng-primary-contrast)] [--ng-control-focus-offset:-4px] shadow-[var(--ng-inset-shadow)] hover:bg-[var(--ng-primary-hover)]",
     secondary: "border border-border-strong bg-surface text-muted hover:bg-[var(--ng-hover)] hover:text-text",
     ghost: "text-muted hover:bg-[var(--ng-hover)] hover:text-text",
     danger: "border border-danger/30 text-danger hover:bg-danger/10 hover:text-text"
