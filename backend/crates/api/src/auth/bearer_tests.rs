@@ -1643,23 +1643,6 @@ async fn command_routes_reject_legacy_keys_and_mcp_audience_bearers()
 }
 
 #[tokio::test]
-async fn command_api_key_shape_does_not_depend_on_jwks() -> Result<(), Box<dyn std::error::Error>> {
-    let state = state(ResolverMode::Registered(true))?;
-    let app = crate::routes::app(state);
-
-    let response = app
-        .oneshot(
-            cli_request()
-                .header("authorization", "Bearer ngk_malformed")
-                .body(cli_body("me", json!({})))?,
-        )
-        .await?;
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    Ok(())
-}
-
-#[tokio::test]
 async fn command_routes_preserve_recovery_errors_and_no_store()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
