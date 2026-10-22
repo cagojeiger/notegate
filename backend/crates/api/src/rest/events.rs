@@ -8,7 +8,7 @@ use axum::{Json, Router};
 use notegate_model::{
     Caller, CommandInvocationSurface, ListAuditEvents, ListBackgroundJobs, ListCommandInvocations,
 };
-use notegate_service::files::{ListFileChangeEvents, SyncFileChanges};
+use notegate_service::files::{FileChangeEvent, ListFileChangeEvents, SyncFileChanges};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -238,17 +238,7 @@ pub(crate) async fn list_file_change_events(
             },
         )
         .await?;
-    let actor_ids = page
-        .items
-        .iter()
-        .filter_map(|event| event.actor_account_id)
-        .collect::<Vec<_>>();
-    let refs = state.accounts.find_account_refs(&actor_ids).await?;
-    let events = page
-        .items
-        .iter()
-        .map(|event| FileChangeEventOut::from_event(event, &refs))
-        .collect();
+    let events = file_change_events_with_actors(&state.accounts, &page.items).await?;
 
     Ok(Json(FileChangeEventListResponse {
         events,
@@ -284,20 +274,26 @@ pub(crate) async fn list_owned_file_changes(
             query.cursor,
         )
         .await?;
-    let ids: Vec<_> = page
-        .items
-        .iter()
-        .filter_map(|e| e.actor_account_id)
-        .collect();
-    let refs = state.accounts.find_account_refs(&ids).await?;
+    let events = file_change_events_with_actors(&state.accounts, &page.items).await?;
     Ok(Json(FileChangeEventListResponse {
-        events: page
-            .items
-            .iter()
-            .map(|e| FileChangeEventOut::from_event(e, &refs))
-            .collect(),
+        events,
         page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     }))
+}
+
+async fn file_change_events_with_actors(
+    accounts: &notegate_db::AccountRepo,
+    events: &[FileChangeEvent],
+) -> Result<Vec<FileChangeEventOut>, ApiError> {
+    let actor_ids = events
+        .iter()
+        .filter_map(|event| event.actor_account_id)
+        .collect::<Vec<_>>();
+    let refs = accounts.find_account_refs(&actor_ids).await?;
+    Ok(events
+        .iter()
+        .map(|event| FileChangeEventOut::from_event(event, &refs))
+        .collect())
 }
 
 #[derive(Debug, Deserialize)]
