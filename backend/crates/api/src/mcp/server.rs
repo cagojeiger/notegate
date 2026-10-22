@@ -295,7 +295,7 @@ impl ServerHandler for McpServer {
 
         invocation::execute_call(
             invocation_id,
-            &self.state,
+            self.state.invocation_capture(),
             caller.as_ref(),
             &tool,
             &input,
@@ -1486,7 +1486,7 @@ mod tests {
         let typed_input = serde_json::from_value(input.clone())?;
         invocation::execute_call(
             uuid::Uuid::new_v4(),
-            &state,
+            state.invocation_capture(),
             Some(&caller),
             "read",
             &input,
@@ -1534,7 +1534,7 @@ mod tests {
         let typed_invalid_input = serde_json::from_value(invalid_input.clone())?;
         invocation::execute_call(
             uuid::Uuid::new_v4(),
-            &state,
+            state.invocation_capture(),
             Some(&caller),
             "read",
             &invalid_input,
@@ -1568,7 +1568,7 @@ mod tests {
         let missing_purpose = serde_json::json!({"op": "spaces"});
         let malformed = invocation::execute_call(
             uuid::Uuid::new_v4(),
-            &state,
+            state.invocation_capture(),
             Some(&caller),
             "read",
             &missing_purpose,

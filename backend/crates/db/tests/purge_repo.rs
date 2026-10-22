@@ -403,13 +403,13 @@ async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::
 }
 
 #[tokio::test]
-async fn purge_deletes_expired_command_invocations_in_bounded_batches()
--> Result<(), Box<dyn std::error::Error>> {
+async fn purge_deletes_expired_history_in_bounded_batches() -> Result<(), Box<dyn std::error::Error>>
+{
     let _guard = PURGE_TEST_MUTEX.lock().await;
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let user =
+    let command_user =
         insert_user_account(&db.pool, "command-purger", "command-purger@example.test").await?;
 
     sqlx::query(
@@ -420,8 +420,8 @@ async fn purge_deletes_expired_command_invocations_in_bounded_batches()
                 '00000000-0000-0000-0000-000000000000'::uuid, $2, 'success', 1 \
          FROM generate_series(1, 1001) AS value",
     )
-    .bind(user)
-    .bind(common::empty_invocation_payload(user))
+    .bind(command_user)
+    .bind(common::empty_invocation_payload(command_user))
     .execute(&db.pool)
     .await?;
     sqlx::query(
@@ -430,35 +430,11 @@ async fn purge_deletes_expired_command_invocations_in_bounded_batches()
          VALUES (now() - interval '89 days', $1, $1, 'user', 'cli', 'read', 'read', \
                  '00000000-0000-0000-0000-000000000000'::uuid, $2, 'success', 1)",
     )
-    .bind(user)
-    .bind(common::empty_invocation_payload(user))
+    .bind(command_user)
+    .bind(common::empty_invocation_payload(command_user))
     .execute(&db.pool)
     .await?;
 
-    let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
-    assert_eq!(first.command_invocations_deleted, 1_000);
-    let second = PurgeRepo::new(db.pool.clone()).run_once().await?;
-    assert_eq!(second.command_invocations_deleted, 1);
-
-    let remaining: Vec<String> = sqlx::query_scalar(
-        "SELECT surface FROM command_invocations WHERE owner_user_id = $1 ORDER BY id",
-    )
-    .bind(user)
-    .fetch_all(&db.pool)
-    .await?;
-    assert_eq!(remaining, vec!["cli"]);
-
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn purge_deletes_expired_event_history_in_bounded_batches()
--> Result<(), Box<dyn std::error::Error>> {
-    let _guard = PURGE_TEST_MUTEX.lock().await;
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
     let user = insert_user_account(&db.pool, "event-purger", "event-purger@example.test").await?;
     let space_id: Uuid = sqlx::query_scalar(
         "INSERT INTO spaces (owner_user_id, name) VALUES ($1, 'event-purge-space') RETURNING id",
@@ -472,7 +448,7 @@ async fn purge_deletes_expired_event_history_in_bounded_batches()
          (created_at, owner_user_id, actor_account_id, source, op_type, resource_type, metadata) \
          SELECT now() - interval '181 days', $1, $1, 'rest', 'test.expired', 'test', \
                 jsonb_build_object('sequence', value) \
-         FROM generate_series(1, 1001) AS value",
+         FROM generate_series(1, 1002) AS value",
     )
     .bind(user)
     .execute(&db.pool)
@@ -491,7 +467,7 @@ async fn purge_deletes_expired_event_history_in_bounded_batches()
          (created_at, space_id, actor_account_id, op_type, metadata, snapshot_id, private_metadata) \
          SELECT now() - interval '91 days', $1, $2, 'test.expired', \
                 jsonb_build_object('sequence', value), '00000000-0000-0000-0000-000000000000'::uuid, $3 \
-         FROM generate_series(1, 1001) AS value",
+         FROM generate_series(1, 1003) AS value",
     )
     .bind(space_id)
     .bind(user)
@@ -509,12 +485,50 @@ async fn purge_deletes_expired_event_history_in_bounded_batches()
     .execute(&db.pool)
     .await?;
 
+    let object_key_prefix = format!("objects/retention-{}/", Uuid::new_v4());
+
+    sqlx::query(
+        "INSERT INTO object_storage_objects \
+         (id, object_key, name, declared_byte_len, media_type, state, last_activity_at, deleted_at) \
+         SELECT gen_random_uuid(), $1 || value::text, 'expired.bin', 1, \
+                'application/octet-stream', \
+                CASE WHEN value % 2 = 0 THEN 'expired' ELSE 'deleted' END, \
+                now() - interval '181 days', now() - interval '181 days' \
+         FROM generate_series(1, 1004) AS value",
+    )
+    .bind(&object_key_prefix)
+    .execute(&db.pool)
+    .await?;
+    let recent_object_key = format!("{object_key_prefix}recent");
+    sqlx::query(
+        "INSERT INTO object_storage_objects \
+         (id, object_key, name, declared_byte_len, media_type, state, last_activity_at, deleted_at) \
+         VALUES (gen_random_uuid(), $1, 'recent.bin', 1, 'application/octet-stream', \
+                 'deleted', now() - interval '179 days', now() - interval '179 days')",
+    )
+    .bind(&recent_object_key)
+    .execute(&db.pool)
+    .await?;
+
+    // Distinct remainders also detect swapped per-table counters in PurgeRun.
     let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(first.command_invocations_deleted, 1_000);
     assert_eq!(first.audit_events_deleted, 1_000);
     assert_eq!(first.file_change_events_deleted, 1_000);
+    assert_eq!(first.object_storage_history_deleted, 1_000);
     let second = PurgeRepo::new(db.pool.clone()).run_once().await?;
-    assert_eq!(second.audit_events_deleted, 1);
-    assert_eq!(second.file_change_events_deleted, 1);
+    assert_eq!(second.command_invocations_deleted, 1);
+    assert_eq!(second.audit_events_deleted, 2);
+    assert_eq!(second.file_change_events_deleted, 3);
+    assert_eq!(second.object_storage_history_deleted, 4);
+
+    let remaining: Vec<String> = sqlx::query_scalar(
+        "SELECT surface FROM command_invocations WHERE owner_user_id = $1 ORDER BY id",
+    )
+    .bind(command_user)
+    .fetch_all(&db.pool)
+    .await?;
+    assert_eq!(remaining, vec!["cli"]);
 
     let remaining_audit_events: i64 =
         sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE op_type = 'test.recent'")
@@ -537,47 +551,6 @@ async fn purge_deletes_expired_event_history_in_bounded_batches()
     assert_eq!(remaining_file_change_events, 1);
     assert_eq!(expired_audit_events, 0);
     assert_eq!(expired_file_change_events, 0);
-
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn purge_deletes_terminal_object_history_in_bounded_batches()
--> Result<(), Box<dyn std::error::Error>> {
-    let _guard = PURGE_TEST_MUTEX.lock().await;
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let object_key_prefix = format!("objects/retention-{}/", Uuid::new_v4());
-
-    sqlx::query(
-        "INSERT INTO object_storage_objects \
-         (id, object_key, name, declared_byte_len, media_type, state, last_activity_at, deleted_at) \
-         SELECT gen_random_uuid(), $1 || value::text, 'expired.bin', 1, \
-                'application/octet-stream', \
-                CASE WHEN value % 2 = 0 THEN 'expired' ELSE 'deleted' END, \
-                now() - interval '181 days', now() - interval '181 days' \
-         FROM generate_series(1, 1001) AS value",
-    )
-    .bind(&object_key_prefix)
-    .execute(&db.pool)
-    .await?;
-    let recent_object_key = format!("{object_key_prefix}recent");
-    sqlx::query(
-        "INSERT INTO object_storage_objects \
-         (id, object_key, name, declared_byte_len, media_type, state, last_activity_at, deleted_at) \
-         VALUES (gen_random_uuid(), $1, 'recent.bin', 1, 'application/octet-stream', \
-                 'deleted', now() - interval '179 days', now() - interval '179 days')",
-    )
-    .bind(&recent_object_key)
-    .execute(&db.pool)
-    .await?;
-
-    let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
-    assert_eq!(first.object_storage_history_deleted, 1_000);
-    let second = PurgeRepo::new(db.pool.clone()).run_once().await?;
-    assert_eq!(second.object_storage_history_deleted, 1);
 
     let old_remaining: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM object_storage_objects \
@@ -763,76 +736,51 @@ async fn seed_browser_session(
 }
 
 #[tokio::test]
-async fn purge_deletes_long_dead_api_keys_only() -> Result<(), Box<dyn std::error::Error>> {
+async fn purge_deletes_long_dead_api_keys_and_browser_sessions_only()
+-> Result<(), Box<dyn std::error::Error>> {
     let _guard = PURGE_TEST_MUTEX.lock().await;
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let user = insert_user_account(&db.pool, "key-purger", "key-purger@example.test").await?;
+    let key_user = insert_user_account(&db.pool, "key-purger", "key-purger@example.test").await?;
     let agent: Uuid =
         sqlx::query_scalar("INSERT INTO accounts (kind) VALUES ('agent') RETURNING id")
             .fetch_one(&db.pool)
             .await?;
     sqlx::query("INSERT INTO agents (id, name, owner_user_id) VALUES ($1, 'key-purger', $2)")
         .bind(agent)
-        .bind(user)
+        .bind(key_user)
         .execute(&db.pool)
         .await?;
     let repo = ApiKeyRepo::new(db.pool.clone());
 
     // A key dies at the earlier of its revoke time and expiry. Retention is 30 days.
-    let live = seed_key(&repo, agent, user, "live").await?;
-    let old_revoked = seed_key(&repo, agent, user, "old-revoked").await?;
-    let old_expired = seed_key(&repo, agent, user, "old-expired").await?;
-    let recent_revoked = seed_key(&repo, agent, user, "recent-revoked").await?;
+    let live_key = seed_key(&repo, agent, key_user, "live").await?;
+    let old_revoked_key = seed_key(&repo, agent, key_user, "old-revoked").await?;
+    let old_expired_key = seed_key(&repo, agent, key_user, "old-expired").await?;
+    let recent_revoked_key = seed_key(&repo, agent, key_user, "recent-revoked").await?;
 
     sqlx::query(
         "UPDATE api_keys SET revoked_at = now() - interval '40 days', revoked_by_user_id = $2, \
          revoked_reason = 'test' WHERE id = $1",
     )
-    .bind(old_revoked)
-    .bind(user)
+    .bind(old_revoked_key)
+    .bind(key_user)
     .execute(&db.pool)
     .await?;
     sqlx::query("UPDATE api_keys SET expires_at = now() - interval '40 days' WHERE id = $1")
-        .bind(old_expired)
+        .bind(old_expired_key)
         .execute(&db.pool)
         .await?;
     sqlx::query(
         "UPDATE api_keys SET revoked_at = now() - interval '1 day', revoked_by_user_id = $2, \
          revoked_reason = 'test' WHERE id = $1",
     )
-    .bind(recent_revoked)
-    .bind(user)
+    .bind(recent_revoked_key)
+    .bind(key_user)
     .execute(&db.pool)
     .await?;
 
-    let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
-    assert_eq!(run.api_keys_deleted, 2, "only the two long-dead keys purge");
-
-    let remaining: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM api_keys WHERE account_id = $1")
-        .bind(agent)
-        .fetch_all(&db.pool)
-        .await?;
-    assert_eq!(remaining.len(), 2);
-    assert!(remaining.contains(&live), "live key is retained");
-    assert!(
-        remaining.contains(&recent_revoked),
-        "recently revoked key is within retention"
-    );
-    assert!(!remaining.contains(&old_revoked));
-    assert!(!remaining.contains(&old_expired));
-
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn purge_deletes_long_dead_browser_sessions_only() -> Result<(), Box<dyn std::error::Error>> {
-    let _guard = PURGE_TEST_MUTEX.lock().await;
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
     let user =
         insert_user_account(&db.pool, "session-purger", "session-purger@example.test").await?;
     let repo = BrowserSessionRepo::new(db.pool.clone());
@@ -871,10 +819,24 @@ async fn purge_deletes_long_dead_browser_sessions_only() -> Result<(), Box<dyn s
     .await?;
 
     let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(run.api_keys_deleted, 2, "only the two long-dead keys purge");
     assert_eq!(
         run.browser_sessions_deleted, 3,
         "only long-dead revoked, absolute-expired and idle-expired sessions purge"
     );
+
+    let remaining: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM api_keys WHERE account_id = $1")
+        .bind(agent)
+        .fetch_all(&db.pool)
+        .await?;
+    assert_eq!(remaining.len(), 2);
+    assert!(remaining.contains(&live_key), "live key is retained");
+    assert!(
+        remaining.contains(&recent_revoked_key),
+        "recently revoked key is within retention"
+    );
+    assert!(!remaining.contains(&old_revoked_key));
+    assert!(!remaining.contains(&old_expired_key));
 
     let remaining: Vec<Uuid> =
         sqlx::query_scalar("SELECT id FROM browser_sessions WHERE user_id = $1")

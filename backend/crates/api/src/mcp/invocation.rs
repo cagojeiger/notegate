@@ -15,16 +15,15 @@ use crate::invocations::redaction::{
     redaction_marker,
 };
 use crate::invocations::{
-    InvocationCompletion, InvocationMetadata, InvocationRecord, InvocationSurface, canonical_tool,
-    sequence_error_code,
+    InvocationCapture, InvocationCompletion, InvocationMetadata, InvocationRecord,
+    InvocationSurface, canonical_tool, sequence_error_code,
 };
 use crate::mcp::contract::command_error;
 use crate::observability::CommandInvocationMetrics;
-use crate::state::AppState;
 
 pub(crate) async fn execute_call(
     invocation_id: uuid::Uuid,
-    state: &AppState,
+    capture: InvocationCapture<'_>,
     caller: Option<&Caller>,
     tool: &str,
     input: &Value,
@@ -38,7 +37,7 @@ pub(crate) async fn execute_call(
 
     let started = Instant::now();
     let metrics =
-        CommandInvocationMetrics::start(state.config.metrics_enabled, "mcp", canonical_tool(tool));
+        CommandInvocationMetrics::start(capture.metrics_enabled, "mcp", canonical_tool(tool));
     let result = match purpose_validation {
         Ok(_) => future.await,
         Err(error) => Err(error),
@@ -53,7 +52,7 @@ pub(crate) async fn execute_call(
         let redacted_response = redact_mcp_response(tool, input, &result);
         completion
             .record(
-                state,
+                capture.writer,
                 caller,
                 InvocationRecord {
                     id: Some(invocation_id),
@@ -190,28 +189,27 @@ mod tests {
 
     use super::*;
     use crate::invocations::invocation_space_name;
-    use crate::invocations::test_support::{assert_completed, capture, report};
+    use crate::invocations::test_support::{
+        RecordingWriter, assert_completed, capture, report, user_caller,
+    };
     use notegate_model::CallerIdentity;
 
     #[tokio::test]
     async fn completion_separates_command_and_history_outcomes()
     -> Result<(), Box<dyn std::error::Error>> {
-        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
-            return Ok(());
+        let writer = RecordingWriter::default();
+        let capture_state = InvocationCapture {
+            writer: &writer,
+            metrics_enabled: true,
         };
-        let mut state = crate::rest::test_support::state(&db);
-        std::sync::Arc::make_mut(&mut state.config).metrics_enabled = true;
-        let (caller, _, _) = crate::rest::test_support::caller_and_space(&state).await?;
+        let caller = user_caller();
         let input = json!({});
         for history_outcome in ["success", "error"] {
-            if history_outcome == "error" {
-                sqlx::query("ALTER TABLE command_invocations ADD CONSTRAINT reject_history CHECK (false) NOT VALID")
-                    .execute(&db.pool).await?;
-            }
+            writer.fail_writes(history_outcome == "error");
             for outcome in ["success", "error"] {
                 let (response, body) = capture(execute_call(
                     uuid::Uuid::new_v4(),
-                    &state,
+                    capture_state,
                     Some(&caller),
                     "me",
                     &input,
@@ -230,7 +228,7 @@ mod tests {
         }
         let (response, body) = capture(execute_call(
             uuid::Uuid::new_v4(),
-            &state,
+            capture_state,
             None,
             "me",
             &input,
@@ -246,11 +244,102 @@ mod tests {
             body.contains("notegate_command_completion_duration_seconds_count"),
             "{body}"
         );
-        let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM command_invocations")
-            .fetch_one(&db.pool)
-            .await?;
-        assert_eq!(rows, 2);
-        db.cleanup().await;
+        assert_eq!(
+            writer.attempts(),
+            4,
+            "anonymous calls must not attempt history writes"
+        );
+        assert_eq!(writer.records().len(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn completion_waits_for_history_and_preserves_invocation_metadata()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        use crate::invocations::{InvocationWriteFuture, InvocationWriter};
+
+        struct GatedWriter {
+            recording: RecordingWriter,
+            entered: AtomicBool,
+            release: tokio::sync::Semaphore,
+        }
+
+        impl InvocationWriter for GatedWriter {
+            fn write<'a>(
+                &'a self,
+                invocation: notegate_db::NewCommandInvocation<'a>,
+            ) -> InvocationWriteFuture<'a> {
+                Box::pin(async move {
+                    self.entered.store(true, Ordering::SeqCst);
+                    let _permit = self
+                        .release
+                        .acquire()
+                        .await
+                        .expect("history write released");
+                    self.recording.write(invocation).await
+                })
+            }
+        }
+
+        let writer = GatedWriter {
+            recording: RecordingWriter::default(),
+            entered: AtomicBool::new(false),
+            release: tokio::sync::Semaphore::new(0),
+        };
+        let mut caller = user_caller();
+        let owner = caller.account_id();
+        let actor = uuid::Uuid::new_v4();
+        caller.account.id = actor;
+        caller.account.kind = notegate_model::account::AccountKind::Agent;
+        caller.identity = CallerIdentity::Agent(notegate_model::agent::Agent {
+            id: actor,
+            name: "history-agent".to_owned(),
+            owner_user_id: owner,
+        });
+        let id = uuid::Uuid::new_v4();
+        let input = json!({"op": "changes", "target": "Research:/", "purpose": "Review changes"});
+        let executed = AtomicBool::new(false);
+        let mut completion = std::pin::pin!(capture(execute_call(
+            id,
+            InvocationCapture {
+                writer: &writer,
+                metrics_enabled: true
+            },
+            Some(&caller),
+            "read",
+            &input,
+            async {
+                executed.store(true, Ordering::SeqCst);
+                Ok(CallToolResult::structured(json!({"events": []})).into())
+            },
+        )));
+
+        assert!(futures_util::poll!(completion.as_mut()).is_pending());
+        assert!(executed.load(Ordering::SeqCst));
+        assert!(writer.entered.load(Ordering::SeqCst));
+        assert!(writer.recording.records().is_empty());
+
+        writer.release.add_permits(1);
+        let (response, metrics) = completion.await;
+        response?;
+        assert_completed(&metrics, "success", "success");
+        let item = writer
+            .recording
+            .records()
+            .pop()
+            .expect("recorded invocation");
+        assert_eq!(writer.recording.attempts(), 1);
+        assert_eq!(item.invocation_id, Some(id));
+        assert_eq!(item.owner_user_id, owner);
+        assert_eq!(item.actor_account_id, actor);
+        assert_eq!(item.caller_kind, "agent");
+        assert_eq!(item.surface, "mcp");
+        assert_eq!(item.tool, "read");
+        assert_eq!(item.op.as_deref(), Some("changes"));
+        assert_eq!(item.purpose.as_deref(), Some("Review changes"));
+        assert_eq!(item.space_name.as_deref(), Some("Research"));
         Ok(())
     }
 
@@ -282,7 +371,7 @@ mod tests {
                 let response = CallToolResult::structured(response).into();
                 let (result, body) = capture(execute_call(
                     uuid::Uuid::new_v4(),
-                    &state,
+                    state.invocation_capture(),
                     Some(&caller),
                     tool,
                     &input,
@@ -350,12 +439,12 @@ mod tests {
     #[tokio::test]
     async fn execute_call_records_redacted_inputs_responses_and_all_outcomes()
     -> Result<(), Box<dyn std::error::Error>> {
-        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
-            return Ok(());
+        let writer = RecordingWriter::default();
+        let capture_state = InvocationCapture {
+            writer: &writer,
+            metrics_enabled: false,
         };
-        let state = crate::rest::test_support::state(&db);
-        let (caller, _space_id, _root_id) =
-            crate::rest::test_support::caller_and_space(&state).await?;
+        let caller = user_caller();
         let search_input = serde_json::json!({
             "purpose": "locate cache design notes",
             "op": "find",
@@ -364,7 +453,7 @@ mod tests {
         });
         execute_call(
             uuid::Uuid::new_v4(),
-            &state,
+            capture_state,
             Some(&caller),
             "search",
             &search_input,
@@ -378,7 +467,7 @@ mod tests {
         });
         let recorded_error = execute_call(
             uuid::Uuid::new_v4(),
-            &state,
+            capture_state,
             Some(&caller),
             "read",
             &missing_input,
@@ -395,7 +484,7 @@ mod tests {
         let executed = std::sync::atomic::AtomicBool::new(false);
         let error = execute_call(
             uuid::Uuid::new_v4(),
-            &state,
+            capture_state,
             Some(&caller),
             "read",
             &invalid_purpose_input,
@@ -414,7 +503,7 @@ mod tests {
         });
         let sequence = execute_call(
             uuid::Uuid::new_v4(),
-            &state,
+            capture_state,
             Some(&caller),
             "run_read_sequence",
             &sequence_input,
@@ -451,15 +540,18 @@ mod tests {
             false
         );
 
-        let mut rows: Vec<_> = state
-            .command_invocations
-            .list_by_owner(
-                caller.account_id(),
-                notegate_model::CommandInvocationSurface::Mcp,
-                100,
-                None,
-            )
-            .await?
+        let recorded = writer.records();
+        assert_eq!(writer.attempts(), 4);
+        for item in &recorded {
+            assert_eq!(item.owner_user_id, caller.account_id());
+            assert_eq!(item.actor_account_id, caller.account_id());
+            assert_eq!(item.caller_kind, "user");
+            assert_eq!(item.surface, "mcp");
+            assert!(item.invocation_id.is_some());
+            assert!(item.space_name.is_none());
+            assert!(item.duration_ms >= 0);
+        }
+        let rows: Vec<_> = recorded
             .into_iter()
             .map(|item| {
                 (
@@ -473,7 +565,6 @@ mod tests {
                 )
             })
             .collect();
-        rows.reverse();
         assert_eq!(rows.len(), 4);
         assert_eq!(rows[0].0, "search");
         assert_eq!(rows[0].1.as_deref(), Some("find"));
@@ -501,7 +592,6 @@ mod tests {
         assert_eq!(rows[3].5, "error");
         assert_eq!(rows[3].6.as_deref(), Some("invalid_input"));
 
-        db.cleanup().await;
         Ok(())
     }
 
@@ -526,7 +616,7 @@ mod tests {
         });
         execute_call(
             uuid::Uuid::new_v4(),
-            &state,
+            state.invocation_capture(),
             Some(&caller),
             "file_upload",
             &upload_input,
@@ -557,7 +647,7 @@ mod tests {
         });
         execute_call(
             uuid::Uuid::new_v4(),
-            &state,
+            state.invocation_capture(),
             Some(&caller),
             "me",
             &me_input,
@@ -586,7 +676,7 @@ mod tests {
         });
         execute_call(
             uuid::Uuid::new_v4(),
-            &state,
+            state.invocation_capture(),
             Some(&caller),
             "run_read_sequence",
             &read_sequence_input,
@@ -642,7 +732,7 @@ mod tests {
         });
         execute_call(
             uuid::Uuid::new_v4(),
-            &state,
+            state.invocation_capture(),
             Some(&caller),
             "run_write_sequence",
             &write_sequence_input,
@@ -819,7 +909,7 @@ mod tests {
         });
         execute_call(
             uuid::Uuid::new_v4(),
-            &state,
+            state.invocation_capture(),
             Some(&agent_caller),
             "search",
             &input,

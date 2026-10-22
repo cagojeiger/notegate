@@ -80,7 +80,7 @@ pub(super) async fn capture(
     let snapshot = json!({"status": status.as_u16(), "body_recorded": false});
     completion
         .record(
-            &state,
+            &state.command_invocations,
             &caller,
             InvocationRecord {
                 id: Some(invocation_id),

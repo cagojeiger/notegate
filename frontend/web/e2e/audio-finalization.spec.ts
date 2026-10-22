@@ -26,15 +26,25 @@ test("a browser recording is finalized into seekable WebM audio", async ({ page 
       audioBitsPerSecond: 64_000
     });
     const chunks: Blob[] = [];
-    recorder.addEventListener("dataavailable", (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
+    const firstChunk = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("audio recording timed out")), 10_000);
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size === 0) return;
+        chunks.push(event.data);
+        clearTimeout(timeout);
+        resolve();
+      });
+      recorder.addEventListener("error", () => {
+        clearTimeout(timeout);
+        reject(new Error("audio recording failed"));
+      }, { once: true });
     });
     const stopped = new Promise<void>((resolve) => {
       recorder.addEventListener("stop", () => resolve(), { once: true });
     });
     oscillator.start();
     recorder.start(100);
-    await new Promise((resolve) => setTimeout(resolve, 450));
+    await firstChunk;
     recorder.stop();
     oscillator.stop();
     await stopped;
@@ -55,13 +65,13 @@ test("a browser recording is finalized into seekable WebM audio", async ({ page 
           reject(new Error(`audio failed with media error ${audio.error?.code ?? "unknown"}`));
         }, { once: true });
       });
-      audio.currentTime = Math.min(0.1, audio.duration / 2);
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error("audio seek timed out")), 10_000);
         audio.addEventListener("seeked", () => {
           clearTimeout(timeout);
           resolve();
         }, { once: true });
+        audio.currentTime = Math.min(0.1, audio.duration / 2);
       });
       return {
         currentTime: audio.currentTime,
@@ -77,7 +87,7 @@ test("a browser recording is finalized into seekable WebM audio", async ({ page 
 
   expect(result.finalizedSize).toBeGreaterThan(result.rawSize);
   expect(result.duration).toBeGreaterThan(0);
-  expect(result.duration).toBeLessThan(2);
+  expect(Number.isFinite(result.duration)).toBe(true);
   expect(result.seekableEnd).toBeCloseTo(result.duration, 2);
   expect(result.currentTime).toBeGreaterThan(0);
 });

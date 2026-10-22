@@ -1,9 +1,11 @@
 //! Shared invocation-history capture for external command surfaces.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use notegate_command::{CommandTool, PurposeValidationError, validate_purpose};
-use notegate_db::NewCommandInvocation;
+use notegate_db::{CommandInvocationRepo, NewCommandInvocation};
 use notegate_model::{Caller, CallerIdentity};
 use notegate_service::files::parse_target;
 use serde_json::Value;
@@ -12,7 +14,26 @@ pub(crate) mod redaction;
 #[cfg(test)]
 pub(crate) mod test_support;
 use crate::observability::CommandInvocationMetrics;
-use crate::state::AppState;
+
+pub(crate) type InvocationWriteFuture<'a> =
+    Pin<Box<dyn Future<Output = notegate_core::Result<()>> + Send + 'a>>;
+
+/// Best-effort invocation history only; transactional audit events stay in their repositories.
+pub(crate) trait InvocationWriter: Send + Sync {
+    fn write<'a>(&'a self, invocation: NewCommandInvocation<'a>) -> InvocationWriteFuture<'a>;
+}
+
+impl InvocationWriter for CommandInvocationRepo {
+    fn write<'a>(&'a self, invocation: NewCommandInvocation<'a>) -> InvocationWriteFuture<'a> {
+        Box::pin(self.insert(invocation))
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct InvocationCapture<'a> {
+    pub(crate) writer: &'a dyn InvocationWriter,
+    pub(crate) metrics_enabled: bool,
+}
 
 /// Shared completion boundary; adapters still interpret and redact their own results.
 pub(crate) struct InvocationCompletion {
@@ -41,11 +62,11 @@ impl InvocationCompletion {
 
     pub(crate) async fn record(
         self,
-        state: &AppState,
+        writer: &dyn InvocationWriter,
         caller: &Caller,
         invocation: InvocationRecord<'_>,
     ) {
-        let recorded = record(state, caller, invocation).await;
+        let recorded = record(writer, caller, invocation).await;
         self.metrics
             .history_finished(recorded, self.history_started.elapsed());
         self.finish();
@@ -139,7 +160,7 @@ impl<'a> InvocationMetadata<'a> {
 
 /// Return whether history was stored, without changing the command result.
 pub(crate) async fn record(
-    state: &AppState,
+    writer: &dyn InvocationWriter,
     caller: &Caller,
     invocation: InvocationRecord<'_>,
 ) -> bool {
@@ -150,9 +171,8 @@ pub(crate) async fn record(
     let outcome = invocation_outcome(invocation.error_code);
     let duration_ms = i64::try_from(invocation.elapsed_ms).unwrap_or(i64::MAX);
 
-    if let Err(error) = state
-        .command_invocations
-        .insert(NewCommandInvocation {
+    if let Err(error) = writer
+        .write(NewCommandInvocation {
             invocation_id: invocation.id,
             owner_user_id,
             actor_account_id: caller.account_id(),

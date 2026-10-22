@@ -109,6 +109,13 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub(crate) fn invocation_capture(&self) -> crate::invocations::InvocationCapture<'_> {
+        crate::invocations::InvocationCapture {
+            writer: &self.command_invocations,
+            metrics_enabled: self.config.metrics_enabled,
+        }
+    }
+
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
