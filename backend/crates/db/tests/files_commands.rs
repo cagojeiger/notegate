@@ -14,8 +14,8 @@ use notegate_core::limits;
 use notegate_db::{FilesRepo, SpaceRepo, TextMutationKind};
 use notegate_model::FileEncryptionMode;
 use notegate_model::files::{
-    BeginObjectUpload, CopyNode, CreateFolder, MoveNode, NodeListCursor, NodeListSort,
-    StoredContent, UpdateNode, WriteTextBody,
+    BeginObjectUpload, ChildrenCursor, CopyNode, CreateFolder, MoveNode, NodeListCursor,
+    NodeListSort, StoredContent, UpdateNode, WriteTextBody,
 };
 use uuid::Uuid;
 
@@ -221,6 +221,150 @@ async fn resolved_paths_and_search_candidates_preserve_all_node_fields()
     assert_eq!(texts[0].content_sha256, text.content_sha256);
     assert_eq!(texts[0].byte_len, text.byte_len);
     assert_eq!(texts[0].line_count, text.line_count);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn child_projections_preserve_keyset_order_visibility_and_node_fields()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner, space, root) = space_with_root(&db.pool, "child-pages").await?;
+    let (_, other_space, _) = space_with_root(&db.pool, "other-child-pages").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let parent = insert_folder(&repo, space, root, "parent", owner).await?;
+    let mut ids = Vec::new();
+    for (name, sort_order, external_access) in [
+        ("z-first", -1, true),
+        ("a-middle", 3, true),
+        ("b-private", 3, false),
+        ("c-last", 3, true),
+        ("a-deleted", -2, true),
+    ] {
+        let node = insert_folder(&repo, space, parent.id, name, owner).await?;
+        sqlx::query(
+            "UPDATE nodes SET sort_order=$2, external_access_enabled=$3, metadata=$4 WHERE id=$1",
+        )
+        .bind(node.id)
+        .bind(sort_order)
+        .bind(external_access)
+        .bind(serde_json::json!({"retained": name}))
+        .execute(&db.pool)
+        .await?;
+        ids.push(node.id);
+    }
+    repo.soft_delete_node(space, ids[4], owner, false).await?;
+    insert_folder(&repo, space, root, "different-parent", owner).await?;
+    let canonical = repo.find_nodes(space, &ids[..4]).await?;
+
+    for external_only in [false, true] {
+        let scoped = repo.clone().with_external_access_only(external_only);
+        let expected = if external_only {
+            vec![ids[0], ids[1], ids[3]]
+        } else {
+            ids[..4].to_vec()
+        };
+        for limit in [1, 2, 4] {
+            let mut cursor = None;
+            let mut seen = 0;
+            for expected_page in expected.chunks(limit as usize) {
+                let (nodes, has_more) = scoped
+                    .paged_children(space, parent.id, limit, cursor.as_ref())
+                    .await?;
+                let (summaries, summary_has_more) = scoped
+                    .paged_child_summaries(space, parent.id, limit, cursor.as_ref())
+                    .await?;
+                assert_eq!(
+                    nodes.iter().map(|node| node.id).collect::<Vec<_>>(),
+                    expected_page
+                );
+                for node in &nodes {
+                    assert_eq!(node, &canonical[&node.id]);
+                }
+                assert_eq!(
+                    summaries,
+                    nodes
+                        .iter()
+                        .map(|node| notegate_model::NodeSummary {
+                            id: node.id,
+                            space_id: node.space_id,
+                            parent_id: node.parent_id,
+                            name: node.name.clone(),
+                            kind: node.kind,
+                            sort_order: node.sort_order,
+                            updated_at: node.updated_at,
+                        })
+                        .collect::<Vec<_>>()
+                );
+                seen += expected_page.len();
+                assert_eq!(has_more, seen < expected.len());
+                assert_eq!(summary_has_more, has_more);
+                let last = nodes.last().expect("expected non-empty page");
+                cursor = Some(ChildrenCursor {
+                    sort_order: last.sort_order,
+                    name: last.name.clone(),
+                    id: last.id,
+                });
+            }
+            assert_eq!(
+                scoped
+                    .paged_children(space, parent.id, limit, cursor.as_ref())
+                    .await?,
+                (vec![], false)
+            );
+            assert_eq!(
+                scoped
+                    .paged_child_summaries(space, parent.id, limit, cursor.as_ref())
+                    .await?,
+                (vec![], false)
+            );
+        }
+        assert_eq!(
+            scoped
+                .paged_children(other_space, parent.id, 10, None)
+                .await?,
+            (vec![], false)
+        );
+        assert_eq!(
+            scoped
+                .paged_child_summaries(other_space, parent.id, 10, None)
+                .await?,
+            (vec![], false)
+        );
+    }
+
+    sqlx::query("UPDATE nodes SET external_access_enabled=false WHERE id=$1")
+        .bind(parent.id)
+        .execute(&db.pool)
+        .await?;
+    let external = repo.clone().with_external_access_only(true);
+    assert_eq!(
+        external.paged_children(space, parent.id, 10, None).await?,
+        (vec![], false)
+    );
+    assert_eq!(
+        external
+            .paged_child_summaries(space, parent.id, 10, None)
+            .await?,
+        (vec![], false)
+    );
+    assert_eq!(
+        repo.paged_children(space, parent.id, 10, None)
+            .await?
+            .0
+            .len(),
+        4
+    );
+    assert_eq!(
+        repo.paged_child_summaries(space, parent.id, 10, None)
+            .await?
+            .0
+            .len(),
+        4
+    );
 
     db.cleanup().await;
     Ok(())

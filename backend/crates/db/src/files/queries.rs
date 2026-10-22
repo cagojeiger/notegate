@@ -395,7 +395,8 @@ pub(crate) mod node {
     use notegate_core::{Error, Result};
     use notegate_model::files::{ChildrenCursor, NodeListCursor, NodeListSort};
     use notegate_model::{Node, NodeKind, NodeSummary, Permission};
-    use sqlx::{Executor, Postgres};
+    use sqlx::postgres::PgRow;
+    use sqlx::{Executor, FromRow, Postgres};
     use std::collections::{HashMap, HashSet};
     use uuid::Uuid;
 
@@ -449,6 +450,50 @@ pub(crate) mod node {
     }
 
     impl crate::FilesRepo {
+        async fn paged_child_rows<R>(
+            &self,
+            columns: &'static str,
+            space_id: Uuid,
+            parent_node_id: Uuid,
+            limit: i64,
+            cursor: Option<&ChildrenCursor>,
+        ) -> Result<Vec<R>>
+        where
+            for<'row> R: FromRow<'row, PgRow> + Send + Unpin,
+        {
+            let access_filter = if self.external_only {
+                "AND node_external_access_allowed(space_id, id)"
+            } else {
+                ""
+            };
+            let (cursor_filter, limit_param) = if cursor.is_some() {
+                ("AND (sort_order, name, id) > ($3, $4, $5)", "$6")
+            } else {
+                ("", "$3")
+            };
+            let sql = format!(
+                "SELECT {columns} FROM nodes \
+                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
+                   {cursor_filter} \
+                 ORDER BY sort_order, name, id \
+                 LIMIT {limit_param}"
+            );
+            let mut query = sqlx::query_as::<_, R>(sqlx::AssertSqlSafe(sql))
+                .bind(space_id)
+                .bind(parent_node_id);
+            if let Some(cursor) = cursor {
+                query = query
+                    .bind(cursor.sort_order)
+                    .bind(cursor.name.as_str())
+                    .bind(cursor.id);
+            }
+            query
+                .bind(limit + 1)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_sqlx_error)
+        }
+
         /// Canonical child nodes for internal tree traversal. Collection endpoints
         /// use `paged_child_summaries` to avoid loading large metadata columns.
         pub async fn paged_children(
@@ -458,47 +503,9 @@ pub(crate) mod node {
             limit: i64,
             cursor: Option<&ChildrenCursor>,
         ) -> Result<(Vec<Node>, bool)> {
-            let cursor = cursor.map(|c| (c.sort_order, c.name.as_str(), c.id));
-
-            let access_filter = if self.external_only {
-                "AND node_external_access_allowed(space_id, id)"
-            } else {
-                ""
-            };
-            let fetch = limit + 1;
-            let rows: Vec<NodeRow> = match cursor {
-                None => {
-                    sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
-                        "SELECT {NODE_COLUMNS} FROM nodes \
-                     WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
-                     ORDER BY sort_order, name, id \
-                     LIMIT $3"
-                    )))
-                    .bind(space_id)
-                    .bind(parent_node_id)
-                    .bind(fetch)
-                    .fetch_all(&self.pool)
-                    .await
-                }
-                Some((sort_order, name, id)) => {
-                    sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
-                        "SELECT {NODE_COLUMNS} FROM nodes \
-                     WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
-                       AND (sort_order, name, id) > ($3, $4, $5) \
-                     ORDER BY sort_order, name, id \
-                     LIMIT $6"
-                    )))
-                    .bind(space_id)
-                    .bind(parent_node_id)
-                    .bind(sort_order)
-                    .bind(name)
-                    .bind(id)
-                    .bind(fetch)
-                    .fetch_all(&self.pool)
-                    .await
-                }
-            }
-            .map_err(map_sqlx_error)?;
+            let rows: Vec<NodeRow> = self
+                .paged_child_rows(NODE_COLUMNS, space_id, parent_node_id, limit, cursor)
+                .await?;
 
             let has_more = rows.len() as i64 > limit;
             let mut nodes: Vec<Node> = rows
@@ -519,47 +526,15 @@ pub(crate) mod node {
             limit: i64,
             cursor: Option<&ChildrenCursor>,
         ) -> Result<(Vec<NodeSummary>, bool)> {
-            let cursor = cursor.map(|c| (c.sort_order, c.name.as_str(), c.id));
-
-            let access_filter = if self.external_only {
-                "AND node_external_access_allowed(space_id, id)"
-            } else {
-                ""
-            };
-            let fetch = limit + 1;
-            let rows: Vec<NodeSummaryRow> = match cursor {
-                None => {
-                    sqlx::query_as::<_, NodeSummaryRow>(sqlx::AssertSqlSafe(format!(
-                        "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
-                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
-                 ORDER BY sort_order, name, id \
-                 LIMIT $3"
-                    )))
-                    .bind(space_id)
-                    .bind(parent_node_id)
-                    .bind(fetch)
-                    .fetch_all(&self.pool)
-                    .await
-                }
-                Some((sort_order, name, id)) => {
-                    sqlx::query_as::<_, NodeSummaryRow>(sqlx::AssertSqlSafe(format!(
-                        "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
-                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL {access_filter} \
-                   AND (sort_order, name, id) > ($3, $4, $5) \
-                 ORDER BY sort_order, name, id \
-                 LIMIT $6"
-                    )))
-                    .bind(space_id)
-                    .bind(parent_node_id)
-                    .bind(sort_order)
-                    .bind(name)
-                    .bind(id)
-                    .bind(fetch)
-                    .fetch_all(&self.pool)
-                    .await
-                }
-            }
-            .map_err(map_sqlx_error)?;
+            let rows: Vec<NodeSummaryRow> = self
+                .paged_child_rows(
+                    NODE_SUMMARY_COLUMNS,
+                    space_id,
+                    parent_node_id,
+                    limit,
+                    cursor,
+                )
+                .await?;
 
             let has_more = rows.len() as i64 > limit;
             let mut nodes: Vec<NodeSummary> = rows
