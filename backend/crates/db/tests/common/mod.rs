@@ -7,37 +7,17 @@
     clippy::panic,
     clippy::unwrap_in_result
 )]
-pub use notegate_db::test_support::TestDb;
-use notegate_db::{AccountRepo, FilesRepo};
+use notegate_db::FilesRepo;
+#[allow(unused_imports)]
+pub use notegate_db::test_support::{TestDb, deactivate_account, insert_user_account};
 use notegate_model::files::BeginObjectUpload;
-use notegate_model::{FileEncryptionMode, FileObject, Node, ResolveAttrs};
+use notegate_model::{FileEncryptionMode, FileObject, Node};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 #[allow(dead_code)]
 pub fn agent_api_key_prefix(key_id: Uuid) -> String {
     format!("ngk_v2_{key_id}")
-}
-
-/// Insert a `kind='user'` account + matching `users` row, returning the id.
-///
-/// Shared by the agent tests; `account_repo` builds its users through the repo,
-/// so the lint fires only for that binary.
-#[allow(dead_code)]
-pub async fn insert_user_account(
-    pool: &PgPool,
-    sub: &str,
-    email: &str,
-) -> Result<Uuid, Box<dyn std::error::Error>> {
-    let (account, _) = AccountRepo::new(pool.clone())
-        .upsert_user_by_identity(&ResolveAttrs {
-            issuer: "https://auth.example.test".to_owned(),
-            sub: sub.to_owned(),
-            email: email.to_owned(),
-            name: format!("user-{sub}"),
-        })
-        .await?;
-    Ok(account.id)
 }
 
 /// Create an owner account + space, returning `(account_id, space_id, root_node_id)`.
@@ -171,25 +151,6 @@ pub async fn set_user_tier(pool: &PgPool, user_id: Uuid, tier: &str) -> Result<(
         .bind(tier)
         .execute(pool)
         .await?;
-    Ok(())
-}
-
-/// Deactivate an account as a soft-delete, matching the production account lifecycle.
-#[allow(dead_code)]
-pub async fn deactivate_account(
-    pool: &PgPool,
-    account_id: Uuid,
-    deleted_by: Uuid,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE accounts \
-         SET is_active = false, deleted_at = now(), deleted_by_account_id = $2, updated_at = now() \
-         WHERE id = $1",
-    )
-    .bind(account_id)
-    .bind(deleted_by)
-    .execute(pool)
-    .await?;
     Ok(())
 }
 
