@@ -273,7 +273,7 @@ async fn finish(
     let response = redact_response(tool, &response_context, &result);
     completion
         .record(
-            state,
+            &state.command_invocations,
             context.caller(),
             InvocationRecord {
                 id: context.invocation_id(),

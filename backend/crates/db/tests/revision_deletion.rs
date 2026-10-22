@@ -32,6 +32,24 @@ async fn usage(db: &TestDb, space: Uuid) -> Result<i64, sqlx::Error> {
         .await
 }
 
+async fn wait_for_blocker(
+    pool: &sqlx::PgPool,
+    waiting_pid: i32,
+    blocking_pid: i32,
+) -> Result<(), sqlx::Error> {
+    loop {
+        let blocked: bool = sqlx::query_scalar("SELECT $2 = ANY(pg_blocking_pids($1))")
+            .bind(waiting_pid)
+            .bind(blocking_pid)
+            .fetch_one(pool)
+            .await?;
+        if blocked {
+            return Ok(());
+        }
+        tokio::task::yield_now().await;
+    }
+}
+
 #[tokio::test]
 async fn retention_and_space_purge_serialize_without_duplicate_receipts_or_usage_release()
 -> TestResult {
@@ -670,8 +688,11 @@ async fn usage_repair_waits_for_a_direct_delete_before_taking_its_snapshot() -> 
             TextMutationKind::Write,
         )
         .await?;
-    {
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
         let mut blocker = db.pool.begin().await?;
+        let blocker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *blocker)
+            .await?;
         sqlx::query("SELECT space_id FROM text_revision_usage WHERE space_id = $1 FOR UPDATE")
             .bind(space)
             .fetch_one(&mut *blocker)
@@ -685,32 +706,41 @@ async fn usage_repair_waits_for_a_direct_delete_before_taking_its_snapshot() -> 
             .execute(&mut *deletion_connection);
         tokio::pin!(deletion);
         // Drive DELETE until its row trigger is blocked on the counter held above.
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(100), &mut deletion)
-                .await
-                .is_err()
-        );
-        let waiting: bool = sqlx::query_scalar(
-            "SELECT wait_event_type = 'Lock' FROM pg_stat_activity WHERE pid = $1",
-        )
-        .bind(deletion_pid)
-        .fetch_one(&db.pool)
-        .await?;
-        assert!(waiting);
+        tokio::select! {
+            result = &mut deletion => {
+                return Err(format!("DELETE completed before its counter lock was observed: {result:?}").into());
+            }
+            result = wait_for_blocker(&db.pool, deletion_pid, blocker_pid) => result?,
+        }
 
-        let reconcile = SpaceUsageRepo::new(db.pool.clone());
+        // A dedicated one-connection pool identifies the repair's real backend.
+        let repair_pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect_with(db.pool.connect_options().as_ref().clone())
+            .await?;
+        let repair_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&repair_pool)
+            .await?;
+        let reconcile = SpaceUsageRepo::new(repair_pool.clone());
         let repair = reconcile.reconcile_space(space);
         tokio::pin!(repair);
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(100), &mut repair)
-                .await
-                .is_err()
-        );
+        tokio::select! {
+            result = &mut deletion => {
+                return Err(format!("DELETE completed while its counter lock was held: {result:?}").into());
+            }
+            result = &mut repair => {
+                return Err(format!("repair completed before waiting for DELETE: {result:?}").into());
+            }
+            result = wait_for_blocker(&db.pool, repair_pid, deletion_pid) => result?,
+        }
         blocker.commit().await?;
         let (deleted, repaired) = tokio::join!(deletion, repair);
         assert_eq!(deleted?.rows_affected(), 1);
         repaired?;
-    }
+        repair_pool.close().await;
+        Ok::<(), Box<dyn std::error::Error>>(())
+    })
+    .await??;
     assert_eq!(usage(&db, space).await?, 0);
     db.cleanup().await;
     Ok(())

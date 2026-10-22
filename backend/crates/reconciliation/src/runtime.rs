@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -19,15 +20,25 @@ use crate::{
 const LOCK_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(10);
 const LOCK_RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub struct ReconciliationRuntime {
+pub struct ReconciliationRuntime<L = PostgresLockProvider> {
     entries: Vec<RegisteredReconciler>,
-    locks: PostgresLockProvider,
+    locks: L,
 }
 
-impl ReconciliationRuntime {
+impl ReconciliationRuntime<PostgresLockProvider> {
     pub fn new(
         pool: &PgPool,
         registry: ReconciliationRegistry,
+    ) -> Result<Self, ReconciliationError> {
+        Self::with_lock_provider(registry, PostgresLockProvider::new(pool))
+    }
+}
+
+impl<L: LockProvider> ReconciliationRuntime<L> {
+    /// Build a runtime with an explicit singleton-lock dependency.
+    pub fn with_lock_provider(
+        registry: ReconciliationRegistry,
+        locks: L,
     ) -> Result<Self, ReconciliationError> {
         if registry.is_empty() {
             return Err(ReconciliationError::InvalidConfiguration(
@@ -37,7 +48,7 @@ impl ReconciliationRuntime {
         describe_metrics();
         Ok(Self {
             entries: registry.into_entries(),
-            locks: PostgresLockProvider::new(pool),
+            locks,
         })
     }
 
@@ -389,23 +400,29 @@ fn describe_metrics() {
     );
 }
 
-trait LockProvider: Clone + Send + Sync + 'static {
+/// Provides exclusive ownership of one reconciliation kind across runtimes.
+pub trait LockProvider: Clone + Send + Sync + 'static {
     type Guard: ReconciliationLock;
 
-    async fn try_acquire(&self, lock_key: i64) -> Result<Option<Self::Guard>, ReconciliationError>;
+    fn try_acquire(
+        &self,
+        lock_key: i64,
+    ) -> impl Future<Output = Result<Option<Self::Guard>, ReconciliationError>> + Send;
 }
 
-trait ReconciliationLock: Send {
-    async fn release(self) -> Result<(), ReconciliationError>;
+/// An acquired singleton lock, held until release or drop.
+pub trait ReconciliationLock: Send {
+    fn release(self) -> impl Future<Output = Result<(), ReconciliationError>> + Send;
 }
 
+/// Uses a dedicated PostgreSQL connection for each advisory lock.
 #[derive(Clone)]
-struct PostgresLockProvider {
+pub struct PostgresLockProvider {
     options: Arc<sqlx::postgres::PgConnectOptions>,
 }
 
 impl PostgresLockProvider {
-    fn new(pool: &PgPool) -> Self {
+    pub fn new(pool: &PgPool) -> Self {
         Self {
             options: pool.connect_options(),
         }
@@ -428,7 +445,7 @@ impl LockProvider for PostgresLockProvider {
     }
 }
 
-struct PostgresLock {
+pub struct PostgresLock {
     connection: PgConnection,
     lock_key: i64,
 }

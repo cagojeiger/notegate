@@ -820,17 +820,45 @@ async fn waiting_for_account_lock_cannot_extend_the_refresh_retry_deadline()
         .bind(user)
         .execute(&mut *lock)
         .await?;
-    sqlx::query("UPDATE oauth_credentials SET refresh_retry_until=clock_timestamp()+interval '100 milliseconds' WHERE private_refresh_response IS NOT NULL")
-        .execute(&mut *lock).await?;
+    let blocker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *lock)
+        .await?;
     let retry_service = svc.clone();
     let retry = tokio::spawn(async move {
         retry_service
             .refresh(&previous, CLIENT, RESOURCE, t + Duration::seconds(1))
             .await
     });
-    sqlx::query("SELECT pg_sleep(0.15)")
-        .execute(&mut *lock)
-        .await?;
+    let waiting: Result<(), Box<dyn std::error::Error>> = async {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let blocked: bool = sqlx::query_scalar(
+                    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity \
+                     WHERE $1 = ANY(pg_blocking_pids(pid)))",
+                )
+                .bind(blocker_pid)
+                .fetch_one(&db.pool)
+                .await?;
+                if blocked {
+                    return Ok::<(), sqlx::Error>(());
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await??;
+        Ok(())
+    }
+    .await;
+    if let Err(error) = waiting {
+        retry.abort();
+        lock.rollback().await?;
+        let _ = retry.await;
+        return Err(error);
+    }
+    // Expire only after the retry is observably blocked. Its logical `now`
+    // stays unchanged, so rejection must use fresh database time after the lock.
+    sqlx::query("UPDATE oauth_credentials SET refresh_retry_until=clock_timestamp() WHERE private_refresh_response IS NOT NULL")
+        .execute(&mut *lock).await?;
     lock.commit().await?;
     rejected(
         tokio::time::timeout(std::time::Duration::from_secs(10), retry).await???,

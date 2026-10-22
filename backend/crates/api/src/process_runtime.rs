@@ -175,7 +175,6 @@ fn log_auxiliary_exit((name, result): TaskExit) {
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::Duration;
 
     use super::*;
 
@@ -231,7 +230,7 @@ mod tests {
     #[tokio::test]
     async fn auxiliary_exit_does_not_stop_the_process() {
         let release_critical = Arc::new(tokio::sync::Notify::new());
-        let (auxiliary_stopped, auxiliary_stopped_rx) = tokio::sync::oneshot::channel();
+        let auxiliary_observed = Arc::new(AtomicBool::new(false));
         let mut runtime = runtime_with_task(
             "critical worker",
             tokio::spawn({
@@ -239,23 +238,23 @@ mod tests {
                 async move { release_critical.notified().await }
             }),
         );
-        runtime.auxiliary_tasks.push(
-            "auxiliary worker",
-            Some(tokio::spawn(async move {
-                let _ = auxiliary_stopped.send(());
-            })),
-        );
+        runtime.auxiliary_tasks.0.push({
+            let auxiliary_observed = auxiliary_observed.clone();
+            async move {
+                auxiliary_observed.store(true, Ordering::SeqCst);
+                ("auxiliary worker", Ok(()))
+            }
+            .boxed()
+        });
         let mut wait_for_exit = Box::pin(runtime.wait_for_critical_exit());
 
         assert!(
-            auxiliary_stopped_rx.await.is_ok(),
-            "auxiliary task should report its exit"
+            futures_util::poll!(&mut wait_for_exit).is_pending(),
+            "auxiliary task exit must not stop the process"
         );
         assert!(
-            tokio::time::timeout(Duration::from_millis(10), &mut wait_for_exit)
-                .await
-                .is_err(),
-            "auxiliary task exit must not stop the process"
+            auxiliary_observed.load(Ordering::SeqCst),
+            "the ready auxiliary exit must be observed before checking the process"
         );
         release_critical.notify_one();
 

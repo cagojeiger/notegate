@@ -202,14 +202,19 @@ async fn browser_activity_extends_idle_expiry_without_moving_absolute_expiry()
             .idle_expires_at,
         before.idle_expires_at
     );
-    let now = Utc::now();
+    let before_renewal: chrono::DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&db.pool)
+        .await?;
     assert!(repo.renew_idle_expiry(id, &hash).await?);
     let after = repo
         .find_by_token(id, &hash)
         .await?
         .ok_or("missing renewed session")?;
-    assert!(after.idle_expires_at >= now + Duration::days(14));
-    assert!(after.idle_expires_at < Utc::now() + Duration::days(14));
+    let after_renewal: chrono::DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&db.pool)
+        .await?;
+    assert!(after.idle_expires_at >= before_renewal + Duration::days(14));
+    assert!(after.idle_expires_at <= after_renewal + Duration::days(14));
     assert_eq!(after.created_at, before.created_at);
     assert_eq!(after.expires_at, before.expires_at);
     assert_eq!(after.user_id, before.user_id);

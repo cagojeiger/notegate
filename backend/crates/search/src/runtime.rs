@@ -1,5 +1,6 @@
 //! Cloneable runtime wrapper for search execution ownership.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use notegate_core::SearchBodyCacheConfig;
@@ -7,7 +8,7 @@ use notegate_db::FilesRepo;
 
 use crate::{
     FindPage, FindRequest, GrepPage, GrepRequest, SearchAdmission, SearchCapacity, SearchError,
-    SearchService,
+    SearchResult, SearchService,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -80,12 +81,12 @@ impl SearchRuntime {
         space_id: uuid::Uuid,
         request: FindRequest,
     ) -> SearchRunResult<FindPage> {
-        let _permit = self.inner.admission.enter_find()?;
-        self.inner
-            .service
-            .find(caller_account_id, space_id, request)
-            .await
-            .map_err(SearchRunError::Search)
+        run_find(&self.inner.admission, || {
+            self.inner
+                .service
+                .find(caller_account_id, space_id, request)
+        })
+        .await
     }
 
     pub async fn grep(
@@ -94,106 +95,102 @@ impl SearchRuntime {
         space_id: uuid::Uuid,
         request: GrepRequest,
     ) -> SearchRunResult<GrepPage> {
-        let _permit = self.inner.admission.enter_grep().await?;
-        let result = self
-            .inner
-            .service
-            .grep(caller_account_id, space_id, request)
-            .await
-            .map_err(SearchRunError::Search);
-        self.record_body_cache_metrics();
-        result
+        run_grep(
+            &self.inner.admission,
+            || {
+                self.inner
+                    .service
+                    .grep(caller_account_id, space_id, request)
+            },
+            || self.record_body_cache_metrics(),
+        )
+        .await
     }
 
     pub fn record_body_cache_metrics(&self) {
         self.inner.service.record_body_cache_metrics();
     }
+}
 
-    #[cfg(test)]
-    fn with_admission(service: SearchService, admission: SearchAdmission) -> Self {
-        Self {
-            inner: Arc::new(SearchRuntimeInner { service, admission }),
-        }
-    }
+async fn run_find<T, F>(
+    admission: &SearchAdmission,
+    execute: impl FnOnce() -> F,
+) -> SearchRunResult<T>
+where
+    F: Future<Output = SearchResult<T>>,
+{
+    let _permit = admission.enter_find()?;
+    execute().await.map_err(SearchRunError::Search)
+}
+
+async fn run_grep<T, F>(
+    admission: &SearchAdmission,
+    execute: impl FnOnce() -> F,
+    record_metrics: impl FnOnce(),
+) -> SearchRunResult<T>
+where
+    F: Future<Output = SearchResult<T>>,
+{
+    let _permit = admission.enter_grep().await?;
+    let result = execute().await.map_err(SearchRunError::Search);
+    record_metrics();
+    result
 }
 
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
 
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll, Waker};
+
     use metrics_exporter_prometheus::PrometheusBuilder;
-    use notegate_core::{SearchBodyCacheConfig, limits::Limits, security::PiiCrypto};
+    use notegate_core::SearchBodyCacheConfig;
+    use tokio::sync::Notify;
 
     use super::*;
-    use crate::{FindMatchMode, GrepLineMode, GrepMatchMode};
-
-    fn lazy_store() -> FilesRepo {
-        let pool =
-            notegate_db::PgPool::connect_lazy("postgres://notegate:notegate@127.0.0.1:1/notegate")
-                .expect("lazy pool");
-        FilesRepo::with_limits_and_crypto(pool, Limits::default(), PiiCrypto::test())
-    }
-
-    fn find_request() -> FindRequest {
-        FindRequest {
-            date_filters: Default::default(),
-            q: "note".to_owned(),
-            path: None,
-            kind: None,
-            match_mode: FindMatchMode::Contains,
-            include: Vec::new(),
-            exclude: Vec::new(),
-            limit: None,
-            cursor: None,
-        }
-    }
-
-    fn grep_request() -> GrepRequest {
-        GrepRequest {
-            date_filters: Default::default(),
-            q: "needle".to_owned(),
-            path: None,
-            match_mode: GrepMatchMode::Literal,
-            line_mode: GrepLineMode::First,
-            include: Vec::new(),
-            exclude: Vec::new(),
-            limit: None,
-            cursor: None,
-        }
-    }
+    use crate::{body_cache::SearchBodyCache, telemetry::SearchTelemetry};
 
     #[tokio::test]
     async fn runtime_find_reports_capacity_before_querying_store() {
-        let runtime = SearchRuntime::with_admission(
-            SearchService::new(lazy_store()),
-            SearchAdmission::for_test(0, 1, 1),
-        );
-
-        let result = runtime
-            .find(uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), find_request())
-            .await;
+        let admission = SearchAdmission::for_test(0, 1, 1);
+        let calls = AtomicUsize::new(0);
+        let result = run_find(&admission, || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { Ok(()) }
+        })
+        .await;
 
         assert!(matches!(
             result,
             Err(SearchRunError::Capacity(SearchCapacity::Find))
         ));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
     async fn runtime_grep_reports_capacity_before_querying_store() {
-        let runtime = SearchRuntime::with_admission(
-            SearchService::new(lazy_store()),
-            SearchAdmission::for_test(1, 0, 1),
-        );
-
-        let result = runtime
-            .grep(uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), grep_request())
-            .await;
+        let admission = SearchAdmission::for_test(1, 0, 1);
+        let calls = AtomicUsize::new(0);
+        let metrics = AtomicUsize::new(0);
+        let result = run_grep(
+            &admission,
+            || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                async { Ok(()) }
+            },
+            || {
+                metrics.fetch_add(1, Ordering::SeqCst);
+            },
+        )
+        .await;
 
         assert!(matches!(
             result,
             Err(SearchRunError::Capacity(SearchCapacity::Grep))
         ));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(metrics.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
@@ -202,16 +199,21 @@ mod tests {
             .with_recommended_naming(true)
             .build_recorder();
         let handle = recorder.handle();
-        let runtime = SearchRuntime::new(
-            lazy_store(),
-            SearchBodyCacheConfig {
-                max_capacity_bytes: 128,
-                ..SearchBodyCacheConfig::default()
+        let cache = SearchBodyCache::new(SearchBodyCacheConfig {
+            max_capacity_bytes: 128,
+            ..SearchBodyCacheConfig::default()
+        });
+        run_grep(
+            &SearchAdmission::for_test(1, 1, 1),
+            || async { Ok(()) },
+            || {
+                metrics::with_local_recorder(&recorder, || {
+                    SearchTelemetry::new(true).record_body_cache_metrics(cache.stats());
+                })
             },
-            true,
-        );
-
-        metrics::with_local_recorder(&recorder, || runtime.record_body_cache_metrics());
+        )
+        .await
+        .expect("grep completed");
 
         let body = handle.render();
         assert!(
@@ -234,17 +236,91 @@ mod tests {
             .with_recommended_naming(true)
             .build_recorder();
         let handle = recorder.handle();
-        let runtime = SearchRuntime::new(
-            lazy_store(),
-            SearchBodyCacheConfig {
-                max_capacity_bytes: 128,
-                ..SearchBodyCacheConfig::default()
+        run_grep(
+            &SearchAdmission::for_test(1, 1, 1),
+            || async { Ok(()) },
+            || {
+                metrics::with_local_recorder(&recorder, || {
+                    SearchTelemetry::new(false).record_body_cache_metrics(Default::default());
+                })
             },
-            false,
-        );
-
-        metrics::with_local_recorder(&recorder, || runtime.record_body_cache_metrics());
+        )
+        .await
+        .expect("grep completed");
 
         assert!(handle.render().is_empty());
+    }
+
+    #[tokio::test]
+    async fn runtime_find_releases_capacity_after_executor_error() {
+        let admission = SearchAdmission::for_test(1, 1, 1);
+        let result: SearchRunResult<()> = run_find(&admission, || async {
+            Err(SearchError::InvalidInput("injected failure".to_owned()))
+        })
+        .await;
+
+        assert!(matches!(result, Err(SearchRunError::Search(_))));
+        assert!(admission.enter_find().is_ok());
+    }
+
+    #[tokio::test]
+    async fn runtime_grep_records_metrics_and_releases_capacity_after_executor_error() {
+        let admission = SearchAdmission::for_test(1, 1, 1);
+        let metrics = AtomicUsize::new(0);
+        let result: SearchRunResult<()> = run_grep(
+            &admission,
+            || async { Err(SearchError::InvalidInput("injected failure".to_owned())) },
+            || {
+                metrics.fetch_add(1, Ordering::SeqCst);
+            },
+        )
+        .await;
+
+        assert!(matches!(result, Err(SearchRunError::Search(_))));
+        assert_eq!(metrics.load(Ordering::SeqCst), 1);
+        let mut next = std::pin::pin!(admission.enter_grep());
+        assert!(matches!(
+            next.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Ready(Ok(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn runtime_grep_cancellation_releases_capacity_without_recording_metrics() {
+        let admission = SearchAdmission::for_test(1, 1, 1);
+        let started = Arc::new(Notify::new());
+        let metrics = Arc::new(AtomicUsize::new(0));
+        let task = tokio::spawn({
+            let admission = admission.clone();
+            let started = started.clone();
+            let metrics = metrics.clone();
+            async move {
+                run_grep(
+                    &admission,
+                    || async {
+                        started.notify_one();
+                        std::future::pending::<SearchResult<()>>().await
+                    },
+                    || {
+                        metrics.fetch_add(1, Ordering::SeqCst);
+                    },
+                )
+                .await
+            }
+        });
+        started.notified().await;
+        assert!(matches!(
+            admission.enter_grep().await,
+            Err(SearchCapacity::Grep)
+        ));
+        task.abort();
+        assert!(task.await.expect_err("task cancelled").is_cancelled());
+
+        let mut next = std::pin::pin!(admission.enter_grep());
+        assert!(matches!(
+            next.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Ready(Ok(_))
+        ));
+        assert_eq!(metrics.load(Ordering::SeqCst), 0);
     }
 }

@@ -1,6 +1,6 @@
 //! Agent API-key issuance and shared token-format helpers.
 
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use notegate_core::limits;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{ApiKeyRepo, api_key_repo::InsertApiKey};
@@ -49,7 +49,7 @@ pub async fn create_agent_key(
     created_by: Uuid,
     command: CreateApiKey,
 ) -> ServiceResult<MintedApiKey> {
-    validate_key_command(&command)?;
+    validate_key_command(&command, Utc::now())?;
     let key_id = Uuid::new_v4();
     let secret = generate_secret();
     let token = format_token(key_id, &secret);
@@ -79,7 +79,7 @@ pub async fn rotate_agent_key(
     old_key_id: Uuid,
     command: CreateApiKey,
 ) -> ServiceResult<MintedApiKey> {
-    validate_key_command(&command)?;
+    validate_key_command(&command, Utc::now())?;
 
     let key_id = Uuid::new_v4();
     let secret = generate_secret();
@@ -104,7 +104,7 @@ pub async fn rotate_agent_key(
     Ok(MintedApiKey { key, token })
 }
 
-fn validate_key_command(command: &CreateApiKey) -> ServiceResult<()> {
+fn validate_key_command(command: &CreateApiKey, now: DateTime<Utc>) -> ServiceResult<()> {
     if command.name.trim().is_empty() {
         return Err(ServiceError::InvalidInput(
             "api key name cannot be empty".to_owned(),
@@ -122,7 +122,6 @@ fn validate_key_command(command: &CreateApiKey) -> ServiceResult<()> {
         ));
     }
 
-    let now = Utc::now();
     let expires_at = command
         .expires_at
         .ok_or_else(|| ServiceError::InvalidInput("api key expires_at is required".to_owned()))?;
@@ -213,48 +212,64 @@ mod tests {
             scopes: Vec::new(),
             expires_at: None,
         };
-        assert!(validate_key_command(&command).is_err());
+        assert!(validate_key_command(&command, DateTime::<Utc>::UNIX_EPOCH).is_err());
     }
 
     #[test]
     fn api_key_name_must_be_non_empty_and_bounded() {
-        let expires_at = Some(Utc::now() + Duration::days(1));
+        let now = DateTime::<Utc>::UNIX_EPOCH;
+        let expires_at = Some(now + Duration::days(1));
         let empty = CreateApiKey {
             name: "   ".to_owned(),
             scopes: Vec::new(),
             expires_at,
         };
-        assert!(validate_key_command(&empty).is_err());
+        assert!(validate_key_command(&empty, now).is_err());
 
         let too_long = CreateApiKey {
             name: "k".repeat(limits::API_KEY_NAME_MAX_CHARS + 1),
             scopes: Vec::new(),
             expires_at,
         };
-        assert!(validate_key_command(&too_long).is_err());
+        assert!(validate_key_command(&too_long, now).is_err());
     }
 
     #[test]
     fn api_key_expiry_must_be_within_ttl() {
+        let now = DateTime::<Utc>::UNIX_EPOCH;
         let command = CreateApiKey {
             name: "too-long".to_owned(),
             scopes: Vec::new(),
-            expires_at: Some(Utc::now() + Duration::days(limits::AGENT_API_KEY_MAX_TTL_DAYS + 1)),
+            expires_at: Some(
+                now + Duration::days(limits::AGENT_API_KEY_MAX_TTL_DAYS)
+                    + Duration::milliseconds(1),
+            ),
         };
-        assert!(validate_key_command(&command).is_err());
+        assert!(validate_key_command(&command, now).is_err());
     }
 
     #[test]
     fn api_key_expiry_accepts_future_within_ttl() {
+        let now = DateTime::<Utc>::UNIX_EPOCH;
         let command = CreateApiKey {
             name: "ok".to_owned(),
             scopes: Vec::new(),
-            expires_at: Some(
-                Utc::now() + Duration::days(limits::AGENT_API_KEY_MAX_TTL_DAYS)
-                    - Duration::seconds(1),
-            ),
+            expires_at: Some(now + Duration::days(limits::AGENT_API_KEY_MAX_TTL_DAYS)),
         };
-        assert!(validate_key_command(&command).is_ok());
+        assert!(validate_key_command(&command, now).is_ok());
+    }
+
+    #[test]
+    fn api_key_expiry_rejects_at_or_before_the_injected_current_time() {
+        let now = DateTime::<Utc>::UNIX_EPOCH;
+        for offset_ms in [-1, 0] {
+            let command = CreateApiKey {
+                name: "key".to_owned(),
+                scopes: Vec::new(),
+                expires_at: Some(now + Duration::milliseconds(offset_ms)),
+            };
+            assert!(validate_key_command(&command, now).is_err());
+        }
     }
 
     #[test]

@@ -2397,7 +2397,9 @@ async fn browser_activity_requires_live_cookie_and_same_origin_without_reauthent
         "https://api.example.test",
         db.pool.clone(),
     )?;
+    let creation_started = Utc::now();
     let token = valid_browser_session(&db, &state).await?;
+    let creation_finished = Utc::now();
     let (id, _) =
         notegate_db::browser_session_repo::parse_token(&token).ok_or("invalid fixture")?;
     let (initial_idle, absolute): (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) =
@@ -2405,10 +2407,8 @@ async fn browser_activity_requires_live_cookie_and_same_origin_without_reauthent
             .bind(id)
             .fetch_one(&db.pool)
             .await?;
-    assert!(
-        initial_idle
-            > chrono::Utc::now() + chrono::Duration::days(14) - chrono::Duration::seconds(5)
-    );
+    assert!(initial_idle >= creation_started + chrono::Duration::days(14));
+    assert!(initial_idle <= creation_finished + chrono::Duration::days(14));
     assert!(initial_idle <= absolute);
     sqlx::query("UPDATE browser_sessions SET idle_expires_at=now()+interval '1 hour' WHERE id=$1")
         .bind(id)

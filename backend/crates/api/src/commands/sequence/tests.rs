@@ -2,7 +2,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::task::Poll;
 
 use super::*;
 use serde_json::json;
@@ -252,17 +252,27 @@ async fn read_executor_is_bounded_and_restores_input_order() {
     .expect("valid read commands");
     let active = Arc::new(AtomicUsize::new(0));
     let maximum = Arc::new(AtomicUsize::new(0));
+    let gates: Arc<Vec<_>> = Arc::new((0..10).map(|_| tokio::sync::Semaphore::new(0)).collect());
+    let completed = Arc::new(Mutex::new(Vec::new()));
 
-    let outcomes = read::collect(commands, {
+    let execution = read::collect(commands, {
         let active = Arc::clone(&active);
         let maximum = Arc::clone(&maximum);
+        let gates = Arc::clone(&gates);
+        let completed = Arc::clone(&completed);
         move |command| {
             let active = Arc::clone(&active);
             let maximum = Arc::clone(&maximum);
+            let gates = Arc::clone(&gates);
+            let completed = Arc::clone(&completed);
             async move {
                 let current = active.fetch_add(1, Ordering::SeqCst) + 1;
                 maximum.fetch_max(current, Ordering::SeqCst);
-                tokio::time::sleep(Duration::from_millis((10 - command.index) as u64)).await;
+                let _permit = gates[command.index].acquire().await.expect("read released");
+                completed
+                    .lock()
+                    .expect("completion order")
+                    .push(command.index);
                 active.fetch_sub(1, Ordering::SeqCst);
                 SequenceOutcome {
                     index: command.index,
@@ -272,9 +282,29 @@ async fn read_executor_is_bounded_and_restores_input_order() {
                 }
             }
         }
-    })
-    .await;
+    });
+    let mut execution = std::pin::pin!(execution);
+    assert!(futures_util::poll!(execution.as_mut()).is_pending());
+    assert_eq!(
+        active.load(Ordering::SeqCst),
+        read::READ_SEQUENCE_CONCURRENCY
+    );
 
+    let completion_order = [3, 2, 1, 0, 7, 6, 5, 4, 9, 8];
+    let mut outcomes = None;
+    for index in completion_order {
+        gates[index].add_permits(1);
+        if let Poll::Ready(result) = futures_util::poll!(execution.as_mut()) {
+            outcomes = Some(result);
+            break;
+        }
+    }
+    let outcomes = outcomes.expect("all released reads complete");
+
+    assert_eq!(
+        *completed.lock().expect("completion order"),
+        completion_order
+    );
     assert_eq!(
         maximum.load(Ordering::SeqCst),
         read::READ_SEQUENCE_CONCURRENCY
@@ -307,21 +337,24 @@ async fn write_executor_is_serial_and_stops_after_failure() {
     let active = Arc::new(AtomicUsize::new(0));
     let maximum = Arc::new(AtomicUsize::new(0));
     let executed = Arc::new(Mutex::new(Vec::new()));
+    let gates: Arc<Vec<_>> = Arc::new((0..3).map(|_| tokio::sync::Semaphore::new(0)).collect());
 
-    let (outcomes, skipped) = write::collect(commands, 3, {
+    let execution = write::collect(commands, 3, {
         let active = Arc::clone(&active);
         let maximum = Arc::clone(&maximum);
         let executed = Arc::clone(&executed);
+        let gates = Arc::clone(&gates);
         move |command| {
             let active = Arc::clone(&active);
             let maximum = Arc::clone(&maximum);
             let executed = Arc::clone(&executed);
+            let gates = Arc::clone(&gates);
             async move {
                 let index = command.index;
                 executed.lock().expect("execution log").push(index);
                 let current = active.fetch_add(1, Ordering::SeqCst) + 1;
                 maximum.fetch_max(current, Ordering::SeqCst);
-                tokio::time::sleep(Duration::from_millis(1)).await;
+                let _permit = gates[index].acquire().await.expect("write released");
                 active.fetch_sub(1, Ordering::SeqCst);
                 SequenceOutcome {
                     index,
@@ -335,8 +368,19 @@ async fn write_executor_is_serial_and_stops_after_failure() {
                 }
             }
         }
-    })
-    .await;
+    });
+    let mut execution = std::pin::pin!(execution);
+    assert!(futures_util::poll!(execution.as_mut()).is_pending());
+    assert_eq!(*executed.lock().expect("execution log"), vec![0]);
+    gates[0].add_permits(1);
+    assert!(futures_util::poll!(execution.as_mut()).is_pending());
+    assert_eq!(*executed.lock().expect("execution log"), vec![0, 1]);
+    gates[1].add_permits(1);
+    let result = match futures_util::poll!(execution.as_mut()) {
+        Poll::Ready(result) => Some(result),
+        Poll::Pending => None,
+    };
+    let (outcomes, skipped) = result.expect("failed write completes without running skipped work");
 
     assert_eq!(maximum.load(Ordering::SeqCst), 1);
     assert_eq!(*executed.lock().expect("execution log"), vec![0, 1]);

@@ -220,6 +220,18 @@ Setup·migration·초기 fixture·cleanup 시간과 setup 완료부터 cleanup �
 구분한다. Lifetime은 순수 테스트 본문 시간과 다르며, 병렬 테스트의 시간 합계도 전체
 wall time과 다르다. Setup 실패와 개별 cleanup 미호출은 별도로 해석해야 한다.
 
+DB 없는 단위 검증에는 실행·저장 의존성을 명시적으로 주입한다. Invocation history는
+작은 writer 경계, 작업 handler는 lease monitor future, 검색 runtime은 실행 closure로
+검증할 수 있다. 기록 대역도 payload·실패·완료 순서를 관찰하며 실제 SQL 저장과
+트랜잭션 감사 검증은 통합 테스트에 남긴다. 사용하지 않는 저장소를 만들기 위해
+접속 불가능한 주소나 닫힌 pool을 새로 넣지 않는다.
+
+시간 경계는 가능한 한 고정된 `now` 입력으로 검사하고, 작업 순서·경합은 완료 신호나
+실제 lock 결과를 관측한다. PostgreSQL 시간이 기준인 검증은 DB에서 읽은 시간으로
+비교한다. 고정 sleep으로 다른 task의 진행을 가정하지 않으며 timeout 안의 작업 오류도
+반드시 확인한다. 실제 lease 갱신·네트워크 deadline·성능 기준을 검증하는 통합 테스트의
+시간 조건은 해당 계약과 함께 유지한다.
+
 브라우저 CI는 `.only`와 재시도로 통과한 flaky test도 실패로 처리한다. 재시도는 진단을
 위해 한 번 유지한다. 실제 dashboard smoke는 테스트 세션이 없으면 건너뛰지 않고 실패한다.
 

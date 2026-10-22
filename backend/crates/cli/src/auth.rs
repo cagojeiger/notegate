@@ -38,6 +38,16 @@ pub(crate) struct AuthManager {
     lock_dir: PathBuf,
 }
 
+trait RefreshLock {
+    fn try_write(&mut self) -> std::io::Result<fd_lock::RwLockWriteGuard<'_, std::fs::File>>;
+}
+
+impl RefreshLock for fd_lock::RwLock<std::fs::File> {
+    fn try_write(&mut self) -> std::io::Result<fd_lock::RwLockWriteGuard<'_, std::fs::File>> {
+        fd_lock::RwLock::try_write(self)
+    }
+}
+
 impl AuthManager {
     pub(crate) fn system(timeout: Duration) -> Result<Self, CliError> {
         let store = Arc::new(KeyringCredentialStore::new().map_err(map_store_error)?);
@@ -435,7 +445,16 @@ impl AuthManager {
     async fn refresh_locked(&self, original: TokenBundle) -> Result<SecretString, CliError> {
         let key = original.key();
         let lock_path = self.lock_dir.join(format!("{}.lock", key_digest(&key)));
-        let mut lock = lock_file(&lock_path).map_err(map_store_error)?;
+        let lock = lock_file(&lock_path).map_err(map_store_error)?;
+        self.refresh_with_lock(original, lock).await
+    }
+
+    async fn refresh_with_lock(
+        &self,
+        original: TokenBundle,
+        mut lock: impl RefreshLock,
+    ) -> Result<SecretString, CliError> {
+        let key = original.key();
         let _guard = loop {
             match lock.try_write() {
                 Ok(guard) => break guard,
@@ -1148,19 +1167,47 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn refresh_rotation_is_serialized_and_reread_after_lock() {
+        struct ObservedLock {
+            inner: fd_lock::RwLock<std::fs::File>,
+            attempts: tokio::sync::mpsc::UnboundedSender<bool>,
+        }
+
+        impl RefreshLock for ObservedLock {
+            fn try_write(
+                &mut self,
+            ) -> std::io::Result<fd_lock::RwLockWriteGuard<'_, std::fs::File>> {
+                let result = self.inner.try_write();
+                if result.is_ok()
+                    || result
+                        .as_ref()
+                        .is_err_and(|error| error.kind() == std::io::ErrorKind::WouldBlock)
+                {
+                    self.attempts.send(result.is_ok()).unwrap();
+                }
+                result
+            }
+        }
+
         let hits = Arc::new(AtomicUsize::new(0));
         let server_hits = Arc::clone(&hits);
+        let request_entered = Arc::new(Notify::new());
+        let server_entered = request_entered.clone();
+        let release_response = Arc::new(Notify::new());
+        let server_release = release_response.clone();
         let base = spawn(Router::new().route(
             "/oauth/token",
             post(move |Form(form): Form<HashMap<String, String>>| {
                 let server_hits = Arc::clone(&server_hits);
+                let server_entered = server_entered.clone();
+                let server_release = server_release.clone();
                 async move {
                     server_hits.fetch_add(1, Ordering::SeqCst);
                     assert_eq!(
                         form.get("refresh_token").map(String::as_str),
                         Some("old-refresh")
                     );
-                    sleep(Duration::from_millis(100)).await;
+                    server_entered.notify_one();
+                    server_release.notified().await;
                     Json(json!({
                         "access_token": "new-access",
                         "refresh_token": "new-refresh",
@@ -1177,13 +1224,43 @@ mod tests {
         let lock_dir = test_lock_dir("refresh-concurrency");
         let first =
             AuthManager::new(Duration::from_secs(5), store.clone(), lock_dir.clone()).unwrap();
-        let second = AuthManager::new(Duration::from_secs(5), store.clone(), lock_dir).unwrap();
+        let second =
+            AuthManager::new(Duration::from_secs(5), store.clone(), lock_dir.clone()).unwrap();
+        let lock_path = lock_dir.join(format!("{}.lock", key_digest(&bundle.key())));
+        let (attempts, mut observed_attempts) = tokio::sync::mpsc::unbounded_channel();
+        let first_lock = ObservedLock {
+            inner: lock_file(&lock_path).unwrap(),
+            attempts: attempts.clone(),
+        };
+        let second_lock = ObservedLock {
+            inner: lock_file(&lock_path).unwrap(),
+            attempts,
+        };
+        let original = bundle.clone();
+        let first_task =
+            tokio::spawn(async move { first.refresh_with_lock(original, first_lock).await });
 
-        let (first_token, second_token) =
-            tokio::join!(first.access_token(&base), second.access_token(&base));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            assert_eq!(observed_attempts.recv().await, Some(true));
+            request_entered.notified().await;
+            let original = bundle.clone();
+            let second_task =
+                tokio::spawn(async move { second.refresh_with_lock(original, second_lock).await });
+            assert_eq!(observed_attempts.recv().await, Some(false));
+            assert_eq!(hits.load(Ordering::SeqCst), 1);
+            release_response.notify_one();
+            assert_eq!(
+                first_task.await.unwrap().unwrap().expose_secret(),
+                "new-access"
+            );
+            assert_eq!(
+                second_task.await.unwrap().unwrap().expose_secret(),
+                "new-access"
+            );
+        })
+        .await
+        .expect("both refresh callers must finish after observed lock contention");
 
-        assert_eq!(first_token.unwrap().expose_secret(), "new-access");
-        assert_eq!(second_token.unwrap().expose_secret(), "new-access");
         assert_eq!(hits.load(Ordering::SeqCst), 1);
         let saved = store.load(&bundle.key()).unwrap().unwrap();
         assert_eq!(saved.refresh_token(), "new-refresh");

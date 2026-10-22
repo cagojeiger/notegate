@@ -2,6 +2,70 @@
   "schema_version": 1,
   "rules": [
     {
+      "package": "notegate-service",
+      "target_kind": "test",
+      "target": "link_graph",
+      "test": "peer_projection_observation_propagates_query_errors",
+      "group": "self-contained",
+      "note": "Injected failing projection probe; no PostgreSQL connection."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::invocation::tests::completion_separates_command_and_history_outcomes",
+      "group": "self-contained",
+      "note": "Injected recording/failing invocation writer; SQL adapter is tested separately."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::invocation::tests::execute_call_records_redacted_inputs_responses_and_all_outcomes",
+      "group": "self-contained",
+      "note": "Injected recording invocation writer; persisted ownership and redaction integration remains."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::invocation::tests::completion_waits_for_history_and_preserves_invocation_metadata",
+      "group": "self-contained",
+      "note": "Injected writer completion gate and metadata; no external services."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "rest::nodes::collection_response_tests::collection_summary_view_is_explicit_and_bounded",
+      "group": "self-contained",
+      "note": "Collection view parsing uses only values; no external services."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "rest::nodes::collection_response_tests::maximum_batch_summary_response_stays_below_two_mib",
+      "group": "self-contained",
+      "note": "Synthetic DTO serialization and size contract; no external services."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "rest::nodes::update_request_tests::generic_update_rejects_policy_fields",
+      "group": "self-contained",
+      "note": "JSON request parsing uses only values; no external services."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "rest::nodes::update_request_tests::write_lock_update_accepts_only_an_explicit_boolean",
+      "group": "self-contained",
+      "note": "JSON request parsing uses only values; no external services."
+    },
+    {
       "package": "notegate-api",
       "target_kind": "bin",
       "target": "notegate-api",
