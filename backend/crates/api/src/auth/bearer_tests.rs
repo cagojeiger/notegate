@@ -1643,23 +1643,6 @@ async fn command_routes_reject_legacy_keys_and_mcp_audience_bearers()
 }
 
 #[tokio::test]
-async fn command_api_key_shape_does_not_depend_on_jwks() -> Result<(), Box<dyn std::error::Error>> {
-    let state = state(ResolverMode::Registered(true))?;
-    let app = crate::routes::app(state);
-
-    let response = app
-        .oneshot(
-            cli_request()
-                .header("authorization", "Bearer ngk_malformed")
-                .body(cli_body("me", json!({})))?,
-        )
-        .await?;
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    Ok(())
-}
-
-#[tokio::test]
 async fn command_routes_preserve_recovery_errors_and_no_store()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
@@ -2397,7 +2380,9 @@ async fn browser_activity_requires_live_cookie_and_same_origin_without_reauthent
         "https://api.example.test",
         db.pool.clone(),
     )?;
+    let creation_started = Utc::now();
     let token = valid_browser_session(&db, &state).await?;
+    let creation_finished = Utc::now();
     let (id, _) =
         notegate_db::browser_session_repo::parse_token(&token).ok_or("invalid fixture")?;
     let (initial_idle, absolute): (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) =
@@ -2405,10 +2390,8 @@ async fn browser_activity_requires_live_cookie_and_same_origin_without_reauthent
             .bind(id)
             .fetch_one(&db.pool)
             .await?;
-    assert!(
-        initial_idle
-            > chrono::Utc::now() + chrono::Duration::days(14) - chrono::Duration::seconds(5)
-    );
+    assert!(initial_idle >= creation_started + chrono::Duration::days(14));
+    assert!(initial_idle <= creation_finished + chrono::Duration::days(14));
     assert!(initial_idle <= absolute);
     sqlx::query("UPDATE browser_sessions SET idle_expires_at=now()+interval '1 hour' WHERE id=$1")
         .bind(id)

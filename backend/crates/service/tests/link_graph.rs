@@ -26,6 +26,34 @@ use notegate_service::{
 };
 use uuid::Uuid;
 
+async fn wait_for_projection<P, F>(mut projected: P) -> Result<(), Box<dyn std::error::Error>>
+where
+    P: FnMut() -> F,
+    F: std::future::Future<Output = Result<bool, sqlx::Error>>,
+{
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if projected().await? {
+                return Ok::<(), sqlx::Error>(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn peer_projection_observation_propagates_query_errors() {
+    let error = wait_for_projection(|| async { Err(sqlx::Error::RowNotFound) })
+        .await
+        .expect_err("a failed query is not an observed projection");
+    assert!(matches!(
+        error.downcast_ref::<sqlx::Error>(),
+        Some(sqlx::Error::RowNotFound)
+    ));
+}
+
 async fn browser_caller(
     pool: &sqlx::PgPool,
     owner: Uuid,
@@ -1004,27 +1032,20 @@ async fn blocked_source_does_not_prevent_a_peer_in_the_same_job_from_projecting(
             .project_job(job.fence(), space_id, &payload.sources)
             .await
     });
-    let peer_projected = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            let projected: bool = sqlx::query_scalar(
-                "SELECT projected_at IS NOT NULL FROM node_link_projections \
-                 WHERE space_id = $1 AND source_node_id = $2",
-            )
-            .bind(space_id)
-            .bind(source_ids[1])
-            .fetch_one(&db.pool)
-            .await?;
-            if projected {
-                return Ok::<(), sqlx::Error>(());
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
+    let peer_projected = wait_for_projection(|| async {
+        sqlx::query_scalar(
+            "SELECT projected_at IS NOT NULL FROM node_link_projections \
+             WHERE space_id = $1 AND source_node_id = $2",
+        )
+        .bind(space_id)
+        .bind(source_ids[1])
+        .fetch_one(&db.pool)
+        .await
     })
-    .await
-    .is_ok();
+    .await;
     blocker.rollback().await?;
     projection.await??;
-    assert!(peer_projected);
+    peer_projected?;
 
     db.cleanup().await;
     Ok(())

@@ -1,0 +1,597 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "package": "notegate-service",
+      "target_kind": "test",
+      "target": "link_graph",
+      "test": "peer_projection_observation_propagates_query_errors",
+      "group": "self-contained",
+      "note": "Injected failing projection probe; no PostgreSQL connection."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::invocation::tests::completion_separates_command_and_history_outcomes",
+      "group": "self-contained",
+      "note": "Injected recording/failing invocation writer; SQL adapter is tested separately."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::invocation::tests::execute_call_records_redacted_inputs_responses_and_all_outcomes",
+      "group": "self-contained",
+      "note": "Injected recording invocation writer; persisted ownership and redaction integration remains."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::invocation::tests::completion_waits_for_history_and_preserves_invocation_metadata",
+      "group": "self-contained",
+      "note": "Injected writer completion gate and metadata; no external services."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "rest::nodes::collection_response_tests::collection_summary_view_is_explicit_and_bounded",
+      "group": "self-contained",
+      "note": "Collection view parsing uses only values; no external services."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "rest::nodes::collection_response_tests::maximum_batch_summary_response_stays_below_two_mib",
+      "group": "self-contained",
+      "note": "Synthetic DTO serialization and size contract; no external services."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "rest::nodes::update_request_tests::generic_update_rejects_policy_fields",
+      "group": "self-contained",
+      "note": "JSON request parsing uses only values; no external services."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "rest::nodes::update_request_tests::write_lock_update_accepts_only_an_explicit_boolean",
+      "group": "self-contained",
+      "note": "JSON request parsing uses only values; no external services."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "command_api::tests::cli_and_mcp_sequence_inputs_share_the_same_common_type",
+      "group": "self-contained",
+      "note": "Shared input-type contract; no database setup."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::invocation::tests::invocation_space_name_keeps_only_a_valid_space_segment",
+      "group": "self-contained",
+      "note": "Value-shaping or error-code contract; no database setup."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::invocation::tests::error_code_prefers_structured_application_code",
+      "group": "self-contained",
+      "note": "Value-shaping or error-code contract; no database setup."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::invocation::tests::sequence_error_code_reads_failed_sequence_results",
+      "group": "self-contained",
+      "note": "Value-shaping or error-code contract; no database setup."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::standalone::*",
+      "group": "external",
+      "note": "Standalone account/session flows create an isolated PostgreSQL schema."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "public_v2::tests::*",
+      "group": "external",
+      "note": "V2 route suites seed real PostgreSQL accounts, agents, spaces, and invocations."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "rest::*_tests::*",
+      "group": "external",
+      "note": "REST route suites use TestDb; upload suites also exercise the configured S3 service."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "command_api::tests::*",
+      "group": "external",
+      "note": "CLI transport integration and measurements use TestDb; pure input-type test is matched first."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::invocation::tests::*",
+      "group": "external",
+      "note": "Invocation persistence and measurements use TestDb; pure value contracts are matched first."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "usage_bootstrap::tests::*",
+      "group": "external",
+      "note": "Usage bootstrap tests operate on an isolated PostgreSQL schema."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::api_cookie_mutation_requires_same_origin_header",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::api_routes_accept_valid_browser_session",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::browser_activity_requires_live_cookie_and_same_origin_without_reauthenticating",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::browser_session_resolves_browser_channel",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::bulk_oauth_revocation_requires_a_kind_and_preserves_other_connection_types",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::command_routes_accept_agent_api_keys",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::command_routes_accept_cli_oauth_for_registered_users",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::command_routes_preserve_recovery_errors_and_no_store",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::command_unregistered_user_error_is_transport_neutral",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::issuer_scoped_identity_resolves_one_user_across_auth_channels",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::logout_does_not_expire_cookie_when_local_revoke_fails",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::mcp_routes_reject_cookie_without_bearer",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::nonexistent_browser_sessions_are_rejected_without_deleting_account_or_history",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::openapi_docs_accept_valid_browser_session",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::session_management_is_owner_scoped_and_revokes_browser_cli_and_mcp_access",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::session_marker_migration_preserves_authentication_decisions",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::upstream_jwts_and_malformed_tokens_never_authorize_requests",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::user_mcp_accepts_oauth_bearer",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::v2_exposes_agent_resources_but_not_management_routes",
+      "group": "external",
+      "note": "Authenticated v2 routes persist invocation records through a lazy PostgreSQL pool."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::bearer_tests::v2_routes_reject_browser_sessions",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "auth::oidc::cache_tests::standalone_oidc_callback_preserves_existing_owner_without_upstream_refresh",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "internal_search::tests::http_search_preserves_local_mcp_find_and_grep_results",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "internal_search::tests::search_runtime_routes_authority_and_queries_to_their_configured_stores",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "internal_search::tests::search_runtime_uses_replica_content_but_primary_access_policy",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "commands::executor::tests::api_and_mcp_writes_attach_the_existing_purpose_to_versions",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "commands::executor::tests::shared_command_file_flow_round_trips",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "commands::executor::tests::shared_command_write_preserves_content_guards",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "commands::executor::tests::truncated_read_returns_an_actionable_continuation",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::server::tests::changes_invocation_records_its_space_name",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::server::tests::sequence_preflight_prevents_partial_writes",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::server::tests::sequence_preflight_rejects_invalid_static_write_content_without_partial_writes",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::server::tests::sequence_preflight_rejects_manage_root_targets_without_partial_writes",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::server::tests::tools_call_boundary_records_schema_and_unknown_tool_failures",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "mcp::server::tests::write_sequence_stops_after_the_first_runtime_failure",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "routes::tests::control_app_exposes_only_control_plane_routes",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "rest::text::tests::conditional_read_preserves_metadata",
+      "group": "external",
+      "note": "Creates TestDb in this otherwise mixed test module."
+    },
+    {
+      "package": "notegate-api",
+      "target_kind": "bin",
+      "target": "notegate-api",
+      "test": "*",
+      "group": "self-contained",
+      "note": "Remaining API tests use local values, lazy test pools, or self-hosted HTTP mocks without configured PostgreSQL/S3."
+    },
+    {
+      "package": "notegate-cli",
+      "target_kind": "lib",
+      "target": "*",
+      "test": "*",
+      "group": "self-contained",
+      "note": "CLI library tests do not require configured PostgreSQL/S3."
+    },
+    {
+      "package": "notegate-cli",
+      "target_kind": "bin",
+      "target": "notegate-cli",
+      "test": "*",
+      "group": "self-contained",
+      "note": "CLI unit tests do not require configured PostgreSQL/S3."
+    },
+    {
+      "package": "notegate-cli",
+      "target_kind": "test",
+      "target": "cli",
+      "test": "*",
+      "group": "self-contained",
+      "note": "CLI process tests own their local HTTP servers and filesystem fixtures."
+    },
+    {
+      "package": "notegate-command",
+      "target_kind": "lib",
+      "target": "*",
+      "test": "*",
+      "group": "self-contained",
+      "note": "Library test targets do not require configured PostgreSQL/S3; resource-backed test targets are classified separately."
+    },
+    {
+      "package": "notegate-core",
+      "target_kind": "lib",
+      "target": "*",
+      "test": "*",
+      "group": "self-contained",
+      "note": "Library test targets do not require configured PostgreSQL/S3; resource-backed test targets are classified separately."
+    },
+    {
+      "package": "notegate-db",
+      "target_kind": "lib",
+      "target": "*",
+      "test": "*",
+      "group": "self-contained",
+      "note": "Library test targets do not require configured PostgreSQL/S3; resource-backed test targets are classified separately."
+    },
+    {
+      "package": "notegate-jobs",
+      "target_kind": "lib",
+      "target": "*",
+      "test": "*",
+      "group": "self-contained",
+      "note": "Library test targets do not require configured PostgreSQL/S3; resource-backed test targets are classified separately."
+    },
+    {
+      "package": "notegate-media",
+      "target_kind": "lib",
+      "target": "*",
+      "test": "*",
+      "group": "self-contained",
+      "note": "Library test targets do not require configured PostgreSQL/S3; resource-backed test targets are classified separately."
+    },
+    {
+      "package": "notegate-model",
+      "target_kind": "lib",
+      "target": "*",
+      "test": "*",
+      "group": "self-contained",
+      "note": "Library test targets do not require configured PostgreSQL/S3; resource-backed test targets are classified separately."
+    },
+    {
+      "package": "notegate-reconciliation",
+      "target_kind": "lib",
+      "target": "*",
+      "test": "*",
+      "group": "self-contained",
+      "note": "Library test targets do not require configured PostgreSQL/S3; resource-backed test targets are classified separately."
+    },
+    {
+      "package": "notegate-search",
+      "target_kind": "lib",
+      "target": "*",
+      "test": "*",
+      "group": "self-contained",
+      "note": "Library test targets do not require configured PostgreSQL/S3; resource-backed test targets are classified separately."
+    },
+    {
+      "package": "notegate-service",
+      "target_kind": "lib",
+      "target": "*",
+      "test": "*",
+      "group": "self-contained",
+      "note": "Library test targets do not require configured PostgreSQL/S3; resource-backed test targets are classified separately."
+    },
+    {
+      "package": "notegate-text",
+      "target_kind": "lib",
+      "target": "*",
+      "test": "*",
+      "group": "self-contained",
+      "note": "Library test targets do not require configured PostgreSQL/S3; resource-backed test targets are classified separately."
+    },
+    {
+      "package": "notegate-db",
+      "target_kind": "test",
+      "target": "browser_session_repo",
+      "test": "browser_session_token_round_trips",
+      "group": "self-contained",
+      "note": "Token formatting/parsing contract; no TestDb or repository call."
+    },
+    {
+      "package": "notegate-db",
+      "target_kind": "test",
+      "target": "*",
+      "test": "*",
+      "group": "external",
+      "note": "Repository and migration test targets create isolated PostgreSQL schemas."
+    },
+    {
+      "package": "notegate-service",
+      "target_kind": "test",
+      "target": "*",
+      "test": "*",
+      "group": "external",
+      "note": "Service integration test targets create isolated PostgreSQL schemas, including ignored performance cases."
+    },
+    {
+      "package": "notegate-reconciliation",
+      "target_kind": "test",
+      "target": "postgres_runtime",
+      "test": "*",
+      "group": "external",
+      "note": "Worker runtime test uses PostgreSQL-backed job state."
+    },
+    {
+      "package": "notegate-media",
+      "target_kind": "test",
+      "target": "detection",
+      "test": "*",
+      "group": "self-contained",
+      "note": "Media detection tests use owned local fixtures."
+    },
+    {
+      "package": "notegate-text",
+      "target_kind": "test",
+      "target": "line_contract",
+      "test": "*",
+      "group": "self-contained",
+      "note": "Text contracts use in-process values."
+    }
+  ]
+}

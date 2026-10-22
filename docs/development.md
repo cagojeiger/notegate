@@ -196,6 +196,42 @@ deploy/ci/test-rust.sh -p notegate-api rest::file_upload_tests
 | `make test-fast` | 로컬에서만 `NOTEGATE_TEST_SKIP_INTEGRATION=1`로 DB/S3 테스트를 명시적으로 제외; 전체 검증으로 취급하지 않음. CI에서는 이 우회를 거부 |
 | 직접 `cargo test` | 필요한 DB/S3 환경변수가 없거나 비어 있으면 해당 테스트 실패. Run 종료 cleanup은 통합 실행 명령에만 적용 |
 
+Rust 테스트는 외부 서비스 필요 여부로 분리해서 실행할 수 있다.
+
+```sh
+make test-unit      # DB/S3 없이 자체 실행 가능한 테스트와 doctest
+make test-external  # PostgreSQL/S3가 필요한 테스트만 실행하고 run 잔여 schema 정리
+make test-measure   # 동일 바이너리로 전체 harness 실행과 분리 실행을 3회 비교
+```
+
+`test-unit`에는 순수 로직 외에 자체 HTTP mock, CLI subprocess, 로컬 fixture 테스트도
+포함된다. `src/`·`tests/` 위치 대신 `deploy/ci/rust-test-resources.json`의 첫 일치 규칙으로
+분류하며, DB/S3 환경변수와 integration skip 우회를 제거한다. 새 external 테스트는
+분류 규칙도 갱신한다. 분류되지 않은 target, 그룹 간 동일 이름 충돌, 실제 실행된
+테스트 ID의 누락·중복은 실패다. 기존 ignored 테스트는 계속 ignored이며 CI의 명시적
+성능 측정은 별도로 유지한다. `make test`와 직접 Cargo 전체 실행의 범위는 유지된다.
+
+컴파일·그룹별 실행·doctest 시간과 정확한 테스트 목록은 `target/test-suites/`에 기록된다.
+`test-measure`는 첫 컴파일 후 baseline→분리, 분리→baseline 순서를 번갈아 실행한다.
+Baseline은 일반 테스트 바이너리 전체이며 doctest는 모든 반복 뒤 한 번 별도 실행한다.
+CI의 두 그룹 명령은 각각 inventory 준비를 하므로 전체 CI 시간에는 추가 준비 비용도 포함된다.
+DB helper는 `NOTEGATE_TEST_TIMING_FILE`의 절대 경로에 opt-in JSONL을 기록한다.
+Setup·migration·초기 fixture·cleanup 시간과 setup 완료부터 cleanup 시작까지의 lifetime을
+구분한다. Lifetime은 순수 테스트 본문 시간과 다르며, 병렬 테스트의 시간 합계도 전체
+wall time과 다르다. Setup 실패와 개별 cleanup 미호출은 별도로 해석해야 한다.
+
+DB 없는 단위 검증에는 실행·저장 의존성을 명시적으로 주입한다. Invocation history는
+작은 writer 경계, 작업 handler는 lease monitor future, 검색 runtime은 실행 closure로
+검증할 수 있다. 기록 대역도 payload·실패·완료 순서를 관찰하며 실제 SQL 저장과
+트랜잭션 감사 검증은 통합 테스트에 남긴다. 사용하지 않는 저장소를 만들기 위해
+접속 불가능한 주소나 닫힌 pool을 새로 넣지 않는다.
+
+시간 경계는 가능한 한 고정된 `now` 입력으로 검사하고, 작업 순서·경합은 완료 신호나
+실제 lock 결과를 관측한다. PostgreSQL 시간이 기준인 검증은 DB에서 읽은 시간으로
+비교한다. 고정 sleep으로 다른 task의 진행을 가정하지 않으며 timeout 안의 작업 오류도
+반드시 확인한다. 실제 lease 갱신·네트워크 deadline·성능 기준을 검증하는 통합 테스트의
+시간 조건은 해당 계약과 함께 유지한다.
+
 브라우저 CI는 `.only`와 재시도로 통과한 flaky test도 실패로 처리한다. 재시도는 진단을
 위해 한 번 유지한다. 실제 dashboard smoke는 테스트 세션이 없으면 건너뛰지 않고 실패한다.
 

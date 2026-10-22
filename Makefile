@@ -1,4 +1,4 @@
-.PHONY: fmt check test test-integration test-fast clippy build cli-build frontend-check workflow-check version-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics split-up split-test split-test-isolation split-logs split-down
+.PHONY: fmt check test test-integration test-unit test-external test-measure test-fast clippy build cli-build frontend-check workflow-check version-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics split-up split-test split-test-isolation split-logs split-down
 
 fmt:
 	cargo fmt --all --check
@@ -10,6 +10,15 @@ test: test-integration
 
 test-integration:
 	deploy/ci/test-rust.sh
+
+test-unit:
+	python3 deploy/ci/rust-test-suites.py self-contained --output target/test-suites/self-contained
+
+test-external:
+	python3 deploy/ci/rust-test-suites.py external --output target/test-suites/external
+
+test-measure:
+	python3 deploy/ci/rust-test-suites.py measure --output target/test-suites/measurement
 
 test-fast:
 	@echo "Partial Rust checks: PostgreSQL/S3 integration tests are excluded. Use make test for full verification."
@@ -41,6 +50,7 @@ workflow-check: version-check
 	find deploy frontend -type f -name '*.sh' -print0 | xargs -0 shellcheck
 	deploy/ci/resolve-release-version.test.sh
 	deploy/ci/test-rust.test.sh
+	python3 -B deploy/ci/rust-test-suites.test.py
 
 release-check: fmt check test clippy build frontend-check workflow-check
 	git diff --check

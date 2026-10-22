@@ -12,7 +12,9 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub use registry::ReconciliationRegistry;
-pub use runtime::ReconciliationRuntime;
+pub use runtime::{
+    LockProvider, PostgresLock, PostgresLockProvider, ReconciliationLock, ReconciliationRuntime,
+};
 
 pub type ReconciliationFailure = Box<dyn Error + Send + Sync>;
 pub type ReconciliationResult = Result<ReconciliationDirective, ReconciliationFailure>;

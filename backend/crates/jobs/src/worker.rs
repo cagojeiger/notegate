@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -235,7 +236,15 @@ async fn execute_claim(
     )
     .increment(1.0);
     let result = match handlers.get(claim.kind.as_str()) {
-        Some(handler) => run_handler(&queue, handler.as_ref(), &claim, &config, &shutdown).await,
+        Some(handler) => {
+            run_handler(
+                handler.as_ref(),
+                &claim,
+                &shutdown,
+                monitor_lease(&queue, &claim, config.lease),
+            )
+            .await
+        }
         None => HandlerOutcome::Failed {
             failure: JobFailure::permanent(
                 "unsupported_job_kind",
@@ -258,11 +267,10 @@ async fn execute_claim(
 }
 
 async fn run_handler(
-    queue: &JobQueue,
     handler: &dyn ErasedJobHandler,
     claim: &ClaimedJob,
-    config: &WorkerConfig,
     shutdown: &CancellationToken,
+    lease_monitor: impl Future<Output = ()>,
 ) -> HandlerOutcome {
     let execution = match std::panic::catch_unwind(AssertUnwindSafe(|| handler.handle(claim))) {
         Ok(execution) => execution,
@@ -270,7 +278,7 @@ async fn run_handler(
     };
     let mut timeout = Box::pin(tokio::time::sleep(handler.timeout()));
     let mut execution = Box::pin(AssertUnwindSafe(execution).catch_unwind());
-    let mut lease_monitor = Box::pin(monitor_lease(queue, claim, config.lease));
+    let mut lease_monitor = Box::pin(lease_monitor);
 
     tokio::select! {
         () = shutdown.cancelled() => HandlerOutcome::Failed {
@@ -505,11 +513,11 @@ enum HandlerOutcome {
 mod tests {
     use std::future::Future;
     use std::pin::Pin;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::{Context, Poll};
 
     use metrics_exporter_prometheus::PrometheusBuilder;
     use serde::{Deserialize, Serialize};
-    use sqlx::postgres::PgPoolOptions;
 
     use super::*;
     use crate::{JobHandler, JobSpec};
@@ -608,6 +616,44 @@ mod tests {
         timeout: Duration,
     }
 
+    struct ObservedPendingHandler {
+        dropped: Arc<AtomicBool>,
+    }
+
+    struct ObservedPendingFuture {
+        dropped: Arc<AtomicBool>,
+    }
+
+    impl Future for ObservedPendingFuture {
+        type Output = Result<JobDisposition, JobFailure>;
+
+        fn poll(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+
+    impl Drop for ObservedPendingFuture {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
+
+    impl JobHandler<PendingJob> for ObservedPendingHandler {
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(30)
+        }
+
+        fn handle<'a>(
+            &'a self,
+            _job: &'a ClaimedJob,
+            _payload: serde_json::Value,
+        ) -> Pin<Box<dyn Future<Output = Result<JobDisposition, JobFailure>> + Send + 'a>> {
+            Box::pin(ObservedPendingFuture {
+                dropped: self.dropped.clone(),
+            })
+        }
+    }
+
     impl JobHandler<PendingJob> for PendingHandler {
         fn timeout(&self) -> Duration {
             self.timeout
@@ -620,13 +666,6 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = Result<JobDisposition, JobFailure>> + Send + 'a>> {
             Box::pin(std::future::pending())
         }
-    }
-
-    fn disconnected_queue() -> JobQueue {
-        let pool = PgPoolOptions::new()
-            .connect_lazy("postgres://notegate:notegate@127.0.0.1:1/notegate")
-            .expect("lazy pool");
-        JobQueue::new(pool)
     }
 
     #[test]
@@ -794,11 +833,10 @@ mod tests {
         let claim = claim("panic");
         let handler = typed_handler::<PanicJob, _>(PanicHandler);
         let outcome = run_handler(
-            &disconnected_queue(),
             handler.as_ref(),
             &claim,
-            &WorkerConfig::default(),
             &CancellationToken::new(),
+            std::future::pending(),
         )
         .await;
 
@@ -816,11 +854,10 @@ mod tests {
         let claim = claim("construction-panic");
         let handler = typed_handler::<ConstructionPanicJob, _>(ConstructionPanicHandler);
         let outcome = run_handler(
-            &disconnected_queue(),
             handler.as_ref(),
             &claim,
-            &WorkerConfig::default(),
             &CancellationToken::new(),
+            std::future::pending(),
         )
         .await;
 
@@ -838,11 +875,10 @@ mod tests {
         let claim = claim("deferred");
         let handler = typed_handler::<DeferredJob, _>(DeferredHandler);
         let outcome = run_handler(
-            &disconnected_queue(),
             handler.as_ref(),
             &claim,
-            &WorkerConfig::default(),
             &CancellationToken::new(),
+            std::future::pending(),
         )
         .await;
 
@@ -864,11 +900,10 @@ mod tests {
             timeout: Duration::from_millis(1),
         });
         let outcome = run_handler(
-            &disconnected_queue(),
             handler.as_ref(),
             &claim,
-            &WorkerConfig::default(),
             &CancellationToken::new(),
+            std::future::pending(),
         )
         .await;
 
@@ -884,27 +919,45 @@ mod tests {
     #[tokio::test]
     async fn shutdown_cancels_in_flight_handlers_for_retry() {
         let shutdown = CancellationToken::new();
-        shutdown.cancel();
         let claim = claim("pending");
-        let handler = typed_handler::<PendingJob, _>(PendingHandler {
-            timeout: Duration::from_secs(30),
+        let dropped = Arc::new(AtomicBool::new(false));
+        let handler = typed_handler::<PendingJob, _>(ObservedPendingHandler {
+            dropped: dropped.clone(),
         });
-        let outcome = run_handler(
-            &disconnected_queue(),
-            handler.as_ref(),
-            &claim,
-            &WorkerConfig::default(),
-            &shutdown,
-        )
-        .await;
+        let execution = run_handler(handler.as_ref(), &claim, &shutdown, std::future::pending());
+        tokio::pin!(execution);
+        assert!(futures_util::poll!(&mut execution).is_pending());
+        assert!(!dropped.load(Ordering::SeqCst));
+        shutdown.cancel();
+        let outcome = execution.await;
 
-        assert!(matches!(
-            outcome,
-            HandlerOutcome::Failed {
-                outcome: AttemptOutcome::Cancelled,
-                ..
-            }
-        ));
+        let HandlerOutcome::Failed { failure, outcome } = outcome else {
+            panic!("expected cancellation to retry the job");
+        };
+        assert_eq!(outcome, AttemptOutcome::Cancelled);
+        assert_eq!(failure.code, "worker_shutdown");
+        assert_eq!(failure.retry_after, Some(Duration::ZERO));
+        assert!(dropped.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn losing_the_claim_cancels_an_in_flight_handler() {
+        let claim = claim("pending");
+        let shutdown = CancellationToken::new();
+        let claim_lost = CancellationToken::new();
+        let dropped = Arc::new(AtomicBool::new(false));
+        let handler = typed_handler::<PendingJob, _>(ObservedPendingHandler {
+            dropped: dropped.clone(),
+        });
+        let execution = run_handler(handler.as_ref(), &claim, &shutdown, claim_lost.cancelled());
+        tokio::pin!(execution);
+        assert!(futures_util::poll!(&mut execution).is_pending());
+        assert!(!dropped.load(Ordering::SeqCst));
+        claim_lost.cancel();
+
+        assert!(matches!(execution.await, HandlerOutcome::ClaimLost));
+        assert!(dropped.load(Ordering::SeqCst));
+        assert!(!shutdown.is_cancelled());
     }
 
     #[tokio::test]
@@ -929,11 +982,10 @@ mod tests {
         let claim = claim(RequiredPayloadJob::KIND);
         let handler = typed_handler::<RequiredPayloadJob, _>(CompleteHandler);
         let outcome = run_handler(
-            &disconnected_queue(),
             handler.as_ref(),
             &claim,
-            &WorkerConfig::default(),
             &CancellationToken::new(),
+            std::future::pending(),
         )
         .await;
 

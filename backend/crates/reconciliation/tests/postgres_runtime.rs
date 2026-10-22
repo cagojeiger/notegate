@@ -6,12 +6,29 @@ use std::time::Duration;
 
 use notegate_db::test_support::TestDb;
 use notegate_reconciliation::{
-    Reconciler, ReconciliationContext, ReconciliationDirective, ReconciliationFuture,
-    ReconciliationRegistry, ReconciliationRuntime, ReconciliationSchedule,
+    LockProvider, PostgresLock, PostgresLockProvider, Reconciler, ReconciliationContext,
+    ReconciliationDirective, ReconciliationError, ReconciliationFuture, ReconciliationRegistry,
+    ReconciliationRuntime, ReconciliationSchedule,
 };
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use tokio_util::sync::CancellationToken;
+
+#[derive(Clone)]
+struct ObservedLocks {
+    inner: PostgresLockProvider,
+    attempts: tokio::sync::mpsc::UnboundedSender<bool>,
+}
+
+impl LockProvider for ObservedLocks {
+    type Guard = PostgresLock;
+
+    async fn try_acquire(&self, lock_key: i64) -> Result<Option<Self::Guard>, ReconciliationError> {
+        let result = self.inner.try_acquire(lock_key).await?;
+        self.attempts.send(result.is_some()).unwrap();
+        Ok(result)
+    }
+}
 
 struct BlockingReconciler {
     starts: Arc<AtomicUsize>,
@@ -63,8 +80,12 @@ async fn postgres_lock_allows_one_kind_and_releases_on_shutdown()
         .await?;
     let starts = Arc::new(AtomicUsize::new(0));
     let started = Arc::new(tokio::sync::Notify::new());
-    let first = ReconciliationRuntime::new(
-        &app_pool,
+    let (attempts, mut observed_attempts) = tokio::sync::mpsc::unbounded_channel();
+    let locks = ObservedLocks {
+        inner: PostgresLockProvider::new(&app_pool),
+        attempts,
+    };
+    let first = ReconciliationRuntime::with_lock_provider(
         ReconciliationRegistry::new().register(
             BlockingReconciler {
                 starts: starts.clone(),
@@ -72,9 +93,9 @@ async fn postgres_lock_allows_one_kind_and_releases_on_shutdown()
             },
             schedule(),
         )?,
+        locks.clone(),
     )?;
-    let second = ReconciliationRuntime::new(
-        &app_pool,
+    let second = ReconciliationRuntime::with_lock_provider(
         ReconciliationRegistry::new().register(
             BlockingReconciler {
                 starts: starts.clone(),
@@ -82,6 +103,7 @@ async fn postgres_lock_allows_one_kind_and_releases_on_shutdown()
             },
             schedule(),
         )?,
+        locks,
     )?;
     let first_shutdown = CancellationToken::new();
     let second_shutdown = CancellationToken::new();
@@ -89,7 +111,13 @@ async fn postgres_lock_allows_one_kind_and_releases_on_shutdown()
     let second_task = tokio::spawn(second.run(second_shutdown.clone()));
 
     tokio::time::timeout(Duration::from_secs(2), started.notified()).await?;
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let (first_attempt, second_attempt) = tokio::time::timeout(Duration::from_secs(2), async {
+        let first = observed_attempts.recv().await.unwrap();
+        let second = observed_attempts.recv().await.unwrap();
+        (first, second)
+    })
+    .await?;
+    assert_ne!(first_attempt, second_attempt);
     assert_eq!(starts.load(Ordering::SeqCst), 1);
 
     first_shutdown.cancel();

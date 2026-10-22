@@ -141,7 +141,7 @@ impl ApiKeyRepo {
     #[cfg(any(test, feature = "test-util"))]
     #[doc(hidden)]
     pub async fn insert_key_unchecked_for_test(&self, args: InsertApiKey<'_>) -> Result<ApiKey> {
-        validate_command(args.command)?;
+        validate_command(args.command, Utc::now())?;
         let row = sqlx::query_as::<_, ApiKeyRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO api_keys \
              (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by_user_id, expires_at, rotated_from_key_id) \
@@ -174,7 +174,7 @@ impl ApiKeyRepo {
         args: InsertApiKey<'_>,
         max_live_keys: usize,
     ) -> Result<ApiKey> {
-        validate_command(args.command)?;
+        validate_command(args.command, Utc::now())?;
 
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -240,7 +240,7 @@ impl ApiKeyRepo {
         revoked_by: Uuid,
         max_live_keys: usize,
     ) -> Result<ApiKey> {
-        validate_command(args.command)?;
+        validate_command(args.command, Utc::now())?;
 
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -432,7 +432,7 @@ fn live_key_predicate(prefix: &'static str) -> String {
     format!("{prefix}revoked_at IS NULL AND {prefix}expires_at > now()")
 }
 
-fn validate_command(command: &CreateApiKey) -> Result<()> {
+fn validate_command(command: &CreateApiKey, now: DateTime<Utc>) -> Result<()> {
     if command.name.trim().is_empty() {
         return Err(Error::validation("api key name cannot be empty"));
     }
@@ -448,7 +448,7 @@ fn validate_command(command: &CreateApiKey) -> Result<()> {
     let Some(expires_at) = command.expires_at else {
         return Err(Error::validation("api key expires_at is required"));
     };
-    if expires_at <= Utc::now() {
+    if expires_at <= now {
         return Err(Error::validation(
             "api key expires_at must be in the future",
         ));
@@ -544,3 +544,21 @@ impl From<ApiKeyRow> for ApiKey {
 
 const API_KEY_COLUMNS: &str = "id, account_id, token_hash, name, scopes, created_by_user_id AS created_by, created_at, \
      last_used_at, expires_at, revoked_at, revoked_by_user_id AS revoked_by, revoked_reason, rotated_from_key_id";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_expiry_uses_the_injected_current_time() {
+        let now = DateTime::<Utc>::UNIX_EPOCH;
+        for (offset_ms, accepted) in [(-1, false), (0, false), (1, true)] {
+            let command = CreateApiKey {
+                name: "key".to_owned(),
+                scopes: Vec::new(),
+                expires_at: Some(now + chrono::Duration::milliseconds(offset_ms)),
+            };
+            assert_eq!(validate_command(&command, now).is_ok(), accepted);
+        }
+    }
+}
