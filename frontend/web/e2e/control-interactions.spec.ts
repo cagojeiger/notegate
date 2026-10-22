@@ -45,9 +45,9 @@ async function mockWorkbench(page: Page, nodeCount = 1, nodeOverrides: Partial<R
   return node;
 }
 
-async function mockAgentManagement(page: Page) {
+async function mockAgentManagement(page: Page, name = "Review agent") {
   await mockWorkbench(page);
-  let agents = [{ id: "review-agent", name: "Review agent", owner_user_id: "user-1" }];
+  let agents = [{ id: "review-agent", name, owner_user_id: "user-1" }];
   await page.route("**/api/v1/agents**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -98,11 +98,59 @@ for (const theme of ["light", "dark"] as const) {
       await page.keyboard.press("Space");
       await expect(toggle).toHaveAttribute("aria-checked", "false");
       await expect(toggle).toBeEnabled();
-      await toggle.focus();
-      await page.keyboard.press("Tab");
-      await page.keyboard.press("Shift+Tab");
       await expect(toggle).toBeFocused();
       await expectOutlineContrast(toggle.locator(":scope > span"));
+    });
+  }
+}
+
+for (const width of [1440, 390]) {
+  for (const outcome of ["success", "error"] as const) {
+    test(`space toggle ${outcome} preserves keyboard navigation at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await mockWorkbench(page);
+      let space = makeSpace();
+      let requests = 0;
+      let release: () => void = () => {};
+      await page.route("**/api/v1/spaces?*", (route) => route.fulfill({ json: { spaces: [space] } }));
+      await page.route("**/api/v1/spaces/space-1", async (route) => {
+        requests += 1;
+        await new Promise<void>((resolve) => { release = resolve; });
+        if (outcome === "error") return route.fulfill({ status: 503, json: { message: "Storage unavailable" } });
+        space = { ...space, ...route.request().postDataJSON() };
+        return route.fulfill({ json: space });
+      });
+      await page.goto("/");
+      await page.getByRole("button", { name: "Open space library", exact: true }).click();
+      if (width < 768) await page.getByRole("button", { name: "Inspect Daily" }).click();
+      const switches = [
+        ["Pin to navigation", "navigation_pinned"], ["User MCP access", "user_mcp_enabled"],
+        ["MCP & API access", "default_external_access_enabled"], ["Text encryption", "default_text_encryption_enabled"]
+      ] as const;
+      for (const [index, [label, field]] of switches.entries()) {
+        const toggle = page.getByRole("switch", { name: label, exact: true });
+        const checked = space[field];
+        await toggle.press("Space");
+        await expect.poll(() => requests).toBe(index + 1);
+        await expect(toggle).toHaveAttribute("aria-disabled", "true");
+        await expect(toggle).toHaveAttribute("aria-busy", "true");
+        await expect(toggle).toBeFocused();
+        await page.keyboard.press("Space");
+        await page.keyboard.press("Enter");
+        expect(requests).toBe(index + 1);
+        // Saving must not reclaim focus after the user moves to another control.
+        const next = page.getByRole("button", { name: "About New item defaults", exact: true });
+        if (index === 1) {
+          await page.keyboard.press("Tab");
+          await expect(next).toBeFocused();
+        }
+        release();
+        await expect(toggle).toBeEnabled();
+        await expect(toggle).not.toHaveAttribute("aria-busy");
+        await expect(toggle).toHaveAttribute("aria-checked", String(outcome === "success" ? !checked : checked));
+        await expect(index === 1 ? next : toggle).toBeFocused();
+      }
+      expect(requests).toBe(switches.length);
     });
   }
 }
@@ -128,6 +176,29 @@ async function expectUnclippedDecoration(decoration: Locator) {
   expect(visibility.width).toBeGreaterThan(0);
   expect(visibility.visibleWidth).toBeCloseTo(visibility.width, 0);
   expect(visibility.visibleHeight).toBeCloseTo(visibility.height, 0);
+}
+
+for (const width of [1440, 320]) {
+  test(`long agent names stay inside the Inspector at ${width}px`, async ({ page }, testInfo) => {
+    const name = "W".repeat(63);
+    await page.setViewportSize({ width, height: 844 });
+    await mockAgentManagement(page, name);
+    await page.goto("/");
+    const view = await openSettings(page, "Agents");
+    await view.getByRole("button", { name: `Select ${name}`, exact: true }).click();
+    await view.getByRole("button", { name: "Open agent actions", exact: true }).click();
+    const inspector = page.getByRole(width < 768 ? "dialog" : "complementary", { name: "Agents Inspector", exact: true });
+    const remove = inspector.getByRole("button", { name: `Delete agent: ${name}`, exact: true });
+    await expect(remove).toHaveText("Delete agent");
+    await expectUnclippedDecoration(remove);
+    await expectUnclippedDecoration(inspector.getByText(name, { exact: true }));
+    await page.screenshot({ path: testInfo.outputPath("long-agent-name.png") });
+    await remove.press("Enter");
+    const cancel = inspector.getByRole("button", { name: "Cancel", exact: true });
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(remove).toBeFocused();
+  });
 }
 
 for (const width of [320, 390]) {
@@ -244,7 +315,7 @@ test("mobile agent creation stays in the body after deleting an inspected agent"
   await view.getByRole("button", { name: "Select Review agent", exact: true }).click();
   await view.getByRole("button", { name: "Open agent actions", exact: true }).click();
   const inspector = page.getByRole("dialog", { name: "Agents Inspector", exact: true });
-  await inspector.getByRole("button", { name: "Delete Review agent", exact: true }).click();
+  await inspector.getByRole("button", { name: "Delete agent: Review agent", exact: true }).click();
   await inspector.getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(inspector).toHaveCount(0);
   await view.getByRole("button", { name: "Add agent", exact: true }).click();
@@ -264,7 +335,7 @@ for (const width of [1440, 390]) {
     const view = await openSettings(page, "Agents");
     await view.getByRole("button", { name: "Select Review agent", exact: true }).click();
     await view.getByRole("button", { name: "Open agent actions", exact: true }).click();
-    const remove = view.getByRole("button", { name: "Delete Review agent", exact: true });
+    const remove = view.getByRole("button", { name: "Delete agent: Review agent", exact: true });
     await remove.click();
     const cancel = view.getByRole("button", { name: "Cancel", exact: true });
     await expect(cancel).toBeFocused();

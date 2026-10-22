@@ -63,8 +63,9 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
       </> : null}
       <SettingsControls>
         {selected && !creating ? <SettingsInspectorSection title="Agent actions">
+          <p className="mb-3 break-all">{selected.name}</p>
           {confirmId === selected.id ? <div className="space-y-3"><p>Delete this agent and revoke its API keys?</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="danger" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(selected.id)}>Confirm</Button><Button size="sm" secondary autoFocus disabled={deleteMutation.isPending} onClick={() => { setConfirmId(null); requestAnimationFrame(() => deleteButton.current?.focus()); }}>Cancel</Button></div></div>
-            : <Button ref={deleteButton} disabled={deleteMutation.isPending} variant="danger" size="sm" onClick={() => setConfirmId(selected.id)}><Trash2 size={15} /> Delete {selected.name}</Button>}
+            : <Button ref={deleteButton} aria-label={`Delete agent: ${selected.name}`} disabled={deleteMutation.isPending} variant="danger" size="sm" onClick={() => setConfirmId(selected.id)}><Trash2 size={15} /> Delete agent</Button>}
         </SettingsInspectorSection> : null}
       </SettingsControls>
       {creating ? <section>

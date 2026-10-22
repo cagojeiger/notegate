@@ -95,7 +95,7 @@ for (const width of [1440, 390]) {
         { tab: "Trash", trigger: "Permanently delete meeting.md", confirmation: "Confirm permanent deletion", role: "region", row: "Select meeting.md" },
         { tab: "Account", trigger: "Sign out Other browser", confirmation: "Confirm revocation", role: "group", row: "Select Other browser" },
         { tab: "Connections", trigger: "Revoke MCP App", confirmation: "Confirm revocation", role: "group", row: "Select MCP App" },
-        { tab: "Agents", trigger: "Delete Review agent", confirmation: "Delete this agent and revoke its API keys?", role: "text", row: null }
+        { tab: "Agents", trigger: "Delete agent: Review agent", confirmation: "Delete this agent and revoke its API keys?", role: "text", row: null }
       ] as const;
       for (const target of targets) {
         await view.getByRole("tab", { name: target.tab, exact: true }).click();
@@ -187,7 +187,7 @@ for (const width of [1440, 390]) {
       { tab: "Trash", trigger: "Permanently delete meeting.md", confirm: "Permanently delete", path: "**/api/v1/me/trash/spaces/*/nodes/deleted-0?**", success: "Permanent deletion requested", error: "Storage unavailable" },
       { tab: "Account", trigger: "Sign out Other browser", confirm: "Confirm", path: "**/api/v1/me/sessions/session-1", success: "Access revoked.", error: "Could not revoke access. Try again." },
       { tab: "Connections", trigger: "Revoke MCP App", confirm: "Confirm", path: "**/api/v1/me/oauth-grants/grant-1", success: "Access revoked.", error: "Could not revoke access. Try again." },
-      { tab: "Agents", trigger: "Delete Review agent", confirm: "Confirm", path: "**/api/v1/agents/agent-1", success: "Agent deleted.", error: "Storage unavailable" }
+      { tab: "Agents", trigger: "Delete agent: Review agent", confirm: "Confirm", path: "**/api/v1/agents/agent-1", success: "Agent deleted.", error: "Storage unavailable" }
     ]) {
       for (const outcome of ["success", "error"] as const) {
         for (const leave of target.tab === "Trash" && outcome === "error" ? ["tabs", "settings"] : ["tabs"]) {

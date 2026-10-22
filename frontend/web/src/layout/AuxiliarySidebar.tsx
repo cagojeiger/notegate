@@ -151,9 +151,9 @@ export function AuxiliarySidebar({
                   disabled={
                     !canManageActiveSpace
                     || activeNode.parent_id === null
-                    || writeLockPending
                     || (!writeLockAvailable && !activeNode.write_locked)
                   }
+                  pending={writeLockPending}
                   onChange={onWriteLockedChange}
                 />
                 <SettingToggle
@@ -163,9 +163,9 @@ export function AuxiliarySidebar({
                   disabled={
                     !canManageActiveSpace
                     || activeNode.parent_id === null
-                    || externalAccessPolicyPending
                     || changesLocked
                   }
+                  pending={externalAccessPolicyPending}
                   onChange={onExternalAccessEnabledChange}
                 />
                 {activeNode.kind === "text" ? (
@@ -177,10 +177,10 @@ export function AuxiliarySidebar({
                     disabled={
                       !canManageActiveSpace
                       || clientEncrypted
-                      || textEncryptionPending
                       || changesLocked
                       || (!textEncryptionAvailable && !serverEncrypted)
                     }
+                    pending={textEncryptionPending}
                     onChange={onTextEncryptionEnabledChange}
                   />
                 ) : null}
