@@ -1,4 +1,4 @@
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -16,18 +16,21 @@ function renderKeyManager({
   maxTtlDays = 30,
   create = vi.fn(),
   list = vi.fn().mockResolvedValue(emptyKeys),
-  revoke = vi.fn().mockResolvedValue(undefined)
+  revoke = vi.fn().mockResolvedValue(undefined),
+  queryClient = createTestQueryClient(),
+  queryKey = ["keys", maxTtlDays]
 }: {
   maxTtlDays?: number;
   create?: (input: { name: string; expires_at: string }) => Promise<MintedKey>;
   list?: () => Promise<ApiKeyListResponse>;
   revoke?: (id: string) => Promise<void>;
+  queryClient?: QueryClient;
+  queryKey?: QueryKey;
 } = {}) {
-  const queryClient = createTestQueryClient();
-  render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <KeyManager
-        queryKey={["keys", maxTtlDays]}
+        queryKey={queryKey}
         list={list}
         create={create}
         revoke={revoke}
@@ -35,10 +38,101 @@ function renderKeyManager({
       />
     </QueryClientProvider>
   );
-  return { list, revoke, queryClient };
+  return { ...view, list, revoke, queryClient };
 }
 
 describe("KeyManager", () => {
+  const mintedKey: MintedKey = {
+    id: "key-retained", name: "retained-key", token: "dummy-one-time-token",
+    created_at: "2026-10-22T00:00:00Z", expires_at: "2026-11-21T00:00:00Z"
+  };
+
+  async function submitKey(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole("button", { name: "Add API key" }));
+    await user.type(screen.getByLabelText("Name"), "retained-key");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+  }
+
+  it("retains a pending mint and its one-time result across remounts until Done", async () => {
+    let finish!: (key: MintedKey) => void;
+    const create = vi.fn(() => new Promise<MintedKey>((resolve) => { finish = resolve; }));
+    const queryClient = createTestQueryClient();
+    const props = { queryClient, create };
+    const user = userEvent.setup();
+    const first = renderKeyManager(props);
+    await submitKey(user);
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    const second = renderKeyManager(props);
+    expect(screen.getByRole("status")).toHaveTextContent("Creating API key");
+    expect(screen.getByRole("button", { name: "Add API key" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Add API key" }));
+    await act(async () => { finish(mintedKey); });
+    expect(await screen.findByText(mintedKey.token)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add API key" })).toBeDisabled();
+    expect(create).toHaveBeenCalledTimes(1);
+    second.unmount();
+
+    const third = renderKeyManager(props);
+    expect(screen.getByText(mintedKey.token)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByText(mintedKey.token)).not.toBeInTheDocument();
+    expect(queryClient.getMutationCache().getAll()).toHaveLength(0);
+    third.unmount();
+
+    renderKeyManager(props);
+    expect(screen.queryByRole("button", { name: "Copy token" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add API key" })).toBeEnabled();
+  });
+
+  it("keeps a late mint failure retryable after returning to the view", async () => {
+    let fail!: (error: Error) => void;
+    const create = vi.fn().mockImplementationOnce(() => new Promise<MintedKey>((_resolve, reject) => { fail = reject; })).mockResolvedValue(mintedKey);
+    const queryClient = createTestQueryClient();
+    const props = { queryClient, create };
+    const user = userEvent.setup();
+    const first = renderKeyManager(props);
+    await submitKey(user);
+    first.unmount();
+    await act(async () => { fail(new Error("Agent API key limit reached")); });
+    renderKeyManager(props);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Agent API key limit reached");
+    expect(create).toHaveBeenCalledTimes(1);
+    await submitKey(user);
+    expect(await screen.findByText(mintedKey.token)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("isolates retained issuance by agent and authenticated query cache", async () => {
+    let finish!: (key: MintedKey) => void;
+    const create = vi.fn(() => new Promise<MintedKey>((resolve) => { finish = resolve; }));
+    const queryClient = createTestQueryClient();
+    const queryKey = ["agents", "agent-a", "keys"];
+    const user = userEvent.setup();
+    const first = renderKeyManager({ queryClient, queryKey, create });
+    await submitKey(user);
+    first.unmount();
+
+    const otherAgent = renderKeyManager({ queryClient, queryKey: ["agents", "agent-b", "keys"], create });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add API key" })).toBeEnabled();
+    await act(async () => { finish(mintedKey); });
+    expect(screen.queryByText(mintedKey.token)).not.toBeInTheDocument();
+    otherAgent.unmount();
+
+    const otherIdentity = renderKeyManager({ queryKey, create });
+    expect(screen.queryByText(mintedKey.token)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add API key" })).toBeEnabled();
+    otherIdentity.unmount();
+
+    renderKeyManager({ queryClient, queryKey, create });
+    expect(screen.getByText(mintedKey.token)).toBeInTheDocument();
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
   it("prevents repeated revocation and target changes while a revocation is pending", async () => {
     const keys = ["ci-key", "other-key"].map((name, index) => ({ id: `key-${index}`, name, created_at: "2026-10-01T00:00:00Z", expires_at: "2026-10-31T00:00:00Z" }));
     let finish!: () => void;

@@ -1,6 +1,6 @@
 import type { QueryKey } from "@tanstack/react-query";
 import { Copy, KeyRound, Plus, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import type { ApiKeyListResponse, MintedKey } from "../../api/keys";
 import { copyText } from "../../shared/lib/clipboard";
@@ -28,20 +28,19 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
   const keysQuery = useApiKeysQuery(queryKey, list);
   const [name, setName] = useState("");
   const [days, setDays] = useState(Math.min(30, maxTtlDays));
-  const [created, setCreated] = useState<MintedKey | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const returnToAdd = () => { requestAnimationFrame(() => addButtonRef.current?.focus()); };
 
-  const createMutation = useCreateApiKeyMutation(queryKey, create, (key) => {
-    setCreated(key);
-    setName("");
-    setAdding(false);
-  });
+  const createMutation = useCreateApiKeyMutation(queryKey, create);
+  const created = createMutation.data;
+  const focusCreatedToken = useCallback((element: HTMLDivElement | null) => {
+    if (!document.activeElement?.closest('[role="tablist"]')) element?.querySelector("button")?.focus();
+  }, []);
   const revokeMutation = useRevokeApiKeyMutation(queryKey, revoke, () => setConfirmId(null));
 
-  const canCreate = name.trim().length > 0 && !createMutation.isPending;
+  const canCreate = name.trim().length > 0 && !createMutation.isPending && !created;
   const options = expiryOptions(maxTtlDays);
 
   function createInput() {
@@ -62,15 +61,17 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
   const keys = keysQuery.data?.keys ?? [];
   return (
     <div className="space-y-4">
+      {createMutation.isPending ? <p role="status" className="text-sm text-muted">Creating API key…</p> : null}
+      {createMutation.isError ? <p role="alert" className="text-sm text-danger">{createMutation.error?.message || "Could not create API key. Try again."}</p> : null}
       {created ? (
         <Card tone="success">
           <div className="text-sm font-semibold text-text">Key “{created.name}” created</div>
-          <p className="mt-1 text-xs text-muted">Copy it now — the token is shown only once.</p>
-          <div className="mt-3 flex items-center gap-2">
+          <p className="mt-1 text-xs text-muted">Copy it before selecting Done. You cannot retrieve it afterwards.</p>
+          <div ref={focusCreatedToken} className="mt-3 flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded-workbench-surface border border-border bg-bg px-3 py-2 font-mono text-xs">{created.token}</code>
-            <IconButton autoFocus label="Copy token" onClick={() => { void copyCreatedToken(); }}><Copy size={15} /></IconButton>
+            <IconButton label="Copy token" onClick={() => { void copyCreatedToken(); }}><Copy size={15} /></IconButton>
           </div>
-          <div className="mt-3 text-right"><Button secondary onClick={() => { setCreated(null); returnToAdd(); }}>Done</Button></div>
+          <div className="mt-3 text-right"><Button secondary onClick={() => { createMutation.reset(); setName(""); setAdding(false); returnToAdd(); }}>Done</Button></div>
         </Card>
       ) : null}
 
@@ -105,7 +106,7 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
         </Card>
       )}
 
-      {adding ? <form onSubmit={(event) => { event.preventDefault(); createKey(); }} className="grid grid-cols-1 items-end gap-2">
+      {adding && !created ? <form onSubmit={(event) => { event.preventDefault(); createKey(); }} className="grid grid-cols-1 items-end gap-2">
         <TextField
           autoFocus
           label="Name"
@@ -121,7 +122,7 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
           <Button type="submit" disabled={!canCreate}><Plus size={15} /> Create</Button>
           <Button secondary disabled={createMutation.isPending} onClick={() => { setAdding(false); setName(""); returnToAdd(); }}>Cancel</Button>
         </div>
-      </form> : <AddButton label="Add API key" ref={addButtonRef} onClick={() => setAdding(true)} />}
+      </form> : <AddButton label="Add API key" ref={addButtonRef} disabled={createMutation.isPending || !!created} onClick={() => setAdding(true)} />}
     </div>
   );
 }

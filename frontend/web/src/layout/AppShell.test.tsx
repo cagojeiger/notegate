@@ -348,6 +348,34 @@ describe("AppShell", () => {
     expect(screen.getByRole("complementary", { name: "Space navigation" })).toBe(activityRail);
     expect(screen.getByText("ready").closest("footer")).toBe(statusBar);
   });
+
+  it.each([false, true])("keeps the workspace mounted and inert during a Library visit (mobile: %s)", async (isMobile) => {
+    const user = userEvent.setup();
+    const actions = { setSettingsOpen: vi.fn(), selectSpace: vi.fn(), closeMobile: vi.fn() };
+    mocks.useWorkbenchController.mockReturnValue({ ...workbench(), isMobile, actions });
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+    const view = render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+    const editor = screen.getByTestId("editor-area");
+
+    await user.click(screen.getByRole("button", { name: "Open space library" }));
+
+    expect(editor).toBeInTheDocument();
+    expect(editor).not.toBeVisible();
+    expect(editor.closest("[hidden]")).toHaveAttribute("inert");
+    expect(editor.closest("[hidden]")).toHaveAttribute("aria-hidden", "true");
+
+    await user.click(screen.getByRole("button", { name: /^Daily$/ }));
+
+    expect(actions.selectSpace).toHaveBeenCalledWith(space);
+    expect(screen.getByTestId("editor-area")).toBe(editor);
+    expect(editor).toBeVisible();
+
+    mocks.useWorkbenchController.mockReturnValue({ ...workbench(), isMobile, settingsOpen: true, actions });
+    view.rerender(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+    expect(editor).toBeInTheDocument();
+    expect(editor).not.toBeVisible();
+    expect(editor.closest("[hidden]")).toHaveAttribute("inert");
+  });
 });
 
 function me(kind: Me["account"]["kind"]): Me {

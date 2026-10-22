@@ -217,8 +217,8 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                 onCreateSpace={actions.promptCreateSpace}
               />
             </Suspense>
-          ) : (
-            <>
+          ) : null}
+            <div hidden={librarySelected} className={librarySelected ? "hidden" : "contents"} inert={librarySelected} aria-hidden={librarySelected || undefined}>
               <PrimarySidebarFrame id="primary-sidebar-panel" mode={layout.primaryMode} sidebarLayout={layout.sidebars}>
                 <PrimarySidebar
                   activeSpace={workbench.activeSpace}
@@ -300,8 +300,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                 />
               </AuxiliarySidebarFrame>
               <PanelOverlay visible={overlayVisible} onClose={closeOverlayPanels} isMobile={workbench.isMobile} />
-            </>
-          )}
+            </div>
           </div>
         </main>
       </div>

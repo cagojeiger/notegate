@@ -345,7 +345,7 @@ describe("SpaceLibrary", () => {
 
     const filesUsage = screen.getByRole("progressbar", { name: "Files usage" });
     const recalculate = screen.getByRole("button", { name: "Recalculate Daily usage" });
-    expect(recalculate).toHaveClass("md:min-h-6", "text-workbench", "border", "bg-surface");
+    expect(recalculate).toHaveClass("text-workbench", "border", "bg-surface");
     expect(filesUsage.compareDocumentPosition(recalculate) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     await user.click(recalculate);
 
@@ -358,7 +358,7 @@ describe("SpaceLibrary", () => {
     renderLibrary();
 
     const reindex = screen.getByRole("button", { name: "Reindex links in Daily" });
-    expect(reindex).toHaveClass("md:min-h-6", "text-workbench", "border", "bg-surface");
+    expect(reindex).toHaveClass("text-workbench", "border", "bg-surface");
     await user.click(reindex);
 
     expect(mocks.reindexLinks).toHaveBeenCalledWith("daily");

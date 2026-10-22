@@ -21,7 +21,7 @@ export function Button({
   size?: ButtonSize;
 }) {
   const sizeClass = size === "xs"
-    ? "min-h-workbench-control px-2 text-workbench md:min-h-6"
+    ? "min-h-[var(--ng-min-target-size)] min-w-[var(--ng-min-target-size)] px-2 text-workbench"
     : size === "sm"
       ? "min-h-workbench-control px-2 text-workbench"
       : "min-h-workbench-control px-2.5 text-workbench";

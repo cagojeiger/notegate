@@ -98,8 +98,34 @@ stateDiagram-v2
 
 이 도식은 다른 focusable content가 없는 호출 상세의 기본 순서다. Native `summary`도 Tab 순환에 포함한다. 명시적 autofocus가 있으면 유지하며, sheet 종료 중 새 화면으로 옮겨진 focus를 오래된 opener로 덮어쓰지 않는다.
 
+## 4. API key 발급 결과의 수명
+
+```mermaid
+stateDiagram-v2
+    [*] --> Ready
+    Ready --> Pending: 명시적 Create / 요청 1회
+    Pending --> Pending: 화면 이동·재진입 / 기존 요청 구독
+    Pending --> Revealed: 성공 / 일회성 토큰 표시
+    Pending --> Failed: 실패 / 재진입해도 오류 안내 유지
+    Failed --> Pending: 명시적 재시도
+    Revealed --> Revealed: 화면 이동·재진입 / 토큰 유지, 추가 발급 차단
+    Revealed --> Ready: Done / 토큰과 발급 결과 제거
+```
+
+발급 상태는 파괴적 작업의 `settings-operation`과 분리한다. 인증별 QueryClient의 메모리에서 정확한 API key query key별로 보관하므로 에이전트나 로그인 계정 사이에 결과가 섞이지 않는다. 진행 중 요청과 확인하지 않은 성공 결과는 화면이 없어져도 유지하고, 다른 발급으로 덮어쓰지 않는다. `Done`은 보관된 mutation과 토큰을 제거한다. 브라우저 저장소에 원문을 기록하거나 서버에서 원문을 다시 조회하는 기능은 추가하지 않는다. 페이지 새로고침이나 인증 cache 교체를 넘어 보존하지 않는다.
+
+복원된 결과는 Settings 탭의 키보드 탐색 focus를 가져가지 않는다.
+
+## 5. Workspace와 Library 왕복
+
+Space Workspace는 Space Library나 Settings를 표시하는 동안에도 mounted 상태를 유지한다. 비활성 영역에는 `hidden`, `inert`, `aria-hidden`을 함께 적용해 보이지 않는 편집기로 focus나 조작이 이동하지 않게 한다. 같은 공간으로 돌아오면 기존 편집 세션과 미저장 초안을 그대로 사용한다. 다른 공간 선택은 기존 공간 전환 동작을 따른다.
+
+이 보존은 현재 페이지의 메모리 수명에 한정된다. 저장된 pane snapshot에 문서 본문이나 미저장 초안을 추가하지 않는다. 화면을 숨기는 동안에도 기존 query observer는 mounted 상태로 남는다.
+
 ## 전환 검증
 
+- [`workbench-persistence.spec.ts`](../../frontend/web/e2e/workbench-persistence.spec.ts): desktop/mobile의 Library·Settings 왕복에서 실제 미저장 초안 보존, 숨겨진 편집기 조작 차단과 다른 공간 전환.
+- [`key-mint-navigation.spec.ts`](../../frontend/web/e2e/key-mint-navigation.spec.ts): 발급 대기·완료 후 에이전트 목록·Settings 탭·Settings 종료 왕복, 토큰 복원, 중복 발급 차단과 Done 후 제거.
 - [`settings-transitions.spec.ts`](../../frontend/web/e2e/settings-transitions.spec.ts): desktop/mobile에서 4개 기능의 닫기 경로·재열기·resize, desktop tab 변경, 미전송 보장, 요청 중 Inspector·tab·Settings 재진입과 이후 성공·실패의 중복 전송 방지.
 - [`useSettingsMutation.test.tsx`](../../frontend/web/src/features/settings/useSettingsMutation.test.tsx): 제거된 화면의 호출·reset 차단, 화면 부재 중 실패 보존, 완료 결과 복구·해제, 작업 범위와 인증 cache 격리.
 - [`invocation-history.spec.ts`](../../frontend/web/e2e/invocation-history.spec.ts): 실제 mobile History Inspector의 summary 접근·Enter·Tab 양방향 순환과 기존 스크롤·선택 복원.

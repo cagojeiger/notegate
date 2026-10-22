@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQuery, useQueryClient, type MutationState, type QueryKey } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
 import { createAgent, createAgentKey, deleteAgent, listAgentKeys, listAgents, revokeAgentKey, type Agent } from "../../api/agents";
@@ -127,16 +127,45 @@ export function useApiKeysQuery(queryKey: QueryKey, list: () => Promise<ApiKeyLi
   return useQuery({ queryKey, queryFn: list });
 }
 
-export function useCreateApiKeyMutation(queryKey: QueryKey, create: (input: { name: string; expires_at: string }) => Promise<MintedKey>, onCreated: (key: MintedKey) => void) {
+export function useCreateApiKeyMutation(queryKey: QueryKey, create: (input: { name: string; expires_at: string }) => Promise<MintedKey>) {
   const queryClient = useQueryClient();
-  return useMutation({
+  const cache = queryClient.getMutationCache();
+  const filters = { mutationKey: ["api-key-issuance", queryKey], exact: true };
+  const mutation = useMutation({
+    mutationKey: filters.mutationKey,
+    // The one-time token stays in this authenticated cache until explicitly acknowledged.
+    gcTime: Infinity,
+    meta: { silentError: true },
     mutationFn: create,
-    onSuccess: (key) => {
-      onCreated(key);
+    onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey });
       invalidateAuditEvents(queryClient);
     }
   });
+  const states = useMutationState<MutationState<MintedKey, Error, { name: string; expires_at: string }>>({
+    filters, select: (item) => item.state
+  });
+  const state = states[states.length - 1];
+  const retained = () => cache.findAll(filters).some((item) => item.state.status === "pending" || item.state.status === "success");
+  const clear = () => cache.findAll(filters).forEach((item) => cache.remove(item));
+
+  return {
+    isPending: state?.status === "pending",
+    isError: state?.status === "error",
+    error: state?.error,
+    data: state?.data,
+    mutate: (input: { name: string; expires_at: string }) => {
+      // Include calls from a remounted view or a stale event handler.
+      if (retained()) return;
+      clear();
+      mutation.mutate(input);
+    },
+    reset: () => {
+      if (cache.find({ ...filters, status: "pending" })) return;
+      mutation.reset();
+      clear();
+    }
+  };
 }
 
 export function useRevokeApiKeyMutation(queryKey: QueryKey, revoke: (id: string) => Promise<void>, onRevoked: () => void) {

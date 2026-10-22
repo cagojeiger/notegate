@@ -625,6 +625,22 @@ for (const profile of [
       await page.getByRole("button", { name: "Open space library" }).click();
       if (profile.width < 768) await page.getByRole("button", { name: "Inspect Daily" }).click();
 
+      const minimumTarget = profile.hasTouch ? 44 : 24;
+      for (const name of ["About Navigation", "About New item defaults", "Reindex links in Daily", "Recalculate Daily usage"]) {
+        const control = page.getByRole("button", { name, exact: true });
+        const bounds = await control.boundingBox();
+        expect(bounds?.height, name).toBe(minimumTarget);
+        expect(bounds?.width, name).toBeGreaterThanOrEqual(minimumTarget);
+      }
+      const help = page.getByRole("button", { name: "About Navigation", exact: true });
+      await help.click();
+      const tooltip = page.getByRole("tooltip");
+      await expect(tooltip).toBeVisible();
+      const helpBounds = await help.boundingBox();
+      expect((await tooltip.boundingBox())?.y).toBeCloseTo(helpBounds!.y + helpBounds!.height, 0);
+      await page.keyboard.press("Escape");
+      await expect(tooltip).toBeHidden();
+
       const toggle = page.getByRole("switch", { name: "Pin to navigation" });
       const toggleBox = await toggle.boundingBox();
       expect(toggleBox?.height).toBe(profile.hasTouch ? 44 : 24);
