@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::time::Instant;
 
-use notegate_command::{CommandTool, validate_purpose};
+use notegate_command::CommandTool;
 use notegate_model::Caller;
 use rmcp::ErrorData;
 use rmcp::model::{CallToolResponse, CallToolResult};
@@ -15,8 +15,8 @@ use crate::invocations::redaction::{
     redaction_marker,
 };
 use crate::invocations::{
-    InvocationCompletion, InvocationRecord, InvocationSurface, canonical_op, canonical_tool,
-    invocation_space_name, sequence_error_code,
+    InvocationCompletion, InvocationMetadata, InvocationRecord, InvocationSurface, canonical_tool,
+    sequence_error_code,
 };
 use crate::mcp::contract::command_error;
 use crate::observability::CommandInvocationMetrics;
@@ -31,24 +31,10 @@ pub(crate) async fn execute_call(
     future: impl Future<Output = Result<CallToolResponse, ErrorData>>,
 ) -> Result<CallToolResponse, ErrorData> {
     let completion_started = Instant::now();
-    let raw_op = input.get("op").and_then(Value::as_str);
-    let op = canonical_op(tool, raw_op);
-    let known_tool = CommandTool::parse(tool);
-    let raw_purpose = if known_tool == Some(CommandTool::Me) {
-        None
-    } else {
-        input.get("purpose").and_then(Value::as_str)
-    };
-    let purpose_validation = raw_purpose
-        .map(validate_purpose)
-        .transpose()
+    let metadata = InvocationMetadata::from_input(tool, input);
+    let purpose_validation = metadata
+        .validate_purpose()
         .map_err(|error| invalid_input_error(error.to_string()));
-    let purpose = raw_purpose.filter(|_| purpose_validation.is_ok());
-    let space_name = if known_tool == Some(CommandTool::Read) && op == Some("changes") {
-        invocation_space_name(input.get("target").and_then(Value::as_str))
-    } else {
-        None
-    };
 
     let started = Instant::now();
     let metrics =
@@ -73,9 +59,9 @@ pub(crate) async fn execute_call(
                     id: Some(invocation_id),
                     surface: InvocationSurface::Mcp,
                     tool: canonical_tool(tool),
-                    op,
-                    purpose,
-                    space_name: space_name.as_deref(),
+                    op: metadata.op,
+                    purpose: metadata.purpose(),
+                    space_name: metadata.space_name.as_deref(),
                     input: &redacted_input,
                     response: Some(&redacted_response),
                     error_code: error_code.as_deref(),
@@ -203,6 +189,7 @@ mod tests {
     )]
 
     use super::*;
+    use crate::invocations::invocation_space_name;
     use crate::invocations::test_support::{assert_completed, capture, report};
     use notegate_model::CallerIdentity;
 
@@ -405,17 +392,22 @@ mod tests {
         .expect_err("tool error is returned");
         assert_eq!(recorded_error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
         let invalid_purpose_input = serde_json::json!({"purpose": " ", "op": "spaces"});
+        let executed = std::sync::atomic::AtomicBool::new(false);
         let error = execute_call(
             uuid::Uuid::new_v4(),
             &state,
             Some(&caller),
             "read",
             &invalid_purpose_input,
-            async { Ok(CallToolResult::structured(serde_json::json!({"spaces": []})).into()) },
+            async {
+                executed.store(true, std::sync::atomic::Ordering::Relaxed);
+                Ok(CallToolResult::structured(serde_json::json!({"spaces": []})).into())
+            },
         )
         .await
         .expect_err("blank purpose is rejected");
         assert_eq!(error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(!executed.load(std::sync::atomic::Ordering::Relaxed));
         let sequence_input = serde_json::json!({
             "purpose": "run a failing sequence",
             "commands": [{"tool": "read", "op": "read", "target": "Research:/missing.md"}]

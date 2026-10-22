@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use notegate_command::CommandTool;
+use notegate_command::{CommandTool, PurposeValidationError, validate_purpose};
 use notegate_db::NewCommandInvocation;
 use notegate_model::{Caller, CallerIdentity};
 use notegate_service::files::parse_target;
@@ -95,6 +95,46 @@ pub(crate) struct InvocationRecord<'a> {
     pub(crate) response: Option<&'a Value>,
     pub(crate) error_code: Option<&'a str>,
     pub(crate) elapsed_ms: u128,
+}
+
+pub(crate) struct InvocationMetadata<'a> {
+    pub(crate) op: Option<&'a str>,
+    purpose: Result<Option<&'a str>, PurposeValidationError>,
+    pub(crate) space_name: Option<String>,
+}
+
+impl<'a> InvocationMetadata<'a> {
+    pub(crate) fn from_input(tool: &str, input: &'a Value) -> Self {
+        let op = canonical_op(tool, input.get("op").and_then(Value::as_str));
+        let known_tool = CommandTool::parse(tool);
+        let purpose = if known_tool == Some(CommandTool::Me) {
+            Ok(None)
+        } else {
+            input
+                .get("purpose")
+                .and_then(Value::as_str)
+                .map(|purpose| validate_purpose(purpose).map(|()| purpose))
+                .transpose()
+        };
+        let space_name = if known_tool == Some(CommandTool::Read) && op == Some("changes") {
+            invocation_space_name(input.get("target").and_then(Value::as_str))
+        } else {
+            None
+        };
+        Self {
+            op,
+            purpose,
+            space_name,
+        }
+    }
+
+    pub(crate) fn purpose(&self) -> Option<&'a str> {
+        self.purpose.as_ref().ok().copied().flatten()
+    }
+
+    pub(crate) fn validate_purpose(&self) -> Result<(), &PurposeValidationError> {
+        self.purpose.as_ref().map(|_| ())
+    }
 }
 
 /// Return whether history was stored, without changing the command result.
@@ -194,4 +234,59 @@ pub(crate) fn sequence_error_code(result: &Value) -> Option<String> {
                         .map(|code| code.to_string())
                 })
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn me_metadata_never_extracts_a_purpose_from_rejected_input() {
+        for purpose in ["must not be persisted", " "] {
+            let input = json!({"purpose": purpose, "op": "changes", "target": "Daily Research:/"});
+            let metadata = InvocationMetadata::from_input("me", &input);
+
+            assert_eq!(metadata.purpose(), None);
+            assert_eq!(metadata.validate_purpose(), Ok(()));
+            assert_eq!(metadata.op, None);
+            assert_eq!(metadata.space_name, None);
+        }
+    }
+
+    #[test]
+    fn invalid_purpose_is_rejected_and_omitted_from_history_metadata() {
+        for purpose in [
+            " ".to_owned(),
+            "가".repeat(notegate_command::PURPOSE_MAX_CHARS + 1),
+        ] {
+            let input = json!({"purpose": purpose, "op": "spaces"});
+            let metadata = InvocationMetadata::from_input("read", &input);
+
+            assert!(metadata.validate_purpose().is_err());
+            assert_eq!(metadata.purpose(), None);
+            assert_eq!(metadata.op, Some("spaces"));
+        }
+    }
+
+    #[test]
+    fn only_changes_metadata_keeps_a_valid_space_name() {
+        let input = json!({"purpose": "inspect changes", "op": "changes", "target": "Daily Research:/private/note.md"});
+        let metadata = InvocationMetadata::from_input("read", &input);
+        assert_eq!(metadata.op, Some("changes"));
+        assert_eq!(metadata.purpose(), Some("inspect changes"));
+        assert_eq!(metadata.space_name.as_deref(), Some("Daily Research"));
+
+        for (tool, op, target) in [
+            ("read", "read", "Daily Research:/private/note.md"),
+            ("search", "changes", "Daily Research:/"),
+            ("read", "changes", "missing-colon"),
+        ] {
+            let input = json!({"op": op, "target": target});
+            let metadata = InvocationMetadata::from_input(tool, &input);
+            assert_eq!(metadata.space_name, None);
+            assert_eq!(metadata.purpose(), None);
+            assert_eq!(metadata.validate_purpose(), Ok(()));
+        }
+    }
 }
