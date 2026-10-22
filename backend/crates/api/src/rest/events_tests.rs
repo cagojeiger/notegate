@@ -371,8 +371,11 @@ async fn owned_changes_remain_private_and_paginated_after_space_removal()
     };
     let state = state(&db);
     let (caller, space, root) = caller_and_space(&state).await?;
-    for name in ["private folder one", "private folder two"] {
-        state
+    for (name, actor) in [
+        ("private folder one", None),
+        ("private folder two", Some(caller.account_id())),
+    ] {
+        let folder = state
             .files
             .create_folder(
                 caller.account_id(),
@@ -383,7 +386,50 @@ async fn owned_changes_remain_private_and_paginated_after_space_removal()
                 },
             )
             .await?;
+        sqlx::query(
+            "UPDATE file_change_events SET actor_account_id=$2 WHERE space_id=$1 AND node_id=$3",
+        )
+        .bind(space)
+        .bind(actor)
+        .bind(folder.node.id)
+        .execute(&db.pool)
+        .await?;
     }
+    let app = rest_app(state.clone(), caller.clone());
+    let (status, scoped) = get_json(
+        app.clone(),
+        format!("/v1/spaces/{space}/file-change-events?limit=2"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    let (status, owned) = get_json(
+        app,
+        format!("/v1/me/file-change-events?space_id={space}&limit=2"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(scoped["events"], owned["events"]);
+    assert_eq!(owned["page"]["returned"], 2);
+    assert_eq!(owned["page"]["has_more"], false);
+    assert_eq!(
+        owned["events"][0]["actor"]["id"],
+        serde_json::json!(caller.account_id())
+    );
+    assert_eq!(
+        owned["events"][0]["actor"]["display_name"],
+        "REST Test Owner"
+    );
+    assert!(
+        owned["events"][1]
+            .get("actor_account_id")
+            .is_some_and(serde_json::Value::is_null)
+    );
+    assert!(
+        owned["events"][1]
+            .get("actor")
+            .is_some_and(serde_json::Value::is_null)
+    );
+
     sqlx::query("DELETE FROM spaces WHERE id=$1")
         .bind(space)
         .execute(&db.pool)
@@ -406,6 +452,7 @@ async fn owned_changes_remain_private_and_paginated_after_space_removal()
         first["events"][0]["metadata"]["item_name"],
         "private folder two"
     );
+    assert_eq!(first["events"][0], owned["events"][0]);
     assert_eq!(first["page"]["has_more"], true);
     let cursor = first["page"]["next_cursor"].as_str().unwrap();
     let (status, second) = get_json(
@@ -418,6 +465,7 @@ async fn owned_changes_remain_private_and_paginated_after_space_removal()
         second["events"][0]["metadata"]["item_name"],
         "private folder one"
     );
+    assert_eq!(second["events"][0], owned["events"][1]);
     let (status, _) = get_json(
         rest_app(state.clone(), caller.clone()),
         format!("/v1/spaces/{space}/file-change-events"),
