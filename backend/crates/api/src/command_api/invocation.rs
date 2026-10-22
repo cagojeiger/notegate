@@ -7,7 +7,7 @@ use axum::extract::rejection::JsonRejection;
 use axum::http::HeaderMap;
 use notegate_command::{
     COMMAND_PROTOCOL_VERSION, CommandError, CommandTool, FileDownloadInput, FileUploadInput,
-    RecoveryAction, RunReadSequenceInput, RunWriteSequenceInput, validate_purpose,
+    RecoveryAction, RunReadSequenceInput, RunWriteSequenceInput,
 };
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -20,7 +20,7 @@ use crate::invocations::redaction::{
     bounded_snapshot, redact_input, redact_output_value, redact_structured_response,
 };
 use crate::invocations::{
-    InvocationCompletion, InvocationRecord, InvocationSurface, canonical_op, invocation_space_name,
+    InvocationCompletion, InvocationMetadata, InvocationRecord, InvocationSurface,
     sequence_error_code,
 };
 use crate::observability::CommandInvocationMetrics;
@@ -267,7 +267,10 @@ async fn finish(
 
     let metadata = InvocationMetadata::from_input(tool, input);
     let redacted_input = redact_input(tool, input);
-    let response = redact_response(tool, &metadata.response_context, &result);
+    let response_context = metadata
+        .op
+        .map_or_else(|| json!({}), |op| json!({"op": op}));
+    let response = redact_response(tool, &response_context, &result);
     completion
         .record(
             state,
@@ -276,8 +279,8 @@ async fn finish(
                 id: context.invocation_id(),
                 surface: InvocationSurface::Cli,
                 tool,
-                op: metadata.op.as_deref(),
-                purpose: metadata.purpose.as_deref(),
+                op: metadata.op,
+                purpose: metadata.purpose(),
                 space_name: metadata.space_name.as_deref(),
                 input: &redacted_input,
                 response: Some(&response),
@@ -288,42 +291,6 @@ async fn finish(
         .await;
 
     result.map(Json)
-}
-
-struct InvocationMetadata {
-    op: Option<String>,
-    purpose: Option<String>,
-    space_name: Option<String>,
-    response_context: Value,
-}
-
-impl InvocationMetadata {
-    fn from_input(tool: &str, input: &Value) -> Self {
-        let op = canonical_op(tool, input.get("op").and_then(Value::as_str)).map(str::to_owned);
-        let purpose = if tool == "me" {
-            None
-        } else {
-            input
-                .get("purpose")
-                .and_then(Value::as_str)
-                .filter(|purpose| validate_purpose(purpose).is_ok())
-                .map(str::to_owned)
-        };
-        let space_name = if tool == "read" && op.as_deref() == Some("changes") {
-            invocation_space_name(input.get("target").and_then(Value::as_str))
-        } else {
-            None
-        };
-        let response_context = op
-            .as_ref()
-            .map_or_else(|| json!({}), |op| json!({"op": op}));
-        Self {
-            op,
-            purpose,
-            space_name,
-            response_context,
-        }
-    }
 }
 
 fn redact_response(tool: &str, input: &Value, result: &Result<Value, CommandHttpError>) -> Value {
@@ -387,13 +354,5 @@ mod tests {
                 .map(Vec::len),
             Some(9)
         );
-    }
-
-    #[test]
-    fn me_metadata_never_extracts_a_purpose_from_rejected_input() {
-        let metadata =
-            InvocationMetadata::from_input("me", &json!({"purpose": "must not be persisted"}));
-
-        assert_eq!(metadata.purpose, None);
     }
 }
