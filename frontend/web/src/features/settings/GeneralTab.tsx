@@ -20,7 +20,7 @@ export function GeneralTab({ onResetSavedWorkspace }: { onResetSavedWorkspace: (
             <span aria-label={`Version v${appVersion}`} className="text-muted">Version <code className="ml-1 font-mono text-text">v{appVersion}</code></span>
             <a href="https://github.com/cagojeiger/notegate" target="_blank" rel="noopener noreferrer"
               aria-label="Open NoteGate on GitHub" title="Open NoteGate on GitHub"
-              className="grid size-workbench-control shrink-0 place-items-center rounded-workbench-surface text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45">
+              className="grid size-workbench-control shrink-0 place-items-center rounded-workbench-surface text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text">
               <ExternalLink size={17} />
             </a>
           </Card>

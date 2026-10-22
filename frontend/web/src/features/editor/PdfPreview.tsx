@@ -95,7 +95,7 @@ export function PdfPreview({
       aria-label={`${name} PDF preview`}
     >
       <div
-        className="min-h-0 flex-1 overflow-auto bg-bg p-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 sm:p-6"
+        className="min-h-0 flex-1 overflow-auto bg-bg p-4 outline-none sm:p-6"
         role="region"
         aria-label={`${name} PDF pages`}
         tabIndex={0}
@@ -158,7 +158,7 @@ export function PdfPreview({
                   event.currentTarget.blur();
                 }
               }}
-              className="h-workbench-control w-10 min-w-[var(--ng-min-target-size)] rounded-workbench-surface border border-seam bg-panel px-1 text-center text-workbench tabular-nums text-text outline-none focus-visible:ring-2 focus-visible:ring-primary/45 disabled:opacity-50"
+              className="h-workbench-control w-10 min-w-[var(--ng-min-target-size)] rounded-workbench-surface border border-seam bg-panel px-1 text-center text-workbench tabular-nums text-text outline-none disabled:opacity-50"
             />
             <span aria-live="polite">/ {pageCount || "–"}</span>
           </div>
@@ -186,7 +186,7 @@ export function PdfPreview({
             title="Reset zoom"
             disabled={zoom === 1}
             onClick={() => setZoom(1)}
-            className="h-workbench-control min-w-11 rounded-workbench-surface px-1 text-workbench tabular-nums text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-default"
+            className="h-workbench-control min-w-11 rounded-workbench-surface px-1 text-workbench tabular-nums text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-default"
           >
             {zoomPercent}%
           </button>

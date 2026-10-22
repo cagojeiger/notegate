@@ -36,6 +36,7 @@
 
 - WCAG 2.2 AA를 기준으로 한다. 색상·hover·drag만으로 상태를 전달하거나 동작하게 하지 않고 키보드·touch 대안을 제공한다.
 - Icon control에 문맥 있는 이름과 보이는 focus를 제공한다. Menu의 키보드 이동·닫기·focus 복귀, 비동기 결과 안내와 reduced motion을 유지한다.
+- Focus 표시는 공통 CSS가 소유하며 컴포넌트별 ring과 중복하지 않는다. 선택선·focus가 스크롤 부모에 잘리지 않아야 하고, 좁은 탭 바는 숨겨진 항목이 있음을 표시하며 이동한 탭을 온전히 보여준다.
 - Desktop의 시각 밀도와 mobile/coarse-pointer의 조작 영역은 별개다.
 - 화면 검증은 [개발 가이드](../development.md#검증)를 따른다. Screenshot은 외관의 증거이며 동작·접근성의 대체가 아니다.
 

@@ -39,7 +39,7 @@ export function ConnectionsTab({ me, onSignOut }: { me: Me; onSignOut: () => voi
         <Card><EndpointRow label="Base URL" value={`${origin}/api/v2`} copyLabel="Copy API base URL" /></Card>
       </section>
       <a href={`${origin}/swagger-ui/v2/`} target="_blank" rel="noopener noreferrer"
-        className="ng-settings-wide inline-flex min-h-workbench-control w-fit items-center gap-2 rounded-workbench-surface text-workbench font-medium text-primary outline-none hover:bg-[var(--ng-hover)] focus-visible:ring-2 focus-visible:ring-primary/45">
+        className="ng-settings-wide inline-flex min-h-workbench-control w-fit items-center gap-2 rounded-workbench-surface text-workbench font-medium text-primary outline-none hover:bg-[var(--ng-hover)]">
         API documentation <ExternalLink size={14} />
       </a>
     </div>

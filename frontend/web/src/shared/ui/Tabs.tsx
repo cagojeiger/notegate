@@ -59,8 +59,8 @@ export function Tabs<T extends string>({ items, value, onChange, label = "Tabs",
       aria-orientation={orientation}
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setFocusedId(null); }}
       className={vertical ? "flex max-w-full flex-col gap-1" : variant === "header"
-        ? "flex h-full max-w-full items-end gap-1 overflow-x-auto"
-        : "mb-5 flex max-w-full gap-1 overflow-x-auto border-b border-seam"}
+        ? "ng-tabs flex h-full max-w-full items-end gap-1 overflow-x-auto"
+        : "ng-tabs mb-5 flex max-w-full gap-1 overflow-x-auto border-b border-seam"}
     >
       {items.map((item, index) => (
         <button

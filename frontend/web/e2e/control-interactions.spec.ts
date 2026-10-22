@@ -64,6 +64,135 @@ async function mockAgentManagement(page: Page) {
   await page.route("**/api/v1/spaces/*/agents?*", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connections: [] }) }));
 }
 
+async function expectUnclippedDecoration(decoration: Locator) {
+  const visibility = await decoration.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    let left = rect.left, right = rect.right, top = rect.top, bottom = rect.bottom;
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+      const style = getComputedStyle(parent);
+      const bounds = parent.getBoundingClientRect();
+      if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) {
+        left = Math.max(left, bounds.left + parent.clientLeft);
+        right = Math.min(right, bounds.left + parent.clientLeft + parent.clientWidth);
+      }
+      if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) {
+        top = Math.max(top, bounds.top + parent.clientTop);
+        bottom = Math.min(bottom, bounds.top + parent.clientTop + parent.clientHeight);
+      }
+    }
+    return { width: rect.width, height: rect.height, visibleWidth: Math.max(0, right - left), visibleHeight: Math.max(0, bottom - top) };
+  });
+  expect(visibility.width).toBeGreaterThan(0);
+  expect(visibility.visibleWidth).toBeCloseTo(visibility.width, 0);
+  expect(visibility.visibleHeight).toBeCloseTo(visibility.height, 0);
+}
+
+for (const width of [320, 390]) {
+  test(`mobile destination indicators stay painted inside scroll boundaries at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    const navigation = page.getByRole("navigation", { name: "Spaces", exact: true });
+    await navigation.getByRole("button", { name: "Daily", exact: true }).click();
+    await page.screenshot({ path: testInfo.outputPath("space-selection.png") });
+    await expectUnclippedDecoration(navigation.locator("[data-active-indicator]"));
+    for (const name of ["Open space library", "Settings"]) {
+      await navigation.getByRole("button", { name, exact: true }).click();
+      await expectUnclippedDecoration(navigation.locator("[data-active-indicator]"));
+    }
+  });
+}
+
+for (const width of [1440, 390, 320]) {
+  test(`settings controls share a single focus boundary and grouped copy field at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    const view = await openSettings(page);
+    const general = view.getByRole("tab", { name: "General", exact: true });
+    await general.focus();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Home");
+    await page.screenshot({ path: testInfo.outputPath("tab-focus.png") });
+    const tabFocus = await general.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { visible: element.matches(":focus-visible"), width: parseFloat(style.outlineWidth), offset: parseFloat(style.outlineOffset) };
+    });
+    expect(tabFocus.visible).toBe(true);
+    expect(tabFocus.width).toBeGreaterThanOrEqual(2);
+    expect(tabFocus.offset).toBeLessThanOrEqual(-tabFocus.width);
+
+    const reset = view.getByRole("button", { name: "Reset", exact: true });
+    await reset.focus();
+    await page.keyboard.press("Shift+Tab");
+    const themeSwitch = view.getByRole("button", { name: /^Switch to (light|dark) theme$/ });
+    await expect(themeSwitch).toBeFocused();
+    const focus = await themeSwitch.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { visible: element.matches(":focus-visible"), outline: style.outlineStyle, shadow: style.boxShadow };
+    });
+    expect(focus.visible).toBe(true);
+    expect(focus.outline).toBe("solid");
+    expect(focus.shadow).toBe("none");
+
+    await view.getByRole("tab", { name: "Connections", exact: true }).click();
+    const copy = view.getByRole("button", { name: "Copy user MCP server URL", exact: true });
+    const geometry = await copy.evaluate((button) => {
+      const field = button.parentElement!;
+      const code = field.querySelector("code")!;
+      const outer = field.getBoundingClientRect(), value = code.getBoundingClientRect(), action = button.getBoundingClientRect();
+      return { fieldHeight: outer.height, valueHeight: value.height, buttonHeight: action.height, buttonWidth: action.width, gap: action.left - value.right };
+    });
+    expect(geometry.valueHeight).toBe(geometry.buttonHeight);
+    expect(geometry.fieldHeight).toBe(geometry.buttonHeight);
+    expect(geometry.gap).toBeLessThanOrEqual(1);
+    expect(geometry.buttonWidth).toBe(width < 768 ? 44 : 28);
+    const escapedIcons = await view.locator("button, a").evaluateAll((controls) => controls.flatMap((control) => {
+      const bounds = control.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return [];
+      return [...control.querySelectorAll("svg")].filter((icon) => {
+        const rect = icon.getBoundingClientRect();
+        return rect.left < bounds.left - 0.5 || rect.right > bounds.right + 0.5 || rect.top < bounds.top - 0.5 || rect.bottom > bounds.bottom + 0.5;
+      }).map(() => control.getAttribute("aria-label") || control.textContent);
+    }));
+    expect(escapedIcons).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath("connections.png") });
+
+    await view.getByRole("tab", { name: "History", exact: true }).click();
+    const refresh = view.getByRole("button", { name: "Refresh", exact: true });
+    const historyAppearance = await refresh.evaluate((button) => {
+      const style = getComputedStyle(button);
+      return { width: button.getBoundingClientRect().width, border: style.borderWidth, background: style.backgroundColor };
+    });
+    await view.getByRole("tab", { name: "Trash", exact: true }).click();
+    expect(await view.getByRole("button", { name: "Refresh", exact: true }).evaluate((button) => {
+      const style = getComputedStyle(button);
+      return { width: button.getBoundingClientRect().width, border: style.borderWidth, background: style.backgroundColor };
+    })).toEqual(historyAppearance);
+  });
+}
+
+for (const width of [320, 390]) {
+  test(`overflow arrows reveal whole settings tabs at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    const view = await openSettings(page);
+    const tabs = view.getByRole("tablist", { name: "Settings sections", exact: true });
+    const nextName = await tabs.evaluate((list) => {
+      const right = list.getBoundingClientRect().right;
+      return [...list.querySelectorAll('[role="tab"]')].find((tab) => tab.getBoundingClientRect().right > right - 8)?.textContent;
+    });
+    await view.getByRole("button", { name: "More settings sections", exact: true }).click();
+    const next = tabs.getByRole("tab", { name: nextName!, exact: true });
+    const viewport = await tabs.boundingBox();
+    const revealed = await next.boundingBox();
+    expect(revealed!.x).toBeGreaterThanOrEqual(viewport!.x + 7);
+    expect(revealed!.x + revealed!.width).toBeLessThanOrEqual(viewport!.x + viewport!.width - 7);
+    await expect(next).toBeInViewport({ ratio: 1 });
+  });
+}
+
 test("mobile agent creation stays in the body after deleting an inspected agent", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockAgentManagement(page);
@@ -405,9 +534,9 @@ for (const profile of [
       await page.keyboard.press("Tab");
       await page.keyboard.press("Shift+Tab");
       await expect(field).toBeFocused();
-      const focus = await field.evaluate((element) => ({ visible: element.matches(":focus-visible"), shadow: getComputedStyle(element).boxShadow }));
+      const focus = await field.evaluate((element) => ({ visible: element.matches(":focus-visible"), outline: getComputedStyle(element).outlineStyle }));
       expect(focus.visible).toBe(true);
-      expect(focus.shadow).not.toBe("none");
+      expect(focus.outline).toBe("solid");
     });
 
     if (profile.name === "touch tablet") {

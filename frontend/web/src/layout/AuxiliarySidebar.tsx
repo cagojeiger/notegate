@@ -190,7 +190,7 @@ export function AuxiliarySidebar({
             )}
           </PanelSection>
           <details open className="group border-b border-seam p-3">
-            <summary className="flex cursor-pointer list-none items-center justify-between outline-none focus-visible:ring-2 focus-visible:ring-primary/45 [&::-webkit-details-marker]:hidden">
+            <summary className="flex cursor-pointer list-none items-center justify-between outline-none [&::-webkit-details-marker]:hidden">
               <span className="text-xs font-semibold uppercase tracking-wide text-muted">System details</span>
               <ChevronRight
                 size={16}
@@ -250,7 +250,7 @@ function OutlinePanel({ outline, onNavigate }: { outline: MarkdownOutlineSnapsho
     <nav
       aria-label="Document outline"
       tabIndex={0}
-      className="max-h-full overflow-y-auto rounded-workbench-surface border border-seam bg-surface p-1 font-ui outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+      className="max-h-full overflow-y-auto rounded-workbench-surface border border-seam bg-surface p-1 font-ui outline-none"
     >
       <ul className="relative before:pointer-events-none before:absolute before:inset-y-1 before:left-1 before:w-px before:bg-seam">
         {outline.items.map((item) => {
@@ -266,7 +266,7 @@ function OutlinePanel({ outline, onNavigate }: { outline: MarkdownOutlineSnapsho
               <button
                 type="button"
                 aria-current={active ? "location" : undefined}
-                className={`flex min-h-workbench-row w-full items-start rounded-workbench py-0.5 pr-1.5 text-left text-workbench transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 ${active ? "bg-[var(--ng-active-surface)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
+                className={`flex min-h-workbench-row w-full items-start rounded-workbench py-0.5 pr-1.5 text-left text-workbench transition focus-visible:outline-none ${active ? "bg-[var(--ng-active-surface)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
                 style={{ paddingInlineStart: `${10 + (item.level - baseLevel) * 9}px` }}
                 onClick={() => {
                   outline.navigate(item.id);

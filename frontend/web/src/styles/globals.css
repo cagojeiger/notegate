@@ -45,7 +45,30 @@ button:not(:disabled):active {
 
 :where(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--ng-focus-ring);
-  outline-offset: 2px;
+  outline-offset: -2px;
+}
+
+/* Keep focus inside scrolling controls; overflow hints belong to the tab viewport. */
+.ng-tabs {
+  scrollbar-width: none;
+}
+
+.ng-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.ng-workbench-tab-viewport {
+  --ng-tab-mask-start: #000;
+  --ng-tab-mask-end: #000;
+  mask-image: linear-gradient(to right, var(--ng-tab-mask-start), #000 8px, #000 calc(100% - 8px), var(--ng-tab-mask-end));
+}
+
+.ng-workbench-tab-viewport[data-before="true"] {
+  --ng-tab-mask-start: transparent;
+}
+
+.ng-workbench-tab-viewport[data-after="true"] {
+  --ng-tab-mask-end: transparent;
 }
 
 .lucide {

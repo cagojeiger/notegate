@@ -23,7 +23,7 @@ export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, navigation
           </button>
         </div>
       ) : null}
-      <div className="flex min-w-0 flex-[0_1_auto] items-center gap-2 overflow-x-auto">
+      <div className="-my-2 flex min-w-0 flex-[0_1_auto] items-center gap-2 overflow-x-auto py-2">
         {spaces.map((space) => {
           const active = !libraryActive && !settingsActive && activeSpace?.id === space.id;
           return (

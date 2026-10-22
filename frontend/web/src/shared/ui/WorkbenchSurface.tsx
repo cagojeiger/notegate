@@ -87,8 +87,10 @@ function WorkbenchTabs<T extends string>({ items, value, onChange, label }: {
     if (!list || !active) return;
     const visible = list.getBoundingClientRect();
     const selected = active.getBoundingClientRect();
-    if (selected.left < visible.left) list.scrollLeft -= Math.ceil(visible.left - selected.left);
-    else if (selected.right > visible.right) list.scrollLeft += Math.ceil(selected.right - visible.right);
+    const left = visible.left + (list.scrollLeft > 1 ? 8 : 0);
+    const right = visible.right - (list.scrollWidth - list.clientWidth - list.scrollLeft > 1 ? 8 : 0);
+    if (selected.left < left) list.scrollLeft -= Math.ceil(left - selected.left);
+    else if (selected.right > right) list.scrollLeft += Math.ceil(selected.right - right);
     if (selected.top < visible.top) list.scrollTop -= Math.ceil(visible.top - selected.top);
     else if (selected.bottom > visible.bottom) list.scrollTop += Math.ceil(selected.bottom - visible.bottom);
   }, []);
@@ -110,11 +112,21 @@ function WorkbenchTabs<T extends string>({ items, value, onChange, label }: {
   useLayoutEffect(() => { revealSelected(); }, [value, edges.overflow, revealSelected]);
   const scroll = (direction: number) => {
     const list = frame.current?.querySelector<HTMLDivElement>('[role="tablist"]');
-    if (list) list.scrollLeft += direction * list.clientWidth * 0.75;
+    if (!list) return;
+    const visible = list.getBoundingClientRect();
+    const tabs = [...list.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const next = (direction > 0 ? tabs : tabs.reverse()).find((tab) => {
+      const bounds = tab.getBoundingClientRect();
+      return direction > 0 ? bounds.right > visible.right - 8 : bounds.left < visible.left + 8;
+    });
+    if (next) {
+      const bounds = next.getBoundingClientRect();
+      list.scrollLeft += direction > 0 ? bounds.left - visible.left - 8 : bounds.right - visible.right + 8;
+    }
   };
   return <div ref={frame} className="flex h-full min-w-0 flex-1 items-center">
     {edges.overflow ? <IconButton label={`Previous ${label.toLowerCase()}`} disabled={!edges.before} onClick={() => scroll(-1)}><ChevronLeft size={16} /></IconButton> : null}
-    <div className="h-full min-w-0 flex-1"><Tabs items={items} value={value} onChange={onChange} label={label} variant="header" /></div>
+    <div className="ng-workbench-tab-viewport h-full min-w-0 flex-1" data-before={edges.before} data-after={edges.after}><Tabs items={items} value={value} onChange={onChange} label={label} variant="header" /></div>
     {edges.overflow ? <IconButton label={`More ${label.toLowerCase()}`} disabled={!edges.after} onClick={() => scroll(1)}><ChevronRight size={16} /></IconButton> : null}
   </div>;
 }

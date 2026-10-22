@@ -119,7 +119,7 @@ function VirtualizedDelimitedTable({ format, rows, columnCount, columnWidths, fi
       ) : (
         <div
           ref={scrollRef}
-          className="min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+          className="min-h-0 flex-1 overflow-auto outline-none"
           role="region"
           aria-label={`${format.toUpperCase()} table preview`}
           tabIndex={0}

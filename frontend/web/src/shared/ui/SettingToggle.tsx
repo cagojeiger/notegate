@@ -35,7 +35,7 @@ export function SettingToggle({
         aria-checked={checked}
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className="grid min-h-[var(--ng-min-target-size)] min-w-[var(--ng-min-target-size)] shrink-0 place-items-center rounded-workbench outline-none transition focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-40"
+        className="grid min-h-[var(--ng-min-target-size)] min-w-[var(--ng-min-target-size)] shrink-0 place-items-center rounded-workbench outline-none transition disabled:cursor-not-allowed disabled:opacity-40"
       >
         <span
           aria-hidden="true"

@@ -81,7 +81,7 @@ function FileChangeEventRow({ event }: { event: FileChangeEvent }) {
                 aria-controls={detailsId}
                 title={toggleLabel}
                 onClick={() => setOpen((value) => !value)}
-                className="grid size-workbench-control place-items-center rounded-workbench-surface text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
+                className="grid size-workbench-control place-items-center rounded-workbench-surface text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text"
               >
                 <ChevronRight size={14} className={`transition ${open ? "rotate-90" : ""}`} />
               </button>

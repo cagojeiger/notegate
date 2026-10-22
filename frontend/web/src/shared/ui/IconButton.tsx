@@ -33,6 +33,7 @@ export function IconButton({
     <button
       type="button"
       aria-label={label}
+      title={label}
       aria-pressed={pressed}
       aria-expanded={expanded}
       aria-controls={controls}
@@ -40,7 +41,7 @@ export function IconButton({
       onClick={onClick}
       disabled={disabled}
       autoFocus={autoFocus}
-      className={`grid place-items-center text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-40 ${sizeClass} ${active ? "bg-panel-strong text-text" : ""}`}
+      className={`grid shrink-0 place-items-center text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-not-allowed disabled:opacity-40 ${sizeClass} ${active ? "bg-panel-strong text-text" : ""}`}
     >
       {children}
     </button>

@@ -2,7 +2,7 @@ import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query
 import { History, RefreshCw } from "lucide-react";
 
 import type { AuditEventListResponse, BackgroundJobListResponse, CommandInvocationListResponse, FileChangeEventListResponse } from "../../api/types";
-import { Button, EmptyState } from "../../shared/ui";
+import { Button, EmptyState, IconButton } from "../../shared/ui";
 import { formatEventTime, formatEventTimeCompact } from "./eventDisplay";
 
 export type EventListResponse = AuditEventListResponse | BackgroundJobListResponse | CommandInvocationListResponse | FileChangeEventListResponse;
@@ -18,9 +18,9 @@ export function RefreshButton({
   disabled?: boolean;
 }) {
   return (
-    <Button size="sm" secondary aria-label="Refresh" title="Refresh" className="min-w-workbench-control" onClick={onRefresh} disabled={disabled || isFetching}>
-      <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /><span className="hidden sm:inline">Refresh</span>
-    </Button>
+    <IconButton label="Refresh" onClick={onRefresh} disabled={disabled || isFetching}>
+      <RefreshCw size={16} className={isFetching ? "animate-spin" : ""} />
+    </IconButton>
   );
 }
 

@@ -138,7 +138,7 @@ export function DocxPreview({
       <iframe
         ref={frameRef}
         className={status === "ready"
-          ? "min-h-0 flex-1 border-0 bg-bg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+          ? "min-h-0 flex-1 border-0 bg-bg outline-none"
           : "hidden"}
         title={`${name} DOCX document`}
         sandbox="allow-same-origin"

@@ -101,7 +101,7 @@ function ComparisonContent({ rows }: { rows: DiffRow[] }) {
           <Button secondary size="xs" aria-label="Next change" disabled={activeChange === changes.length - 1} onClick={() => navigate(activeChange + 1)}><ChevronDown size={16} aria-hidden="true" /></Button>
         </div>
       </div>
-      <div ref={viewport} role="region" tabIndex={0} className="min-h-36 flex-1 overflow-auto rounded-workbench border border-seam outline-none focus-visible:ring-2 focus-visible:ring-primary/45 md:min-h-0" aria-label="Version comparison">
+      <div ref={viewport} role="region" tabIndex={0} className="min-h-36 flex-1 overflow-auto rounded-workbench border border-seam outline-none md:min-h-0" aria-label="Version comparison">
         <div ref={heading} className="sticky top-0 z-10 border-b border-seam bg-panel">
           <div className="hidden grid-cols-2 text-workbench font-medium md:grid">
             <div className="p-3">Selected version · − removed</div><div className="border-l border-seam p-3">Current saved version · + added</div>

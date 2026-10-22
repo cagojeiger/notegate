@@ -74,7 +74,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
       </div>
     }>
       <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
-        <button ref={versionPicker} type="button" aria-label={versionLabel === "Choose saved version" ? versionLabel : `Choose saved version: ${versionLabel}`} aria-controls={versionsId} aria-expanded={versionsOpen} disabled={restore.isPending} onClick={() => setVersionsOpen(!versionsOpen)} className="flex min-h-workbench-control shrink-0 items-center justify-between gap-2 rounded-workbench border border-border-strong bg-surface px-3 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary/45 md:hidden">
+        <button ref={versionPicker} type="button" aria-label={versionLabel === "Choose saved version" ? versionLabel : `Choose saved version: ${versionLabel}`} aria-controls={versionsId} aria-expanded={versionsOpen} disabled={restore.isPending} onClick={() => setVersionsOpen(!versionsOpen)} className="flex min-h-workbench-control shrink-0 items-center justify-between gap-2 rounded-workbench border border-border-strong bg-surface px-3 text-left text-xs outline-none md:hidden">
           <span>{versionLabel}</span>
           <ChevronDown size={16} aria-hidden="true" className={`shrink-0 ${versionsOpen ? "rotate-180" : ""}`} />
         </button>
@@ -128,7 +128,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
 
 function VersionPreview({ node, content, identity }: { node: RestNode; content: string; identity: string }) {
   const showToast = useUiStore((state) => state.showToast);
-  return <div role="region" aria-label="Version preview" tabIndex={0} className="flex min-h-36 flex-1 shrink-0 overflow-auto rounded-workbench border border-seam outline-none focus-visible:ring-2 focus-visible:ring-primary/45 md:min-h-0 md:shrink" onClickCapture={(event) => {
+  return <div role="region" aria-label="Version preview" tabIndex={0} className="flex min-h-36 flex-1 shrink-0 overflow-auto rounded-workbench border border-seam outline-none md:min-h-0 md:shrink" onClickCapture={(event) => {
     if (event.target instanceof Element && event.target.closest("a[href]")) {
       event.preventDefault();
       event.stopPropagation();

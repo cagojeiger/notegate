@@ -72,7 +72,7 @@ export function HelpTooltip({
     >
       <button
         type="button"
-        className="inline-grid size-workbench-control shrink-0 place-items-center rounded-workbench text-muted outline-none hover:bg-panel-strong hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45 md:size-6"
+        className="inline-grid size-workbench-control shrink-0 place-items-center rounded-workbench text-muted outline-none hover:bg-panel-strong hover:text-text md:size-6"
         aria-label={label}
         aria-describedby={tooltipId}
         onClick={() => {
