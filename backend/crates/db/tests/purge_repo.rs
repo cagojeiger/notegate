@@ -448,7 +448,7 @@ async fn purge_deletes_expired_history_in_bounded_batches() -> Result<(), Box<dy
          (created_at, owner_user_id, actor_account_id, source, op_type, resource_type, metadata) \
          SELECT now() - interval '181 days', $1, $1, 'rest', 'test.expired', 'test', \
                 jsonb_build_object('sequence', value) \
-         FROM generate_series(1, 1001) AS value",
+         FROM generate_series(1, 1002) AS value",
     )
     .bind(user)
     .execute(&db.pool)
@@ -467,7 +467,7 @@ async fn purge_deletes_expired_history_in_bounded_batches() -> Result<(), Box<dy
          (created_at, space_id, actor_account_id, op_type, metadata, snapshot_id, private_metadata) \
          SELECT now() - interval '91 days', $1, $2, 'test.expired', \
                 jsonb_build_object('sequence', value), '00000000-0000-0000-0000-000000000000'::uuid, $3 \
-         FROM generate_series(1, 1001) AS value",
+         FROM generate_series(1, 1003) AS value",
     )
     .bind(space_id)
     .bind(user)
@@ -494,7 +494,7 @@ async fn purge_deletes_expired_history_in_bounded_batches() -> Result<(), Box<dy
                 'application/octet-stream', \
                 CASE WHEN value % 2 = 0 THEN 'expired' ELSE 'deleted' END, \
                 now() - interval '181 days', now() - interval '181 days' \
-         FROM generate_series(1, 1001) AS value",
+         FROM generate_series(1, 1004) AS value",
     )
     .bind(&object_key_prefix)
     .execute(&db.pool)
@@ -510,6 +510,7 @@ async fn purge_deletes_expired_history_in_bounded_batches() -> Result<(), Box<dy
     .execute(&db.pool)
     .await?;
 
+    // Distinct remainders also detect swapped per-table counters in PurgeRun.
     let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
     assert_eq!(first.command_invocations_deleted, 1_000);
     assert_eq!(first.audit_events_deleted, 1_000);
@@ -517,9 +518,9 @@ async fn purge_deletes_expired_history_in_bounded_batches() -> Result<(), Box<dy
     assert_eq!(first.object_storage_history_deleted, 1_000);
     let second = PurgeRepo::new(db.pool.clone()).run_once().await?;
     assert_eq!(second.command_invocations_deleted, 1);
-    assert_eq!(second.audit_events_deleted, 1);
-    assert_eq!(second.file_change_events_deleted, 1);
-    assert_eq!(second.object_storage_history_deleted, 1);
+    assert_eq!(second.audit_events_deleted, 2);
+    assert_eq!(second.file_change_events_deleted, 3);
+    assert_eq!(second.object_storage_history_deleted, 4);
 
     let remaining: Vec<String> = sqlx::query_scalar(
         "SELECT surface FROM command_invocations WHERE owner_user_id = $1 ORDER BY id",
