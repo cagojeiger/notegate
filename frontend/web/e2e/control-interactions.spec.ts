@@ -5,6 +5,7 @@ import type { RestNode } from "../src/api/types";
 import { makeRestNode, makeSpace } from "../src/test/fixtures";
 import { routeJsonApi } from "./support/api";
 import { usageResponse } from "./support/usage";
+import { expectOutlineContrast, setFocusTestTheme } from "./support/focus";
 import { openSettings, showSettingsInspector, closeSettingsInspector } from "./support/settings";
 
 async function mockWorkbench(page: Page, nodeCount = 1, nodeOverrides: Partial<RestNode> = {}) {
@@ -62,6 +63,43 @@ async function mockAgentManagement(page: Page) {
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(path.endsWith("/keys") ? { keys: [] } : { agents }) });
   });
   await page.route("**/api/v1/spaces/*/agents?*", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connections: [] }) }));
+}
+
+for (const theme of ["light", "dark"] as const) {
+  for (const width of [1440, 390]) {
+    test(`filled controls keep a contrasting keyboard focus in ${theme} mode at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 });
+      await mockWorkbench(page);
+      await page.goto("/");
+      await setFocusTestTheme(page, theme);
+      await page.getByRole("button", { name: "New folder", exact: true }).focus();
+      await page.keyboard.press("Shift+Tab");
+      const primary = page.getByRole("button", { name: "New document", exact: true });
+      await expect(primary).toBeFocused();
+      await expectOutlineContrast(primary);
+      await page.screenshot({ path: testInfo.outputPath("primary-focus.png") });
+      await primary.hover();
+      await expectOutlineContrast(primary);
+
+      await page.getByRole("button", { name: "Open space library", exact: true }).click();
+      if (width < 768) await page.getByRole("button", { name: "Inspect Daily" }).click();
+      const toggle = page.getByRole("switch", { name: "Pin to navigation", exact: true });
+      await toggle.focus();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      await expect(toggle).toBeFocused();
+      await expect(toggle).toHaveAttribute("aria-checked", "true");
+      await expectOutlineContrast(toggle.locator(":scope > span"));
+      await page.keyboard.press("Space");
+      await expect(toggle).toHaveAttribute("aria-checked", "false");
+      await expect(toggle).toBeEnabled();
+      await toggle.focus();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      await expect(toggle).toBeFocused();
+      await expectOutlineContrast(toggle.locator(":scope > span"));
+    });
+  }
 }
 
 async function expectUnclippedDecoration(decoration: Locator) {

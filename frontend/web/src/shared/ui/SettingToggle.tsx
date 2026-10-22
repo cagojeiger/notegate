@@ -38,8 +38,9 @@ export function SettingToggle({
         className="grid min-h-[var(--ng-min-target-size)] min-w-[var(--ng-min-target-size)] shrink-0 place-items-center rounded-workbench outline-none transition disabled:cursor-not-allowed disabled:opacity-40"
       >
         <span
+          data-switch-track
           aria-hidden="true"
-          className={`relative block h-6 w-10 rounded-full transition ${checked ? "bg-primary" : "bg-panel-strong"}`}
+          className={`relative block h-6 w-10 rounded-full transition ${checked ? "bg-primary [--ng-control-focus-color:var(--ng-primary-contrast)]" : "bg-panel-strong"}`}
         >
           <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow-sm transition ${checked ? "left-[18px]" : "left-0.5"}`} />
         </span>

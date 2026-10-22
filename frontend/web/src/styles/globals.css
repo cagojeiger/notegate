@@ -43,9 +43,16 @@ button:not(:disabled):active {
   transform: translateY(0.5px);
 }
 
-:where(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--ng-focus-ring);
+:where(button, a, input, textarea, select, summary, [tabindex]):focus-visible,
+[role="switch"]:focus-visible > [data-switch-track],
+[data-docx-preview][data-frame-focused="true"] {
+  outline: 2px solid var(--ng-control-focus-color, var(--ng-focus-ring));
   outline-offset: -2px;
+}
+
+/* The track owns the switch's visible surface; its hit area can be larger. */
+[role="switch"]:focus-visible {
+  outline: none;
 }
 
 /* Keep focus inside scrolling controls; overflow hints belong to the tab viewport. */

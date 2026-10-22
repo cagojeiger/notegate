@@ -4,6 +4,7 @@ import type { Me, RestNode, Space } from "../src/api/types";
 import { expectNoAccessibilityViolations } from "./support/accessibility";
 import { routeJsonApi } from "./support/api";
 import { usageResponse } from "./support/usage";
+import { expectOutlineContrast, setFocusTestTheme } from "./support/focus";
 
 const space: Space = {
   id: "space-1",
@@ -74,6 +75,36 @@ const docxNode: RestNode = {
   preview_available: false,
   file_preview_kind: "docx"
 };
+
+for (const theme of ["light", "dark"] as const) {
+  for (const width of [1440, 390]) {
+    test(`DOCX keyboard entry keeps a visible focus boundary in ${theme} mode at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 });
+      await mockFilePreviewApi(page);
+      await page.goto("/");
+      await setFocusTestTheme(page, theme);
+      if (width < 768) await page.getByRole("button", { name: "Toggle left sidebar", exact: true }).click();
+      await page.getByRole("button", { name: docxNode.name, exact: true }).click();
+      const preview = page.getByRole("region", { name: `${docxNode.name} DOCX preview`, exact: true });
+      const frame = page.getByTitle(`${docxNode.name} DOCX document`, { exact: true });
+      await expect(page.frameLocator(`iframe[title="${docxNode.name} DOCX document"]`).getByText("NoteGate DOCX preview", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "More actions", exact: true }).focus();
+      await page.keyboard.press("Tab");
+      await expect(frame).toBeFocused();
+      await page.screenshot({ path: testInfo.outputPath("docx-focus.png") });
+      await expectOutlineContrast(preview);
+      await page.keyboard.press("Tab");
+      await expect(frame).not.toBeFocused();
+      await expect(preview).toHaveCSS("outline-style", "none");
+      await page.keyboard.press("Shift+Tab");
+      await expect(frame).toBeFocused();
+      await expectOutlineContrast(preview);
+      await page.keyboard.press("Shift+Tab");
+      await expect(page.getByRole("button", { name: "More actions", exact: true })).toBeFocused();
+      await expect(preview).toHaveCSS("outline-style", "none");
+    });
+  }
+}
 
 for (const viewport of [
   { name: "wide desktop", width: 1920, height: 1080, mobile: false },

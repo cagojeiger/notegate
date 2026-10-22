@@ -75,6 +75,21 @@ export function DocxPreview({
   const frameRef = useRef<HTMLIFrameElement>(null);
   const onErrorRef = useRef(onError);
   const [status, setStatus] = useState<PreviewStatus>("loading");
+  const [frameFocused, setFrameFocused] = useState(false);
+
+  useEffect(() => {
+    const frameWindow = frameRef.current?.contentWindow;
+    if (!frameWindow) return;
+    // Native Tab enters the child document without matching iframe:focus-visible.
+    const onFocus = () => setFrameFocused(true);
+    const onBlur = () => setFrameFocused(false);
+    frameWindow.addEventListener("focus", onFocus);
+    frameWindow.addEventListener("blur", onBlur);
+    return () => {
+      frameWindow.removeEventListener("focus", onFocus);
+      frameWindow.removeEventListener("blur", onBlur);
+    };
+  }, []);
 
   useEffect(() => {
     onErrorRef.current = onError;
@@ -128,6 +143,7 @@ export function DocxPreview({
   return (
     <div
       data-docx-preview
+      data-frame-focused={frameFocused || undefined}
       className="relative flex min-h-0 flex-1 overflow-hidden bg-bg"
       role="region"
       aria-label={`${name} DOCX preview`}
