@@ -79,7 +79,7 @@ FROM dependencies AS builder
 
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY backend ./backend
-COPY frontend/web/src/design/theme.css ./frontend/web/src/design/theme.css
+COPY frontend/web/src/design/theme.css frontend/web/src/design/auth.css ./frontend/web/src/design/
 COPY frontend/web/public/brand/svg/logo-horizontal-light.svg frontend/web/public/brand/svg/logo-horizontal-dark.svg ./frontend/web/public/brand/svg/
 RUN --mount=type=cache,id=notegate-sccache,target=/sccache,sharing=locked \
     cargo build --release --locked --bin notegate-api \

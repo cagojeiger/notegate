@@ -8,7 +8,7 @@ use crate::state::AppState;
 const STYLES: &str = concat!(
     include_str!("../../../../../frontend/web/src/design/theme.css"),
     "\n",
-    include_str!("page.css")
+    include_str!("../../../../../frontend/web/src/design/auth.css")
 );
 const SCRIPT: &str = include_str!("page.js");
 const BRAND_LIGHT: &str =
@@ -90,12 +90,13 @@ fn document(title: &str, body: &str) -> String {
         r#"<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{title} · NoteGate</title><link rel="stylesheet" href="/auth/ui.css">
-<script src="/auth/ui.js"></script></head><body>
+<script src="/auth/ui.js"></script></head><body class="ng-auth-screen">
 <div class="auth-shell"><header class="auth-header">
 <a class="auth-brand" href="/" aria-label="NoteGate home"><span class="auth-brand-light" aria-hidden="true">{BRAND_LIGHT}</span><span class="auth-brand-dark" aria-hidden="true">{BRAND_DARK}</span></a>
-<button id="auth-theme" type="button" hidden>Change theme</button></header>
+<button id="auth-theme" class="auth-theme" type="button" hidden>Change theme</button></header>
 <main class="auth-card" aria-labelledby="page-title"><h1 id="page-title">{title}</h1>{body}</main>
-<footer class="auth-footer"><a href="/">Back to NoteGate</a></footer></div></body></html>"#
+<footer class="auth-footer"><a href="/">Back to NoteGate</a>
+<nav class="auth-links" aria-label="Legal and support"><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/support">Support</a></nav></footer></div></body></html>"#
     )
 }
 
@@ -149,6 +150,16 @@ mod tests {
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(html.contains("/auth/ui.css"));
         assert!(html.contains("/auth/ui.js"));
+        assert!(html.contains(r#"<body class="ng-auth-screen">"#));
+        assert!(html.contains(r#"<a href="/">Back to NoteGate</a>"#));
+        assert!(html.contains(r#"aria-label="Legal and support""#));
+        for (path, label) in [
+            ("/terms", "Terms"),
+            ("/privacy", "Privacy"),
+            ("/support", "Support"),
+        ] {
+            assert!(html.contains(&format!(r#"<a href="{path}">{label}</a>"#)));
+        }
         assert!(!html.contains("<script>alert"));
         Ok(())
     }

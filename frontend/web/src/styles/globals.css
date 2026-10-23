@@ -1,6 +1,7 @@
 @import "../design/theme.css";
 
 @import "tailwindcss";
+@import "../design/auth.css" layer(components);
 @config "../../tailwind.config.ts";
 
 * {
@@ -87,32 +88,6 @@ button:not(:disabled):active {
   background: var(--ng-editor-selection);
 }
 
-.ng-auth-screen {
-  position: relative;
-  isolation: isolate;
-  overflow-x: hidden;
-  overflow-y: auto;
-  background: var(--ng-bg);
-}
-
-.ng-auth-backdrop-mark {
-  position: absolute;
-  z-index: 0;
-  top: 50%;
-  right: clamp(-270px, -13vw, -120px);
-  width: clamp(520px, 52vw, 760px);
-  height: auto;
-  color: var(--ng-brand-ink);
-  opacity: 0.055;
-  pointer-events: none;
-  transform: translateY(-48%);
-}
-
-:root[data-theme="dark"] .ng-auth-backdrop-mark {
-  color: var(--ng-primary);
-  opacity: 0.09;
-}
-
 .ng-brand-theme-dark {
   display: none;
 }
@@ -130,6 +105,7 @@ button:not(:disabled):active {
   user-select: none;
   display: inline-flex;
   height: 40px;
+  min-height: var(--ng-min-target-size);
   width: 100%;
   max-width: 400px;
   align-items: center;
@@ -158,12 +134,6 @@ button:not(:disabled):active {
 .ng-google-button:disabled {
   cursor: default;
   opacity: 0.38;
-}
-
-@media (max-width: 720px) {
-  .ng-auth-backdrop-mark {
-    display: none;
-  }
 }
 
 .markdown {

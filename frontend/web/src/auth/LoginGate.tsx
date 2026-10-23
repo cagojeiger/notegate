@@ -1,101 +1,30 @@
-import { useEffect } from "react";
-import { Moon, ShieldCheck, Sun } from "lucide-react";
-
-import { persistTheme, useUiStore } from "../stores/uiStore";
-import { PublicInformationLinks } from "../features/public-information/PublicInformationLinks";
-import { BrandLockup, Card, IconButton } from "../shared/ui";
+import { Notice } from "../shared/ui";
+import { AuthPage } from "./AuthPage";
 import { useLoginGateController, type LoginGateControllerProps } from "./useLoginGateController";
 
 export function LoginGate(controllerProps: LoginGateControllerProps) {
   const auth = useLoginGateController(controllerProps);
-  const theme = useUiStore((state) => state.theme);
-  const toggleTheme = useUiStore((state) => state.toggleTheme);
-
-  useEffect(() => {
-    persistTheme(theme);
-  }, [theme]);
 
   return (
-    <main className="ng-auth-screen grid h-full overflow-y-auto px-6 py-10 text-text">
-      <AuthBackdropMark />
-
-      <div className="absolute right-4 top-4 z-10">
-        <IconButton label={`Use ${theme === "light" ? "dark" : "light"} theme`} onClick={toggleTheme}>
-          {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
-        </IconButton>
-      </div>
-
-      <section className="relative z-10 m-auto w-full max-w-[420px]">
-        <header className="mb-7 text-center">
-          <BrandLockup className="w-[190px]" />
-          <p className="mx-auto mt-4 max-w-sm text-sm leading-6 text-muted">
-            Your notes and files, ready for you and your AI.
-          </p>
-        </header>
-
-        <Card
-          className="w-full border-border bg-surface p-6 shadow-[var(--ng-focus-shadow)] sm:p-7"
-          aria-labelledby="auth-title"
-        >
-          <div className="mb-6">
-            <h1 id="auth-title" className="text-2xl font-semibold tracking-tight">Continue to NoteGate</h1>
-            <p className="mt-2 text-sm leading-6 text-muted">Sign in with your connected Google account to open your Spaces.</p>
-          </div>
-
-          <button type="button" className="ng-google-button" onClick={auth.startLogin}>
-            <GoogleMark />
-            Continue with Google
-          </button>
-
-          <a
-            href={auth.loginHref}
-            target="notegate-login"
-            onClick={() => auth.beginPolling(null)}
-            className="mt-3 block rounded-workbench text-center text-xs text-muted underline underline-offset-2 hover:text-text"
-          >
-            Open Google sign-in in a new window
-          </a>
-
-          <div className="mt-6 flex gap-2.5 rounded-workbench-surface border border-border bg-panel p-3 text-xs leading-5 text-muted">
-            <ShieldCheck className="mt-0.5 text-success" size={16} aria-hidden="true" />
-            <p>Your Google password stays with Google.</p>
-          </div>
-
-          {auth.loginHint ? (
-            <Card className="mt-3 text-xs leading-5 text-muted" padding="sm" role="status" aria-live="polite">
-              {auth.loginHint}
-            </Card>
-          ) : null}
-        </Card>
-        <footer className="mt-5">
-          <PublicInformationLinks />
-          <a href="/signup/preview" className="mt-2 flex min-h-[var(--ng-min-target-size)] items-center justify-center rounded text-xs text-muted underline underline-offset-4 hover:text-text">
-            Preview account setup
-          </a>
-        </footer>
-      </section>
-    </main>
+    <AuthPage
+      title="Continue to NoteGate"
+      footer={<a href="/signup/preview">Preview account setup</a>}
+    >
+      <p className="mb-6 text-sm leading-6 text-muted">Sign in with your connected Google account to open your Spaces.</p>
+      <button type="button" className="ng-google-button" onClick={auth.startLogin}>
+        <img src="/google-g.png" className="size-5 object-contain" alt="" aria-hidden="true" />
+        Continue with Google
+      </button>
+      <a
+        href={auth.loginHref}
+        target="notegate-login"
+        onClick={() => auth.beginPolling(null)}
+        className="mt-3 block rounded text-center text-xs underline underline-offset-2"
+      >
+        Open Google sign-in in a new window
+      </a>
+      <Notice className="mt-6" title="About sign-in"><p>Your Google password stays with Google.</p></Notice>
+      {auth.loginHint ? <Notice className="mt-3" role="status" aria-live="polite">{auth.loginHint}</Notice> : null}
+    </AuthPage>
   );
-}
-
-function AuthBackdropMark() {
-  return (
-    <svg className="ng-auth-backdrop-mark" viewBox="0 0 512 512" aria-hidden="true">
-      <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M116 410V102a30 30 0 0 1 30-30h210" strokeWidth="24" />
-        <path d="M116 410h240" strokeWidth="24" />
-        <path d="M198 176v160M198 228h80M198 304h80" strokeWidth="18" />
-      </g>
-      <g fill="currentColor">
-        <rect x="174" y="150" width="48" height="48" rx="9" />
-        <rect x="270" y="204" width="58" height="48" rx="9" />
-        <rect x="270" y="280" width="58" height="48" rx="9" />
-        <path d="M342 112 430 66v380l-88-46V112Z" />
-      </g>
-    </svg>
-  );
-}
-
-function GoogleMark() {
-  return <img src="/google-g.png" className="size-5 object-contain" alt="" aria-hidden="true" />;
 }

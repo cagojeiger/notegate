@@ -3,6 +3,10 @@ import { createServer } from "node:http";
 import { expect, test, type Page } from "@playwright/test";
 
 async function captureAuthViews(page: Page, name: string) {
+  const links = page.getByRole("navigation", { name: "Legal and support" });
+  for (const [label, path] of [["Terms", "/terms"], ["Privacy", "/privacy"], ["Support", "/support"]]) {
+    await expect(links.getByRole("link", { name: label, exact: true })).toHaveAttribute("href", path);
+  }
   for (const theme of ["light", "dark"] as const) {
     for (const [device, width, height] of [["desktop", 1440, 900], ["mobile", 390, 844]] as const) {
       await page.setViewportSize({ width, height });
@@ -44,6 +48,7 @@ test("standalone CLI approval and connection revocation", async ({ browser, play
     const approvalPage = await page.goto(device.verification_uri_complete);
     expect(approvalPage?.headers()["content-security-policy"]).toBe("default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
     await expect(page.getByRole("heading", { name: "Connect NoteGate CLI" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "Check the code", exact: true })).toBeVisible();
     await captureAuthViews(page, "oauth-device");
     const approvalRequest = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/oauth/device");
     await page.getByRole("button", { name: "Connect CLI", exact: true }).click();
@@ -62,6 +67,7 @@ test("standalone CLI approval and connection revocation", async ({ browser, play
     expect(typeof tokens.access_token).toBe("string");
     await page.goto("/oauth/connections");
     await expect(page.getByRole("heading", { name: "Connected applications" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "Revoking access", exact: true })).toBeVisible();
     await expect(page.getByText("NoteGate CLI", { exact: true })).toBeVisible();
     await captureAuthViews(page, "oauth-connections");
     await page.screenshot({ path: "test-results/browser-functional/oauth-connections.png" });
@@ -110,6 +116,7 @@ test("standalone MCP consent follows its registered callback and exchanges the P
     const page = await context.newPage();
     await page.goto(`/oauth/approve?id=${fixture.id}`);
     await expect(page.getByRole("heading", { name: "Connect application" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "Before you allow access", exact: true })).toBeVisible();
     await captureAuthViews(page, "oauth-consent");
     await page.getByRole("button", { name: "Allow access", exact: true }).click();
     await expect(page).toHaveURL(`${callback.origin}/done`);

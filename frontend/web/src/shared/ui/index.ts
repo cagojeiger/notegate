@@ -13,6 +13,7 @@ export { MenuButton } from "./MenuButton";
 export { ListItemButton } from "./ListItemButton";
 export { MetaRow } from "./MetaRow";
 export { Modal } from "./Modal";
+export { Notice } from "./Notice";
 export { PanelHeader } from "./PanelHeader";
 export { PanelSection } from "./PanelSection";
 export { ResizeSeparator } from "./ResizeSeparator";
