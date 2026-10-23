@@ -1,3 +1,4 @@
+use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
@@ -31,17 +32,25 @@ pub struct LoginQuery {
 pub async fn login(
     State(state): State<AppState>,
     jar: CookieJar,
-    Query(query): Query<LoginQuery>,
+    query: Result<Query<LoginQuery>, QueryRejection>,
 ) -> Response {
+    let Query(query) = match query {
+        Ok(query) => query,
+        Err(error) => return invalid_query(error.status()),
+    };
     super::standalone_login::login(&state, jar, sanitize_next(query.next.as_deref())).await
 }
 
 pub async fn callback(
     State(state): State<AppState>,
     jar: CookieJar,
-    Query(query): Query<CallbackQuery>,
+    query: Result<Query<CallbackQuery>, QueryRejection>,
     headers: HeaderMap,
 ) -> Response {
+    let Query(query) = match query {
+        Ok(query) => query,
+        Err(error) => return invalid_query(error.status()),
+    };
     super::standalone_login::callback(
         &state,
         jar,
@@ -53,6 +62,14 @@ pub async fn callback(
             .and_then(|value| value.to_str().ok()),
     )
     .await
+}
+
+fn invalid_query(status: StatusCode) -> Response {
+    html_page(
+        status,
+        "Login failed",
+        "The sign-in request is incomplete or invalid. Return to NoteGate and start a new sign-in.",
+    )
 }
 
 pub(super) async fn complete_login(
@@ -92,7 +109,7 @@ pub(super) async fn complete_login(
                     html_page(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Login failed",
-                        "Account lookup failed",
+                        "NoteGate could not look up your account. Return to NoteGate and start a new sign-in. If this continues, contact the operator.",
                     ),
                 )
                     .into_response();
@@ -112,7 +129,7 @@ pub(super) async fn complete_login(
                         html_page(
                             StatusCode::INTERNAL_SERVER_ERROR,
                             "Login error",
-                            "internal error",
+                            "Sign-in could not be completed. Return to NoteGate and start a new sign-in. If this continues, contact the operator.",
                         ),
                     )
                         .into_response();
@@ -126,7 +143,11 @@ pub(super) async fn complete_login(
         }
         Err(IdentityError::Inactive) => (
             jar,
-            html_page(StatusCode::FORBIDDEN, "Login forbidden", "user is inactive"),
+            html_page(
+                StatusCode::FORBIDDEN,
+                "Login forbidden",
+                "This account is inactive. Contact the operator if you need help.",
+            ),
         )
             .into_response(),
         Err(IdentityError::InvalidInput) => (
@@ -134,7 +155,7 @@ pub(super) async fn complete_login(
             html_page(
                 StatusCode::BAD_REQUEST,
                 "Login error",
-                "identity attributes exceed NoteGate limits",
+                "The identity provider returned account details NoteGate cannot use. Contact the operator before trying again.",
             ),
         )
             .into_response(),
@@ -145,7 +166,7 @@ pub(super) async fn complete_login(
                 html_page(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Login error",
-                    "internal error",
+                    "Sign-in could not be completed. Return to NoteGate and start a new sign-in. If this continues, contact the operator.",
                 ),
             )
                 .into_response()
@@ -157,7 +178,7 @@ pub async fn success() -> Response {
     super::page::browser_page(
         StatusCode::OK,
         "Login complete",
-        r#"<p>You can close this tab and return to NoteGate.</p><script src="/auth/login-complete.js" defer></script>"#,
+        r#"<section class="auth-note auth-note--success" aria-labelledby="completion-title"><h2 id="completion-title">Next step</h2><p>You can close this tab and return to NoteGate.</p></section><script src="/auth/login-complete.js" defer></script>"#,
         None,
     )
 }

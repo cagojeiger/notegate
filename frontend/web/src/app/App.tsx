@@ -58,6 +58,7 @@ function AuthBoundary({
   sessionRevision: number;
   onSessionChanged: () => void;
 }) {
+  const [isRetryingAuth, setIsRetryingAuth] = useState(false);
   const meQuery = useSessionQuery(sessionRevision);
   const me = meQuery.data;
   const authViewState = deriveAuthViewState({
@@ -76,15 +77,24 @@ function AuthBoundary({
   useBrowserSessionActivity(authViewState.kind === "authenticated" && accountId === cacheOwner, onSessionChanged);
 
   // A different successful /me response must never render against the previous owner's cache.
-  if (authViewState.kind === "checking" || replaceCache || (accountId !== null && cacheOwner === null)) return <FullScreenStatus label="Checking session" />;
+  if (authViewState.kind === "checking" || replaceCache || (accountId !== null && cacheOwner === null)) {
+    return (
+      <AuthPage title="Checking session">
+        <Notice role="status" aria-busy="true"><p>Checking your existing browser session…</p></Notice>
+      </AuthPage>
+    );
+  }
 
-  if (authViewState.kind === "temporarilyUnavailable") {
+  if (authViewState.kind === "temporarilyUnavailable" || isRetryingAuth) {
     return (
       <AuthPage title="Authentication temporarily unavailable">
         <Notice role="status"><p>Your session was not cleared. Try again once the auth service is reachable.</p></Notice>
         <div className="auth-actions">
-          <Button className="auth-primary" onClick={() => void meQuery.refetch()} disabled={meQuery.isFetching}>
-            Retry
+          <Button className="auth-primary" aria-label="Retry" aria-busy={isRetryingAuth} onClick={() => {
+            setIsRetryingAuth(true);
+            void meQuery.refetch().finally(() => setIsRetryingAuth(false));
+          }} disabled={isRetryingAuth || meQuery.isFetching}>
+            {isRetryingAuth ? "Retrying…" : "Retry"}
           </Button>
         </div>
       </AuthPage>

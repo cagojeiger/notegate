@@ -19,7 +19,7 @@ export function LoginGate(controllerProps: LoginGateControllerProps) {
         href={auth.loginHref}
         target="notegate-login"
         onClick={() => auth.beginPolling(null)}
-        className="mt-3 block rounded text-center text-xs underline underline-offset-2"
+        className="mt-3 flex min-h-11 items-center justify-center rounded text-center text-xs underline underline-offset-2"
       >
         Open Google sign-in in a new window
       </a>

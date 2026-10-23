@@ -45,7 +45,10 @@ pub fn html_page(status: StatusCode, title: &str, body: &str) -> Response {
     browser_page(
         status,
         title,
-        &format!("<p>{}</p>", escape_html(body)),
+        &format!(
+            r#"<section class="auth-note auth-note--danger" aria-labelledby="recovery-title"><h2 id="recovery-title">What to do next</h2><p>{}</p></section>"#,
+            escape_html(body)
+        ),
         None,
     )
 }
@@ -150,6 +153,8 @@ mod tests {
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(html.contains("/auth/ui.css"));
         assert!(html.contains("/auth/ui.js"));
+        assert!(html.contains(r#"class="auth-note auth-note--danger""#));
+        assert!(html.contains("What to do next"));
         assert!(html.contains(r#"<body class="ng-auth-screen">"#));
         assert!(html.contains(r#"<a href="/">Back to NoteGate</a>"#));
         assert!(html.contains(r#"aria-label="Legal and support""#));

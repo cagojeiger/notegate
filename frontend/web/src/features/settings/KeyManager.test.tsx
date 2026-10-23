@@ -300,4 +300,47 @@ describe("KeyManager", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Add API key" })).toHaveFocus());
     expect(create).not.toHaveBeenCalled();
   });
+
+  it("keeps key creation retryable and never exposes a token after a failed request", async () => {
+    let rejectCreation: (error: Error) => void = () => undefined;
+    const create = vi.fn()
+      .mockImplementationOnce(() => new Promise<MintedKey>((_resolve, reject) => { rejectCreation = reject; }))
+      .mockResolvedValue({ id: "key-1", name: "ci-key", token: "preview-token-not-a-credential", expires_at: "2026-10-31T00:00:00Z", created_at: "2026-10-01T00:00:00Z" });
+    const user = userEvent.setup();
+    renderKeyManager({ create });
+    await screen.findByText("No active keys.");
+    await user.type(screen.getByLabelText("Name"), "ci-key");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    await act(async () => { rejectCreation(new Error("Unavailable")); });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not create this key.");
+    expect(screen.getByLabelText("Name")).toHaveValue("ci-key");
+    expect(screen.queryByRole("button", { name: "Copy token" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    expect(await screen.findByRole("button", { name: "Copy token" })).toBeEnabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a one-time token visible after copy failure and excludes it from announcements", async () => {
+    const token = "preview-token-not-a-credential";
+    const create = vi.fn().mockResolvedValue({ id: "key-1", name: "ci-key", token, expires_at: "2026-10-31T00:00:00Z", created_at: "2026-10-01T00:00:00Z" });
+    const user = userEvent.setup();
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new Error("Denied")).mockResolvedValue(undefined);
+    renderKeyManager({ create });
+    await screen.findByText("No active keys.");
+    await user.type(screen.getByLabelText("Name"), "ci-key");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await user.click(await screen.findByRole("button", { name: "Copy token" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not copy token.");
+    expect(screen.getByText(token)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).not.toHaveTextContent(token);
+    expect(screen.getByRole("status")).not.toHaveTextContent(token);
+    await user.click(screen.getByRole("button", { name: "Copy token" }));
+    expect(await screen.findByText("Token copied.")).toHaveAttribute("role", "status");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByText(token)).not.toBeInTheDocument();
+    expect(screen.queryByText("Token copied.")).not.toBeInTheDocument();
+  });
 });

@@ -23,8 +23,10 @@ export function FullScreenStatus({
         {variant === "loading" ? (
           <Loader2 className="mx-auto mb-3 animate-spin text-primary" size={20} aria-hidden="true" />
         ) : null}
-        <div className="font-semibold">{label}</div>
-        {detail ? <div className="mt-2 max-w-md text-sm text-muted">{detail}</div> : null}
+        <div role="status" aria-busy={variant === "loading"}>
+          <div className="font-semibold">{label}</div>
+          {detail ? <div className="mt-2 max-w-md text-sm text-muted">{detail}</div> : null}
+        </div>
         {action ? <div className="mt-4">{action}</div> : null}
       </div>
     </main>

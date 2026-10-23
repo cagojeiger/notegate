@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -37,6 +37,23 @@ describe("App auth boundary", () => {
     );
     const [, init] = fetchMock.mock.calls[0];
     expect((init?.headers as Headers).has("authorization")).toBe(false);
+  });
+
+  it("keeps the initial session check in the shared authentication page until it completes", async () => {
+    let completeCheck: (response: Response) => void = () => undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>((resolve) => { completeCheck = resolve; }));
+
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: "Checking session" })).toBeInTheDocument();
+    expect(screen.getByRole("main")).toHaveClass("ng-auth-screen");
+    expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("link", { name: "Privacy" })).toHaveAttribute("href", "/privacy");
+    expect(screen.queryByRole("button", { name: "Continue with Google" })).not.toBeInTheDocument();
+
+    await act(async () => { completeCheck(new Response(JSON.stringify({ error: "unauthorized", kind: "unauthorized", message: "unauthorized" }), { status: 401 })); });
+
+    expect(await screen.findByRole("heading", { name: "Continue to NoteGate" })).toBeInTheDocument();
   });
 
   it("shows the login gate when the browser session is missing", async () => {
@@ -92,13 +109,15 @@ describe("App auth boundary", () => {
   });
 
   it("keeps a browser session retryable when /me is temporarily unavailable", async () => {
+    let completeRetry: (response: Response) => void = () => undefined;
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ error: "auth_unavailable", kind: "auth_unavailable", message: "auth service temporarily unavailable" }), {
           status: 503
         })
       )
-      .mockResolvedValue(new Response(JSON.stringify(meResponse()), { status: 200 }));
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { completeRetry = resolve; }))
+      .mockResolvedValue(new Response(null, { status: 204 }));
 
     render(<App />);
 
@@ -106,6 +125,11 @@ describe("App auth boundary", () => {
     expect(screen.queryByText("Continue to NoteGate")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "Retry" })).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "Retry" })).toHaveTextContent("Retrying…");
+    await act(async () => { completeRetry(new Response(JSON.stringify(meResponse()), { status: 200 })); });
 
     await screen.findByText("Mock sign out");
   });
