@@ -264,6 +264,48 @@ output.write_bytes(b"\\n".join(line for line in source.read_bytes().splitlines()
             self.assertIn("requires valid CI_RUST_* environment", completed.stderr)
             self.assertFalse(self.harness_log.exists())
 
+    def test_prepared_paths_reject_outside_sibling_traversal_and_symlink_escapes(self):
+        escape = self.root / "target/escape"
+        escape.symlink_to(self.root / "backend", target_is_directory=True)
+        invalid = (self.root / "outside", self.root / "target-evil/file",
+                   self.root / "target/../outside", escape / "file")
+        for path in invalid:
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(ValueError, "Prepared paths"):
+                    runner.target_tree_path(path)
+                for option in ("--prepared", "--output"):
+                    completed = self.consume("self-contained", option, str(path))
+                    self.assertNotEqual(completed.returncode, 0)
+                    self.assertIn("Prepared paths", completed.stderr)
+                for variable in ("CI_RUST_PREPARED_PATH", "CI_RUST_OUTPUT_PATH"):
+                    values = dict(CI_RUST_PREPARED_PATH=str(self.bundle),
+                                  CI_RUST_OUTPUT_PATH=str(self.root / "target/driver"),
+                                  CI_RUST_GROUP="self-contained")
+                    values[variable] = str(path)
+                    completed = self.consume("_execute", **values)
+                    self.assertNotEqual(completed.returncode, 0)
+                    self.assertIn("Prepared paths", completed.stderr)
+                self.assertFalse(self.harness_log.exists())
+                self.assertFalse(path.exists())
+
+    def test_target_directory_symlink_cannot_redefine_allowed_root(self):
+        (self.root / "target").rename(self.root / "saved-target")
+        outside = self.root / "outside-target"
+        outside.mkdir()
+        (self.root / "target").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "Prepared paths"):
+            runner.target_tree_path(self.root / "target/report")
+        self.assertFalse((outside / "report").exists())
+
+    def test_legacy_nonprepared_output_path_remains_configurable(self):
+        output = self.root / "legacy-output"
+        with patch.object(sys, "argv", [str(self.script), "self-contained", "--output", str(output)]), \
+                patch.object(runner, "prepare", return_value=(self.cases, self.artifacts, set())), \
+                patch.object(runner, "run_group"), \
+                patch.object(runner, "logged", return_value=(0, .1, [])):
+            self.assertEqual(runner.main(), 0)
+        self.assertTrue((output / "summary.json").is_file())
+
     def test_prepared_split_retains_baseline_active_and_ignored_coverage_without_cargo(self):
         results = []
         for mode in runner.GROUPS:

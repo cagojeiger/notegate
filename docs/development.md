@@ -223,7 +223,9 @@ CI 전달용 복사본에서 debug 정보만 제외하고 zstd로 압축한다. 
 전달본은 상세 backtrace의 소스 행 정보가 줄어들 수 있다. 원본·전달본 크기를 빌드 보고서에 기록한다.
 전달한 파일은 같은 checkout 경로·커밋·실행·플랫폼·toolchain에서만 사용하고, package별
 작업 디렉터리, 테스트 분류·누락 검증, run 단위 DB 정리를 유지한다. 기존 로컬 Make 명령은
-직접 컴파일·실행하는 경로를 유지한다. 빌드 시간과 artifact 전송 시간은 테스트 실행 시간과
+직접 컴파일·실행하는 경로를 유지한다. Prepared 실행의 입력 bundle과 출력 보고서는 저장소
+`target/` 안으로 제한하며 상위 경로·심볼릭 링크를 통한 이탈은 거부한다.
+빌드 시간과 artifact 전송 시간은 테스트 실행 시간과
 별도로 비교한다. PostgreSQL 18과 배포용 release 빌드는 각자의 빌드 경로를 유지한다.
 DB helper는 `NOTEGATE_TEST_TIMING_FILE`의 절대 경로에 opt-in JSONL을 기록한다.
 Setup·migration·초기 fixture·cleanup 시간과 setup 완료부터 cleanup 시작까지의 lifetime을

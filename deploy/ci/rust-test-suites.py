@@ -164,6 +164,19 @@ def bundle_path(name):
     return path
 
 
+def target_tree_path(value):
+    """Prepared runs only read and write within this checkout's target tree."""
+    if ".." in Path(value).parts:
+        raise ValueError("Prepared paths cannot contain traversal")
+    normalized = os.path.realpath(value)
+    # ROOT is already resolved. Do not resolve target itself: a target symlink
+    # must not turn an outside directory into the permitted boundary.
+    prefix = str(ROOT / "target") + os.sep
+    if not normalized.startswith(prefix):
+        raise ValueError("Prepared paths must stay inside the repository target directory")
+    return Path(normalized)
+
+
 def pack_bundle(path, kind, executables, summary, strip_debug=False, **metadata):
     started = time.monotonic()
     if strip_debug:
@@ -464,11 +477,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=(*GROUPS, "split", "measure", "prepare", "exact",
                                         "pack-api", "restore-api", "_execute"))
-    parser.add_argument("--output", type=Path, default=ROOT / "target/test-suites")
+    parser.add_argument("--output", type=Path, default=ROOT / "target/test-suites",
+                        help="report directory; prepared runs require repository target/")
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--strip-debug", action="store_true")
-    parser.add_argument("--prepared", type=Path)
+    parser.add_argument("--prepared", type=Path, help="same-source bundle under repository target/")
     parser.add_argument("--group", choices=(*GROUPS, "baseline"))
     parser.add_argument("--package")
     parser.add_argument("--target-kind", choices=("lib", "bin", "test"))
@@ -484,8 +498,11 @@ def main():
         args.group = os.environ.pop("CI_RUST_GROUP", "")
         if not prepared_path or not output_path or args.group not in (*GROUPS, "baseline"):
             parser.error("Internal prepared driver requires valid CI_RUST_* environment")
-        args.prepared = Path(prepared_path)
-        args.output = Path(output_path)
+        try:
+            args.prepared = target_tree_path(prepared_path)
+            args.output = target_tree_path(output_path)
+        except ValueError as error:
+            parser.error(str(error))
     if args.repetitions < 1:
         parser.error("--repetitions must be positive")
     if extra_args and args.mode != "exact":
@@ -506,7 +523,14 @@ def main():
         for name in ("NOTEGATE_TEST_DATABASE_URL", "NOTEGATE_TEST_S3_ENDPOINT"):
             if not os.environ.get(name, "").strip():
                 parser.error(f"{name} is required")
-    output = args.output.resolve()
+    try:
+        if args.prepared:
+            args.prepared = target_tree_path(args.prepared)
+            output = target_tree_path(args.output)
+        else:
+            output = args.output.resolve()
+    except ValueError as error:
+        parser.error(str(error))
     output.mkdir(parents=True, exist_ok=True)
     summary = {"mode": args.mode, "runs": [], "commit": subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()}
