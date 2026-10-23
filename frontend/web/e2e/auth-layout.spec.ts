@@ -147,3 +147,60 @@ test("login footer provides touch-sized native links without collecting agreemen
   await expect(page).toHaveURL(/\/terms$/);
   await expect(page.getByRole("heading", { level: 1, name: "Terms of Service", exact: true })).toBeVisible();
 });
+
+test("account setup preview works by keyboard without saving or authenticating", async ({ page }, testInfo) => {
+  const authRequests: string[] = [];
+  await page.route((url) => /^\/(api|auth|oauth)(\/|$)/.test(url.pathname), async (route) => {
+    authRequests.push(new URL(route.request().url()).pathname);
+    await route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/signup/preview");
+  await expect(page.getByRole("heading", { level: 1, name: "Before you start", exact: true })).toBeVisible();
+  await expect(page.getByText("Preview only. Nothing is saved and no account is created.", { exact: true })).toBeVisible();
+  const checkbox = page.getByRole("checkbox", { name: "I agree to the Terms of Service.", exact: true });
+  const continueButton = page.getByRole("button", { name: "Agree and continue", exact: true });
+  await expect(checkbox).not.toBeChecked();
+  await expect(continueButton).toBeDisabled();
+  await expect(page.getByRole("link", { name: "Back to sign in", exact: true })).toHaveAttribute("href", "/");
+  for (const [name, path] of [["Terms of Service", "/terms"], ["Privacy Policy", "/privacy"]]) {
+    const link = page.getByRole("link", { name, exact: true });
+    await expect(link).toHaveAttribute("href", path);
+    await expect(link).toHaveAttribute("target", "_blank");
+    await expect(link).toHaveAttribute("rel", /\bnoopener\b/);
+  }
+  const storageBefore = await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }));
+  await testInfo.attach("signup-preview-desktop", {
+    body: await page.screenshot({ path: "test-results/login-signup-preview-desktop.png" }),
+    contentType: "image/png"
+  });
+
+  await page.setViewportSize({ width: 320, height: 1100 });
+  await checkbox.focus();
+  await page.keyboard.press("Space");
+  await expect(checkbox).toBeChecked();
+  await expect(continueButton).toBeEnabled();
+  await page.keyboard.press("Tab");
+  await expect(continueButton).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("status")).toHaveText("Preview complete. No agreement or account was saved.");
+  expect(await checkbox.evaluate((input) => input.closest("label")?.getBoundingClientRect().height ?? 0)).toBeGreaterThanOrEqual(44);
+  const buttonTarget = await continueButton.boundingBox();
+  expect(buttonTarget).not.toBeNull();
+  expect(buttonTarget!.height).toBeGreaterThanOrEqual(44);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await expectNoAccessibilityViolations(page);
+  expect(await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }))).toEqual(storageBefore);
+  expect(authRequests).toEqual([]);
+  await testInfo.attach("signup-preview-mobile", {
+    body: await page.screenshot({ path: "test-results/login-signup-preview-mobile.png" }),
+    contentType: "image/png"
+  });
+
+  await page.reload();
+  await expect(checkbox).not.toBeChecked();
+  await expect(continueButton).toBeDisabled();
+  await expect(page.getByRole("status")).toHaveCount(0);
+  expect(await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }))).toEqual(storageBefore);
+  expect(authRequests).toEqual([]);
+});

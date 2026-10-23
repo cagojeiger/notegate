@@ -68,6 +68,29 @@ describe("App auth boundary", () => {
     window.history.replaceState(null, "", "/");
   });
 
+  it("previews agreement without persisting it or starting authentication", () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No backend in preview"));
+    const storedBefore = [Object.entries(localStorage), Object.entries(sessionStorage)];
+    window.history.replaceState(null, "", "/signup/preview");
+    const preview = render(<App />);
+
+    const checkbox = screen.getByRole("checkbox", { name: "I agree to the Terms of Service." });
+    const continueButton = screen.getByRole("button", { name: "Agree and continue" });
+    expect(continueButton).toBeDisabled();
+    fireEvent.click(checkbox);
+    expect(continueButton).toBeEnabled();
+    fireEvent.click(continueButton);
+    expect(screen.getByRole("status")).toHaveTextContent("Preview complete. No agreement or account was saved.");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect([Object.entries(localStorage), Object.entries(sessionStorage)]).toEqual(storedBefore);
+
+    preview.unmount();
+    render(<App />);
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    window.history.replaceState(null, "", "/");
+  });
+
   it("keeps a browser session retryable when /me is temporarily unavailable", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(

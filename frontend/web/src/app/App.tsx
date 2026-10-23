@@ -7,6 +7,7 @@ import { LoginGate } from "../auth/LoginGate";
 import { useSessionQuery } from "../auth/useAuthQueries";
 import { useBrowserSessionActivity } from "../auth/useBrowserSessionActivity";
 import { PublicInformationPage } from "../features/public-information/PublicInformationPage";
+import { SignupPreview } from "../features/public-information/SignupPreview";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
 import { Button } from "../shared/ui";
 import { useUiStore } from "../stores/uiStore";
@@ -15,6 +16,7 @@ const AuthenticatedWorkspace = lazy(() => import("./AuthenticatedWorkspace"));
 
 export function App() {
   switch (window.location.pathname) {
+    case "/signup/preview": return <SignupPreview />;
     case "/terms": return <PublicInformationPage page="terms" />;
     case "/privacy": return <PublicInformationPage page="privacy" />;
     case "/support": return <PublicInformationPage page="support" />;

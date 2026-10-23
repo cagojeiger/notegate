@@ -69,6 +69,9 @@ export function LoginGate(controllerProps: LoginGateControllerProps) {
         </Card>
         <footer className="mt-5">
           <PublicInformationLinks />
+          <a href="/signup/preview" className="mt-2 flex min-h-[var(--ng-min-target-size)] items-center justify-center rounded text-xs text-muted underline underline-offset-4 hover:text-text">
+            Preview account setup
+          </a>
         </footer>
       </section>
     </main>
