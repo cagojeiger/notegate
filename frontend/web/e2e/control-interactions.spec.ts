@@ -191,6 +191,8 @@ for (const width of [1440, 390, 320]) {
 
     for (const viewportWidth of [width, width === 1440 ? 1280 : width === 390 ? 320 : 390]) {
       await page.setViewportSize({ width: viewportWidth, height: 844 });
+      // Viewport updates can resolve before the browser dispatches its resize event.
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
       await expectUnclippedDecoration(tooltip);
       const bounds = (await tooltip.boundingBox())!;
       expect(bounds.x).toBeGreaterThanOrEqual(16);
