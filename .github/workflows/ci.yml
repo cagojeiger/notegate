@@ -114,7 +114,7 @@ jobs:
   rust:
     name: Rust
     needs: rust-build
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     services:
       postgres:

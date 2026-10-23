@@ -573,8 +573,9 @@ def main():
                     run_group(group, f"round-{index + 1}-{group}", tests, artifacts, output, summary,
                               prepared)
         elif args.mode != "prepare":
-            for group in GROUPS if args.mode == "split" else (args.mode,):
-                run_group(group, group, tests, artifacts, output, summary, prepared)
+            for group in GROUPS:
+                if args.mode == "split" or args.mode == group:
+                    run_group(group, group, tests, artifacts, output, summary, prepared)
         # Doctests belong to the self-contained phase, once per split execution.
         if args.mode != "external" and not prepared:
             env = dict(os.environ)

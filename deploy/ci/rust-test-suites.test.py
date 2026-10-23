@@ -306,6 +306,21 @@ output.write_bytes(b"\\n".join(line for line in source.read_bytes().splitlines()
             self.assertEqual(runner.main(), 0)
         self.assertTrue((output / "summary.json").is_file())
 
+    def test_cli_modes_dispatch_requested_resource_groups_once(self):
+        for mode, expected in (("self-contained", ("self-contained",)),
+                               ("external", ("external",)), ("split", runner.GROUPS)):
+            with self.subTest(mode=mode), \
+                    patch.object(sys, "argv", [str(self.script), mode, "--output",
+                                               str(self.root / "target/routing" / mode)]), \
+                    patch.dict(os.environ, NOTEGATE_TEST_DATABASE_URL="postgres://example",
+                               NOTEGATE_TEST_S3_ENDPOINT="http://s3"), \
+                    patch.object(runner, "prepare", return_value=(self.cases, self.artifacts, set())), \
+                    patch.object(runner, "run_group") as run_group, \
+                    patch.object(runner, "logged", return_value=(0, .1, [])):
+                self.assertEqual(runner.main(), 0)
+                self.assertEqual([(call.args[0], call.args[1]) for call in run_group.call_args_list],
+                                 [(group, group) for group in expected])
+
     def test_prepared_split_retains_baseline_active_and_ignored_coverage_without_cargo(self):
         results = []
         for mode in runner.GROUPS:
