@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { cloneElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RestNode } from "../../api/types";
@@ -28,7 +28,7 @@ function renderEditorArea(overrides: Partial<Parameters<typeof EditorArea>[0]> =
     { id: 2, node: null, mode: "preview", back: [], forward: [] }
   ];
 
-  return render(
+  const element = (
     <EditorArea
       groups={groups}
       activeGroupIndex={2}
@@ -55,6 +55,8 @@ function renderEditorArea(overrides: Partial<Parameters<typeof EditorArea>[0]> =
       {...overrides}
     />
   );
+  const view = render(element);
+  return { ...view, rerenderEditorArea: (props: Partial<Parameters<typeof EditorArea>[0]>) => view.rerender(cloneElement(element, props)) };
 }
 
 describe("EditorArea", () => {
@@ -90,6 +92,23 @@ describe("EditorArea", () => {
     for (const group of container.querySelectorAll("[data-editor-group]")) {
       expect(group).toHaveClass("min-h-0", "overflow-hidden");
     }
+  });
+
+  it("dismisses file action portals when the Workspace becomes inactive", async () => {
+    const file = makeRestNode({ kind: "file", name: "sample.bin" });
+    const view = renderEditorArea({
+      groups: [{ id: 0, node: file, mode: "preview", back: [], forward: [] }],
+      activeGroupIndex: 0, activeSpace: makeSpace(), canWriteActiveSpace: true
+    });
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(await screen.findByRole("dialog", { name: "More actions" })).toBeInTheDocument();
+
+    view.rerenderEditorArea({ workspaceActive: false });
+    expect(screen.queryByRole("dialog", { name: "More actions" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More actions" })).toBeDisabled();
+    view.rerenderEditorArea({ workspaceActive: true });
+    expect(screen.queryByRole("dialog", { name: "More actions" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More actions" })).toBeEnabled();
   });
 
   it("starts root audio recording from a writable empty editor", () => {

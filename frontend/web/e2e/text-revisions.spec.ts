@@ -264,6 +264,56 @@ test("small phones keep long reasons and restore controls usable and return focu
   await expect(more).toBeFocused();
 });
 
+for (const viewport of [{ width: 900, height: 440 }, { width: 900, height: 390 }, { width: 844, height: 390 }]) {
+  test.describe(`touch landscape history at ${viewport.width}x${viewport.height}`, () => {
+    test.use({ hasTouch: true });
+
+    test("keeps version content readable with touch controls and fixed restore actions", async ({ page }) => {
+      const before = Array.from({ length: 120 }, (_, index) => index === 0 ? "# Network" : `Line ${index + 1}`);
+      const after = before.map((line, index) => index === 20 || index === 80 ? `Updated ${line}` : line);
+      const requests = await setup(page, { previousContent: before.join("\n"), currentContent: after.join("\n") });
+      await page.setViewportSize(viewport);
+      const inspector = page.getByRole("button", { name: "Toggle right sidebar", exact: true });
+      if (await inspector.getAttribute("aria-pressed") === "true") await inspector.click();
+      await expect(inspector).toHaveAttribute("aria-pressed", "false");
+      const more = page.getByRole("button", { name: "More actions", exact: true }).first();
+      await more.click();
+      await page.getByRole("menuitem", { name: "Version history", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Version history · network.md" });
+      const comparison = dialog.getByRole("region", { name: "Version comparison", exact: true });
+      const next = dialog.getByRole("button", { name: "Next change" });
+      const previous = dialog.getByRole("button", { name: "Previous change" });
+      expect((await next.boundingBox())?.height).toBe(44);
+      expect((await previous.boundingBox())?.height).toBe(44);
+      await expect(comparison.getByText("Updated Line 21", { exact: true })).toBeInViewport({ ratio: 1 });
+      await next.focus();
+      await page.keyboard.press("Enter");
+      await expect(comparison.getByText("Updated Line 81", { exact: true })).toBeInViewport({ ratio: 1 });
+      await expect(dialog.getByRole("status", { name: "Change 2 of 2", exact: true })).toBeVisible();
+      await previous.focus();
+      await page.keyboard.press("Enter");
+      await expect(comparison.getByText("Updated Line 21", { exact: true })).toBeInViewport({ ratio: 1 });
+      await comparison.focus();
+      await page.keyboard.press("End");
+      await expect(dialog.getByRole("status", { name: "Change 2 of 2", exact: true })).toBeVisible();
+
+      await dialog.getByRole("tab", { name: "Full version", exact: true }).click();
+      const preview = dialog.getByRole("region", { name: "Version preview", exact: true });
+      await preview.scrollIntoViewIfNeeded();
+      await expect(preview.getByRole("heading", { name: "Network", exact: true })).toBeInViewport({ ratio: 1 });
+      const restore = dialog.getByRole("button", { name: "Restore this version", exact: true });
+      await expect(restore).toBeInViewport({ ratio: 1 });
+      await restore.click();
+      await expect(dialog.getByRole("button", { name: "Confirm restore", exact: true })).toBeInViewport({ ratio: 1 });
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      expect(requests.filter((request) => request.method === "POST")).toHaveLength(0);
+      await dialog.getByRole("button", { name: "Close", exact: true }).last().click();
+      await expect(dialog).not.toBeVisible();
+      await expect(more).toBeFocused();
+    });
+  });
+}
+
 test("a conflicted restore reloads the new baseline and requires another confirmation", async ({ page }) => {
   const requests = await setup(page);
   const changedHash = "c".repeat(64);

@@ -95,7 +95,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
           ))}
           {list.hasNextPage ? <Button secondary size="sm" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>Load more</Button> : null}
         </nav>
-        <section aria-label="Version content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+        <section aria-label="Version content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain *:shrink-0">
           <Tabs items={[{ id: "diff", label: "Compare changes", disabled: showingCurrent }, { id: "full", label: "Full version" }]} value={showingCurrent ? "full" : view} onChange={setView} label="Version view" />
           <details key={showingCurrent ? "current" : selected?.id} className="mb-2 shrink-0 text-sm text-muted">
             <summary className="cursor-pointer list-inside truncate"><span className="font-medium">Save reason:</span> {purpose ?? "Not recorded"}</summary>
@@ -128,7 +128,7 @@ export default function TextRevisionModal({ node, canRestore, dirty, saving, onC
 
 function VersionPreview({ node, content, identity }: { node: RestNode; content: string; identity: string }) {
   const showToast = useUiStore((state) => state.showToast);
-  return <div role="region" aria-label="Version preview" tabIndex={0} className="flex min-h-36 flex-1 shrink-0 overflow-auto rounded-workbench border border-seam outline-none md:min-h-0 md:shrink" onClickCapture={(event) => {
+  return <div role="region" aria-label="Version preview" tabIndex={0} className="flex min-h-36 flex-1 shrink-0 overflow-auto rounded-workbench border border-seam outline-none" onClickCapture={(event) => {
     if (event.target instanceof Element && event.target.closest("a[href]")) {
       event.preventDefault();
       event.stopPropagation();

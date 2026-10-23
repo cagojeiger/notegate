@@ -254,6 +254,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
               </PrimarySidebarFrame>
               <PrimarySidebarResizeHandle visible={layout.primaryMode === "docked"} sidebarLayout={layout.sidebars} />
               <EditorArea
+                workspaceActive={!librarySelected && !settingsOpen}
                 groups={workbench.editorGroups}
                 activeGroupIndex={workbench.activeGroupIndex}
                 presentation={layout.editorPresentation}

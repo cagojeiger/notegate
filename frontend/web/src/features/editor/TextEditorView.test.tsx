@@ -151,6 +151,29 @@ describe("TextEditorView", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });
 
+  it("cancels transient editor actions while inactive without discarding the draft", async () => {
+    const user = userEvent.setup();
+    mockFullText("saved text");
+    const props = makeTextEditorViewProps({ mode: "edit" });
+    const view = render(<TextEditorView {...props} />);
+    const editor = screen.getByRole("textbox", { name: "Edit text content" });
+    await user.clear(editor);
+    await user.type(editor, "unsaved draft");
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    expect(await screen.findByRole("menu", { name: "Editor actions" })).toBeInTheDocument();
+
+    view.rerender(<TextEditorView {...props} workspaceActive={false} />);
+    expect(screen.queryByRole("menu", { name: "Editor actions" })).not.toBeInTheDocument();
+    expect(editor).toHaveValue("unsaved draft");
+    view.rerender(<TextEditorView {...props} workspaceActive />);
+
+    expect(screen.queryByRole("menu", { name: "Editor actions" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Edit text content" })).toBe(editor);
+    expect(editor).toHaveValue("unsaved draft");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(props.onSetMode).not.toHaveBeenCalled();
+  });
+
   it("switches CSV previews between table and exact source", async () => {
     const user = userEvent.setup();
     const csvNode = { ...node, name: "people.csv", path: "/people.csv" };

@@ -19,7 +19,7 @@ import { useTextEditorSession } from "./useTextEditorSession";
 const TextRevisionModal = lazy(() => import("../revisions/TextRevisionModal"));
 const EditorContextMenu = lazy(() => import("./EditorContextMenu"));
 
-export function TextEditorView({ active, groupId, navigationActions, node, latestNode, qualifiedPath, mode, canWriteActiveSpace, canOpenInNewGroup, canClose, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; navigationActions?: ReactNode; node: RestNode; latestNode?: RestNode; qualifiedPath: string | null; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canOpenInNewGroup: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
+export function TextEditorView({ workspaceActive = true, active, groupId, navigationActions, node, latestNode, qualifiedPath, mode, canWriteActiveSpace, canOpenInNewGroup, canClose, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & EditorNavigationActions & { workspaceActive?: boolean; active: boolean; groupId: number; navigationActions?: ReactNode; node: RestNode; latestNode?: RestNode; qualifiedPath: string | null; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canOpenInNewGroup: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
   const loadMarkdownImage = useMarkdownImageLoader(node);
   const [editorMenu, setEditorMenu] = useState<{ x: number; y: number } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -87,6 +87,13 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
     setStructuredExpansionMode("expanded");
     setEditorMenu(null);
   }, [node.id]);
+
+  useEffect(() => {
+    if (!workspaceActive) {
+      setHistoryOpen(false);
+      setEditorMenu(null);
+    }
+  }, [workspaceActive]);
 
   function openEditorMenu(event: MouseEvent) {
     event.preventDefault();
@@ -218,11 +225,11 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           )}
         </div>
       )}
-      {historyOpen && !encrypted ? <Suspense fallback={null}>
+      {workspaceActive && historyOpen && !encrypted ? <Suspense fallback={null}>
         <TextRevisionModal key={`${node.space_id}:${node.id}`} node={latestNode ?? node} canRestore={canEditText} dirty={dirty} saving={saving}
           onClose={() => setHistoryOpen(false)} onRestored={() => { resetRevisionSession(); setHistoryOpen(false); onSetMode("preview"); }} />
       </Suspense> : null}
-      {editorMenu ? (
+      {workspaceActive && editorMenu ? (
         <Suspense fallback={null}>
           <EditorContextMenu
             menu={editorMenu}

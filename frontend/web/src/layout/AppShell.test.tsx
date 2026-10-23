@@ -35,8 +35,8 @@ vi.mock("../features/spaces/useUsageQueries", () => ({
 }));
 
 vi.mock("../features/editor/EditorArea", () => ({
-  EditorArea: ({ canWriteActiveSpace }: { canWriteActiveSpace: boolean }) => (
-    <div data-testid="editor-area" data-can-write={String(canWriteActiveSpace)} />
+  EditorArea: ({ canWriteActiveSpace, workspaceActive }: { canWriteActiveSpace: boolean; workspaceActive: boolean }) => (
+    <div data-testid="editor-area" data-can-write={String(canWriteActiveSpace)} data-workspace-active={String(workspaceActive)} />
   )
 }));
 vi.mock("../features/nodes/PrimarySidebar", () => ({
@@ -356,11 +356,13 @@ describe("AppShell", () => {
     mocks.useUploadManager.mockReturnValue(uploadManager());
     const view = render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
     const editor = screen.getByTestId("editor-area");
+    expect(editor).toHaveAttribute("data-workspace-active", "true");
 
     await user.click(screen.getByRole("button", { name: "Open space library" }));
 
     expect(editor).toBeInTheDocument();
     expect(editor).not.toBeVisible();
+    expect(editor).toHaveAttribute("data-workspace-active", "false");
     expect(editor.closest("[hidden]")).toHaveAttribute("inert");
     expect(editor.closest("[hidden]")).toHaveAttribute("aria-hidden", "true");
 
@@ -369,11 +371,13 @@ describe("AppShell", () => {
     expect(actions.selectSpace).toHaveBeenCalledWith(space);
     expect(screen.getByTestId("editor-area")).toBe(editor);
     expect(editor).toBeVisible();
+    expect(editor).toHaveAttribute("data-workspace-active", "true");
 
     mocks.useWorkbenchController.mockReturnValue({ ...workbench(), isMobile, settingsOpen: true, actions });
     view.rerender(<AppShell me={me("user")} onSignOut={vi.fn()} />);
     expect(editor).toBeInTheDocument();
     expect(editor).not.toBeVisible();
+    expect(editor).toHaveAttribute("data-workspace-active", "false");
     expect(editor.closest("[hidden]")).toHaveAttribute("inert");
   });
 });

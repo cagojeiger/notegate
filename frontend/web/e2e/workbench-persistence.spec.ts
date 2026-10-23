@@ -207,6 +207,72 @@ for (const width of [1440, 390]) {
     await expect(firstSpace).toHaveAttribute("aria-current", "page");
     await expect(page.locator("header").getByText(`/ ${spaces[0]!.name}`, { exact: true })).toBeVisible();
   });
+
+  for (const destination of ["Library", "Settings"]) {
+    test(`cancels a delayed Version history when visiting ${destination} at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.addInitScript(({ node, spaceId }) => {
+        window.localStorage.setItem("notegate.lastActiveSpaceId", spaceId);
+        window.localStorage.setItem("notegate.workbenchPanels.v1", JSON.stringify({ version: 1, primarySidebarOpen: false, auxiliaryOpen: false }));
+        window.localStorage.setItem(`notegate.workbench.v1.space.${spaceId}`, JSON.stringify({
+          version: 1, spaceId, updatedAt: Date.now(), activeGroupIndex: 0,
+          groups: [{ node, mode: "edit", back: [], forward: [] }]
+        }));
+      }, { node: savedNode, spaceId: savedSpace.id });
+      await mockApi(page);
+      let chunkRequested = false;
+      let releaseChunk!: () => void;
+      // Match both production chunks and the source module used by the local Vite server.
+      const revisionModule = /\/(?:assets\/TextRevisionModal-[^/]+\.js|src\/features\/revisions\/TextRevisionModal\.tsx)(?:\?.*)?$/;
+      await page.route(revisionModule, async (route) => {
+        const released = new Promise<void>((resolve) => { releaseChunk = resolve; });
+        chunkRequested = true;
+        await released;
+        await route.continue();
+      });
+      let revisionReads = 0;
+      page.on("request", (request) => {
+        if (new URL(request.url()).pathname.endsWith(`/text/${savedNode.id}/revisions`)) revisionReads += 1;
+      });
+      await page.goto("/");
+      const editor = page.getByRole("textbox", { name: "Edit text content", includeHidden: true });
+      await expect(editor).toHaveValue("# Restored workbench");
+      await editor.fill("Keep this draft while a dialog loads");
+      const openHistory = async () => {
+        if (width < 768) {
+          await page.getByRole("button", { name: "More actions", exact: true }).click();
+          await page.getByRole("menuitem", { name: "Version history", exact: true }).click();
+        } else await page.getByRole("button", { name: "Version history", exact: true }).click();
+      };
+      await openHistory();
+      await expect.poll(() => chunkRequested).toBe(true);
+      if (destination === "Library") {
+        await page.getByRole("button", { name: "Open space library", exact: true }).click();
+        await expect(page.getByRole("tabpanel", { name: "Spaces 2", exact: true })).toBeVisible();
+      } else await openSettings(page);
+      const loaded = page.waitForResponse((response) => revisionModule.test(response.url()));
+      releaseChunk();
+      await (await loaded).finished();
+
+      if (destination === "Library") await page.getByRole("button", { name: savedSpace.name, exact: true }).click();
+      else await page.getByRole("button", { name: "Close settings", exact: true }).click();
+      await expect(editor).toBeVisible();
+      await expect(editor).toHaveValue("Keep this draft while a dialog loads");
+      const historyTrigger = page.getByRole("button", { name: "Version history", exact: true, includeHidden: true });
+      await expect(historyTrigger).toHaveAttribute("aria-expanded", "false");
+      const modal = page.getByRole("dialog", { name: `Version history · ${savedNode.name}`, exact: true });
+      await expect(modal).toHaveCount(0);
+      expect(revisionReads).toBe(0);
+
+      await openHistory();
+      await expect(modal).toBeVisible();
+      await expect.poll(() => revisionReads).toBe(1);
+      await modal.getByRole("button", { name: "Close", exact: true }).last().click();
+      await expect(modal).toHaveCount(0);
+      await expect(editor).toHaveValue("Keep this draft while a dialog loads");
+      await expect(page.getByRole("button", { name: width < 768 ? "More actions" : "Version history", exact: true })).toBeFocused();
+    });
+  }
 }
 
 async function mockApi(page: import("@playwright/test").Page) {
@@ -221,6 +287,9 @@ function responseFor(url: URL) {
   }
   if (url.pathname === `/api/v1/spaces/${savedSpace.id}/nodes/${savedNode.id}`) {
     return savedNode;
+  }
+  if (url.pathname === `/api/v1/spaces/${savedSpace.id}/text/${savedNode.id}/revisions`) {
+    return { current: { content_sha256: savedNode.content_sha256, purpose: null }, revisions: [], page: pageInfo(0) };
   }
   if (url.pathname === `/api/v1/spaces/${savedSpace.id}/text/${savedNode.id}`) {
     return {
