@@ -92,7 +92,6 @@ jobs:
           cache-from: |
             type=gha,scope=notegate-main-deps-v1-${{ matrix.arch }}
             type=gha,scope=notegate-release-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=notegate-release-${{ matrix.arch }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
