@@ -71,9 +71,11 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
       {creating ? <section>
         <p className="mb-3 text-xs text-muted">Choose a name, then configure permissions and keys.</p>
         <form onSubmit={(event) => { event.preventDefault(); if (name.trim() && !createMutation.isPending) createMutation.mutate(name.trim()); }} className="flex flex-wrap items-end gap-3">
-          <TextField autoFocus label="New agent name" className="min-w-0 flex-1" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. ci-bot, importer" />
-          <Button type="submit" disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
-          <Button secondary disabled={createMutation.isPending} onClick={() => setCreating(false)}>Cancel</Button>
+          <TextField autoFocus label="New agent name" className="min-w-0 flex-[1_1_16rem]" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. ci-bot, importer" />
+          <div className="flex shrink-0 gap-2">
+            <Button type="submit" disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
+            <Button secondary disabled={createMutation.isPending} onClick={() => setCreating(false)}>Cancel</Button>
+          </div>
         </form>
       </section> : selected ? <section key={selected.id} aria-label={`Settings for ${selected.name}`}>
         <div className="ng-settings-grid">

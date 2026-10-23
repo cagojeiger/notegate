@@ -163,8 +163,8 @@ export function TrashPanel() {
             </section>
           ) : selected ? (
             <section aria-label={`Details for ${selected.name}`} className="flex h-full flex-col">
-              <div className="flex items-center gap-3"><SelectedIcon size={24} aria-hidden="true" className="text-primary" /><div className="min-w-0"><h3 className="break-all text-base font-semibold">{selected.name}</h3><p className="mt-1 text-xs text-muted">{itemAppearance[selected.kind].label} · {selected.space_name}</p></div></div>
-              <dl className="mt-5 space-y-4">
+              <div className="flex items-start gap-3"><SelectedIcon size={24} aria-hidden="true" className="shrink-0 text-primary" /><div className="min-w-0"><h3 className="break-all text-base font-semibold">{selected.name}</h3><p className="mt-1 text-xs text-muted">{itemAppearance[selected.kind].label} · {selected.space_name}</p></div></div>
+              <dl className={`mt-5 space-y-4${selected.deletion_pending ? " pb-4" : ""}`}>
                 <div><dt className="mb-1 text-xs text-muted">Original location</dt><dd className="flex items-start gap-2"><FolderOpen size={14} aria-hidden="true" className="mt-0.5 text-muted" /><span className="break-all font-mono text-xs">{selected.space_name} · {selected.path}</span></dd></div>
                 <div><dt className="mb-1 text-xs text-muted">{selected.deletion_pending ? "Status" : "Kept until"}</dt><dd className="flex items-start gap-2"><CalendarDays size={14} aria-hidden="true" className="mt-0.5 text-muted" /><span>{selected.deletion_pending ? "Deletion queued · recovery unavailable" : new Date(selected.purge_after).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</span></dd></div>
               </dl>

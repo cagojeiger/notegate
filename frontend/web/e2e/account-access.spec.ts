@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 
 import { makeSpace } from "../src/test/fixtures";
 import { routeJsonApi } from "./support/api";
@@ -17,11 +17,14 @@ for (const profile of [
 
     test("keeps growing account connections bounded and revokes only the selected connection", async ({ page }, testInfo) => {
       const space = makeSpace();
+      const accountName = "Kang Hee Yong · Platform Engineering";
+      const accountEmail = "platform.engineering.account@example.com";
+      const mcpAppName = "PersonalKnowledgeWorkspaceSynchronizationService";
       const meta = { limit: 100, returned: 0, has_more: false, next_cursor: null };
       const dates = { created_at: "2026-10-18T00:00:00Z", idle_expires_at: "2026-11-02T00:00:00Z", expires_at: "2026-11-18T00:00:00Z" };
       const sessions = Array.from({ length: 24 }, (_, i) => ({ ...dates, id: `session-${i}`, current: i === 0, client_environment: i === 0 ? "Chrome on macOS" : `Browser ${i}`, last_used_at: dates.created_at }));
       let grants = (["cli", "mcp"] as const).flatMap((kind) => Array.from({ length: kind === "cli" ? 12 : 8 }, (_, i) => ({
-        ...dates, id: `${kind}-${i}`, client_name: `${kind.toUpperCase()} App ${i}`, kind,
+        ...dates, id: `${kind}-${i}`, client_name: kind === "mcp" && i === 1 ? mcpAppName : `${kind.toUpperCase()} App ${i}`, kind,
         client_environment: "macOS", last_token_at: dates.created_at, offline_access: true
       })));
       const reads = { sessions: 0, grants: 0 };
@@ -34,7 +37,7 @@ for (const profile of [
           grants = grants.filter((grant) => url.pathname !== `/api/v1/me/oauth-grants/${grant.id}`);
           return {};
         }
-        if (url.pathname === "/api/v1/me") return { account: { id: "user-1", kind: "user", display_name: "User" }, user: { email: "user@example.com" }, capabilities: { can_create_space: true, can_manage_agents: true } };
+        if (url.pathname === "/api/v1/me") return { account: { id: "user-1", kind: "user", display_name: accountName }, user: { email: accountEmail }, capabilities: { can_create_space: true, can_manage_agents: true } };
         if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
         if (url.pathname === "/api/v1/spaces") return { spaces: [space], page: meta };
         if (url.pathname === "/api/v1/me/sessions") { reads.sessions++; return { sessions }; }
@@ -46,6 +49,9 @@ for (const profile of [
       });
       await page.goto("/");
       const view = await openSettings(page, "Account");
+      for (const value of [accountName, accountEmail]) {
+        await expectTextInsideCard(view.getByText(value, { exact: true }));
+      }
       const list = view.getByRole("list", { name: "Browser sessions" });
       await expect(list.getByRole("button")).toHaveCount(10);
       await expect.poll(() => reads).toEqual({ sessions: 1, grants: 0 });
@@ -73,15 +79,16 @@ for (const profile of [
       await view.getByRole("tab", { name: "MCP", exact: true }).click();
       await expect(view.getByRole("tablist", { name: "Connection views" })).toBeInViewport();
       await expect(view.getByRole("list", { name: "MCP connections" }).getByRole("button")).toHaveCount(8);
-      await view.getByRole("button", { name: "Select MCP App 1", exact: true }).click();
-      await expect(view.getByRole("region", { name: "Selected connection" }).getByText("MCP App 1 · MCP", { exact: true })).toBeVisible();
+      await view.getByRole("button", { name: `Select ${mcpAppName}`, exact: true }).click();
+      await expect(view.getByRole("region", { name: "Selected connection" }).getByText(`${mcpAppName} · MCP`, { exact: true })).toBeVisible();
       await expect(view.getByRole("button", { name: "Revoke all CLI connections", exact: true })).toHaveCount(0);
-      const revoke = view.getByRole("button", { name: "Revoke MCP App 1", exact: true });
+      const revoke = view.getByRole("button", { name: `Revoke ${mcpAppName}`, exact: true });
       await revoke.click();
       expect(mutations).toEqual([]);
       const confirmation = view.getByRole("group", { name: "Confirm revocation" });
       await expect(confirmation).toBeFocused();
       await expect(confirmation.getByRole("button", { name: "Confirm", exact: true })).toBeInViewport();
+      await expectTextInsideCard(confirmation.getByText(`Revoke ${mcpAppName}?`, { exact: true }));
       const accessibility = await new AxeBuilder({ page }).include("[data-settings-view]").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
       expect(accessibility.violations).toEqual([]);
       await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -89,7 +96,7 @@ for (const profile of [
       await revoke.click();
       await confirmation.getByRole("button", { name: "Confirm", exact: true }).click();
       await expect.poll(() => mutations).toEqual(["/api/v1/me/oauth-grants/mcp-1"]);
-      await expect(view.getByRole("button", { name: "Select MCP App 1", exact: true })).toHaveCount(0);
+      await expect(view.getByRole("button", { name: `Select ${mcpAppName}`, exact: true })).toHaveCount(0);
       await expect(view.getByText("Access revoked.", { exact: true })).toBeFocused();
       await closeSettingsInspector(page);
       await view.getByRole("tab", { name: "CLI", exact: true }).click();
@@ -125,4 +132,31 @@ for (const profile of [
       await page.screenshot({ path: testInfo.outputPath("account-inspector.png") });
     });
   });
+}
+
+async function expectTextInsideCard(text: Locator) {
+  const bounds = await text.evaluate((element) => {
+    const card = element.parentElement!;
+    const rect = card.getBoundingClientRect();
+    const style = getComputedStyle(card);
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return {
+      text: element.textContent ?? "",
+      left: rect.left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft),
+      right: rect.right - Number.parseFloat(style.borderRightWidth) - Number.parseFloat(style.paddingRight),
+      top: rect.top + Number.parseFloat(style.borderTopWidth) + Number.parseFloat(style.paddingTop),
+      bottom: rect.bottom - Number.parseFloat(style.borderBottomWidth) - Number.parseFloat(style.paddingBottom),
+      fragments: Array.from(range.getClientRects(), (fragment) => ({
+        left: fragment.left, right: fragment.right, top: fragment.top, bottom: fragment.bottom
+      }))
+    };
+  });
+  expect(bounds.fragments.length, bounds.text).toBeGreaterThan(0);
+  for (const fragment of bounds.fragments) {
+    expect(fragment.left, bounds.text).toBeGreaterThanOrEqual(bounds.left - 0.5);
+    expect(fragment.right, bounds.text).toBeLessThanOrEqual(bounds.right + 0.5);
+    expect(fragment.top, bounds.text).toBeGreaterThanOrEqual(bounds.top - 0.5);
+    expect(fragment.bottom, bounds.text).toBeLessThanOrEqual(bounds.bottom + 0.5);
+  }
 }

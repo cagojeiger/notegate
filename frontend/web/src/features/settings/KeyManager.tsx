@@ -68,7 +68,7 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
       {revokeMutation.error ? <p role="alert" className="text-sm text-danger">{revokeMutation.error.message}</p> : null}
       {created ? (
         <Card tone="success">
-          <div className="text-sm font-semibold text-text">Key “{created.name}” created</div>
+          <div className="break-words text-sm font-semibold text-text">Key “{created.name}” created</div>
           <p className="mt-1 text-xs text-muted">Copy it before selecting Done. You cannot retrieve it afterwards.</p>
           <div ref={focusCreatedToken} className="mt-3 flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded-workbench-surface border border-border bg-bg px-3 py-2 font-mono text-xs">{created.token}</code>
@@ -90,14 +90,14 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
       ) : (
         <Card padding="none" as="ul" className="divide-y divide-seam">
           {keys.map((key) => (
-            <li key={key.id} className="flex items-center gap-3 px-3 py-3 text-workbench">
+            <li key={key.id} className="flex flex-wrap items-center gap-3 px-3 py-3 text-workbench">
               <KeyRound size={15} className="shrink-0 text-muted" />
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-[1_1_10rem]">
                 <div className="truncate font-medium">{key.name}</div>
                 <div className="text-xs text-muted">created {key.created_at.slice(0, 10)} · expires {key.expires_at.slice(0, 10)}</div>
               </div>
               {(revokingId ?? confirmId) === key.id ? (
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="ml-auto flex shrink-0 items-center gap-2">
                   <Button size="sm" variant="danger" disabled={revokeMutation.isPending} onClick={() => revokeMutation.mutate(key.id)}>Confirm</Button>
                   <Button size="sm" secondary disabled={revokeMutation.isPending} onClick={() => setConfirmId(null)}>Cancel</Button>
                 </div>

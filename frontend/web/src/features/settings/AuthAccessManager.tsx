@@ -141,7 +141,7 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
         </SettingsInspectorSection>
         {confirmation ? <PanelSection><div ref={focusConfirmation} tabIndex={-1} role="group" aria-label="Confirm revocation" className="outline-none">
           <Card className="space-y-3 text-sm">
-            <p>{confirmation.label}?</p>
+            <p className="break-words">{confirmation.label}?</p>
             <div className="flex flex-wrap gap-2">
               <Button variant="danger" disabled={revoke.isPending} onClick={() => revoke.mutate(confirmation)}>Confirm</Button>
               <Button secondary disabled={revoke.isPending} onClick={() => { setConfirmation(null); requestAnimationFrame(() => actionRef.current?.focus()); }}>Cancel</Button>

@@ -1,5 +1,5 @@
 import { CircleHelp } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 export function HelpTooltip({
   label,
@@ -12,11 +12,36 @@ export function HelpTooltip({
 }) {
   const tooltipId = useId();
   const rootRef = useRef<HTMLSpanElement>(null);
+  const tooltipRef = useRef<HTMLSpanElement>(null);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [latched, setLatched] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const open = !dismissed && (hovered || focused || latched);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    function positionTooltip() {
+      const root = rootRef.current;
+      const tooltip = tooltipRef.current;
+      if (!root || !tooltip) return;
+      const anchor = root.getBoundingClientRect();
+      const width = tooltip.getBoundingClientRect().width;
+      const preferredLeft = align === "end" ? anchor.right - width : anchor.left;
+      const left = Math.max(16, Math.min(preferredLeft, document.documentElement.clientWidth - width - 16));
+      tooltip.style.left = `${left - anchor.left}px`;
+      tooltip.style.right = "auto";
+    }
+
+    positionTooltip();
+    window.addEventListener("resize", positionTooltip);
+    window.addEventListener("scroll", positionTooltip, true);
+    return () => {
+      window.removeEventListener("resize", positionTooltip);
+      window.removeEventListener("scroll", positionTooltip, true);
+    };
+  }, [align, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -88,6 +113,7 @@ export function HelpTooltip({
         <CircleHelp size={13} />
       </button>
       <span
+        ref={tooltipRef}
         id={tooltipId}
         role="tooltip"
         hidden={!open}

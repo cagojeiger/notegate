@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 
 import { openSettings, chooseHistorySection, closeSettingsInspector } from "./support/settings";
 
@@ -10,17 +10,20 @@ import { usageResponse } from "./support/usage";
 const space = makeSpace();
 const emptyPage = { limit: 50, returned: 0, has_more: false, next_cursor: null };
 const operation = "PUT /api/v2/spaces/{space_id}/text/{node_id}";
+const actorName = "Daily notebook automation with a long but valid agent name";
+const spaceName = "Daily research and project decisions archive";
 const invocations: CommandInvocation[] = Array.from({ length: 51 }, (_, index) => ({
   id: 51 - index,
   invocation_id: `d78b5f11-620e-44a5-9881-${String(51 - index).padStart(12, "0")}`,
   created_at: new Date(Date.UTC(2026, 9, 11, 13, 50) - index * 60_000).toISOString(),
   actor_account_id: "38339a28-3c37-4ba4-b11f-000000000001",
+  actor: index === 0 ? { id: "38339a28-3c37-4ba4-b11f-000000000001", kind: "agent", display_name: actorName } : undefined,
   caller_kind: "agent",
   surface: "api",
   tool: "http",
   op: operation,
   purpose: index === 0 ? "회의록의 결정 사항과 후속 작업 반영" : null,
-  space_name: null,
+  space_name: index === 0 ? spaceName : null,
   input: { method: "PUT", route: operation.slice(4), path_ids: {}, body_recorded: false },
   response: { status: 200, body_recorded: false },
   outcome: "success",
@@ -220,6 +223,64 @@ for (const viewport of [
       await settings.getByRole("tab", { name: "History", exact: true }).click();
       await expect(rows).toHaveCount(50);
       await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(900);
+
+      if (viewport.name === "mobile") {
+        await closeSettingsInspector(page);
+        await page.setViewportSize({ width: 320, height: 844 });
+        const row = rows.first();
+        await row.scrollIntoViewIfNeeded();
+        const separators = await textRectangles(row.getByText("·", { exact: true }));
+        expect(separators).toHaveLength(2);
+        const groups = await Promise.all([`${actorName} (Agent)`, "Success"].map((label) => textRectangles(row.getByText(label, { exact: true }))));
+        for (const [index, group] of groups.entries()) {
+          expect.soft(group.some((rect) => rect.top < separators[index].bottom && rect.bottom > separators[index].top),
+            "metadata separators share a line with their following value").toBe(true);
+        }
+
+        const time = await row.locator("time").evaluate((element) => {
+          const box = (rect: DOMRect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom });
+          const text = Array.from(element.querySelectorAll("span")).find((span) => span.getBoundingClientRect().width > 0)!;
+          const range = document.createRange();
+          range.selectNodeContents(text);
+          const button = element.closest("button")!;
+          const rect = button.getBoundingClientRect();
+          const style = getComputedStyle(button);
+          return {
+            icon: box(element.querySelector("svg")!.getBoundingClientRect()),
+            text: Array.from(range.getClientRects(), box),
+            content: {
+              left: rect.left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft),
+              right: rect.right - Number.parseFloat(style.borderRightWidth) - Number.parseFloat(style.paddingRight),
+              top: rect.top + Number.parseFloat(style.borderTopWidth) + Number.parseFloat(style.paddingTop),
+              bottom: rect.bottom - Number.parseFloat(style.borderBottomWidth) - Number.parseFloat(style.paddingBottom)
+            }
+          };
+        });
+        expect.soft(time.text, "event time remains on one line").toHaveLength(1);
+        for (const rect of time.text) {
+          expect.soft(rect.top < time.icon.bottom && rect.bottom > time.icon.top,
+            "event time icon and text share a line").toBe(true);
+        }
+        for (const rect of [time.icon, ...time.text]) {
+          expect.soft(rect.left, "event time stays inside the row").toBeGreaterThanOrEqual(time.content.left - 0.5);
+          expect.soft(rect.right, "event time stays inside the row").toBeLessThanOrEqual(time.content.right + 0.5);
+          expect.soft(rect.top, "event time stays inside the row").toBeGreaterThanOrEqual(time.content.top - 0.5);
+          expect.soft(rect.bottom, "event time stays inside the row").toBeLessThanOrEqual(time.content.bottom + 0.5);
+        }
+        await testInfo.attach("history-row-geometry-320", {
+          body: JSON.stringify({ separators, groups, time }, null, 2), contentType: "application/json"
+        });
+      }
     });
   }
+}
+
+async function textRectangles(locator: Locator) {
+  return locator.evaluateAll((elements) => elements.flatMap((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return Array.from(range.getClientRects(), (rect) => ({
+      left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom
+    }));
+  }));
 }

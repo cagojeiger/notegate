@@ -178,6 +178,28 @@ async function expectUnclippedDecoration(decoration: Locator) {
   expect(visibility.visibleHeight).toBeCloseTo(visibility.height, 0);
 }
 
+for (const width of [1440, 390, 320]) {
+  test(`help text stays within the viewport and Inspector at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    await page.getByRole("button", { name: "Open space library", exact: true }).click();
+    if (width < 768) await page.getByRole("button", { name: "Inspect Daily" }).click();
+    await page.getByRole("button", { name: "About Navigation", exact: true }).click();
+    const tooltip = page.getByRole("tooltip");
+    await expect(tooltip).toBeVisible();
+
+    for (const viewportWidth of [width, width === 1440 ? 1280 : width === 390 ? 320 : 390]) {
+      await page.setViewportSize({ width: viewportWidth, height: 844 });
+      await expectUnclippedDecoration(tooltip);
+      const bounds = (await tooltip.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(16);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewportWidth - 16);
+      await page.screenshot({ path: testInfo.outputPath(`tooltip-${viewportWidth}.png`) });
+    }
+  });
+}
+
 for (const width of [1440, 320]) {
   test(`long agent names stay inside the Inspector at ${width}px`, async ({ page }, testInfo) => {
     const name = "W".repeat(63);

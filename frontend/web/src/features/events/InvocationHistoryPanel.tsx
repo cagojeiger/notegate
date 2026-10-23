@@ -83,15 +83,15 @@ function CommandInvocationRow({ invocation, selected, onSelect }: { invocation: 
           </div>
           {!invocation.purpose && invocation.tool !== "me" ? <p className="mt-0.5 truncate font-mono text-xs text-muted" title={operation}>{operation}</p> : null}
           <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted">
-            {invocation.space_name ? (
-              <>
-                <span className="truncate" title={invocation.space_name}>Space {invocation.space_name}</span>
-                <span aria-hidden="true">·</span>
-              </>
-            ) : null}
-            <span className="truncate" title={invocation.actor_account_id}>{actor}</span>
-            <span aria-hidden="true">·</span>
-            <span className={invocation.outcome === "success" ? "text-success" : "text-danger"}>{status}</span>
+            {invocation.space_name ? <span className="truncate" title={invocation.space_name}>Space {invocation.space_name}</span> : null}
+            <span className="inline-flex min-w-0 max-w-full items-baseline gap-1.5">
+              {invocation.space_name ? <span aria-hidden="true" className="shrink-0">·</span> : null}
+              <span className="min-w-0 truncate" title={invocation.actor_account_id}>{actor}</span>
+            </span>
+            <span className="inline-flex min-w-0 max-w-full items-baseline gap-1.5">
+              <span aria-hidden="true" className="shrink-0">·</span>
+              <span className={`min-w-0 break-words ${invocation.outcome === "success" ? "text-success" : "text-danger"}`}>{status}</span>
+            </span>
           </div>
         </div>
         <ChevronRight size={15} className="mt-1 shrink-0 text-muted" />

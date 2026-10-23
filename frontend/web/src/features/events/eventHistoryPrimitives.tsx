@@ -33,7 +33,7 @@ export function EventQueryState<T extends EventListResponse>({ query, itemCount,
 
 export function EventTime({ value }: { value: string }) {
   return (
-    <time className="text-xs text-muted" dateTime={value}>
+    <time className="shrink-0 whitespace-nowrap text-xs text-muted" dateTime={value}>
       <History size={14} className="mr-1 inline-block align-[-2px]" />
       <span className="sm:hidden">{formatEventTimeCompact(value)}</span>
       <span className="hidden sm:inline">{formatEventTime(value)}</span>

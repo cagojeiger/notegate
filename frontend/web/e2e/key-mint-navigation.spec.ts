@@ -8,7 +8,7 @@ import { usageResponse } from "./support/usage";
 const space = makeSpace();
 const meta = { limit: 50, returned: 0, has_more: false, next_cursor: null };
 const mintedKey = {
-  id: "key-review", name: "Review key", token: "dummy-one-time-key",
+  id: "key-review", name: "W".repeat(63), token: "dummy-one-time-key",
   created_at: "2026-10-22T00:00:00Z", expires_at: "2026-11-21T00:00:00Z"
 };
 
@@ -95,6 +95,30 @@ for (const width of [1440, 390]) {
         await expect(view.getByRole("button", { name: "Add API key", exact: true })).toBeDisabled();
         if (navigation === "Account tab") await expect(view.getByRole("tab", { name: "Agents", exact: true })).toBeFocused();
 
+        const titleBounds = await view.getByText(`Key “${mintedKey.name}” created`, { exact: true }).evaluate((element) => {
+          const card = element.parentElement!;
+          const rect = card.getBoundingClientRect();
+          const style = getComputedStyle(card);
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          return {
+            left: rect.left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft),
+            right: rect.right - Number.parseFloat(style.borderRightWidth) - Number.parseFloat(style.paddingRight),
+            top: rect.top + Number.parseFloat(style.borderTopWidth) + Number.parseFloat(style.paddingTop),
+            bottom: rect.bottom - Number.parseFloat(style.borderBottomWidth) - Number.parseFloat(style.paddingBottom),
+            fragments: Array.from(range.getClientRects(), (fragment) => ({
+              left: fragment.left, right: fragment.right, top: fragment.top, bottom: fragment.bottom
+            }))
+          };
+        });
+        expect.soft(titleBounds.fragments.length).toBeGreaterThan(0);
+        for (const fragment of titleBounds.fragments) {
+          expect.soft(fragment.left, "created key title stays inside its card").toBeGreaterThanOrEqual(titleBounds.left - 0.5);
+          expect.soft(fragment.right, "created key title stays inside its card").toBeLessThanOrEqual(titleBounds.right + 0.5);
+          expect.soft(fragment.top, "created key title stays inside its card").toBeGreaterThanOrEqual(titleBounds.top - 0.5);
+          expect.soft(fragment.bottom, "created key title stays inside its card").toBeLessThanOrEqual(titleBounds.bottom + 0.5);
+        }
+
         await leave();
         await returnToAgent();
         await expect(view.getByText(mintedKey.token, { exact: true })).toBeVisible();
@@ -104,8 +128,32 @@ for (const width of [1440, 390]) {
         await leave();
         await returnToAgent();
         await expect(view.getByRole("button", { name: "Copy token", exact: true })).toHaveCount(0);
-        await expect(view.getByRole("button", { name: "Revoke Review key", exact: true })).toBeVisible();
+        const revoke = view.getByRole("button", { name: `Revoke ${mintedKey.name}`, exact: true });
+        await expect(revoke).toBeVisible();
         expect(issuance.calls()).toBe(1);
+
+        if (width < 768) {
+          await page.setViewportSize({ width: 320, height: 900 });
+          await revoke.scrollIntoViewIfNeeded();
+          const row = view.getByRole("listitem").filter({ has: page.getByText(mintedKey.name, { exact: true }) });
+          const information = row.getByText(mintedKey.name, { exact: true }).locator("..");
+          const previousBounds = (await information.boundingBox())!;
+          await revoke.click();
+          const confirm = row.getByRole("button", { name: "Confirm", exact: true });
+          const cancel = row.getByRole("button", { name: "Cancel", exact: true });
+          await expect(confirm).toBeVisible();
+          const informationBounds = (await information.boundingBox())!;
+          expect.soft(informationBounds.width, "confirmation preserves the key information width").toBeGreaterThanOrEqual(previousBounds.width - 0.5);
+          for (const control of [confirm, cancel]) {
+            const bounds = (await control.boundingBox())!;
+            expect.soft(bounds.y, "confirmation actions stay below the key information").toBeGreaterThanOrEqual(informationBounds.y + informationBounds.height - 0.5);
+            expect.soft(bounds.width, "confirmation actions retain their touch target").toBeGreaterThanOrEqual(44);
+            expect.soft(bounds.height, "confirmation actions retain their touch target").toBeGreaterThanOrEqual(44);
+          }
+          await cancel.click();
+          await expect(revoke).toBeVisible();
+          expect(issuance.calls()).toBe(1);
+        }
       });
     }
   });

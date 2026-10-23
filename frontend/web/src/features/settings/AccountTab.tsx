@@ -11,7 +11,7 @@ export function AccountTab({ me, onSignOut, renderPage }: {
 }) {
   const profile = <section>
     <SectionHeader title="Profile" />
-    <Card className="text-sm">
+    <Card className="break-words text-sm">
       <div className="font-medium">{me.account.display_name}</div>
       <div className="text-muted">{me.user?.email ?? me.account.kind}</div>
     </Card>
