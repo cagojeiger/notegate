@@ -6,6 +6,7 @@ import type { Me } from "../api/types";
 import { LoginGate } from "../auth/LoginGate";
 import { useSessionQuery } from "../auth/useAuthQueries";
 import { useBrowserSessionActivity } from "../auth/useBrowserSessionActivity";
+import { PublicInformationPage } from "../features/public-information/PublicInformationPage";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
 import { Button } from "../shared/ui";
 import { useUiStore } from "../stores/uiStore";
@@ -13,6 +14,15 @@ import { useUiStore } from "../stores/uiStore";
 const AuthenticatedWorkspace = lazy(() => import("./AuthenticatedWorkspace"));
 
 export function App() {
+  switch (window.location.pathname) {
+    case "/terms": return <PublicInformationPage page="terms" />;
+    case "/privacy": return <PublicInformationPage page="privacy" />;
+    case "/support": return <PublicInformationPage page="support" />;
+    default: return <SessionApp />;
+  }
+}
+
+function SessionApp() {
   const [sessionRevision, setSessionRevision] = useState(0);
   const showToast = useUiStore((state) => state.showToast);
 

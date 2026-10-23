@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Moon, ShieldCheck, Sun } from "lucide-react";
 
 import { persistTheme, useUiStore } from "../stores/uiStore";
+import { PublicInformationLinks } from "../features/public-information/PublicInformationLinks";
 import { BrandLockup, Card, IconButton } from "../shared/ui";
 import { useLoginGateController, type LoginGateControllerProps } from "./useLoginGateController";
 
@@ -66,6 +67,9 @@ export function LoginGate(controllerProps: LoginGateControllerProps) {
             </Card>
           ) : null}
         </Card>
+        <footer className="mt-5">
+          <PublicInformationLinks />
+        </footer>
       </section>
     </main>
   );

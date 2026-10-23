@@ -18,6 +18,7 @@ function meResponse() {
 describe("App auth boundary", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    window.history.replaceState(null, "", "/");
   });
 
   it("checks /api/v1/me on mount with the browser session", async () => {
@@ -44,6 +45,27 @@ describe("App auth boundary", () => {
     render(<App />);
 
     await screen.findByText("Continue to NoteGate");
+    expect(screen.getByRole("link", { name: "Terms" })).toHaveAttribute("href", "/terms");
+    expect(screen.getByRole("link", { name: "Privacy" })).toHaveAttribute("href", "/privacy");
+    expect(screen.getByRole("link", { name: "Support" })).toHaveAttribute("href", "/support");
+  });
+
+  it.each([
+    { path: "/terms", title: "Terms of Service" },
+    { path: "/privacy", title: "Privacy Policy" },
+    { path: "/support", title: "Help and contact" }
+  ])("opens $path without checking or changing the browser session", ({ path, title }) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Session service unavailable"));
+    window.history.replaceState(null, "", path);
+
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
+    expect(screen.getByText("In preparation")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to NoteGate" })).toHaveAttribute("href", "/");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    window.history.replaceState(null, "", "/");
   });
 
   it("keeps a browser session retryable when /me is temporarily unavailable", async () => {
