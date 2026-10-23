@@ -224,6 +224,13 @@ test("refreshes restored editors through one focus-owned Space sync", async ({ p
     }
     return restoredEditorsResponseFor(url, externalRevision);
   });
+  await page.route((url) => url.pathname === `/api/v1/spaces/${space.id}/text/text-2`, async (route) => {
+    const url = new URL(route.request().url());
+    requests.set(url.pathname, count(requests, url.pathname) + 1);
+    // Let canonical metadata arrive while the external body refresh is still pending.
+    if (externalRevision === 2) await new Promise((resolve) => setTimeout(resolve, 100));
+    await route.fulfill({ json: restoredEditorsResponseFor(url, externalRevision) });
+  });
 
   await page.goto("/");
   await expect(page.locator("[data-editor-group]")).toHaveCount(3);
