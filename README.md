@@ -110,3 +110,5 @@ See the [CLI contract](docs/spec/cli.md) for JSON input, output, exit codes, and
 ## Project status
 
 NoteGate is open source under [AGPL-3.0-or-later](LICENSE) and is primarily maintained by one developer.
+
+<!-- Temporary CI impact qualification: final documentation-only change. -->
