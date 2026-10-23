@@ -2,7 +2,7 @@
 """Conservatively select PR jobs; unrecognized inputs retain the full CI suite."""
 
 import argparse
-from pathlib import Path
+import sys
 
 
 JOBS = ("rust_build", "rust", "web", "browser", "postgres", "image")
@@ -55,25 +55,22 @@ def classify(event, paths):
     return result(enabled, "docs", "docs-only")
 
 
-def read_paths(filename):
-    if not filename:
+def parse_paths(data):
+    if not data or not data.endswith(b"\0"):
         return None
     try:
-        data = Path(filename).read_bytes()
-        if not data or not data.endswith(b"\0"):
-            return None
         paths = data[:-1].decode("utf-8").split("\0")
         return paths if all(paths) else None
-    except (OSError, UnicodeError):
+    except UnicodeError:
         return None
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--event", required=True)
-    parser.add_argument("--paths-file")
     args = parser.parse_args()
-    selection = classify(args.event, read_paths(args.paths_file))
+    paths = parse_paths(sys.stdin.buffer.read()) if args.event == "pull_request" else None
+    selection = classify(args.event, paths)
     for key, value in selection.items():
         print(f"{key}={str(value).lower() if isinstance(value, bool) else value}")
 

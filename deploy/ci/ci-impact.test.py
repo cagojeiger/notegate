@@ -6,7 +6,6 @@ import importlib.util
 import io
 from pathlib import Path
 import sys
-import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -17,6 +16,14 @@ SPEC.loader.exec_module(impact)
 
 
 class ImpactContracts(unittest.TestCase):
+    def cli(self, event, data):
+        output = io.StringIO()
+        stdin = io.TextIOWrapper(io.BytesIO(data), encoding="utf-8")
+        with patch.object(sys, "argv", ["ci-impact.py", "--event", event]), \
+                patch.object(sys, "stdin", stdin), contextlib.redirect_stdout(output):
+            impact.main()
+        return output.getvalue().splitlines()
+
     def selected(self, paths, event="pull_request"):
         result = impact.classify(event, paths)
         return {job for job in impact.JOBS if result[job]}
@@ -28,6 +35,11 @@ class ImpactContracts(unittest.TestCase):
         for event in ("push", "workflow_dispatch", "schedule", "pull_request_target", ""):
             with self.subTest(event=event):
                 self.assert_full(["docs/guide.md"], event)
+        with patch.object(sys, "argv", ["ci-impact.py", "--event", "push"]), \
+                patch.object(sys, "stdin") as stdin, contextlib.redirect_stdout(io.StringIO()):
+            stdin.buffer.read.side_effect = AssertionError("non-PR events must not read stdin")
+            impact.main()
+            stdin.buffer.read.assert_not_called()
 
     def test_documentation_allowlist_is_deliberately_narrow(self):
         paths = ["README.md", "SECURITY.md", "CLAUDE.md", "CONTRIBUTING.md", "AGENTS.md",
@@ -85,44 +97,24 @@ class ImpactContracts(unittest.TestCase):
                 self.assert_full(paths)
 
     def test_nul_diff_requires_valid_utf8_complete_nonempty_records(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "paths"
-            for data in (b"", b"README.md", b"\0", b"README.md\0\0", b"docs/\xff.md\0"):
-                with self.subTest(data=data):
-                    path.write_bytes(data)
-                    self.assert_full(impact.read_paths(path))
-            path.write_bytes("docs/한국어 안내.md\0README.md\0".encode())
-            self.assertEqual(self.selected(impact.read_paths(path)), set())
-            self.assert_full(impact.read_paths(Path(directory) / "missing"))
-            self.assert_full(impact.read_paths(None))
+        for data in (b"", b"README.md", b"\0", b"README.md\0\0", b"docs/\xff.md\0"):
+            with self.subTest(data=data):
+                self.assert_full(impact.parse_paths(data))
+        paths = impact.parse_paths("docs/한국어 안내.md\0README.md\0".encode())
+        self.assertEqual(self.selected(paths), set())
 
     def test_cli_output_has_only_fixed_keys_and_safe_values(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "paths"
-            path.write_bytes(b"frontend/web/src/a.test.ts\0")
-            output = io.StringIO()
-            with patch.object(sys, "argv", ["ci-impact.py", "--event", "pull_request",
-                                             "--paths-file", str(path)]), \
-                    contextlib.redirect_stdout(output):
-                impact.main()
-            self.assertEqual(output.getvalue().splitlines(), [
-                "rust_build=false", "rust=false", "web=true", "browser=false", "postgres=false",
-                "image=false", "scope=frontend-unit", "reason=frontend-unit-only"])
+        self.assertEqual(self.cli("pull_request", b"frontend/web/src/a.test.ts\0"), [
+            "rust_build=false", "rust=false", "web=true", "browser=false", "postgres=false",
+            "image=false", "scope=frontend-unit", "reason=frontend-unit-only"])
 
     def test_cli_missing_diff_and_output_injection_path_keep_full_jobs(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "paths"
-            path.write_bytes(b"docs/a.md\nweb=false\0")
-            for extra in ([], ["--paths-file", str(path)]):
-                with self.subTest(extra=extra):
-                    output = io.StringIO()
-                    with patch.object(sys, "argv", ["ci-impact.py", "--event", "pull_request", *extra]), \
-                            contextlib.redirect_stdout(output):
-                        impact.main()
-                    lines = output.getvalue().splitlines()
-                    self.assertEqual(lines[:6], [f"{job}=true" for job in impact.JOBS])
-                    self.assertEqual(lines[6], "scope=full")
-                    self.assertEqual(len(lines), 8)
+        for data in (b"", b"README.md", b"docs/\xff.md\0", b"docs/a.md\nweb=false\0"):
+            with self.subTest(data=data):
+                lines = self.cli("pull_request", data)
+                self.assertEqual(lines[:6], [f"{job}=true" for job in impact.JOBS])
+                self.assertEqual(lines[6], "scope=full")
+                self.assertEqual(len(lines), 8)
 
 
 if __name__ == "__main__":
