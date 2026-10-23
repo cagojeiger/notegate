@@ -964,7 +964,9 @@ mod tests {
 
         assert_eq!(
             error.body().get("error").and_then(Value::as_str),
-            Some("candidate_version_mismatch")
+            Some("candidate_version_mismatch"),
+            "unexpected candidate response: {}",
+            error.body()
         );
         assert_eq!(
             candidate_version_output(&install_path)?,

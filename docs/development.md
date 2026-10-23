@@ -214,7 +214,19 @@ make test-measure   # 동일 바이너리로 전체 harness 실행과 분리 실
 컴파일·그룹별 실행·doctest 시간과 정확한 테스트 목록은 `target/test-suites/`에 기록된다.
 `test-measure`는 첫 컴파일 후 baseline→분리, 분리→baseline 순서를 번갈아 실행한다.
 Baseline은 일반 테스트 바이너리 전체이며 doctest는 모든 반복 뒤 한 번 별도 실행한다.
-CI의 두 그룹 명령은 각각 inventory 준비를 하므로 전체 CI 시간에는 추가 준비 비용도 포함된다.
+CI에서는 `Rust Build`가 정적 검사, 테스트 컴파일·inventory 생성, doctest와 API·seed
+빌드를 담당한다. 테스트 실행 파일과 CLI subprocess용 실행 파일은 `rust-prepared-tests`,
+API·seed는 `rust-e2e-api` artifact로 전달한다. `Rust`는 두 테스트 그룹을, `Browser E2E`는
+API·Web 기능을 실행하며 두 job에서 Cargo 재빌드는 하지 않는다. Browser는 `Rust Build`,
+Web, Hygiene 완료 후 Rust 테스트와 병렬로 진행한다. 빌드 실패는 필수 `Rust` 검사도 실패시킨다.
+CI 전달용 복사본에서 debug 정보만 제외하고 zstd로 압축한다. Cargo 빌드 원본은 유지하며,
+전달본은 상세 backtrace의 소스 행 정보가 줄어들 수 있다. 원본·전달본 크기를 빌드 보고서에 기록한다.
+전달한 파일은 같은 checkout 경로·커밋·실행·플랫폼·toolchain에서만 사용하고, package별
+작업 디렉터리, 테스트 분류·누락 검증, run 단위 DB 정리를 유지한다. 기존 로컬 Make 명령은
+직접 컴파일·실행하는 경로를 유지한다. Prepared 실행의 입력 bundle과 출력 보고서는 저장소
+`target/` 안으로 제한하며 상위 경로·심볼릭 링크를 통한 이탈은 거부한다.
+빌드 시간과 artifact 전송 시간은 테스트 실행 시간과
+별도로 비교한다. PostgreSQL 18과 배포용 release 빌드는 각자의 빌드 경로를 유지한다.
 DB helper는 `NOTEGATE_TEST_TIMING_FILE`의 절대 경로에 opt-in JSONL을 기록한다.
 Setup·migration·초기 fixture·cleanup 시간과 setup 완료부터 cleanup 시작까지의 lifetime을
 구분한다. Lifetime은 순수 테스트 본문 시간과 다르며, 병렬 테스트의 시간 합계도 전체

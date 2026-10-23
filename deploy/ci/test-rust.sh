@@ -4,6 +4,16 @@ set -euo pipefail
 
 unset NOTEGATE_TEST_SKIP_INTEGRATION
 
+prepared_command=false
+if [ "${1:-}" = --command ]; then
+  shift
+  if [ "$#" -eq 0 ]; then
+    echo "--command requires an executable." >&2
+    exit 1
+  fi
+  prepared_command=true
+fi
+
 for name in NOTEGATE_TEST_DATABASE_URL NOTEGATE_TEST_S3_ENDPOINT; do
   value="${!name:-}"
   if [[ -z "${value//[[:space:]]/}" ]]; then
@@ -12,7 +22,7 @@ for name in NOTEGATE_TEST_DATABASE_URL NOTEGATE_TEST_S3_ENDPOINT; do
   fi
 done
 command -v psql >/dev/null || { echo "PostgreSQL psql is required for integration test cleanup." >&2; exit 1; }
-command -v cargo >/dev/null
+if "$prepared_command"; then command -v "$1" >/dev/null; else command -v cargo >/dev/null; fi
 PGCONNECT_TIMEOUT=5 psql --dbname="$NOTEGATE_TEST_DATABASE_URL" -X --set=ON_ERROR_STOP=1 --command='SELECT 1' >/dev/null
 
 # 14-byte prefix + 16 hex digits + underscore + 32 UUID digits = 63 bytes.
@@ -43,4 +53,8 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 echo "Running Rust integration tests with PostgreSQL/S3; run ID ${NOTEGATE_TEST_RUN_ID}."
-cargo test --locked --workspace "$@"
+if "$prepared_command"; then
+  "$@"
+else
+  cargo test --locked --workspace "$@"
+fi

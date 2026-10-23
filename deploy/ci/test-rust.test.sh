@@ -29,6 +29,16 @@ echo cargo >> "$TEST_RUNNER_LOG"
 exit "${TEST_CARGO_CODE:-0}"
 MOCK
 chmod +x "$tmp_root/bin/psql" "$tmp_root/bin/cargo"
+cat > "$tmp_root/bin/prepared-tests" <<'MOCK'
+#!/usr/bin/env bash
+set -eu
+[[ "$NOTEGATE_TEST_RUN_ID" =~ ^[0-9a-f]{16}$ ]]
+[[ -z "${NOTEGATE_TEST_SKIP_INTEGRATION:-}" ]]
+[[ "$*" == --fixture ]]
+echo harness >> "$TEST_RUNNER_LOG"
+exit "${TEST_HARNESS_CODE:-0}"
+MOCK
+chmod +x "$tmp_root/bin/prepared-tests"
 
 run_case() {
   local expected="$1"
@@ -64,6 +74,32 @@ run_case 1 TEST_CLEANUP_CODE=3
 assert_calls $'preflight\ncargo\ncleanup'
 run_case 101 TEST_CARGO_CODE=101 TEST_CLEANUP_CODE=3
 assert_calls $'preflight\ncargo\ncleanup'
+
+run_prepared_case() {
+  local expected="$1"
+  shift
+  : > "$TEST_RUNNER_LOG"
+  local result_code=0
+  env PATH="$tmp_root/bin:$PATH" \
+    NOTEGATE_TEST_DATABASE_URL=postgres://test/test \
+    NOTEGATE_TEST_S3_ENDPOINT=http://storage.test \
+    "$@" "$runner" --command prepared-tests --fixture > "$tmp_root/output" 2>&1 || result_code=$?
+  if [ "$result_code" -ne "$expected" ]; then
+    cat "$tmp_root/output" >&2
+    echo "expected exit ${expected}, got ${result_code}" >&2
+    exit 1
+  fi
+}
+run_prepared_case 0 NOTEGATE_TEST_SKIP_INTEGRATION=1
+assert_calls $'preflight\nharness\ncleanup'
+run_prepared_case 23 TEST_HARNESS_CODE=23
+assert_calls $'preflight\nharness\ncleanup'
+run_prepared_case 1 TEST_CLEANUP_CODE=3
+assert_calls $'preflight\nharness\ncleanup'
+run_prepared_case 23 TEST_HARNESS_CODE=23 TEST_CLEANUP_CODE=3
+assert_calls $'preflight\nharness\ncleanup'
+run_prepared_case 2 TEST_PREFLIGHT_CODE=2
+assert_calls preflight
 echo 'Rust test runner contract tests passed.'
 
 if [ "${1:-}" != --postgres ]; then exit 0; fi
@@ -79,7 +115,7 @@ owned="${prefix}00000000000000000000000000000001"
 # Same prefix but not a TestDb name, and a valid schema owned by another run.
 keep="${prefix}keep"
 other="notegate_test_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')_00000000000000000000000000000002"
-printf '%s\n' "$owned" "$keep" "$other" > "$TEST_RUNNER_SCHEMAS"
+printf '%s\n' "$owned" "$keep" "$other" >> "$TEST_RUNNER_SCHEMAS"
 psql --dbname="$NOTEGATE_TEST_DATABASE_URL" -X --set=ON_ERROR_STOP=1 <<SQL
 CREATE SCHEMA "$owned";
 CREATE TABLE "$owned".test_data (id integer);
@@ -101,13 +137,16 @@ trap cleanup_postgres EXIT
 result_code=0
 PATH="$tmp_root/bin:$PATH" "$runner" > "$tmp_root/output" 2>&1 || result_code=$?
 [ "$result_code" -eq 101 ] || { cat "$tmp_root/output" >&2; exit 1; }
+result_code=0
+PATH="$tmp_root/bin:$PATH" "$runner" --command "$tmp_root/bin/cargo" > "$tmp_root/output" 2>&1 || result_code=$?
+[ "$result_code" -eq 101 ] || { cat "$tmp_root/output" >&2; exit 1; }
 index=0
 while IFS= read -r schema; do
   exists="$(psql --dbname="$NOTEGATE_TEST_DATABASE_URL" -X -At --set=ON_ERROR_STOP=1 --set="schema=$schema" <<'SQL'
 SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = :'schema');
 SQL
 )"
-  if [ "$index" -eq 0 ]; then [ "$exists" = f ]; else [ "$exists" = t ]; fi
+  if [ "$((index % 3))" -eq 0 ]; then [ "$exists" = f ]; else [ "$exists" = t ]; fi
   index=$((index + 1))
 done < "$TEST_RUNNER_SCHEMAS"
 echo 'Failed-run cleanup removed its schema and preserved unrelated schemas.'
