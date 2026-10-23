@@ -59,8 +59,9 @@ test("an empty library creates its first Space from the plus card", async ({ pag
   await page.goto("/");
   await page.getByRole("button", { name: "Open space library" }).click();
 
-  await expect(page.getByRole("heading", { name: "Spaces 0" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Spaces 0", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "No spaces yet" })).toBeVisible();
+  expect((await page.getByRole("button", { name: "Create space", exact: true }).boundingBox())?.height).toBeGreaterThanOrEqual(144);
   await page.getByRole("list", { name: "All spaces" }).getByRole("button", { name: "Create space" }).click();
   await expect(page.getByRole("dialog", { name: "New space" }).getByLabel("Space name")).toBeFocused();
 });
@@ -70,7 +71,7 @@ test("a caller without creation permission sees only the existing Space cards", 
   await page.goto("/");
   await page.getByRole("button", { name: "Open space library" }).click();
 
-  await expect(page.getByRole("heading", { name: "Spaces 4" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Spaces 4", exact: true })).toBeVisible();
   await expect(page.getByRole("list", { name: "All spaces" }).getByRole("listitem")).toHaveCount(4);
   await expect(page.getByRole("button", { name: "Create space" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Add space" })).toHaveCount(0);
@@ -86,10 +87,10 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   const grid = page.getByRole("list", { name: "All spaces" });
   await expect(grid).toBeVisible();
   await expect(grid.getByRole("listitem")).toHaveCount(5);
-  await expect(page.getByRole("heading", { name: "Spaces 4" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Spaces 4", exact: true })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Space navigation" })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Space inspector" })).toBeVisible();
-  const libraryHeader = page.locator("[data-panel-header]").filter({ has: page.getByRole("heading", { name: "Spaces 4" }) });
+  const libraryHeader = page.locator("[data-panel-header]").filter({ has: page.getByRole("tab", { name: "Spaces 4", exact: true }) });
   const inspectorHeader = page.getByRole("complementary", { name: "Space inspector" }).locator("[data-panel-header]");
   const railHeader = page.getByRole("button", { name: "Open space library" }).locator("..");
   const headerBounds = await Promise.all([libraryHeader.boundingBox(), inspectorHeader.boundingBox(), railHeader.boundingBox()]);
@@ -119,7 +120,9 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
 
   const inspectorToggle = page.getByRole("button", { name: "Toggle space inspector" });
   await expect(inspectorToggle).toHaveAttribute("aria-pressed", "true");
-  await inspectorToggle.click();
+  await page.getByRole("button", { name: "Close space inspector", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "Spaces 4", exact: true })).toBeFocused();
+  await expect(inspectorToggle).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByText("Space Inspector", { exact: true })).toBeHidden();
   await expect.poll(async () => {
     const boxes = await grid.getByRole("listitem").filter({ has: page.getByRole("button", { name: /^Inspect / }) }).evaluateAll((items) => items.map((item) => item.getBoundingClientRect().y));

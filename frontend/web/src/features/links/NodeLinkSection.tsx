@@ -49,7 +49,7 @@ export function NodeLinkSection({
     <section id={id} className={expanded ? "flex min-h-0 min-w-0 flex-col" : "min-w-0 shrink-0"}>
       <button
         type="button"
-        className="flex min-h-workbench-control w-full shrink-0 items-center gap-2 px-1 py-1.5 text-left outline-none transition hover:bg-[var(--ng-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+        className="flex min-h-workbench-control w-full shrink-0 items-center gap-2 px-1 py-1.5 text-left outline-none transition hover:bg-[var(--ng-hover)]"
         aria-label={`${accessibleTitle}, ${links.length} links loaded${hasMore ? ", more available" : ""}`}
         aria-expanded={expanded}
         aria-controls={panelId}
@@ -188,7 +188,7 @@ function LinkRow({
   return (
     <button
       type="button"
-      className="flex min-h-workbench-row w-full items-start gap-2 px-1 py-1.5 text-workbench text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+      className="flex min-h-workbench-row w-full items-start gap-2 px-1 py-1.5 text-workbench text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text"
       onClick={() => onOpenNode(link.node_id!)}
       aria-label={`Open ${link.path}`}
       title={link.path}

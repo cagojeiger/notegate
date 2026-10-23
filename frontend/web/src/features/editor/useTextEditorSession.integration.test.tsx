@@ -85,6 +85,85 @@ describe("text editing with the shared server cache", () => {
     expect(server.save).not.toHaveBeenCalled();
   });
 
+  it("waits for an in-flight external text refresh when node metadata arrives first", async () => {
+    const server = mockTextServer();
+    const { result } = renderHook(useEditor, { wrapper: ApiWrapper });
+    await waitFor(() => expect(result.current.session.draft).toBe("original"));
+    const pending = deferred<void>();
+    server.read.mockImplementation(async () => {
+      await pending.promise;
+      return server.readResponse();
+    });
+
+    server.change("remote update");
+    await act(async () => {
+      await applyExternalFileChanges(result.current.queryClient, node.space_id, [change]);
+    });
+    await waitFor(() => expect(result.current.latestNode.content_sha256).toBe("sha-2"));
+    expect(result.current.session.textQuery.isFetching).toBe(true);
+
+    await act(async () => { pending.resolve(); });
+    await waitFor(() => {
+      expect(result.current.session.content).toBe("remote update");
+      expect(result.current.session.draft).toBe("remote update");
+      expect(result.current.session.textQuery.isFetching).toBe(false);
+    });
+    expect(server.read).toHaveBeenCalledTimes(2);
+    expect(server.save).not.toHaveBeenCalled();
+  });
+
+  it("catches up when an in-flight body response predates newer node metadata", async () => {
+    const server = mockTextServer();
+    const { result } = renderHook(useEditor, { wrapper: ApiWrapper });
+    await waitFor(() => expect(result.current.session.draft).toBe("original"));
+    server.change("revision two");
+    const bodyTwo = server.readResponse();
+    const pending = deferred<Response>();
+    server.read.mockImplementationOnce(() => pending.promise);
+    act(() => {
+      void result.current.queryClient.refetchQueries({ queryKey: queryKeys.text(node.space_id, node.id), exact: true });
+    });
+    await waitFor(() => expect(server.read).toHaveBeenCalledTimes(2));
+
+    server.change("revision three");
+    await act(async () => {
+      await result.current.queryClient.refetchQueries({ queryKey: queryKeys.node(node.space_id, node.id), exact: true });
+    });
+    await waitFor(() => expect(result.current.latestNode.content_sha256).toBe("sha-3"));
+    await act(async () => { pending.resolve(bodyTwo); });
+    await waitFor(() => {
+      expect(result.current.session.textQuery.isFetching).toBe(false);
+      expect(result.current.session.content).toBe("revision three");
+      expect(result.current.session.draft).toBe("revision three");
+    });
+    expect(server.read).toHaveBeenCalledTimes(3);
+  });
+
+  it("leaves failed body refreshes to the query retry policy", async () => {
+    const server = mockTextServer();
+    const { result } = renderHook(() => {
+      useQueryClient().setQueryDefaults(queryKeys.text(node.space_id, node.id), { retry: false });
+      return useEditor();
+    }, { wrapper: ApiWrapper });
+    await waitFor(() => expect(result.current.session.draft).toBe("original"));
+    server.read.mockImplementation(async () => jsonResponse({ message: "Temporarily unavailable" }, 503));
+    server.change("remote update");
+    await act(async () => {
+      await applyExternalFileChanges(result.current.queryClient, node.space_id, [change]);
+    });
+    await waitFor(() => expect(result.current.session.textQuery.isFetching).toBe(false));
+    expect(server.read).toHaveBeenCalledTimes(2);
+    expect(result.current.session.textQuery.isError).toBe(true);
+    expect(result.current.session.draft).toBe("original");
+
+    server.read.mockImplementation(async () => server.readResponse());
+    await act(async () => {
+      await applyExternalFileChanges(result.current.queryClient, node.space_id, [change]);
+    });
+    await waitFor(() => expect(result.current.session.content).toBe("remote update"));
+    expect(result.current.session.draft).toBe("remote update");
+  });
+
   it("preserves input started while an external text refresh is pending", async () => {
     const server = mockTextServer();
     const { result } = renderHook(useEditor, { wrapper: ApiWrapper });
@@ -346,7 +425,7 @@ function useEditor() {
     canWrite: true,
     onSetMode: setMode
   });
-  return { session, mode, setMode, queryClient };
+  return { session, mode, setMode, queryClient, latestNode: currentNode };
 }
 
 type SaveRequest = {

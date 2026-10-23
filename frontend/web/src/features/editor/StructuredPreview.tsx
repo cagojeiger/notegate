@@ -25,7 +25,7 @@ export function StructuredPreviewLayout({ format, content, parsed, mode = "tree"
       {mode === "tree" && parsed.ok ? (
         <StructuredTreePanel value={parsed.value} expansionMode={expansionMode} />
       ) : mode === "tree" && !parsed.ok ? (
-        <div className="rounded-2xl border border-danger/30 bg-danger/10 p-4 text-sm text-danger">
+        <div className="rounded-workbench-surface border border-danger/30 bg-danger/10 p-4 text-sm text-danger">
           Could not parse {format.toUpperCase()}: {parsed.message}
         </div>
       ) : (

@@ -63,6 +63,29 @@ describe("useUiStore", () => {
     });
   });
 
+  it("resets private in-memory workspace state without changing saved workbenches or layout preferences", () => {
+    const persistence = fakePersistence();
+    const store = createUiStore(persistence);
+    store.setState({ activeSpaceId: "space-a", expandedFolderIds: new Set(["folder-a"]),
+      expandedFolderIdsBySpace: { "space-a": ["folder-a"] }, theme: "dark", primaryWidth: 400,
+      auxiliaryOpen: false, mobileTreeOpen: true, mobileAuxOpen: true, toast: "Private note saved", saveState: "saved" });
+    store.getState().openInActiveGroup(node("private-a", "Private A", "space-a"));
+    const previousGroupId = store.getState().editorGroups[0].id;
+
+    store.getState().resetSessionWorkspace();
+
+    expect(store.getState()).toMatchObject({ activeSpaceId: null, expandedFolderIdsBySpace: {},
+      theme: "dark", primaryWidth: 400, auxiliaryOpen: false, mobileTreeOpen: false,
+      mobileAuxOpen: false, toast: null, saveState: "idle" });
+    expect(store.getState().expandedFolderIds.size).toBe(0);
+    expect(store.getState().editorGroups).toHaveLength(1);
+    expect(store.getState().editorGroups[0]).toMatchObject({ node: null, mode: "preview", back: [], forward: [] });
+    expect(store.getState().editorGroups[0].id).not.toBe(previousGroupId);
+    expect(persistence.saveSpaceWorkbench).not.toHaveBeenCalled();
+    expect(persistence.loadSpaceWorkbench).not.toHaveBeenCalled();
+    expect(persistence.savePanelState).not.toHaveBeenCalled();
+  });
+
   it("caps editor groups at the product maximum", () => {
     for (let i = 0; i < MAX_EDITOR_GROUPS + 2; i += 1) {
       useUiStore.getState().addGroup();

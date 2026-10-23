@@ -35,12 +35,12 @@ function UploadProgressPanel({ manager }: { manager: ReturnType<typeof useUpload
   return (
     <section
       aria-label="File uploads"
-      className="pointer-events-auto shrink-0 border-t border-seam bg-surface text-text md:overflow-hidden md:rounded-lg md:border md:border-border md:shadow-[var(--ng-focus-shadow)]"
+      className="pointer-events-auto shrink-0 border-t border-seam bg-surface text-text md:overflow-hidden md:rounded-workbench-surface md:border md:border-border md:shadow-[var(--ng-focus-shadow)]"
     >
       <button
         type="button"
         onClick={() => setCollapsed((value) => !value)}
-        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left outline-none hover:bg-[var(--ng-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left outline-none hover:bg-[var(--ng-hover)]"
         aria-label={`${collapsed ? "Expand" : "Collapse"} uploads`}
         aria-expanded={!collapsed}
         aria-controls="upload-progress-list"

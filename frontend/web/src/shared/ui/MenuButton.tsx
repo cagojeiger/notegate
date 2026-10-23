@@ -11,7 +11,7 @@ export function MenuButton({ children, onClick, danger, disabled }: { children: 
       tabIndex={menuItem ? -1 : undefined}
       onClick={onClick}
       disabled={disabled}
-      className={`flex min-h-workbench-control w-full items-center gap-2 rounded-workbench px-2 text-left text-workbench outline-none transition focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
+      className={`flex min-h-workbench-control w-full items-center gap-2 rounded-workbench px-2 text-left text-workbench outline-none transition disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
         danger ? "text-danger hover:bg-danger/10" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"
       }`}
     >

@@ -95,7 +95,7 @@ function RecentLoadMore({ loaded, isFetching, scrollRef, fetchNextPage }: { load
     <div ref={ref} className="flex justify-center py-1">
       <button
         type="button"
-        className="min-h-workbench-control rounded px-2 py-1 text-workbench text-faint hover:bg-[var(--ng-hover)] hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:min-h-6"
+        className="min-h-workbench-control rounded-workbench px-2 py-1 text-workbench text-faint hover:bg-[var(--ng-hover)] hover:text-text focus-visible:outline-none md:min-h-6"
         disabled={isFetching}
         onClick={fetchNextPage}
       >

@@ -92,7 +92,7 @@ function ComparisonContent({ rows }: { rows: DiffRow[] }) {
 
   if (!changes.length) return <p role="status" className="p-4 text-muted">No changes compared with the current saved version.</p>;
   return (
-    <div className="flex min-h-48 flex-1 shrink-0 flex-col md:min-h-0 md:shrink">
+    <div className="flex min-h-48 flex-1 shrink-0 flex-col">
       <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2 text-xs">
         <p aria-label="Change summary" className="shrink-0"><span className="text-success">+{added}<span className="sr-only md:not-sr-only"> added</span></span><span className="ml-2 text-danger">−{removed}<span className="sr-only md:not-sr-only"> removed</span></span></p>
         <div className="flex items-center gap-2">
@@ -101,7 +101,7 @@ function ComparisonContent({ rows }: { rows: DiffRow[] }) {
           <Button secondary size="xs" aria-label="Next change" disabled={activeChange === changes.length - 1} onClick={() => navigate(activeChange + 1)}><ChevronDown size={16} aria-hidden="true" /></Button>
         </div>
       </div>
-      <div ref={viewport} role="region" tabIndex={0} className="min-h-36 flex-1 overflow-auto rounded-workbench border border-seam outline-none focus-visible:ring-2 focus-visible:ring-primary/45 md:min-h-0" aria-label="Version comparison">
+      <div ref={viewport} role="region" tabIndex={0} className="min-h-0 flex-1 overflow-auto rounded-workbench border border-seam outline-none" aria-label="Version comparison">
         <div ref={heading} className="sticky top-0 z-10 border-b border-seam bg-panel">
           <div className="hidden grid-cols-2 text-workbench font-medium md:grid">
             <div className="p-3">Selected version · − removed</div><div className="border-l border-seam p-3">Current saved version · + added</div>
@@ -133,8 +133,10 @@ function ComparisonContent({ rows }: { rows: DiffRow[] }) {
 function scrollToChange(container: HTMLDivElement | null, heading: HTMLDivElement | null, start: number | undefined) {
   const target = container?.querySelector<HTMLElement>(`[data-change-start="${start}"] [data-changed-row]`);
   if (!container || !target) return null;
-  // Scroll only the comparison, preserving the modal and keyboard focus.
+  // Reveal the change below its heading without moving keyboard focus.
   container.scrollTop += target.getBoundingClientRect().top - container.getBoundingClientRect().top - (heading?.offsetHeight ?? 0) - 1;
+  // A short window can clip this region after its toolbar receives focus.
+  container.scrollIntoView({ block: "nearest" });
   return container.scrollTop;
 }
 

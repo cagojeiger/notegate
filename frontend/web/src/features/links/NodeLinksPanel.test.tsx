@@ -124,7 +124,7 @@ describe("NodeLinksPanel", () => {
       );
     });
     const sync = screen.getByRole("button", { name: "Sync links for note.md" });
-    expect(sync).toHaveClass("md:min-h-6", "text-workbench");
+    expect(sync).toHaveClass("text-workbench");
     expect(sync).not.toHaveClass("border");
     await user.click(sync);
 

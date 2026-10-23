@@ -89,7 +89,7 @@ for (const viewport of [
     if (viewport.opensOverlay) {
       const filesToggleBox = await page.getByRole("button", { name: "Files" }).boundingBox();
       const collapseAllBox = await page.getByRole("button", { name: "Collapse all folders" }).boundingBox();
-      const historyBox = await page.getByRole("button", { name: "History" }).boundingBox();
+      const historyBox = await page.getByRole("button", { name: "Settings" }).boundingBox();
       expect(filesToggleBox?.height).toBeGreaterThanOrEqual(44);
       expect(collapseAllBox?.height).toBeGreaterThanOrEqual(44);
       expect(collapseAllBox?.width).toBeGreaterThanOrEqual(44);

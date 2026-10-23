@@ -112,7 +112,7 @@ export function FileDetailView({ node }: { node: RestNode }) {
         ) : null}
         <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{node.name}</h1>
         {isAudioFile && previewUrl && !previewFailed ? (
-          <div className="mt-8 rounded-2xl border border-border bg-surface p-4">
+          <div className="mt-8 rounded-workbench-surface border border-border bg-surface p-4">
             <AudioPreview
               key={previewUrl}
               url={previewUrl}

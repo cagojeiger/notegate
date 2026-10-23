@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarDays, CircleAlert, Clock3, File, FileText, Folder, FolderOpen, Layers, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
@@ -7,7 +7,13 @@ import { ApiError } from "../../api/errors";
 import { queryKeys } from "../../api/queryKeys";
 import { invalidateAuditEvents, invalidateFileSyncFallback, invalidateSpacesList } from "../../api/queryInvalidation";
 import { listTrash, purgeTrash, restoreTrash, type TrashItem } from "../../api/trash";
-import { Button, Card, IconButton, Modal } from "../../shared/ui";
+import { Button, Card, IconButton, ListItemButton, PanelSection } from "../../shared/ui";
+
+import { SettingsControls, SettingsInspectorSection, useSettingsInspector } from "../settings/SettingsInspector";
+
+import { SettingsPage } from "../settings/SettingsPage";
+import { useSettingsScroll, useSettingsViewState } from "../settings/settingsViewState";
+import { useSettingsMutation } from "../settings/useSettingsMutation";
 
 const itemAppearance = {
   space: { icon: Layers, label: "Space" },
@@ -16,7 +22,8 @@ const itemAppearance = {
   file: { icon: File, label: "File" }
 };
 
-export function TrashModal({ onClose }: { onClose: () => void }) {
+export function TrashPanel() {
+  const inspector = useSettingsInspector();
   const client = useApiClient();
   const queryClient = useQueryClient();
   const descriptionId = useId();
@@ -25,15 +32,15 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
   const returnFocus = useRef(false);
   const [confirmation, setConfirmation] = useState<TrashItem | null>(null);
   // undefined selects the initial item; null deliberately leaves no selection after restore.
-  const [selectedKey, setSelectedKey] = useState<string | null>();
-  const [notice, setNotice] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useSettingsViewState<string | null | undefined>("selected-trash-item", undefined);
+  const listScroll = useSettingsScroll<HTMLUListElement>("trash-list");
   const query = useInfiniteQuery({
     queryKey: queryKeys.trash,
     initialPageParam: null as string | null,
     queryFn: ({ pageParam }) => listTrash(client, pageParam),
     getNextPageParam: (last) => last.page.next_cursor ?? undefined
   });
-  const mutation = useMutation({
+  const mutation = useSettingsMutation("trash", {
     meta: { silentError: true },
     mutationFn: async ({ item, action }: { item: TrashItem; action: "restore" | "purge" }) => {
       if (action === "restore") await restoreTrash(client, item);
@@ -41,14 +48,10 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
     },
     onError: (error) => {
       if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
-        setConfirmation(null);
         void queryClient.invalidateQueries({ queryKey: queryKeys.trash });
       }
     },
     onSuccess: async (_, { item, action }) => {
-      setConfirmation(null);
-      setNotice(action === "restore" ? `Restored “${item.name}” to ${item.space_name} · ${item.path}.` : `Permanent deletion requested for “${item.name}”. Recovery is unavailable; cleanup runs in the background.`);
-      setSelectedKey(action === "restore" ? null : `${item.kind}:${item.id}`);
       invalidateAuditEvents(queryClient);
       invalidateSpacesList(queryClient);
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
@@ -60,13 +63,33 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
       await queryClient.invalidateQueries({ queryKey: queryKeys.trash });
     }
   });
+  const completed = mutation.isSuccess ? mutation.variables : undefined;
+  const notice = completed ? completed.action === "restore"
+    ? `Restored “${completed.item.name}” to ${completed.item.space_name} · ${completed.item.path}.`
+    : `Permanent deletion requested for “${completed.item.name}”. Recovery is unavailable; cleanup runs in the background.` : null;
+  useEffect(() => {
+    if (completed) {
+      setConfirmation(null);
+      setSelectedKey(completed.action === "restore" ? null : `${completed.item.kind}:${completed.item.id}`);
+    } else if (mutation.error instanceof ApiError && [404, 409].includes(mutation.error.status)) setConfirmation(null);
+  }, [completed, mutation.error, setSelectedKey]);
+  const inspectorOpen = inspector?.open ?? true;
+  useEffect(() => {
+    // Dismiss unsubmitted confirmation; an in-flight request still owns its result.
+    if (!inspectorOpen && !mutation.isPending) setConfirmation(null);
+  }, [inspectorOpen, mutation.isPending]);
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
-  const selected = selectedKey === undefined ? items[0] : items.find((item) => `${item.kind}:${item.id}` === selectedKey);
+  const operation = mutation.variables;
+  const effectiveKey = operation && (mutation.isPending || mutation.isSuccess)
+    ? mutation.isSuccess && operation.action === "restore" ? null : `${operation.item.kind}:${operation.item.id}`
+    : selectedKey;
+  const selected = effectiveKey === undefined ? items[0] : items.find((item) => `${item.kind}:${item.id}` === effectiveKey);
   const SelectedIcon = itemAppearance[selected?.kind ?? "file"].icon;
 
   useEffect(() => {
-    if (detailsRef.current) detailsRef.current.scrollTop = 0;
-  }, [selected?.kind, selected?.id]);
+    const scroller = inspector?.container ?? detailsRef.current;
+    if (scroller) scroller.scrollTop = 0;
+  }, [inspector?.container, selected?.kind, selected?.id]);
 
   useEffect(() => {
     if (!confirmation && returnFocus.current) {
@@ -76,35 +99,32 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
   }, [confirmation]);
 
   useEffect(() => {
-    if (notice) noticeRef.current?.focus();
-  }, [notice]);
+    if (notice && !document.activeElement?.closest('[role="tablist"]')) noticeRef.current?.focus();
+  }, [notice, inspector?.container]);
 
   return (
-    <Modal title={<span className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-workbench-surface bg-panel-strong text-muted"><Trash2 size={18} aria-hidden="true" /></span>Trash</span>} width="max-w-3xl" fixedHeight onClose={onClose}>
-      <p className="mb-4 shrink-0 border-b border-seam pb-4 text-muted">Deleted items are kept for 30 days.</p>
-      <div role="region" aria-label="Trash contents" className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] md:overflow-hidden md:[scrollbar-gutter:auto]">
-      <div className="grid gap-4 md:h-full md:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] md:grid-rows-[minmax(0,1fr)]">
-        <Card padding="sm" className="flex min-h-0 min-w-0 flex-col" style={{ borderRadius: "var(--ng-workbench-surface-radius)" }}>
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="font-medium">Deleted items</h3>
-            <div className="flex items-center gap-2 text-xs text-muted"><span>Newest first</span><IconButton label="Refresh" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void queryClient.invalidateQueries({ queryKey: queryKeys.trash }); }}><RefreshCw size={16} aria-hidden="true" /></IconButton></div>
-          </div>
-          {query.isPending ? <p role="status">Loading trash…</p> : null}
-          {query.error ? <p role="alert" className="text-danger">Could not load trash. Try refreshing.</p> : null}
-          {!query.isPending && !query.error && items.length === 0 ? <p className="text-muted">Trash is empty.</p> : null}
+    <SettingsPage label="Trash" title="Deleted items" inspectorLabel="Open trash actions" scrollKey="trash" contained disabled={mutation.isPending}
+      actions={<div className="flex items-center gap-2 text-xs text-muted"><span>Newest first</span><IconButton label="Refresh" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void queryClient.invalidateQueries({ queryKey: queryKeys.trash }); }}><RefreshCw size={16} aria-hidden="true" /></IconButton></div>}>
+      <SettingsControls><PanelSection><p className="text-xs text-muted">Deleted items are kept for 30 days.</p></PanelSection></SettingsControls>
+      {mutation.isPending ? <p role="status" className="text-xs text-muted">{operation?.action === "restore" ? "Restoring…" : "Requesting deletion…"}</p> : null}
+      <div role="region" aria-label="Trash contents" className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <Card padding="none" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {query.isPending ? <p role="status" className="p-3">Loading trash…</p> : null}
+          {query.error ? <p role="alert" className="p-3 text-danger">Could not load trash. Try refreshing.</p> : null}
+          {!query.isPending && !query.error && items.length === 0 ? <p className="p-3 text-muted">Trash is empty.</p> : null}
           {/* Keep absolutely positioned screen-reader text inside the list's scroll area. */}
-          <ul aria-label="Deleted items" className="relative max-h-[24dvh] space-y-1 overflow-y-auto overscroll-contain empty:hidden md:min-h-0 md:max-h-none md:flex-1">
+          <ul ref={listScroll} aria-label="Deleted items" className="relative min-h-0 flex-1 divide-y divide-seam overflow-y-auto overscroll-contain empty:hidden">
             {items.map((item) => {
               const key = `${item.kind}:${item.id}`;
               const ItemIcon = itemAppearance[item.kind].icon;
               return (
                 <li key={key}>
-                  <button
-                    type="button"
-                    aria-pressed={selected === item}
+                  <ListItemButton
+                    selected={selected === item}
                     disabled={mutation.isPending || !!confirmation}
-                    onClick={() => { mutation.reset(); setNotice(null); setSelectedKey(key); }}
-                    className={`flex w-full items-start gap-2 rounded-workbench border-l-2 px-2 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-not-allowed ${selected === item ? "border-[var(--ng-active-border)] bg-[var(--ng-selection)]" : "border-transparent hover:bg-[var(--ng-hover)]"}`}
+                    onClick={() => { mutation.reset(); setSelectedKey(key); inspector?.onOpen(); }}
+                    className="items-start"
                   >
                     <span className="sr-only">Select</span>{" "}
                     <ItemIcon size={16} aria-hidden="true" className={`mt-0.5 ${selected === item ? "text-primary" : "text-muted"}`} />
@@ -116,14 +136,14 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
                         {" "}<span className="sr-only">Deleted {new Date(item.deleted_at).toLocaleString()}.</span>
                       </span>
                     </span>
-                  </button>
+                  </ListItemButton>
                 </li>
               );
             })}
           </ul>
-          {query.hasNextPage ? <Button secondary className="mt-2 shrink-0" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void query.fetchNextPage(); }}>{query.isFetchingNextPage ? "Loading…" : "Load more"}</Button> : null}
+          {query.hasNextPage ? <Button secondary className="m-3 shrink-0" disabled={query.isFetching || mutation.isPending || !!confirmation} onClick={() => { void query.fetchNextPage(); }}>{query.isFetchingNextPage ? "Loading…" : "Load more"}</Button> : null}
         </Card>
-        <div ref={detailsRef} className="min-h-0 min-w-0 border-t border-seam pt-4 md:overflow-y-auto md:overscroll-contain md:border-l md:border-t-0 md:pl-4 md:pt-0">
+        <SettingsControls><SettingsInspectorSection title="Selected item"><div ref={detailsRef} className="min-h-0 min-w-0 text-sm">
           {notice ? <p ref={noticeRef} role="status" tabIndex={-1} className="mb-3 break-words outline-none">{notice}</p> : null}
           {mutation.error ? <p role="alert" className="mb-3 break-words text-danger">{mutation.error instanceof ApiError && mutation.error.status === 404 ? "This item is no longer available in this trash view." : mutation.error instanceof Error ? mutation.error.message : "Request failed"}</p> : null}
           {confirmation ? (
@@ -143,26 +163,26 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
             </section>
           ) : selected ? (
             <section aria-label={`Details for ${selected.name}`} className="flex h-full flex-col">
-              <div className="flex items-center gap-3"><SelectedIcon size={24} aria-hidden="true" className="text-primary" /><div className="min-w-0"><h3 className="break-all text-base font-semibold">{selected.name}</h3><p className="mt-1 text-xs text-muted">{itemAppearance[selected.kind].label} · {selected.space_name}</p></div></div>
-              <dl className="mt-5 space-y-4">
+              <div className="flex items-start gap-3"><SelectedIcon size={24} aria-hidden="true" className="shrink-0 text-primary" /><div className="min-w-0"><h3 className="break-all text-base font-semibold">{selected.name}</h3><p className="mt-1 text-xs text-muted">{itemAppearance[selected.kind].label} · {selected.space_name}</p></div></div>
+              <dl className={`mt-5 space-y-4${selected.deletion_pending ? " pb-4" : ""}`}>
                 <div><dt className="mb-1 text-xs text-muted">Original location</dt><dd className="flex items-start gap-2"><FolderOpen size={14} aria-hidden="true" className="mt-0.5 text-muted" /><span className="break-all font-mono text-xs">{selected.space_name} · {selected.path}</span></dd></div>
                 <div><dt className="mb-1 text-xs text-muted">{selected.deletion_pending ? "Status" : "Kept until"}</dt><dd className="flex items-start gap-2"><CalendarDays size={14} aria-hidden="true" className="mt-0.5 text-muted" /><span>{selected.deletion_pending ? "Deletion queued · recovery unavailable" : new Date(selected.purge_after).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</span></dd></div>
               </dl>
               {!selected.deletion_pending ? (
-                <Card padding="sm" className="my-4" style={{ borderRadius: "var(--ng-workbench-surface-radius)" }}>
+                <Card padding="sm" className="my-4">
                   <p className="mb-1 font-medium">{!selected.recoverable ? "Restore unavailable" : selected.kind === "folder" ? "What will be restored" : "Restore to original location"}</p>
                   <p className="text-xs text-muted">{!selected.recoverable ? "The parent is deleted or this content predates recovery support." : selected.kind === "space" ? "Restored spaces require reconnecting agents." : selected.kind === "folder" ? "Items deleted with this folder are included. Items deleted separately stay in Trash. Name conflicts must be resolved first." : "Existing files will not be overwritten. Resolve any name conflict before restoring."}</p>
                 </Card>
               ) : null}
               <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-seam pt-4">
-                <Button variant="ghost" size="sm" data-trash-purge disabled={mutation.isPending || selected.deletion_pending} aria-label={`Permanently delete ${selected.name}`} onClick={() => { mutation.reset(); setNotice(null); setConfirmation(selected); }}>Permanently delete</Button>
-                <Button size="sm" disabled={mutation.isPending || selected.deletion_pending || !selected.recoverable} aria-label={`Restore ${selected.name}`} onClick={() => { setNotice(null); mutation.mutate({ item: selected, action: "restore" }); }}><RotateCcw size={14} aria-hidden="true" />{mutation.isPending && mutation.variables?.action === "restore" ? "Restoring…" : "Restore"}</Button>
+                <Button variant="danger" size="sm" data-trash-purge disabled={mutation.isPending || selected.deletion_pending} aria-label={`Permanently delete ${selected.name}`} onClick={() => { mutation.reset(); setConfirmation(selected); }}>Permanently delete</Button>
+                <Button size="sm" disabled={mutation.isPending || selected.deletion_pending || !selected.recoverable} aria-label={`Restore ${selected.name}`} onClick={() => mutation.mutate({ item: selected, action: "restore" })}><RotateCcw size={14} aria-hidden="true" />{mutation.isPending && mutation.variables?.action === "restore" ? "Restoring…" : "Restore"}</Button>
               </div>
             </section>
           ) : <p className="text-muted">Select an item to restore or permanently delete.</p>}
-        </div>
+        </div></SettingsInspectorSection></SettingsControls>
       </div>
       </div>
-    </Modal>
+    </SettingsPage>
   );
 }

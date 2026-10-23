@@ -137,7 +137,8 @@ export function useTextEditorSession({
       return;
     }
 
-    if (sha === latestSha) return;
+    // Recheck successful reads against metadata; retries remain owned by the query.
+    if (textQuery.isFetching || textQuery.isError || sha === latestSha) return;
     if (lastAutoReloadSha.current === latestSha) return;
     lastAutoReloadSha.current = latestSha;
     void reloadLatestText(false).then((reloaded) => {
@@ -145,7 +146,7 @@ export function useTextEditorSession({
         lastAutoReloadSha.current = null;
       }
     });
-  }, [dirty, externalUpdate?.content_sha256, latestNode, node, reloadLatestText, sha, comparisonSha, saveMutation.isPending]);
+  }, [dirty, externalUpdate?.content_sha256, latestNode, node, reloadLatestText, sha, comparisonSha, saveMutation.isPending, textQuery.isFetching, textQuery.isError]);
 
   function saveDraft(force: boolean) {
     if (!canEdit || !editBaseline || saveMutation.isPending) return;
