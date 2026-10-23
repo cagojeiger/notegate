@@ -28,9 +28,9 @@ export function AccessConfirmation({ title, description, confirmLabel, pending, 
       <Card tone="danger" padding="sm" className="space-y-3 text-sm">
         <p id={titleId} className="font-semibold">{title}</p>
         <p id={descriptionId} className="text-muted">{description}</p>
-        {error ? <p role="alert" className="text-danger">{error}</p> : null}
+        {error ? <p role="alert" className="text-text">{error}</p> : null}
         <div className="flex flex-wrap gap-2">
-          <Button variant="danger" disabled={pending} aria-busy={pending} onClick={onConfirm}>{pending ? "Working…" : confirmLabel}</Button>
+          <Button secondary disabled={pending} aria-busy={pending} onClick={onConfirm}>{pending ? "Working…" : confirmLabel}</Button>
           <Button secondary disabled={pending} onClick={cancel}>Cancel</Button>
         </div>
       </Card>
