@@ -53,6 +53,7 @@ workflow-check: version-check
 	python3 -B deploy/ci/resolve-text-write-baseline.test.py
 	deploy/ci/test-rust.test.sh
 	python3 -B deploy/ci/rust-test-suites.test.py
+	python3 -B deploy/ci/ci-impact.test.py
 
 release-check: fmt check test clippy build frontend-check workflow-check
 	git diff --check

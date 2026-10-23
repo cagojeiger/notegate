@@ -227,6 +227,25 @@ CI 전달용 복사본에서 debug 정보만 제외하고 zstd로 압축한다. 
 `target/` 안으로 제한하며 상위 경로·심볼릭 링크를 통한 이탈은 거부한다.
 빌드 시간과 artifact 전송 시간은 테스트 실행 시간과
 별도로 비교한다. PostgreSQL 18과 배포용 release 빌드는 각자의 빌드 경로를 유지한다.
+
+PR에서는 Hygiene이 merge commit의 첫 parent와 전체 tree 차이를 비교해 필요한 job을 고른다.
+마지막 commit만 비교하지 않으며 rename은 삭제·추가 양쪽 경로를 반영한다. 선택 결과는
+Hygiene summary에서 확인한다. Hygiene과 기존 보안 검사는 항상 유지한다.
+
+| PR 변경 범위 | 실행할 기능 검사 |
+| --- | --- |
+| 명시된 root Markdown 문서와 `docs/**/*.md`만 | Hygiene·보안 검사 |
+| `frontend/web/src/**/*.test.ts[x]`와 문서만 | Web 전체 |
+| 프론트 실행 코드·E2E·공용 fixture·정적 자산 | API·seed 빌드, Web, Browser E2E, PR Image Gate |
+| Rust·의존성·설정·CI·배포·미분류 경로 | 전체 |
+
+프론트 전용 변경에서는 Browser가 사용하는 API·seed만 준비하며 Rust check/clippy·테스트
+컴파일·실행·doctest와 PostgreSQL 18 검사는 생략한다. Rust에 내장되는 theme CSS·두 logo SVG는
+전체 검사 대상이다. 분류는 `deploy/ci/ci-impact.py`에 있고 여러 범주는 필요한 검사의 합집합이다.
+변경 목록을 읽을 수 없거나 비어 있으면 전체 검사로 돌아간다. main push는 전체 검사를 유지해
+릴리즈가 같은 CI run의 `web-dist`를 받는 계약을 보존한다. 생략된 job은 실행·통과한 테스트와
+구분해서 해석한다. 작은 변경의 검사 비용을 줄이는 정책이며 모든 PR의 5분 완료를 보장하지 않는다.
+
 DB helper는 `NOTEGATE_TEST_TIMING_FILE`의 절대 경로에 opt-in JSONL을 기록한다.
 Setup·migration·초기 fixture·cleanup 시간과 setup 완료부터 cleanup 시작까지의 lifetime을
 구분한다. Lifetime은 순수 테스트 본문 시간과 다르며, 병렬 테스트의 시간 합계도 전체
