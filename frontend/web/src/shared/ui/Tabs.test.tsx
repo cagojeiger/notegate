@@ -12,12 +12,37 @@ const items = [
   { id: "history", label: "History" }
 ] as const;
 
-function TabsHarness() {
+function TabsHarness({ orientation = "horizontal", activationMode = "automatic" }: { orientation?: "horizontal" | "vertical"; activationMode?: "automatic" | "manual" }) {
   const [value, setValue] = useState<(typeof items)[number]["id"]>("outline");
-  return <Tabs items={[...items]} value={value} onChange={setValue} label="Inspector sections" />;
+  return <Tabs items={[...items]} value={value} onChange={setValue} label="Inspector sections" orientation={orientation} activationMode={activationMode} />;
 }
 
 describe("Tabs", () => {
+  it.each([{ key: "Enter", input: "{Enter}" }, { key: "Space", input: " " }])("keeps manual navigation separate from activation with $key", async ({ input }) => {
+    const user = userEvent.setup();
+    render(<><TabsHarness orientation="vertical" activationMode="manual" /><button>After tabs</button></>);
+    const outline = screen.getByRole("tab", { name: "Outline" });
+    const links = screen.getByRole("tab", { name: "Links" });
+    const history = screen.getByRole("tab", { name: "History" });
+    outline.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(links).toHaveFocus();
+    expect(outline).toHaveAttribute("aria-selected", "true");
+    expect(links).toHaveAttribute("aria-selected", "false");
+    await user.keyboard("{End}");
+    expect(history).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(outline).toHaveFocus();
+    await user.keyboard("{ArrowUp}{ArrowUp}");
+    expect(links).toHaveFocus();
+    await user.keyboard(input);
+    expect(links).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{ArrowDown}{Tab}");
+    expect(screen.getByRole("button", { name: "After tabs" })).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(links).toHaveFocus();
+  });
+
   it("uses roving tab stops and selects tabs while moving focus", async () => {
     const user = userEvent.setup();
     render(<TabsHarness />);
@@ -63,6 +88,24 @@ describe("Tabs", () => {
     await user.click(screen.getByRole("tab", { name: "Metadata" }));
 
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("navigates vertical sections with up and down arrows, skipping disabled tabs", async () => {
+    const user = userEvent.setup();
+    render(<TabsHarness orientation="vertical" />);
+    expect(screen.getByRole("tablist")).toHaveAttribute("aria-orientation", "vertical");
+    const outline = screen.getByRole("tab", { name: "Outline" });
+    const links = screen.getByRole("tab", { name: "Links" });
+    outline.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(outline).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(links).toHaveFocus();
+    expect(links).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{ArrowUp}");
+    expect(outline).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByRole("tab", { name: "History" })).toHaveFocus();
   });
 
   it("keeps the default appearance and offers flush header tabs", () => {

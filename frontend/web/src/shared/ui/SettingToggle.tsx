@@ -8,6 +8,8 @@ type SettingToggleProps = {
   badge?: string;
   checked: boolean;
   disabled: boolean;
+  // Saving blocks activation while retaining focus; unavailable controls use disabled.
+  pending?: boolean;
   onChange: (checked: boolean) => void;
 };
 
@@ -17,6 +19,7 @@ export function SettingToggle({
   badge,
   checked,
   disabled,
+  pending = false,
   onChange
 }: SettingToggleProps) {
   return (
@@ -33,13 +36,16 @@ export function SettingToggle({
         role="switch"
         aria-label={label}
         aria-checked={checked}
+        aria-disabled={pending || undefined}
+        aria-busy={pending || undefined}
         disabled={disabled}
-        onClick={() => onChange(!checked)}
-        className="grid min-h-[var(--ng-min-target-size)] min-w-[var(--ng-min-target-size)] shrink-0 place-items-center rounded-workbench outline-none transition focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-40"
+        onClick={() => { if (!pending) onChange(!checked); }}
+        className="grid min-h-[var(--ng-min-target-size)] min-w-[var(--ng-min-target-size)] shrink-0 place-items-center rounded-workbench outline-none transition disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
       >
         <span
+          data-switch-track
           aria-hidden="true"
-          className={`relative block h-6 w-10 rounded-full transition ${checked ? "bg-primary" : "bg-panel-strong"}`}
+          className={`relative block h-6 w-10 rounded-full transition ${checked ? "bg-primary [--ng-control-focus-color:var(--ng-primary-contrast)]" : "bg-panel-strong"}`}
         >
           <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow-sm transition ${checked ? "left-[18px]" : "left-0.5"}`} />
         </span>

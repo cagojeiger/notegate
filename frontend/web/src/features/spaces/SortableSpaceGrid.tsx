@@ -21,7 +21,6 @@ import {
   GripVertical,
   LockKeyhole,
   Pin,
-  Plus,
   Plug,
   Unplug,
   UnlockKeyhole
@@ -31,7 +30,7 @@ import { useState, type ReactNode } from "react";
 import type { Space } from "../../api/types";
 import type { SpaceUsage } from "../../api/usage";
 import { formatBytes } from "../../shared/lib/formatBytes";
-import { Button, Card, IconButton } from "../../shared/ui";
+import { AddButton, Button, Card, IconButton } from "../../shared/ui";
 
 type SortableSpaceGridProps = {
   spaces: Space[];
@@ -109,15 +108,7 @@ export function SortableSpaceGrid({
           ))}
           {onCreateSpace ? (
             <li className="w-full max-w-96">
-              <button
-                type="button"
-                aria-label="Create space"
-                title="Create space"
-                onClick={onCreateSpace}
-                className="grid h-full min-h-36 w-full place-items-center rounded-2xl border border-dashed border-border-strong text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
-              >
-                <Plus size={28} strokeWidth={1.5} aria-hidden="true" />
-              </button>
+              <AddButton label="Create space" title="Create space" layout="card" onClick={onCreateSpace} />
             </li>
           ) : null}
         </ul>
@@ -196,7 +187,7 @@ function SortableSpaceCard({
           <span
             ref={setActivatorNodeRef}
             className={[
-              "grid size-8 touch-none place-items-center rounded-lg text-muted transition hover:bg-[var(--ng-hover)] hover:text-text",
+              "grid size-8 touch-none place-items-center rounded-workbench text-muted transition hover:bg-[var(--ng-hover)] hover:text-text",
               reorderPending ? "cursor-not-allowed opacity-40" : "cursor-grab active:cursor-grabbing"
             ].join(" ")}
             {...attributes}
@@ -210,7 +201,7 @@ function SortableSpaceCard({
             <GripVertical size={16} />
           </span>
           <span
-            className="grid size-9 shrink-0 place-items-center rounded-lg bg-panel-strong text-sm font-semibold text-text"
+            className="grid size-9 shrink-0 place-items-center rounded-workbench-surface bg-panel-strong text-sm font-semibold text-text"
             aria-hidden="true"
           >
             {space.name.slice(0, 1).toUpperCase()}
@@ -304,7 +295,7 @@ function StatusItem({
     <span
       title={description}
       className={[
-        "grid size-7 place-items-center rounded-md",
+        "grid size-7 place-items-center rounded-workbench-surface",
         active
           ? "bg-primary/10 text-primary"
           : "bg-panel text-muted"

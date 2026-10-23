@@ -193,19 +193,36 @@ describe("AuxiliarySidebar", () => {
     expect(screen.getByRole("switch", { name: "Lock changes" })).toBeDisabled();
   });
 
-  it("tracks search and encryption requests independently", () => {
-    renderSidebar({ externalAccessPolicyPending: true });
+  it("tracks search and encryption requests independently", async () => {
+    const user = userEvent.setup();
+    const onExternalAccessEnabledChange = vi.fn();
+    const onTextEncryptionEnabledChange = vi.fn();
+    const { rerenderSidebar } = renderSidebar({ externalAccessPolicyPending: true, onExternalAccessEnabledChange, onTextEncryptionEnabledChange });
+    const access = screen.getByRole("switch", { name: "MCP & API access" });
+    const encryption = screen.getByRole("switch", { name: "Stored text encryption" });
 
-    expect(screen.getByRole("switch", { name: "MCP & API access" })).toBeDisabled();
-    expect(screen.getByRole("switch", { name: "Stored text encryption" })).toBeEnabled();
+    expect(access).toHaveAttribute("aria-disabled", "true");
+    expect(encryption).not.toHaveAttribute("aria-disabled");
+    await user.click(access);
+    expect(onExternalAccessEnabledChange).not.toHaveBeenCalled();
+    rerenderSidebar({ externalAccessPolicyPending: false, textEncryptionPending: true });
+    expect(access).not.toHaveAttribute("aria-disabled");
+    expect(encryption).toHaveAttribute("aria-disabled", "true");
+    await user.click(encryption);
+    expect(onTextEncryptionEnabledChange).not.toHaveBeenCalled();
   });
 
-  it("tracks write-lock requests independently", () => {
-    renderSidebar({ writeLockPending: true });
+  it("tracks write-lock requests independently", async () => {
+    const user = userEvent.setup();
+    const onWriteLockedChange = vi.fn();
+    renderSidebar({ writeLockPending: true, onWriteLockedChange });
+    const lock = screen.getByRole("switch", { name: "Lock changes" });
 
-    expect(screen.getByRole("switch", { name: "Lock changes" })).toBeDisabled();
-    expect(screen.getByRole("switch", { name: "MCP & API access" })).toBeEnabled();
-    expect(screen.getByRole("switch", { name: "Stored text encryption" })).toBeEnabled();
+    expect(lock).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("switch", { name: "MCP & API access" })).not.toHaveAttribute("aria-disabled");
+    expect(screen.getByRole("switch", { name: "Stored text encryption" })).not.toHaveAttribute("aria-disabled");
+    await user.click(lock);
+    expect(onWriteLockedChange).not.toHaveBeenCalled();
   });
 
   it("shows client-encrypted text as encrypted without offering a server rewrite", () => {

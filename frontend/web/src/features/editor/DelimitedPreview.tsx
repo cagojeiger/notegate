@@ -104,7 +104,7 @@ function VirtualizedDelimitedTable({ format, rows, columnCount, columnWidths, fi
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
       <div className="flex min-h-9 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-seam bg-panel px-4 py-1.5 text-xs text-muted">
-        <label className="inline-flex min-h-6 cursor-pointer items-center gap-2">
+        <label className="inline-flex min-h-workbench-control cursor-pointer items-center gap-2">
           <input
             type="checkbox"
             checked={firstRowIsHeader}
@@ -119,7 +119,7 @@ function VirtualizedDelimitedTable({ format, rows, columnCount, columnWidths, fi
       ) : (
         <div
           ref={scrollRef}
-          className="min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+          className="min-h-0 flex-1 overflow-auto outline-none"
           role="region"
           aria-label={`${format.toUpperCase()} table preview`}
           tabIndex={0}

@@ -30,7 +30,6 @@ describe("ActivityRail", () => {
 
     expect(screen.getByRole("button", { name: "Open space library" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Daily" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "History" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Settings" })).toBeDisabled();
   });
 });
@@ -50,7 +49,6 @@ function renderRail(libraryActive: boolean, navigationLocked = false) {
       onDeleteSpace={vi.fn()}
       onOpenLibrary={vi.fn()}
       libraryActive={libraryActive}
-      onOpenHistory={vi.fn()}
       onOpenSettings={vi.fn()}
     />
   );

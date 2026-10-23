@@ -171,7 +171,7 @@ describe("SpaceLibrary", () => {
     const items = within(screen.getByRole("list", { name: "All spaces" })).getAllByRole("listitem");
     const create = within(items[items.length - 1]).getByRole("button", { name: "Create space" });
     expect(items).toHaveLength(3);
-    expect(screen.getByRole("heading", { name: "Spaces 2" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Spaces 2" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Move Private later" })).toBeDisabled();
     create.focus();
     await user.keyboard("{Enter}");
@@ -187,7 +187,7 @@ describe("SpaceLibrary", () => {
     renderLibrary({ spaces: [], onCreateSpace });
 
     expect(screen.getByRole("heading", { name: "No spaces yet" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Spaces 0" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Spaces 0" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Create space" }));
 
     expect(onCreateSpace).toHaveBeenCalledTimes(1);
@@ -226,7 +226,7 @@ describe("SpaceLibrary", () => {
     const user = userEvent.setup();
     renderLibrary();
 
-    expect(screen.getByRole("heading", { name: "Spaces 2" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Spaces 2" })).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "All spaces" })).toBeInTheDocument();
     expect(screen.getByTitle("MCP & API access default on")).toBeInTheDocument();
     expect(screen.getByTitle("MCP & API access default off")).toBeInTheDocument();
@@ -306,10 +306,11 @@ describe("SpaceLibrary", () => {
     expect(screen.queryByRole("dialog", { name: "Space Inspector" })).not.toBeInTheDocument();
   });
 
-  it("removes the docked inspector from layout when it is closed", () => {
+  it("removes the docked inspector and its status query when it is closed", () => {
     renderLibrary({ inspectorOpen: false });
 
     expect(screen.queryByText("Space Inspector")).not.toBeInTheDocument();
+    expect(mocks.useSpaceLinkIndexStatusQuery).not.toHaveBeenCalled();
   });
 
   it("offers single-click ordering controls as an alternative to dragging", async () => {
@@ -344,7 +345,7 @@ describe("SpaceLibrary", () => {
 
     const filesUsage = screen.getByRole("progressbar", { name: "Files usage" });
     const recalculate = screen.getByRole("button", { name: "Recalculate Daily usage" });
-    expect(recalculate).toHaveClass("md:min-h-6", "text-workbench", "border", "bg-surface");
+    expect(recalculate).toHaveClass("text-workbench", "border", "bg-surface");
     expect(filesUsage.compareDocumentPosition(recalculate) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     await user.click(recalculate);
 
@@ -357,7 +358,7 @@ describe("SpaceLibrary", () => {
     renderLibrary();
 
     const reindex = screen.getByRole("button", { name: "Reindex links in Daily" });
-    expect(reindex).toHaveClass("md:min-h-6", "text-workbench", "border", "bg-surface");
+    expect(reindex).toHaveClass("text-workbench", "border", "bg-surface");
     await user.click(reindex);
 
     expect(mocks.reindexLinks).toHaveBeenCalledWith("daily");

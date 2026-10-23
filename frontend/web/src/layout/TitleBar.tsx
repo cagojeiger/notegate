@@ -13,6 +13,7 @@ type TitleBarProps = {
   primarySidebarOpen: boolean;
   auxiliaryOpen: boolean;
   auxiliaryLabel?: string;
+  auxiliaryDisabled?: boolean;
   editorGroupCount: number;
   onAddGroup: () => void;
   onToggleTheme: () => void;
@@ -28,6 +29,7 @@ export function TitleBar({
   primarySidebarOpen,
   auxiliaryOpen,
   auxiliaryLabel = "Toggle right sidebar",
+  auxiliaryDisabled = false,
   editorGroupCount,
   onAddGroup,
   onToggleTheme,
@@ -59,7 +61,7 @@ export function TitleBar({
               </div>
             </>
           ) : null}
-          <IconButton label={auxiliaryLabel} onClick={onToggleAuxiliary} pressed={auxiliaryOpen}><PanelRight size={16} /></IconButton>
+          <IconButton label={auxiliaryLabel} onClick={onToggleAuxiliary} pressed={auxiliaryOpen} disabled={auxiliaryDisabled}><PanelRight size={16} /></IconButton>
         </div>
         <IconButton label="Toggle theme" onClick={onToggleTheme}>{theme === "light" ? <Moon size={16} /> : <Sun size={16} />}</IconButton>
       </div>

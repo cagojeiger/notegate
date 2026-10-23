@@ -52,13 +52,13 @@ export function RecordingDock() {
   return (
     <section
       aria-label="Audio recorder"
-      className="pointer-events-auto shrink-0 border-t border-seam bg-surface text-text md:overflow-hidden md:rounded-lg md:border md:border-border md:shadow-[var(--ng-focus-shadow)]"
+      className="pointer-events-auto shrink-0 border-t border-seam bg-surface text-text md:overflow-hidden md:rounded-workbench-surface md:border md:border-border md:shadow-[var(--ng-focus-shadow)]"
     >
       <span className="sr-only" role="status">{recordingStatusAnnouncement(state.status)}</span>
       <button
         type="button"
         onClick={() => setCollapsed((value) => !value)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left outline-none hover:bg-[var(--ng-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left outline-none hover:bg-[var(--ng-hover)]"
         aria-label={`${collapsed ? "Expand" : "Collapse"} recorder`}
         aria-expanded={!collapsed}
         aria-controls="audio-recorder-details"

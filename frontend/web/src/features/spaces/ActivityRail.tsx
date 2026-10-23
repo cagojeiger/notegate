@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Copy, History, LayoutGrid, Pencil, Plus, Settings, Trash2 } from "lucide-react";
+import { Check, Copy, LayoutGrid, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 
 import type { Space } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
@@ -28,12 +28,11 @@ type ActivityRailProps = {
   onDeleteSpace: (space: Space) => void;
   onOpenLibrary?: () => void;
   libraryActive?: boolean;
-  onOpenTrash?: () => void;
-  onOpenHistory: () => void;
+  settingsActive?: boolean;
   onOpenSettings: () => void;
 };
 
-export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpaces, navigationLocked = false, onSelectSpace, onReorderSpaces, onCreateSpace, onRenameSpace, onDeleteSpace, onOpenLibrary, libraryActive = false, onOpenTrash, onOpenHistory, onOpenSettings }: ActivityRailProps) {
+export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpaces, navigationLocked = false, onSelectSpace, onReorderSpaces, onCreateSpace, onRenameSpace, onDeleteSpace, onOpenLibrary, libraryActive = false, settingsActive = false, onOpenSettings }: ActivityRailProps) {
   const [draggedSpaceId, setDraggedSpaceId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; space: Space } | null>(null);
@@ -68,7 +67,7 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
       ) : null}
       <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto py-2">
         {spaces.map((space) => {
-          const active = !libraryActive && activeSpace?.id === space.id;
+          const active = !libraryActive && !settingsActive && activeSpace?.id === space.id;
           const dragging = draggedSpaceId === space.id;
           const dropBefore = dragTarget?.spaceId === space.id && dragTarget.position === "before";
           const dropAfter = dragTarget?.spaceId === space.id && dragTarget.position === "after";
@@ -124,12 +123,9 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
           </button>
         ) : null}
       </div>
-      <div className="space-y-0.5 border-t border-seam p-2 [@media(any-pointer:coarse)]:px-0">
-        {onOpenTrash ? <button disabled={navigationLocked} onClick={onOpenTrash} className="grid size-workbench-control place-items-center rounded-workbench-surface text-muted transition hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-not-allowed disabled:opacity-45" aria-label="Trash" title="Trash"><Trash2 size={16} /></button> : null}
-        <button disabled={navigationLocked} onClick={onOpenHistory} className="grid size-workbench-control place-items-center rounded-workbench-surface text-muted transition hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-not-allowed disabled:opacity-45" aria-label="History" title="History">
-          <History size={16} />
-        </button>
-        <button disabled={navigationLocked} onClick={onOpenSettings} className="grid size-workbench-control place-items-center rounded-workbench-surface text-muted transition hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-not-allowed disabled:opacity-45" aria-label="Settings">
+      <div className="relative flex justify-center border-t border-seam py-2">
+        {settingsActive ? <span data-active-indicator className="absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-r-full bg-primary" aria-hidden="true" /> : null}
+        <button disabled={navigationLocked} onClick={onOpenSettings} className={`grid size-workbench-control place-items-center rounded-workbench-surface transition disabled:cursor-not-allowed disabled:opacity-45 ${settingsActive ? "bg-[var(--ng-selection)] text-primary" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`} aria-label="Settings" aria-pressed={settingsActive} aria-current={settingsActive ? "page" : undefined}>
           <Settings size={16} />
         </button>
       </div>

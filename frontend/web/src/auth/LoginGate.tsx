@@ -50,12 +50,12 @@ export function LoginGate(controllerProps: LoginGateControllerProps) {
             href={auth.loginHref}
             target="notegate-login"
             onClick={() => auth.beginPolling(null)}
-            className="mt-3 block rounded text-center text-xs text-muted underline underline-offset-2 hover:text-text"
+            className="mt-3 block rounded-workbench text-center text-xs text-muted underline underline-offset-2 hover:text-text"
           >
             Open Google sign-in in a new window
           </a>
 
-          <div className="mt-6 flex gap-2.5 rounded-xl border border-border bg-panel p-3 text-xs leading-5 text-muted">
+          <div className="mt-6 flex gap-2.5 rounded-workbench-surface border border-border bg-panel p-3 text-xs leading-5 text-muted">
             <ShieldCheck className="mt-0.5 text-success" size={16} aria-hidden="true" />
             <p>Your Google password stays with Google.</p>
           </div>

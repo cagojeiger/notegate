@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo } from "react";
 
+import { useSettingsViewState } from "../settings/settingsViewState";
 import type { BackgroundJob } from "../../api/types";
 import { formatDurationBetween } from "./eventDisplay";
 import { EventQueryState, LifecycleTime, LoadMore, RefreshButton } from "./eventHistoryPrimitives";
@@ -11,26 +12,26 @@ export function BackgroundJobsPanel() {
   const jobs = useMemo(() => query.data?.pages.flatMap((page) => page.jobs) ?? [], [query.data]);
   const activeCount = jobs.filter((job) => job.status === "queued" || job.status === "running").length;
   return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
+    <>
+      <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} />
+      <section className="w-full space-y-3">
         <p className="text-xs text-muted">
           {activeCount > 0 ? `${activeCount} active · updates automatically` : "Background activity for your account"}
         </p>
-        <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} />
-      </div>
-      <EventQueryState query={query} itemCount={jobs.length} emptyLabel="No background jobs yet." />
-      {jobs.length > 0 ? (
-        <ol className="rounded-lg border border-border bg-surface px-4">
-          {jobs.map((job) => <BackgroundJobRow key={job.id} job={job} />)}
-        </ol>
-      ) : null}
-      <LoadMore query={query} />
-    </section>
+        <EventQueryState query={query} itemCount={jobs.length} emptyLabel="No background jobs yet." />
+        {jobs.length > 0 ? (
+          <ol className="rounded-workbench-surface border border-border bg-surface px-4">
+            {jobs.map((job) => <BackgroundJobRow key={job.id} job={job} />)}
+          </ol>
+        ) : null}
+        <LoadMore query={query} />
+      </section>
+    </>
   );
 }
 
 function BackgroundJobRow({ job }: { job: BackgroundJob }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useSettingsViewState(`history-job-${job.id}-expanded`, false);
   const detail = useBackgroundJobQuery(job.id, open);
   const currentJob = detail.data?.job ?? job;
   const presentation = jobPresentation(currentJob);
@@ -69,7 +70,7 @@ function BackgroundJobRow({ job }: { job: BackgroundJob }) {
               aria-controls={attemptsId}
               title={toggleLabel}
               onClick={() => setOpen((value) => !value)}
-              className="grid size-7 place-items-center rounded-lg text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
+              className="grid size-workbench-control place-items-center rounded-workbench-surface text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text"
             >
               <ChevronRight size={14} className={`transition ${open ? "rotate-90" : ""}`} />
             </button>
@@ -92,7 +93,7 @@ function BackgroundJobRow({ job }: { job: BackgroundJob }) {
                     ? formatDurationBetween(attempt.started_at, attempt.finished_at)
                     : null;
                   return (
-                    <li key={attempt.attempt_number} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-md bg-bg px-3 py-2">
+                    <li key={attempt.attempt_number} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-workbench-surface bg-bg px-3 py-2">
                       <span className="font-medium text-text">Attempt {attempt.attempt_number}</span>
                       <div className="flex flex-wrap items-center gap-1.5 text-muted">
                         <span>{attempt.outcome ? formatAttemptOutcome(attempt.outcome) : "Running"}</span>

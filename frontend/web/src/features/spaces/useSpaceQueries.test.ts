@@ -1,23 +1,26 @@
 import { MutationObserver, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
-import type { SpacesListResponse } from "../../api/types";
+import type { Space, SpacesListResponse } from "../../api/types";
 import { makeSpace } from "../../test/fixtures";
 import { createTestQueryClient } from "../../test/queryClient";
 import {
   createSpaceMutationOptions,
+  useCreateSpaceMutation,
   useReorderSpacesMutation,
   useDeleteSpaceMutation
 } from "./useSpaceQueries";
 
-const apiClient = vi.hoisted(() => ({ post: vi.fn(), delete: vi.fn() }));
+const apiClient = vi.hoisted(() => ({ post: vi.fn(), delete: vi.fn(), current: true }));
 
 vi.mock("../../api/ApiProvider", () => ({
-  useApiClient: () => apiClient
+  useApiClient: () => apiClient,
+  useIsCurrentApiCache: () => () => apiClient.current
 }));
+beforeEach(() => { apiClient.current = true; });
 
 describe("createSpaceMutationOptions", () => {
   it("updates the spaces cache before notifying the caller", async () => {
@@ -75,6 +78,22 @@ describe("createSpaceMutationOptions", () => {
 
     expect(onCreated).toHaveBeenCalledWith(createdSpace);
   });
+
+  it("does not select a newly created space after its authenticated cache is replaced", async () => {
+    const queryClient = createTestQueryClient();
+    const createdSpace = makeSpace({ id: "old-owner-space" });
+    let finish!: (space: Space) => void;
+    apiClient.post.mockReturnValueOnce(new Promise<Space>((resolve) => { finish = resolve; }));
+    const onCreated = vi.fn();
+    const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: queryClient }, children);
+    const { result } = renderHook(() => useCreateSpaceMutation(onCreated), { wrapper });
+    let pending!: Promise<Space>;
+    act(() => { pending = result.current.mutateAsync("Old owner's space"); });
+    await waitFor(() => expect(apiClient.post).toHaveBeenCalled());
+    apiClient.current = false;
+    await act(async () => { finish(createdSpace); await pending; });
+    expect(onCreated).not.toHaveBeenCalled();
+  });
 });
 
 describe("useReorderSpacesMutation", () => {
@@ -119,5 +138,22 @@ describe("useDeleteSpaceMutation", () => {
     expect(queryClient.getQueryState(queryKeys.usage)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(queryKeys.trash)?.isInvalidated).toBe(true);
     expect(onDeleted).toHaveBeenCalledWith("space-1");
+  });
+
+  it("rechecks cache ownership after asynchronous deletion cleanup before changing the workspace", async () => {
+    const queryClient = createTestQueryClient();
+    let finishCleanup!: () => void;
+    const cleanup = new Promise<void>((resolve) => { finishCleanup = resolve; });
+    const cancel = vi.spyOn(queryClient, "cancelQueries").mockReturnValue(cleanup);
+    apiClient.delete.mockResolvedValueOnce(undefined);
+    const onDeleted = vi.fn();
+    const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: queryClient }, children);
+    const { result } = renderHook(() => useDeleteSpaceMutation(onDeleted), { wrapper });
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.mutateAsync("space-1"); });
+    await waitFor(() => expect(cancel).toHaveBeenCalled());
+    apiClient.current = false;
+    await act(async () => { finishCleanup(); await pending; });
+    expect(onDeleted).not.toHaveBeenCalled();
   });
 });

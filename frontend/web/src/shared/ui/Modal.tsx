@@ -9,10 +9,11 @@ const FOCUSABLE_SELECTOR = [
   "input:not([disabled])",
   "select:not([disabled])",
   "textarea:not([disabled])",
+  "summary",
   '[tabindex]:not([tabindex="-1"])'
 ].join(",");
 
-// Shared modal shell matching the SettingsModal tone: soft backdrop + paper panel.
+// Shared modal shell for focused dialogs and mobile Inspector sheets.
 // Escape and backdrop click both dismiss. Keep panels small and focused.
 export function Modal({
   title,
@@ -51,10 +52,14 @@ export function Modal({
     const previousFocus = previousFocusRef.current;
 
     function focusableElements(): HTMLElement[] {
-      return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+        .filter((element) => element.tabIndex >= 0 && !element.matches(":disabled"));
     }
 
     function onKey(event: KeyboardEvent) {
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      if (dialogs[dialogs.length - 1] !== dialog) return;
+
       if (event.key === "Escape") {
         event.stopPropagation();
         onCloseRef.current();
@@ -88,7 +93,9 @@ export function Modal({
     return () => {
       window.removeEventListener("keydown", onKey);
       window.setTimeout(() => {
-        if (!dialog.isConnected && previousFocus?.isConnected) previousFocus.focus();
+        const active = document.activeElement;
+        if (!dialog.isConnected && previousFocus?.isConnected &&
+          (!active || active === document.body || dialog.contains(active))) previousFocus.focus();
       }, 0);
     };
   }, []);
@@ -104,8 +111,8 @@ export function Modal({
         tabIndex={-1}
         className={`relative w-full ${width} border border-border bg-panel font-ui text-workbench shadow-[var(--ng-focus-shadow)] ${
           bottomSheet
-            ? "flex h-[82dvh] flex-col overflow-hidden rounded-t-2xl border-b-0"
-            : `${centeredLayout} rounded-lg p-6`
+            ? "flex h-[82dvh] flex-col overflow-hidden rounded-t-workbench-surface border-b-0"
+            : `${centeredLayout} rounded-workbench-surface p-6`
         }`}
       >
         <div className={`flex shrink-0 items-center justify-between ${bottomSheet ? "h-12 border-b border-seam px-3" : "mb-4"}`}>

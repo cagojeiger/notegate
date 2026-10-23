@@ -2,11 +2,20 @@
 
 색상·치수·컴포넌트 목록과 화면별 호출 순서는 문서에 복제하지 않는다. 정본은 [theme.css](../../frontend/web/src/design/theme.css), [공통 UI](../../frontend/web/src/shared/ui), 각 feature와 browser test다. 이 문서에는 구현을 바꿔도 유지할 제품 제약만 둔다.
 
+## 화면 명칭
+
+- **Workbench**는 Title Bar, 탐색 Rail, 현재 화면, Inspector, Status Bar를 담는 앱 전체 틀이다.
+- **Space Library**는 여러 Space를 카드로 모아 보여주는 목록 화면이다. 사용자에게는 `Spaces`로 표시한다.
+- **Space Workspace**는 특정 Space의 파일 탐색·문서 읽기와 편집 화면이다. Primary Sidebar, Editor Area, Inspector로 구성한다.
+- **Settings**는 계정·연결·에이전트·기록 등 서비스 설정 화면이다.
+
 ## 읽기와 조작
 
 - 문서 읽기·편집을 우선한다. 창이 좁아져도 열린 문서와 editor group을 버리지 않고 보조 패널을 overlay로 전환한다. 표시 폭을 줄였다고 사용자가 저장한 선호 폭을 덮어쓰지 않는다.
 - 시각 변경을 이유로 기존 동작·상태·metadata를 제거하거나 새 기능을 추가하지 않는다.
 - 색상·치수는 semantic token, 반복되는 chrome은 공통 UI가 소유한다. 문서 typography는 Workbench 밀도와 독립적이다. 외부 font CDN과 별도 theme/icon 체계를 추가하지 않는다.
+- Space Library와 Settings는 같은 상단 탭·본문·선택형 오른쪽 Inspector 틀을 사용한다. 탭은 현재 영역의 화면을 전환하고 Inspector는 그 화면의 선택 대상에 속한다. Mobile에서도 이 관계를 유지하되 Inspector를 아래쪽 sheet로 표시한다.
+- 영역이 달라도 추가·선택·입력 조작과 Inspector 섹션은 공통 UI 규칙을 사용한다. 기능별 코드는 데이터와 작업 상태, 콘텐츠의 배치만 소유한다. 모서리는 공통 surface/control token을 사용하고 원형 스위치·상태 표시와 외부 브랜드 규격은 용도에 맞는 형태를 유지한다.
 - 사용자에게 내부 `node`나 인증 구현 대신 구체적인 Document·Folder·File과 다음 행동을 보여준다. 유지보수 실행 가능 시각은 서버가 판단한다.
 
 ## 상태와 개인정보
@@ -27,5 +36,9 @@
 
 - WCAG 2.2 AA를 기준으로 한다. 색상·hover·drag만으로 상태를 전달하거나 동작하게 하지 않고 키보드·touch 대안을 제공한다.
 - Icon control에 문맥 있는 이름과 보이는 focus를 제공한다. Menu의 키보드 이동·닫기·focus 복귀, 비동기 결과 안내와 reduced motion을 유지한다.
+- Focus 표시는 공통 CSS가 소유하며 컴포넌트별 ring과 중복하지 않는다. 선택선·focus가 스크롤 부모에 잘리지 않아야 하고, 좁은 탭 바는 숨겨진 항목이 있음을 표시하며 이동한 탭을 온전히 보여준다.
+- Focus 선은 실제로 그려지는 배경과 구별되어야 한다. 채워진 버튼과 스위치는 해당 surface의 대비색을 사용하고, DOCX처럼 별도 document로 진입하는 읽기 영역도 키보드 위치를 표시한다.
 - Desktop의 시각 밀도와 mobile/coarse-pointer의 조작 영역은 별개다.
 - 화면 검증은 [개발 가이드](../development.md#검증)를 따른다. Screenshot은 외관의 증거이며 동작·접근성의 대체가 아니다.
+
+Settings의 표시·확인·요청·focus 전환 계약은 [Settings 상태 전환](settings-state-machines.md)을 따른다.

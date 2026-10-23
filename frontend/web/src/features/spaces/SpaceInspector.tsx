@@ -104,7 +104,7 @@ export function SpaceInspector({
     || reindexPending;
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-surface font-ui text-workbench md:border-l md:border-seam">
+    <div className={`flex h-full min-h-0 w-full flex-col bg-surface font-ui text-workbench ${showHeader ? "md:border-l md:border-seam" : ""}`}>
       {showHeader ? (
         <PanelHeader><span className="font-medium">Space Inspector</span></PanelHeader>
       ) : null}
@@ -130,7 +130,8 @@ export function SpaceInspector({
               icon={<Pin size={16} />}
               label="Pin to navigation"
               checked={space?.navigation_pinned ?? false}
-              disabled={!space || pending}
+              disabled={!space}
+              pending={pending}
               onChange={(checked) => onUpdate({ navigation_pinned: checked })}
             />
           </PanelSection>
@@ -143,7 +144,8 @@ export function SpaceInspector({
               icon={<Bot size={16} />}
               label="User MCP access"
               checked={space?.user_mcp_enabled ?? false}
-              disabled={!space || pending}
+              disabled={!space}
+              pending={pending}
               onChange={(checked) => onUpdate({ user_mcp_enabled: checked })}
             />
           </PanelSection>
@@ -157,7 +159,8 @@ export function SpaceInspector({
                 icon={<Plug size={16} />}
                 label="MCP & API access"
                 checked={space?.default_external_access_enabled ?? false}
-                disabled={!space || pending}
+                disabled={!space}
+                pending={pending}
                 onChange={(checked) => onUpdate({ default_external_access_enabled: checked })}
               />
               <SettingToggle
@@ -167,9 +170,9 @@ export function SpaceInspector({
                 checked={space?.default_text_encryption_enabled ?? false}
                 disabled={
                   !space
-                  || pending
                   || (!space.features.text_encryption && !space.default_text_encryption_enabled)
                 }
+                pending={pending}
                 onChange={(checked) => onUpdate({ default_text_encryption_enabled: checked })}
               />
             </div>

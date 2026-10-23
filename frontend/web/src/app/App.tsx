@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { ApiProvider } from "../api/ApiProvider";
 import { ApiError } from "../api/errors";
@@ -17,6 +17,7 @@ export function App() {
   const showToast = useUiStore((state) => state.showToast);
 
   const refreshSession = useCallback(() => {
+    useUiStore.getState().resetSessionWorkspace();
     setSessionRevision((revision) => revision + 1);
   }, []);
 
@@ -29,6 +30,7 @@ export function App() {
       onMutationError={showToast}
     >
       <AuthBoundary
+        key={sessionRevision}
         sessionRevision={sessionRevision}
         onSessionChanged={refreshSession}
       />
@@ -51,9 +53,17 @@ function AuthBoundary({
     isLoading: meQuery.isLoading,
     session: me
   });
-  useBrowserSessionActivity(authViewState.kind === "authenticated", onSessionChanged);
+  const [cacheOwner, setCacheOwner] = useState<string | null>(null);
+  const accountId = authViewState.kind === "authenticated" ? authViewState.me.account.id : null;
+  const replaceCache = cacheOwner !== null && (authViewState.kind === "login" || (accountId !== null && accountId !== cacheOwner));
+  useEffect(() => {
+    if (replaceCache) onSessionChanged();
+    else if (accountId !== null && cacheOwner === null) setCacheOwner(accountId);
+  }, [accountId, cacheOwner, replaceCache, onSessionChanged]);
+  useBrowserSessionActivity(authViewState.kind === "authenticated" && accountId === cacheOwner, onSessionChanged);
 
-  if (authViewState.kind === "checking") return <FullScreenStatus label="Checking session" />;
+  // A different successful /me response must never render against the previous owner's cache.
+  if (authViewState.kind === "checking" || replaceCache || (accountId !== null && cacheOwner === null)) return <FullScreenStatus label="Checking session" />;
 
   if (authViewState.kind === "temporarilyUnavailable") {
     return (

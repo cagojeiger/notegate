@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiProvider } from "../../api/ApiProvider";
 import { makeSpace } from "../../test/fixtures";
-import { EventHistoryModal } from "./EventHistoryModal";
+import { SettingsViewSession } from "../settings/settingsViewState";
+import { EventHistoryPanel } from "./EventHistoryPanel";
 
 const page = { limit: 50, returned: 0, has_more: false, next_cursor: null };
 
@@ -23,7 +24,7 @@ function jsonResponse(body: unknown) {
   return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
 }
 
-describe("EventHistoryModal", () => {
+describe("EventHistoryPanel", () => {
   it("loads public API history separately and labels HTTP summaries", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
@@ -33,18 +34,31 @@ describe("EventHistoryModal", () => {
           invocation_id: "api-call-20",
           input: { method: "PUT", path_ids: { node_id: "node-20" }, body_recorded: false },
           response: { status: 200, body_recorded: false }
+        }, {
+          ...commandInvocation(21, "http", "POST /api/v2/spaces", "Create another space", "success", "api"),
+          invocation_id: "api-call-21", response: { status: 201 }
         }], page
       });
       return jsonResponse({ events: [], command_invocations: [], page });
     });
-    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    render(<ApiProvider authCacheKey="browser-session:0"><SettingsViewSession><EventHistoryPanel spaces={[]} initialSpaceId={null} canViewAuditEvents /></SettingsViewSession></ApiProvider>);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("surface=api"))).toBe(false);
-    await user.click(screen.getByRole("tab", { name: "API" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "History type" }), "API");
     expect(await screen.findByText("API v2 request")).toBeInTheDocument();
     expect(screen.getByText("PUT /api/v2/spaces/{space_id}/text/{node_id}")).toBeInTheDocument();
-    expect(screen.getByText("Call api-call-20")).toBeInTheDocument();
+    expect(screen.queryByText("api-call-20")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^View API call 20:/ }));
+    expect(within(screen.getByRole("region", { name: "Details for API call 20" })).getByText("PUT /api/v2/spaces/{space_id}/text/{node_id}")).toBeInTheDocument();
+    expect(screen.getByText("api-call-20")).toBeInTheDocument();
     await user.click(screen.getByText("Response"));
     expect(await screen.findByText(/"status": 200/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^View API call 21:/ }));
+    expect(screen.queryByText(/"status": 200/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/"status": 201/)).not.toBeInTheDocument();
+    await user.click(screen.getByText("Response"));
+    expect(screen.getByText(/"status": 201/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^View API call 20:/ }));
+    expect(screen.getByText(/"status": 200/)).toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain("/api/v1/me/command-invocations?surface=api&limit=50");
     expect(fetchMock.mock.calls.some(([input]) => /surface=(mcp|cli)/.test(String(input)))).toBe(false);
   });
@@ -58,8 +72,8 @@ describe("EventHistoryModal", () => {
         metadata: { completion_scope: "database", recorded_by: "database_trigger", reason: "unknown" }
       }] : [], page
     }));
-    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
-    await user.click(screen.getByRole("tab", { name: "Audit" }));
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryPanel spaces={[]} initialSpaceId={null} canViewAuditEvents /></ApiProvider>);
+    await user.selectOptions(screen.getByRole("combobox", { name: "History type" }), "Audit");
     expect(await screen.findByText("Removed version body from database")).toBeInTheDocument();
     expect(screen.getByText("Reason not recorded")).toBeInTheDocument();
     expect(screen.getByText("Actor not recorded")).toBeInTheDocument();
@@ -81,8 +95,8 @@ describe("EventHistoryModal", () => {
       }] : [],
       page
     }));
-    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
-    await user.click(screen.getByRole("tab", { name: "Audit" }));
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryPanel spaces={[]} initialSpaceId={null} canViewAuditEvents /></ApiProvider>);
+    await user.selectOptions(screen.getByRole("combobox", { name: "History type" }), "Audit");
     expect(await screen.findByText("Removed item from database")).toBeInTheDocument();
     expect(screen.getByText("File removed-file")).toBeInTheDocument();
     expect(screen.getByText("Database cleanup only. File storage cleanup is tracked separately.")).toBeInTheDocument();
@@ -99,8 +113,8 @@ describe("EventHistoryModal", () => {
         metadata: { completion_scope: "s3", space_id: "removed-space" }
       }] : [], page
     }));
-    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
-    await user.click(screen.getByRole("tab", { name: "Audit" }));
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryPanel spaces={[]} initialSpaceId={null} canViewAuditEvents /></ApiProvider>);
+    await user.selectOptions(screen.getByRole("combobox", { name: "History type" }), "Audit");
     expect(await screen.findByText("File deletion confirmed by storage")).toBeInTheDocument();
     expect(screen.getByText("Stored file object-42")).toBeInTheDocument();
     expect(screen.getByText(/Storage confirmed deletion and released the file quota/)).toHaveTextContent("Internal disk cleanup is managed by the storage provider.");
@@ -114,7 +128,7 @@ describe("EventHistoryModal", () => {
         metadata: { item_kind: "text", item_name: "old.md", purpose: "Correct a date", source: "mcp", before_revision_id: "old-revision", before_revision_status: "unavailable" } }],
       page: { ...page, returned: 1 }
     }));
-    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryModal spaces={[]} initialSpaceId={null} canViewAuditEvents onClose={vi.fn()} /></ApiProvider>);
+    render(<ApiProvider authCacheKey="browser-session:0"><EventHistoryPanel spaces={[]} initialSpaceId={null} canViewAuditEvents /></ApiProvider>);
     expect(await screen.findByText("Document · old.md")).toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain("/api/v1/me/file-change-events?limit=50");
     await user.click(screen.getByRole("button", { name: "Show change details for Document · old.md" }));
@@ -127,15 +141,15 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents={false} onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents={false} />
       </ApiProvider>
     );
 
-    expect(screen.queryByRole("tab", { name: "Audit" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "MCP" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "CLI" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "API" })).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Changes" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Audit" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "MCP" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "CLI" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "API" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Changes" })).toBeInTheDocument();
 
     await screen.findByText("No changes yet.");
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -148,17 +162,17 @@ describe("EventHistoryModal", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({ events: [], page }));
     const { rerender } = render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
-    await user.click(screen.getByRole("tab", { name: "Audit" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "History type" }), "Audit");
     await screen.findByText("No audit events.");
     fetchMock.mockClear();
 
     rerender(
       <ApiProvider authCacheKey="browser-session:1">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents={false} onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents={false} />
       </ApiProvider>
     );
 
@@ -184,11 +198,11 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
-    await user.click(screen.getByRole("tab", { name: "Audit" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "History type" }), "Audit");
     await screen.findByText("Updated a space");
     await user.click(screen.getByRole("button", { name: "Load more" }));
 
@@ -229,11 +243,11 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+    expect(within(screen.getByRole("combobox", { name: "History type" })).getAllByRole("option").map((tab) => tab.textContent)).toEqual([
       "Changes",
       "Audit",
       "MCP",
@@ -242,13 +256,13 @@ describe("EventHistoryModal", () => {
       "Jobs"
     ]);
 
-    await user.click(screen.getByRole("tab", { name: "MCP" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "History type" }), "MCP");
     expect(await screen.findByText("Review recent changes")).toBeInTheDocument();
-    expect(screen.getByTitle("MCP transport")).toHaveTextContent("MCP");
+    await user.click(screen.getByRole("button", { name: /^View MCP call 3:/ }));
     expect(screen.getByText("read · changes")).toBeInTheDocument();
     expect(screen.getByText("Space Research")).toBeInTheDocument();
     expect(screen.getByText("12 ms")).toBeInTheDocument();
-    expect(screen.getByText("Success")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Details for MCP call 3" })).getByText("Success")).toBeInTheDocument();
     expect(screen.queryByText(/"target": "Research:\/"/)).not.toBeInTheDocument();
     expect(screen.queryByText(/"kind": "complete"/)).not.toBeInTheDocument();
     await user.click(screen.getByText("Input"));
@@ -264,9 +278,9 @@ describe("EventHistoryModal", () => {
       "/api/v1/me/command-invocations?surface=mcp&limit=50&cursor=mcp-cursor-1"
     );
 
-    await user.click(screen.getByRole("tab", { name: "CLI" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "History type" }), "CLI");
     expect(await screen.findByText("Review the selected note")).toBeInTheDocument();
-    expect(screen.getByTitle("CLI transport")).toHaveTextContent("CLI");
+
     expect(screen.getByText("Error · tool_error")).toBeInTheDocument();
     expect(screen.queryByText("Review recent changes")).not.toBeInTheDocument();
 
@@ -292,12 +306,13 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
-    await user.click(screen.getByRole("tab", { name: "MCP" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "History type" }), "MCP");
     await screen.findByText("List spaces");
+    await user.click(screen.getByRole("button", { name: /^View MCP call 1:/ }));
     await user.click(screen.getByText("Response"));
 
     expect(screen.getByText("Not recorded. This call predates response logging.")).toBeInTheDocument();
@@ -320,11 +335,11 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
-    await user.click(screen.getByRole("tab", { name: "MCP" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "History type" }), "MCP");
 
     expect(await screen.findByText("Checked caller identity")).toBeInTheDocument();
     expect(screen.getByText("Purpose not recorded")).toBeInTheDocument();
@@ -363,12 +378,12 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/v1/me/jobs"))).toBe(false);
-    await user.click(screen.getByRole("tab", { name: "Jobs" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "History type" }), "Jobs");
     const jobTitle = await screen.findByText("Usage recalculation");
     expect(jobTitle).toHaveClass("text-workbench");
     expect(jobTitle).not.toHaveClass("truncate");
@@ -413,7 +428,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
@@ -429,7 +444,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
@@ -458,7 +473,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 
@@ -479,7 +494,7 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider authCacheKey="browser-session:0">
-        <EventHistoryModal spaces={[space, secondSpace]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryPanel spaces={[space, secondSpace]} initialSpaceId={space.id} canViewAuditEvents />
       </ApiProvider>
     );
 

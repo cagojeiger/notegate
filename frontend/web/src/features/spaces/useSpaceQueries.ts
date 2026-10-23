@@ -6,7 +6,7 @@ import {
   type UseMutationOptions
 } from "@tanstack/react-query";
 
-import { useApiClient } from "../../api/ApiProvider";
+import { useApiClient, useIsCurrentApiCache } from "../../api/ApiProvider";
 import {
   invalidateAuditEvents,
   invalidateSpacesList,
@@ -65,12 +65,13 @@ export function createSpaceMutationOptions(
 
 export function useCreateSpaceMutation(onCreated: (space: Space) => void) {
   const client = useApiClient();
+  const isCurrentCache = useIsCurrentApiCache();
   const queryClient = useQueryClient();
   return useMutation(
     createSpaceMutationOptions(
       (name) => createSpace(client, name),
       queryClient,
-      onCreated
+      (space) => { if (isCurrentCache()) onCreated(space); }
     )
   );
 }
@@ -119,13 +120,14 @@ export function useReorderSpacesMutation() {
 
 export function useDeleteSpaceMutation(onDeleted: (spaceId: string) => void) {
   const client = useApiClient();
+  const isCurrentCache = useIsCurrentApiCache();
   const queryClient = useQueryClient();
   return useMutation({
     meta: { silentError: true },
     mutationFn: (spaceId: string) => deleteSpace(client, spaceId),
     onSuccess: async (_data, spaceId) => {
       await removeDeletedSpaceQueries(queryClient, spaceId);
-      onDeleted(spaceId);
+      if (isCurrentCache()) onDeleted(spaceId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.trash });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       invalidateSpacesList(queryClient);

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { useApiClient } from "../../api/ApiProvider";
+import { useApiClient, useIsCurrentApiCache } from "../../api/ApiProvider";
 import { ApiError } from "../../api/errors";
 import { updateNodeCaches } from "../../api/nodeCache";
 import { getNode } from "../../api/nodes";
@@ -52,6 +52,7 @@ export function useSaveTextDocument(
   onConflict: (request: TextSaveRequest) => void
 ) {
   const client = useApiClient();
+  const isCurrentCache = useIsCurrentApiCache();
   const queryClient = useQueryClient();
   const showToast = useUiStore((state) => state.showToast);
   const setSaveState = useUiStore((state) => state.setSaveState);
@@ -70,6 +71,7 @@ export function useSaveTextDocument(
       return { response, request };
     },
     onMutate: async ({ node }) => {
+      if (!isCurrentCache()) return;
       setSaveState("saving");
       await queryClient.cancelQueries({
         queryKey: queryKeys.text(node.space_id, node.id),
@@ -78,6 +80,7 @@ export function useSaveTextDocument(
       return { textDataUpdateCount: queryClient.getQueryState(queryKeys.text(node.space_id, node.id))?.dataUpdateCount };
     },
     onSuccess: async ({ response, request }, _variables, context) => {
+      if (!isCurrentCache()) return;
       const { node, content } = request;
       const textState = queryClient.getQueryState(queryKeys.text(node.space_id, node.id));
       const needsRevalidation = !!textState && (
@@ -86,6 +89,7 @@ export function useSaveTextDocument(
       );
       // Discard reads that may predate this save, then revalidate any observed refresh.
       await queryClient.cancelQueries({ queryKey: queryKeys.text(node.space_id, node.id), exact: true });
+      if (!isCurrentCache()) return;
       const cachedNode = queryClient.getQueryData<RestNode>(queryKeys.node(node.space_id, node.id));
       const currentNode = cachedNode ?? node;
       // Saving text must not roll back a concurrent rename, move, or policy change.
@@ -130,6 +134,7 @@ export function useSaveTextDocument(
       }
     },
     onError: (error, request) => {
+      if (!isCurrentCache()) return;
       const { node } = request;
       if (error instanceof ApiError && error.status === 409) {
         onConflict(request);

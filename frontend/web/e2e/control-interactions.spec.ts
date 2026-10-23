@@ -1,9 +1,12 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 
 import type { RestNode } from "../src/api/types";
 import { makeRestNode, makeSpace } from "../src/test/fixtures";
 import { routeJsonApi } from "./support/api";
 import { usageResponse } from "./support/usage";
+import { expectOutlineContrast, setFocusTestTheme } from "./support/focus";
+import { openSettings, showSettingsInspector, closeSettingsInspector } from "./support/settings";
 
 async function mockWorkbench(page: Page, nodeCount = 1, nodeOverrides: Partial<RestNode> = {}) {
   let space = makeSpace();
@@ -13,12 +16,17 @@ async function mockWorkbench(page: Page, nodeCount = 1, nodeOverrides: Partial<R
   await routeJsonApi(page, (url, request) => {
     if (url.pathname === "/api/v1/me") return { account: { id: "user-1", kind: "user", display_name: "User" }, user: { email: "user@example.com" }, capabilities: { can_create_space: true, can_manage_agents: true } };
     if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
+    if (url.pathname === "/api/v1/me/sessions") return { sessions: [] };
+    if (url.pathname === "/api/v1/me/oauth-grants") return { grants: [] };
     if (url.pathname === "/api/v1/spaces") return { spaces: [space], page: meta };
     if (url.pathname === `/api/v1/spaces/${space.id}` && request.method() === "PATCH") {
       space = { ...space, ...request.postDataJSON() };
       return space;
     }
     if (url.pathname === "/api/v1/agents") return { agents: [], page: meta };
+    if (url.pathname === "/api/v1/me/trash") return { items: [], page: meta };
+    if (url.pathname === "/api/v1/me/audit-events") return { events: [], page: meta };
+    if (url.pathname.endsWith("/file-change-events")) return { events: [], page: meta };
     if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${node.id}`) return node;
     if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${node.id}/reveal`) return { ancestors: [], target: node };
     if (url.pathname === `/api/v1/spaces/${space.id}/text/${node.id}`) return {
@@ -36,6 +44,582 @@ async function mockWorkbench(page: Page, nodeCount = 1, nodeOverrides: Partial<R
   });
   return node;
 }
+
+async function mockAgentManagement(page: Page, name = "Review agent") {
+  await mockWorkbench(page);
+  let agents = [{ id: "review-agent", name, owner_user_id: "user-1" }];
+  await page.route("**/api/v1/agents**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "DELETE") {
+      agents = agents.filter((agent) => !path.endsWith(`/${agent.id}`));
+      return route.fulfill({ status: 204 });
+    }
+    if (request.method() === "POST") {
+      const agent = { id: "replacement-agent", name: request.postDataJSON().name as string, owner_user_id: "user-1" };
+      agents.push(agent);
+      return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(agent) });
+    }
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(path.endsWith("/keys") ? { keys: [] } : { agents }) });
+  });
+  await page.route("**/api/v1/spaces/*/agents?*", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connections: [] }) }));
+}
+
+for (const theme of ["light", "dark"] as const) {
+  for (const width of [1440, 390]) {
+    test(`filled controls keep a contrasting keyboard focus in ${theme} mode at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 });
+      await mockWorkbench(page);
+      await page.goto("/");
+      await setFocusTestTheme(page, theme);
+      await page.getByRole("button", { name: "New folder", exact: true }).focus();
+      await page.keyboard.press("Shift+Tab");
+      const primary = page.getByRole("button", { name: "New document", exact: true });
+      await expect(primary).toBeFocused();
+      await expectOutlineContrast(primary);
+      const focusGap = await primary.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return -parseFloat(style.outlineOffset) - parseFloat(style.outlineWidth);
+      });
+      expect(focusGap).toBeGreaterThanOrEqual(1);
+      await page.screenshot({ path: testInfo.outputPath("primary-focus.png") });
+      await primary.hover();
+      await expectOutlineContrast(primary);
+
+      await page.getByRole("button", { name: "Open space library", exact: true }).click();
+      if (width < 768) await page.getByRole("button", { name: "Inspect Daily" }).click();
+      const toggle = page.getByRole("switch", { name: "Pin to navigation", exact: true });
+      await toggle.focus();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      await expect(toggle).toBeFocused();
+      await expect(toggle).toHaveAttribute("aria-checked", "true");
+      await expectOutlineContrast(toggle.locator(":scope > span"));
+      await page.keyboard.press("Space");
+      await expect(toggle).toHaveAttribute("aria-checked", "false");
+      await expect(toggle).toBeEnabled();
+      await expect(toggle).toBeFocused();
+      await expectOutlineContrast(toggle.locator(":scope > span"));
+    });
+  }
+}
+
+for (const width of [1440, 390]) {
+  for (const outcome of ["success", "error"] as const) {
+    test(`space toggle ${outcome} preserves keyboard navigation at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await mockWorkbench(page);
+      let space = makeSpace();
+      let requests = 0;
+      let release: () => void = () => {};
+      await page.route("**/api/v1/spaces?*", (route) => route.fulfill({ json: { spaces: [space] } }));
+      await page.route("**/api/v1/spaces/space-1", async (route) => {
+        requests += 1;
+        await new Promise<void>((resolve) => { release = resolve; });
+        if (outcome === "error") return route.fulfill({ status: 503, json: { message: "Storage unavailable" } });
+        space = { ...space, ...route.request().postDataJSON() };
+        return route.fulfill({ json: space });
+      });
+      await page.goto("/");
+      await page.getByRole("button", { name: "Open space library", exact: true }).click();
+      if (width < 768) await page.getByRole("button", { name: "Inspect Daily" }).click();
+      const switches = [
+        ["Pin to navigation", "navigation_pinned"], ["User MCP access", "user_mcp_enabled"],
+        ["MCP & API access", "default_external_access_enabled"], ["Text encryption", "default_text_encryption_enabled"]
+      ] as const;
+      for (const [index, [label, field]] of switches.entries()) {
+        const toggle = page.getByRole("switch", { name: label, exact: true });
+        const checked = space[field];
+        await toggle.press("Space");
+        await expect.poll(() => requests).toBe(index + 1);
+        await expect(toggle).toHaveAttribute("aria-disabled", "true");
+        await expect(toggle).toHaveAttribute("aria-busy", "true");
+        await expect(toggle).toBeFocused();
+        await page.keyboard.press("Space");
+        await page.keyboard.press("Enter");
+        expect(requests).toBe(index + 1);
+        // Saving must not reclaim focus after the user moves to another control.
+        const next = page.getByRole("button", { name: "About New item defaults", exact: true });
+        if (index === 1) {
+          await page.keyboard.press("Tab");
+          await expect(next).toBeFocused();
+        }
+        release();
+        await expect(toggle).toBeEnabled();
+        await expect(toggle).not.toHaveAttribute("aria-busy");
+        await expect(toggle).toHaveAttribute("aria-checked", String(outcome === "success" ? !checked : checked));
+        await expect(index === 1 ? next : toggle).toBeFocused();
+      }
+      expect(requests).toBe(switches.length);
+    });
+  }
+}
+
+async function expectUnclippedDecoration(decoration: Locator) {
+  const visibility = await decoration.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    let left = rect.left, right = rect.right, top = rect.top, bottom = rect.bottom;
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+      const style = getComputedStyle(parent);
+      const bounds = parent.getBoundingClientRect();
+      if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) {
+        left = Math.max(left, bounds.left + parent.clientLeft);
+        right = Math.min(right, bounds.left + parent.clientLeft + parent.clientWidth);
+      }
+      if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) {
+        top = Math.max(top, bounds.top + parent.clientTop);
+        bottom = Math.min(bottom, bounds.top + parent.clientTop + parent.clientHeight);
+      }
+    }
+    return { width: rect.width, height: rect.height, visibleWidth: Math.max(0, right - left), visibleHeight: Math.max(0, bottom - top) };
+  });
+  expect(visibility.width).toBeGreaterThan(0);
+  expect(visibility.visibleWidth).toBeCloseTo(visibility.width, 0);
+  expect(visibility.visibleHeight).toBeCloseTo(visibility.height, 0);
+}
+
+for (const width of [1440, 390, 320]) {
+  test(`help text stays within the viewport and Inspector at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    await page.getByRole("button", { name: "Open space library", exact: true }).click();
+    if (width < 768) await page.getByRole("button", { name: "Inspect Daily" }).click();
+    await page.getByRole("button", { name: "About Navigation", exact: true }).click();
+    const tooltip = page.getByRole("tooltip");
+    await expect(tooltip).toBeVisible();
+
+    for (const viewportWidth of [width, width === 1440 ? 1280 : width === 390 ? 320 : 390]) {
+      await page.setViewportSize({ width: viewportWidth, height: 844 });
+      // Viewport updates can resolve before the browser dispatches its resize event.
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+      await expectUnclippedDecoration(tooltip);
+      const bounds = (await tooltip.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(16);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewportWidth - 16);
+      await page.screenshot({ path: testInfo.outputPath(`tooltip-${viewportWidth}.png`) });
+    }
+  });
+}
+
+for (const width of [1440, 320]) {
+  test(`long agent names stay inside the Inspector at ${width}px`, async ({ page }, testInfo) => {
+    const name = "W".repeat(63);
+    await page.setViewportSize({ width, height: 844 });
+    await mockAgentManagement(page, name);
+    await page.goto("/");
+    const view = await openSettings(page, "Agents");
+    await view.getByRole("button", { name: `Select ${name}`, exact: true }).click();
+    await view.getByRole("button", { name: "Open agent actions", exact: true }).click();
+    const inspector = page.getByRole(width < 768 ? "dialog" : "complementary", { name: "Agents Inspector", exact: true });
+    const remove = inspector.getByRole("button", { name: `Delete agent: ${name}`, exact: true });
+    await expect(remove).toHaveText("Delete agent");
+    await expectUnclippedDecoration(remove);
+    await expectUnclippedDecoration(inspector.getByText(name, { exact: true }));
+    await page.screenshot({ path: testInfo.outputPath("long-agent-name.png") });
+    await remove.press("Enter");
+    const cancel = inspector.getByRole("button", { name: "Cancel", exact: true });
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(remove).toBeFocused();
+  });
+}
+
+for (const width of [320, 390]) {
+  test(`mobile destination indicators stay painted inside scroll boundaries at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    const navigation = page.getByRole("navigation", { name: "Spaces", exact: true });
+    await navigation.getByRole("button", { name: "Daily", exact: true }).click();
+    await page.screenshot({ path: testInfo.outputPath("space-selection.png") });
+    await expectUnclippedDecoration(navigation.locator("[data-active-indicator]"));
+    for (const name of ["Open space library", "Settings"]) {
+      await navigation.getByRole("button", { name, exact: true }).click();
+      await expectUnclippedDecoration(navigation.locator("[data-active-indicator]"));
+    }
+  });
+}
+
+for (const width of [1440, 390, 320]) {
+  test(`settings controls share a single focus boundary and grouped copy field at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    const view = await openSettings(page);
+    const general = view.getByRole("tab", { name: "General", exact: true });
+    await general.focus();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Home");
+    await page.screenshot({ path: testInfo.outputPath("tab-focus.png") });
+    const tabFocus = await general.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { visible: element.matches(":focus-visible"), width: parseFloat(style.outlineWidth), offset: parseFloat(style.outlineOffset) };
+    });
+    expect(tabFocus.visible).toBe(true);
+    expect(tabFocus.width).toBeGreaterThanOrEqual(2);
+    expect(tabFocus.offset).toBeLessThanOrEqual(-tabFocus.width);
+
+    const reset = view.getByRole("button", { name: "Reset", exact: true });
+    await reset.focus();
+    await page.keyboard.press("Shift+Tab");
+    const themeSwitch = view.getByRole("button", { name: /^Switch to (light|dark) theme$/ });
+    await expect(themeSwitch).toBeFocused();
+    const focus = await themeSwitch.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { visible: element.matches(":focus-visible"), outline: style.outlineStyle, shadow: style.boxShadow };
+    });
+    expect(focus.visible).toBe(true);
+    expect(focus.outline).toBe("solid");
+    expect(focus.shadow).toBe("none");
+
+    await view.getByRole("tab", { name: "Connections", exact: true }).click();
+    const copy = view.getByRole("button", { name: "Copy user MCP server URL", exact: true });
+    const geometry = await copy.evaluate((button) => {
+      const field = button.parentElement!;
+      const code = field.querySelector("code")!;
+      const outer = field.getBoundingClientRect(), value = code.getBoundingClientRect(), action = button.getBoundingClientRect();
+      return { fieldHeight: outer.height, valueHeight: value.height, buttonHeight: action.height, buttonWidth: action.width, gap: action.left - value.right };
+    });
+    expect(geometry.valueHeight).toBe(geometry.buttonHeight);
+    expect(geometry.fieldHeight).toBe(geometry.buttonHeight);
+    expect(geometry.gap).toBeLessThanOrEqual(1);
+    expect(geometry.buttonWidth).toBe(width < 768 ? 44 : 28);
+    const escapedIcons = await view.locator("button, a").evaluateAll((controls) => controls.flatMap((control) => {
+      const bounds = control.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return [];
+      return [...control.querySelectorAll("svg")].filter((icon) => {
+        const rect = icon.getBoundingClientRect();
+        return rect.left < bounds.left - 0.5 || rect.right > bounds.right + 0.5 || rect.top < bounds.top - 0.5 || rect.bottom > bounds.bottom + 0.5;
+      }).map(() => control.getAttribute("aria-label") || control.textContent);
+    }));
+    expect(escapedIcons).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath("connections.png") });
+
+    await view.getByRole("tab", { name: "History", exact: true }).click();
+    const refresh = view.getByRole("button", { name: "Refresh", exact: true });
+    const historyAppearance = await refresh.evaluate((button) => {
+      const style = getComputedStyle(button);
+      return { width: button.getBoundingClientRect().width, border: style.borderWidth, background: style.backgroundColor };
+    });
+    await view.getByRole("tab", { name: "Trash", exact: true }).click();
+    expect(await view.getByRole("button", { name: "Refresh", exact: true }).evaluate((button) => {
+      const style = getComputedStyle(button);
+      return { width: button.getBoundingClientRect().width, border: style.borderWidth, background: style.backgroundColor };
+    })).toEqual(historyAppearance);
+  });
+}
+
+for (const width of [320, 390]) {
+  test(`overflow arrows reveal whole settings tabs at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    const view = await openSettings(page);
+    const tabs = view.getByRole("tablist", { name: "Settings sections", exact: true });
+    const nextName = await tabs.evaluate((list) => {
+      const right = list.getBoundingClientRect().right;
+      return [...list.querySelectorAll('[role="tab"]')].find((tab) => tab.getBoundingClientRect().right > right - 8)?.textContent;
+    });
+    await view.getByRole("button", { name: "More settings sections", exact: true }).click();
+    const next = tabs.getByRole("tab", { name: nextName!, exact: true });
+    const viewport = await tabs.boundingBox();
+    const revealed = await next.boundingBox();
+    expect(revealed!.x).toBeGreaterThanOrEqual(viewport!.x + 7);
+    expect(revealed!.x + revealed!.width).toBeLessThanOrEqual(viewport!.x + viewport!.width - 7);
+    await expect(next).toBeInViewport({ ratio: 1 });
+  });
+}
+
+test("mobile agent creation stays in the body after deleting an inspected agent", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockAgentManagement(page);
+  await page.goto("/");
+  const view = await openSettings(page, "Agents");
+  await view.getByRole("button", { name: "Select Review agent", exact: true }).click();
+  await view.getByRole("button", { name: "Open agent actions", exact: true }).click();
+  const inspector = page.getByRole("dialog", { name: "Agents Inspector", exact: true });
+  await inspector.getByRole("button", { name: "Delete agent: Review agent", exact: true }).click();
+  await inspector.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(inspector).toHaveCount(0);
+  await view.getByRole("button", { name: "Add agent", exact: true }).click();
+  await view.getByRole("textbox", { name: "New agent name", exact: true }).fill("Replacement");
+  await view.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(view.locator("[data-settings-heading] h2")).toHaveText("Replacement");
+  await expect(inspector).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Toggle settings inspector", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(view.getByRole("combobox", { name: "Daily permission", exact: true })).toBeInViewport();
+});
+
+for (const width of [1440, 390]) {
+  test(`agent deletion confirmation retains keyboard focus at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockAgentManagement(page);
+    await page.goto("/");
+    const view = await openSettings(page, "Agents");
+    await view.getByRole("button", { name: "Select Review agent", exact: true }).click();
+    await view.getByRole("button", { name: "Open agent actions", exact: true }).click();
+    const remove = view.getByRole("button", { name: "Delete agent: Review agent", exact: true });
+    await remove.click();
+    const cancel = view.getByRole("button", { name: "Cancel", exact: true });
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(remove).toBeFocused();
+  });
+}
+
+for (const width of [1440, 390, 320]) {
+  test(`settings tabs retain keyboard focus across Account at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    const view = await openSettings(page);
+    const tabs = view.getByRole("tablist", { name: "Settings sections", exact: true });
+    await tabs.getByRole("tab", { name: "General", exact: true }).focus();
+    for (const [key, label] of [
+      ["ArrowRight", "Account"], ["ArrowRight", "Connections"],
+      ["ArrowLeft", "Account"], ["ArrowLeft", "General"],
+      ["End", "Trash"], ["Home", "General"]
+    ]) {
+      await page.keyboard.press(key);
+      const active = tabs.getByRole("tab", { name: label, exact: true });
+      await expect(active).toHaveAttribute("aria-selected", "true");
+      await expect(active).toBeFocused();
+      await expect(active).toBeInViewport({ ratio: 1 });
+    }
+  });
+
+  test(`settings preserves an unsaved document and restores focus at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const node = await mockWorkbench(page);
+    await page.goto("/");
+    if (width < 768) await page.getByRole("button", { name: "Toggle left sidebar" }).click();
+    await page.getByRole("button", { name: node.name, exact: true }).click();
+    const edit = page.getByRole("button", { name: "Edit", exact: true });
+    if (await edit.isVisible()) await edit.click();
+    else {
+      await page.getByRole("button", { name: "More actions", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
+    }
+    const editor = page.getByRole("textbox", { name: "Edit text content", includeHidden: true });
+    await editor.fill("Keep my unsaved settings-review draft");
+    const view = await openSettings(page);
+    await expect(editor).toBeAttached();
+    await expect(editor).toBeHidden();
+    await expect(page.getByRole("button", { name: "History", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Trash", exact: true })).toHaveCount(0);
+    for (const tab of ["General", "Account"]) {
+      await view.getByRole("tab", { name: tab, exact: true }).click();
+      await expect(view.getByRole("tabpanel", { name: tab, exact: true })).toBeVisible();
+      const result = await new AxeBuilder({ page }).include("[data-settings-view]").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+      expect(result.violations).toEqual([]);
+      expect(await view.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    }
+    await showSettingsInspector(page);
+    const inspectorTrigger = view.getByRole("button", { name: "Open session actions", exact: true });
+    await expect(inspectorTrigger).toHaveAttribute("aria-expanded", "true");
+    const controlsId = await inspectorTrigger.getAttribute("aria-controls");
+    expect(await view.locator(".ng-settings-inspector-frame").getAttribute("id")).toBe(controlsId);
+    if (width < 768) {
+      const sheet = page.getByRole("dialog", { name: "Account Inspector" });
+      await expect(sheet.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(sheet).toBeHidden();
+      await expect(page.getByRole("button", { name: "Toggle settings inspector" })).toBeFocused();
+    } else {
+      await view.getByRole("button", { name: "Close settings inspector" }).click();
+      await expect(view.getByRole("tabpanel", { name: "Account", exact: true })).toBeVisible();
+    }
+    await expect(inspectorTrigger).toHaveAttribute("aria-expanded", "false");
+    await closeSettingsInspector(page);
+    await view.getByRole("button", { name: "Close settings", exact: true }).click();
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveValue("Keep my unsaved settings-review draft");
+    await expect(page.getByRole("button", { name: "Settings", exact: true })).toBeFocused();
+  });
+}
+
+for (const width of [1440, 390]) {
+  test(`Space Library and Settings share tabs, gutters and control geometry at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    await page.getByRole("button", { name: "Open space library", exact: true }).click();
+    const spaces = page.getByRole("tab", { name: "Spaces 1", exact: true });
+    await expect(spaces).toHaveAttribute("aria-selected", "true");
+    const workspaceHeader = page.locator("[data-panel-header]").filter({ has: spaces });
+    const workspaceBounds = await workspaceHeader.boundingBox();
+    const addRadius = await page.getByRole("button", { name: "Create space", exact: true })
+      .evaluate((element) => getComputedStyle(element).borderRadius);
+    const workspacePadding = await page.getByRole("tabpanel", { name: "Spaces 1", exact: true })
+      .evaluate((element) => { const style = getComputedStyle(element); return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft]; });
+
+    const settings = await openSettings(page);
+    const general = settings.getByRole("tab", { name: "General", exact: true });
+    await expect(general).toHaveAttribute("aria-selected", "true");
+    const settingsHeader = settings.locator("[data-panel-header]").filter({ has: page.getByRole("tab", { name: "General", exact: true }) });
+    const settingsBounds = await settingsHeader.boundingBox();
+    expect(workspaceBounds).not.toBeNull();
+    expect(settingsBounds).not.toBeNull();
+    expect({ x: settingsBounds!.x, y: settingsBounds!.y, height: settingsBounds!.height })
+      .toEqual({ x: workspaceBounds!.x, y: workspaceBounds!.y, height: workspaceBounds!.height });
+    expect(await settings.getByRole("tabpanel", { name: "General", exact: true })
+      .evaluate((element) => { const style = getComputedStyle(element); return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft]; }))
+      .toEqual(workspacePadding);
+
+    const reset = settings.getByRole("button", { name: "Reset", exact: true });
+    const buttonHeight = await reset.evaluate((element) => element.getBoundingClientRect().height);
+    expect(buttonHeight).toBe(width < 768 ? 44 : 28);
+    expect(await reset.evaluate((element) => getComputedStyle(element).borderRadius)).toBe(addRadius);
+    const themeSwitch = settings.getByRole("button", { name: /^Switch to (light|dark) theme$/ });
+    expect(await themeSwitch.evaluate((element) => element.getBoundingClientRect().height)).toBe(buttonHeight);
+    const previousTheme = await page.locator("html").getAttribute("data-theme");
+    await themeSwitch.click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", previousTheme === "dark" ? "light" : "dark");
+    await themeSwitch.click();
+    await page.screenshot({ path: testInfo.outputPath("general.png") });
+    await settings.getByRole("tab", { name: "History", exact: true }).click();
+    expect(await settings.getByRole("combobox", { name: "History type", exact: true })
+      .evaluate((element) => element.getBoundingClientRect().height)).toBe(buttonHeight);
+
+    await settings.getByRole("button", { name: "Close settings", exact: true }).click();
+    await page.getByRole("button", { name: "Create space", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "New space", exact: true });
+    expect(await dialog.getByRole("textbox", { name: "Space name", exact: true })
+      .evaluate((element) => element.getBoundingClientRect().height)).toBe(buttonHeight);
+  });
+}
+
+test("settings sections remain discoverable and keep the selected tab visible after resizing", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockWorkbench(page);
+  await page.goto("/");
+  const view = await openSettings(page);
+  const more = view.getByRole("button", { name: "More settings sections", exact: true });
+  await expect(more).toBeVisible();
+  await more.click();
+  const trash = view.getByRole("tab", { name: "Trash", exact: true });
+  await trash.click();
+  for (const width of [320, 844, 1440, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(trash).toHaveAttribute("aria-selected", "true");
+    await expect(trash).toBeInViewport({ ratio: 1 });
+    expect(await view.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  }
+});
+
+for (const width of [1440, 390]) {
+  test(`settings exposes primary controls and opens only contextual Inspectors at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    const view = await openSettings(page);
+    let headingOrigin: { x: number; y: number } | undefined;
+    for (const [tab, label] of [
+      ["General", null], ["Account", "Open session actions"], ["Connections", null],
+      ["Agents", null], ["History", null], ["Trash", "Open trash actions"]
+    ] as const) {
+      await view.getByRole("tab", { name: tab, exact: true }).click();
+      await closeSettingsInspector(page);
+      const toggle = page.getByRole("button", { name: "Toggle settings inspector" });
+      if (await toggle.getAttribute("aria-pressed") === "true") await toggle.click();
+      const heading = await view.locator("[data-settings-heading]").boundingBox();
+      if (!heading) throw new Error("Missing settings heading");
+      headingOrigin ??= { x: heading.x, y: heading.y };
+      expect({ x: heading.x, y: heading.y }, `${tab} heading alignment`).toEqual(headingOrigin);
+      await expect(view.getByRole("tab", { name: tab!, exact: true })).toBeInViewport({ ratio: 1 });
+      if (!label) {
+        await expect(toggle).toBeDisabled();
+        await expect(view.getByRole("complementary")).toHaveCount(0);
+        continue;
+      }
+      const opener = view.getByRole("button", { name: label, exact: true });
+      await opener.click();
+      const inspector = view.getByRole(width < 768 ? "dialog" : "complementary", { name: `${tab} Inspector`, exact: true });
+      await expect(inspector).toBeVisible();
+      if (width < 768) {
+        await page.keyboard.press("Escape");
+        await expect(inspector).toBeHidden();
+        await expect(opener).toBeFocused();
+      } else await toggle.click();
+    }
+  });
+}
+
+for (const width of [1440, 390]) {
+  test(`Connections switches from the body and preserves keyboard focus at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockWorkbench(page);
+    await page.goto("/");
+    const view = await openSettings(page, "Connections");
+    const navigation = view.getByRole("tablist", { name: "Connection views" });
+    await navigation.getByRole("tab", { name: "Connection guide", exact: true }).focus();
+    for (const [key, name, title] of [
+      ["ArrowRight", "CLI", "CLI connections"], ["ArrowRight", "MCP", "MCP connections"],
+      ["Home", "Connection guide", "Connections"], ["End", "MCP", "MCP connections"],
+      ["ArrowLeft", "CLI", "CLI connections"], ["ArrowLeft", "Connection guide", "Connections"]
+    ]) {
+      await page.keyboard.press(key);
+      const target = navigation.getByRole("tab", { name, exact: true });
+      await expect(target).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(target).toBeFocused();
+      await expect(target).toHaveAttribute("aria-selected", "true");
+      await expect(view.getByRole("heading", { name: title, exact: true })).toBeVisible();
+      await expect(page.getByRole("dialog", { name: "Connections Inspector" })).toHaveCount(0);
+    }
+  });
+}
+
+test("mobile History exposes its type and refresh without opening the Inspector", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockWorkbench(page);
+  await page.goto("/");
+  const view = await openSettings(page, "History");
+  const type = view.getByRole("combobox", { name: "History type", exact: true });
+  await expect(type).toBeInViewport();
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const space = await view.getByRole("combobox", { name: "Space", exact: true }).boundingBox();
+    const refresh = await view.getByRole("button", { name: "Refresh", exact: true }).boundingBox();
+    expect(space).not.toBeNull();
+    expect(refresh).not.toBeNull();
+    const historyType = await type.boundingBox();
+    expect(historyType).not.toBeNull();
+    expect(refresh!.y + refresh!.height).toBeCloseTo(historyType!.y + historyType!.height, 0);
+    expect(refresh!.y + refresh!.height).toBeCloseTo(space!.y + space!.height, 0);
+    expect(refresh!.width).toBeGreaterThanOrEqual(44);
+    expect(refresh!.height).toBeGreaterThanOrEqual(44);
+    expect(await view.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`history-${width}.png`) });
+  }
+  await type.focus();
+  await type.selectOption("audit");
+  await expect(view.getByText("No audit events.", { exact: true })).toBeVisible();
+  await expect(type).toBeFocused();
+  await expect(view.getByRole("button", { name: "Refresh", exact: true })).toBeInViewport();
+  await expect(page.getByRole("dialog", { name: "History Inspector" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Toggle settings inspector" })).toBeDisabled();
+});
+
+test("mobile workspace reset keeps keyboard focus in its confirmation", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockWorkbench(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open space library" }).click();
+  await openSettings(page);
+  await expect(page.getByRole("button", { name: "Toggle settings inspector" })).toBeDisabled();
+  const reset = page.locator("[data-settings-content]").getByRole("button", { name: "Reset", exact: true });
+  await reset.click();
+  const confirmation = page.getByRole("dialog", { name: "Reset saved workspace" });
+  await expect(confirmation.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(confirmation.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(confirmation).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "General Inspector" })).toHaveCount(0);
+  await expect(reset).toBeFocused();
+});
 
 async function expectSeparateEditorControls(header: Locator, name: string) {
   const controls = await header.getByRole("button").evaluateAll((buttons) => buttons.map((button) => {
@@ -65,6 +649,22 @@ for (const profile of [
       await page.getByRole("button", { name: "Open space library" }).click();
       if (profile.width < 768) await page.getByRole("button", { name: "Inspect Daily" }).click();
 
+      const minimumTarget = profile.hasTouch ? 44 : 24;
+      for (const name of ["About Navigation", "About New item defaults", "Reindex links in Daily", "Recalculate Daily usage"]) {
+        const control = page.getByRole("button", { name, exact: true });
+        const bounds = await control.boundingBox();
+        expect(bounds?.height, name).toBe(minimumTarget);
+        expect(bounds?.width, name).toBeGreaterThanOrEqual(minimumTarget);
+      }
+      const help = page.getByRole("button", { name: "About Navigation", exact: true });
+      await help.click();
+      const tooltip = page.getByRole("tooltip");
+      await expect(tooltip).toBeVisible();
+      const helpBounds = await help.boundingBox();
+      expect((await tooltip.boundingBox())?.y).toBeCloseTo(helpBounds!.y + helpBounds!.height, 0);
+      await page.keyboard.press("Escape");
+      await expect(tooltip).toBeHidden();
+
       const toggle = page.getByRole("switch", { name: "Pin to navigation" });
       const toggleBox = await toggle.boundingBox();
       expect(toggleBox?.height).toBe(profile.hasTouch ? 44 : 24);
@@ -75,17 +675,22 @@ for (const profile of [
       if (profile.width < 768) await page.getByRole("dialog", { name: "Space Inspector" }).getByRole("button", { name: "Close", exact: true }).click();
 
       await page.getByRole("button", { name: "Settings", exact: true }).click();
-      const settings = page.getByRole("dialog", { name: "Settings" });
+      const settings = page.locator("[data-settings-view]");
       const tab = settings.getByRole("tab", { name: "Agents" });
       expect((await tab.boundingBox())?.height).toBe(profile.hasTouch ? 44 : 32);
       await tab.click();
+      await expect(page.getByRole("button", { name: "Toggle settings inspector" })).toBeDisabled();
+      await expect(settings.getByRole("button", { name: "Add agent", exact: true })).toHaveCSS("height", "48px");
+      await settings.getByRole("button", { name: "Add agent", exact: true }).click();
       const field = settings.getByRole("textbox", { name: "New agent name" });
-      expect((await field.boundingBox())?.height).toBe(profile.hasTouch ? 44 : 38);
-      await field.focus();
+      expect((await field.boundingBox())?.height).toBe(profile.hasTouch ? 44 : 28);
+      await expect(field).toBeFocused();
       await page.keyboard.press("Tab");
       await page.keyboard.press("Shift+Tab");
       await expect(field).toBeFocused();
-      expect(await field.evaluate((element) => ({ visible: element.matches(":focus-visible"), style: getComputedStyle(element).outlineStyle, width: getComputedStyle(element).outlineWidth }))).toEqual({ visible: true, style: "solid", width: "2px" });
+      const focus = await field.evaluate((element) => ({ visible: element.matches(":focus-visible"), outline: getComputedStyle(element).outlineStyle }));
+      expect(focus.visible).toBe(true);
+      expect(focus.outline).toBe("solid");
     });
 
     if (profile.name === "touch tablet") {
@@ -160,7 +765,7 @@ for (const profile of [
           const rect = element.getBoundingClientRect();
           return { left: rect.left, right: rect.right, width: rect.width };
         }));
-        expect(buttons.length).toBeGreaterThan(4);
+        expect(buttons).toHaveLength(4);
         for (const button of buttons) {
           expect(button.width).toBe(44);
           expect(button.left).toBeGreaterThanOrEqual(railBounds!.x);
