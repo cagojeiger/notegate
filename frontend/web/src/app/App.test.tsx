@@ -124,11 +124,13 @@ describe("App auth boundary", () => {
     await screen.findByText("Authentication temporarily unavailable");
     expect(screen.queryByText("Continue to NoteGate")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    const retryButton = screen.getByRole("button", { name: "Retry" });
+    fireEvent.click(retryButton);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled());
-    expect(screen.getByRole("button", { name: "Retry" })).toHaveAttribute("aria-busy", "true");
-    expect(screen.getByRole("button", { name: "Retry" })).toHaveTextContent("Retrying…");
+    await waitFor(() => expect(retryButton).toBeDisabled());
+    expect(retryButton).toHaveAttribute("aria-busy", "true");
+    expect(retryButton).toHaveTextContent("Retrying…");
+    expect(retryButton).toHaveAccessibleName("Retrying…");
     await act(async () => { completeRetry(new Response(JSON.stringify(meResponse()), { status: 200 })); });
 
     await screen.findByText("Mock sign out");

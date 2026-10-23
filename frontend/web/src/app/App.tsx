@@ -90,7 +90,7 @@ function AuthBoundary({
       <AuthPage title="Authentication temporarily unavailable">
         <Notice role="status"><p>Your session was not cleared. Try again once the auth service is reachable.</p></Notice>
         <div className="auth-actions">
-          <Button className="auth-primary" aria-label="Retry" aria-busy={isRetryingAuth} onClick={() => {
+          <Button className="auth-primary" aria-busy={isRetryingAuth} onClick={() => {
             setIsRetryingAuth(true);
             void meQuery.refetch().finally(() => setIsRetryingAuth(false));
           }} disabled={isRetryingAuth || meQuery.isFetching}>

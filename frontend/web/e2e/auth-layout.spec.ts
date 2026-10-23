@@ -262,11 +262,12 @@ for (const theme of ["light", "dark"] as const) {
       releaseInitial();
       await expect(page.getByRole("heading", { name: "Authentication temporarily unavailable", exact: true })).toBeVisible();
       await capture("unavailable");
-      const retryButton = page.getByRole("button", { name: "Retry", exact: true });
+      const retryButton = page.getByRole("button", { name: /^Retry/ });
       await retryButton.click();
       await expect(retryButton).toBeDisabled();
       await expect(retryButton).toHaveAttribute("aria-busy", "true");
       await expect(retryButton).toHaveText("Retrying…");
+      await expect(retryButton).toHaveAccessibleName("Retrying…");
       await capture("retrying");
       releaseRetry();
       const googleButton = page.getByRole("button", { name: "Continue with Google", exact: true });
