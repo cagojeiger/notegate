@@ -120,7 +120,7 @@ stateDiagram-v2
 
 인증 cache의 경계는 실제 `account.id`다. `/me`가 성공 응답으로 다른 계정을 반환한 경우에도 이전 계정의 Workspace를 숨기고 cache를 교체한 뒤 새 계정을 다시 확인한다. 다른 탭의 로그인으로 쿠키만 바뀐 경우도 같은 규칙을 따른다. 이전 계정에서 늦게 끝난 발급 요청은 새 계정의 cache나 화면에 결과를 전달하지 않는다. 같은 계정의 재조회는 cache와 미확인 토큰을 유지한다.
 
-이 경계에서 메모리의 선택 공간·편집 그룹·일시 상태도 초기화한다. 저장된 space별 snapshot과 레이아웃 선호는 삭제하지 않는다. 이미 서버로 보낸 작업 자체는 취소하지 않지만, 이전 cache의 세션 폐기·Space/Node 작업·본문 저장/복원 완료가 새 계정의 로그아웃·편집창 선택·저장 상태로 연결되지 않게 한다. 비동기 callback은 전역 UI 변경 직전에도 현재 cache인지 확인한다.
+이 경계에서 메모리의 선택 공간·편집 그룹·일시 상태도 초기화한다. 저장된 space별 snapshot과 레이아웃 선호는 삭제하지 않는다. 이미 서버로 보낸 작업 자체는 취소하지 않지만, 이전 cache의 세션 폐기·Space/Node 작업·본문 저장/복원 완료가 새 계정의 로그아웃·편집창 선택·저장 상태로 연결되지 않게 한다. 비동기 callback은 전역 UI 변경 직전에도 현재 cache인지 확인한다. 현재 브라우저 폐기 후 별도 로그아웃 요청을 기다리는 경우에도, 해당 요청이 끝난 뒤 cache를 다시 확인한다. 이전 계정의 늦은 성공·실패는 새 계정의 저장된 워크벤치나 미저장 초안을 지우지 않는다.
 
 ## 5. Workspace와 Library 왕복
 
@@ -132,6 +132,8 @@ Space Workspace는 Space Library나 Settings를 표시하는 동안에도 mounte
 
 외부 변경의 본문 조회가 진행 중이면 편집기의 자동 재조회는 기다린다. 조회 완료 뒤 현재 본문 SHA와 최신 metadata를 다시 비교해, 같은 revision이면 추가 요청 없이 끝내고 metadata가 더 최신이면 그때 본문을 다시 읽는다. 수동 reload와 미저장 초안의 충돌 처리 규칙은 유지한다.
 
+본문 조회가 query의 재시도를 소진하면 오류 화면에서 명시적으로 Retry할 수 있다. 이 동작은 본문 조회만 다시 실행하며 진행 중에는 중복 실행을 막는다. 성공하면 수정하지 않은 편집기는 최신 본문을 표시하고, 미저장 초안이 있으면 초안과 기존 저장 기준 SHA를 유지한다. 초안을 교체하는 Reload와는 다른 동작이다.
+
 ## 6. 낮은 화면의 버전 비교
 
 터치 화면의 44px 조작 영역은 화면 높이가 낮아져도 유지한다. Version history의 비교 영역과 전체 본문에는 기존 최소 읽기 높이를 적용하고, 모달 콘텐츠가 공간을 초과하면 바깥 콘텐츠 영역을 스크롤한다. 고정 비교 헤더와 도구 모음 때문에 본문을 읽을 공간이 사라지도록 비교 영역만 축소하지 않는다.
@@ -139,11 +141,13 @@ Space Workspace는 Space Library나 Settings를 표시하는 동안에도 mounte
 ## 전환 검증
 
 - [`auth-owner-transition.spec.ts`](../../frontend/web/e2e/auth-owner-transition.spec.ts): 같은 브라우저의 다른 탭에서 쿠키를 교체하고 실제 `/me` 성공 응답으로 계정 변경을 감지한다. 이전 토큰·에이전트 cache와 늦은 발급 결과가 새 계정에 노출되지 않는지 확인한다.
-- [`auth-late-workspace.spec.ts`](../../frontend/web/e2e/auth-late-workspace.spec.ts): 이전 계정의 늦은 Space 생성 완료 후에도 새 계정의 실제 미저장 문서 초안이 유지되는지 확인한다.
+- [`auth-late-workspace.spec.ts`](../../frontend/web/e2e/auth-late-workspace.spec.ts): 이전 계정의 늦은 Space 생성·로그아웃 응답 완료 후에도 새 계정의 실제 미저장 문서 초안이 유지되는지 확인한다.
+- [`useWorkbenchActions.test.tsx`](../../frontend/web/src/features/workbench/useWorkbenchActions.test.tsx): 로그아웃 성공·실패 후 인증 cache를 다시 확인하고, 같은 계정의 정리와 새 계정의 워크벤치 보존을 확인한다.
 - [`App.authOwnership.test.tsx`](../../frontend/web/src/app/App.authOwnership.test.tsx): 실제 App의 인증 경계에서 같은 계정 유지, 다른 계정의 첫 protected commit, 이전 계정의 늦은 응답, 로그아웃·401의 cache 폐기를 확인한다.
 - [`workbench-persistence.spec.ts`](../../frontend/web/e2e/workbench-persistence.spec.ts): desktop/mobile의 Library·Settings 왕복에서 실제 미저장 초안 보존, 숨겨진 편집기 조작 차단과 다른 공간 전환.
 - [`text-revisions.spec.ts`](../../frontend/web/e2e/text-revisions.spec.ts): 낮은 터치 가로 화면에서 실제 변경 행·전체 본문을 읽고 이동·확인 취소·닫기를 조작한다.
 - [`useTextEditorSession.integration.test.tsx`](../../frontend/web/src/features/editor/useTextEditorSession.integration.test.tsx): 외부 본문 조회와 metadata 도착 순서, 더 오래된 본문 응답의 후속 갱신, 실패 시 query retry 정책과 초안 보존을 확인한다.
+- [`TextEditorView.recovery.test.tsx`](../../frontend/web/src/features/editor/TextEditorView.recovery.test.tsx): 실제 오류 화면에서 수동 재시도, 진행 중 중복 요청 차단, 미저장 초안과 저장 기준 SHA 보존을 확인한다.
 - [`key-mint-navigation.spec.ts`](../../frontend/web/e2e/key-mint-navigation.spec.ts): 발급 대기·완료 후 에이전트 목록·Settings 탭·Settings 종료 왕복, 토큰 복원, 중복 발급 차단과 Done 후 제거.
 - [`settings-transitions.spec.ts`](../../frontend/web/e2e/settings-transitions.spec.ts): desktop/mobile에서 4개 기능의 닫기 경로·재열기·resize, desktop tab 변경, 미전송 보장, 요청 중 Inspector·tab·Settings 재진입과 이후 성공·실패의 중복 전송 방지.
 - [`useSettingsMutation.test.tsx`](../../frontend/web/src/features/settings/useSettingsMutation.test.tsx): 제거된 화면의 호출·reset 차단, 화면 부재 중 실패 보존, 완료 결과 복구·해제, 작업 범위와 인증 cache 격리.

@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { useIsCurrentApiCache } from "../../api/ApiProvider";
 import type { Space, RestNode } from "../../api/types";
 import type { AppDialog } from "./dialogs/dialogTypes";
 import { useUiStore } from "../../stores/uiStore";
@@ -19,6 +20,7 @@ type WorkbenchActionsProps = {
 };
 
 export function useWorkbenchActions({ activeSpace, activeNode, inspectedNode, canCreateSpace, canWriteActiveSpace, canManageActiveSpace, onSignOut }: WorkbenchActionsProps) {
+  const isCurrentCache = useIsCurrentApiCache();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dialog, setDialog] = useState<AppDialog | null>(null);
 
@@ -50,8 +52,10 @@ export function useWorkbenchActions({ activeSpace, activeNode, inspectedNode, ca
     try {
       await logoutSession();
     } finally {
-      clearPersistedWorkbenches();
-      onSignOut();
+      if (isCurrentCache()) {
+        clearPersistedWorkbenches();
+        onSignOut();
+      }
     }
   }
 

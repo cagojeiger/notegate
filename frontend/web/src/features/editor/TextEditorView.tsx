@@ -171,7 +171,12 @@ export function TextEditorView({ workspaceActive = true, active, groupId, naviga
       {textQuery.isLoading ? (
         <div className="p-10 text-muted">Loading text…</div>
       ) : textQuery.isError ? (
-        <div className="p-10 text-danger">Could not load text.</div>
+        <div className="space-y-3 p-10">
+          <p role="alert" className="text-danger">Could not load text.</p>
+          <Button secondary aria-label="Retry text" disabled={textQuery.isFetching} onClick={() => { void textQuery.refetch({ cancelRefetch: false }); }}>
+            {textQuery.isFetching ? "Retrying…" : "Retry"}
+          </Button>
+        </div>
       ) : encrypted ? (
         <div className="p-10 text-muted">Encrypted text cannot be previewed by the server.</div>
       ) : (

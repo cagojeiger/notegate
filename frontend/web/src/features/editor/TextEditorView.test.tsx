@@ -16,7 +16,7 @@ type TextEditorViewProps = Parameters<typeof TextEditorView>[0];
 type TextDocumentQuery = ReturnType<typeof useTextDocument>;
 type TextDocumentQueryMock = Pick<
   TextDocumentQuery,
-  "data" | "isError" | "isLoading" | "isSuccess" | "refetch"
+  "data" | "isError" | "isFetching" | "isLoading" | "isSuccess" | "refetch"
 >;
 type SaveTextMutation = ReturnType<typeof useSaveTextDocument>;
 type SaveTextMutationMock = Pick<SaveTextMutation, "mutate" | "isPending">;
@@ -84,6 +84,7 @@ function mockTextDocument(data: ReadTextResponse = partialText) {
   const query = {
     data,
     isError: false,
+    isFetching: false,
     isLoading: false,
     isSuccess: true,
     refetch: vi.fn()
