@@ -41,5 +41,3 @@ describe("createApiClient", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
-
-// Temporary CI impact qualification: frontend unit-test path.
