@@ -1,6 +1,5 @@
 import { useId, type ReactNode } from "react";
 
-import { PublicInformationLinks } from "../features/public-information/PublicInformationLinks";
 import { BrandLockup } from "../shared/ui";
 import { persistTheme, useUiStore } from "../stores/uiStore";
 
@@ -31,7 +30,11 @@ export function AuthPage({ title, children, footer, wide = false }: {
         </section>
         <footer className="auth-footer">
           {footer}
-          <PublicInformationLinks />
+          <nav className="auth-links" aria-label="Legal and support">
+            <a href="/terms">Terms</a>
+            <a href="/privacy">Privacy</a>
+            <a href="/support">Support</a>
+          </nav>
         </footer>
       </div>
     </main>
