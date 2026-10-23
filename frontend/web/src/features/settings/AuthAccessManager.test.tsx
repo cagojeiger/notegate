@@ -55,8 +55,10 @@ describe("AuthAccessManager", () => {
   it("keeps browser, CLI and MCP lists separate and moves selected details to the Inspector", async () => {
     const { user, requests } = setup();
     const currentSession = await screen.findByRole("button", { name: /^Select Chrome on macOS This session Signed in / });
+    const currentDescription = within(currentSession).getByText(/^Signed in /).textContent;
     expect(within(currentSession).getByText("This session")).toBeInTheDocument();
-    expect(currentSession).toHaveAccessibleName(`Select Chrome on macOS This session ${within(currentSession).getByText(/^Signed in /).textContent}`);
+    expect(currentSession.textContent).toBe(`Chrome on macOS This session ${currentDescription}`);
+    expect(currentSession).toHaveAccessibleName(`Select Chrome on macOS This session ${currentDescription}`);
     expect(screen.queryByText("NoteGate CLI · CLI")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: /^CLI/ }));
     expect(await screen.findByText("NoteGate CLI on Linux", { exact: true })).toBeInTheDocument();
@@ -64,7 +66,9 @@ describe("AuthAccessManager", () => {
     expect(screen.queryByRole("button", { name: /Select Chrome/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: /^MCP/ }));
     const mcpConnection = screen.getByRole("button", { name: /^Select Remote MCP / });
-    expect(mcpConnection).toHaveAccessibleName(`Select Remote MCP ${within(mcpConnection).getByText(/^Execution environment not recorded · Connected /).textContent}`);
+    const mcpDescription = within(mcpConnection).getByText(/^Execution environment not recorded · Connected /).textContent;
+    expect(mcpConnection.textContent).toBe(`Remote MCP ${mcpDescription}`);
+    expect(mcpConnection).toHaveAccessibleName(`Select Remote MCP ${mcpDescription}`);
     expect(screen.getByText("Execution environment not recorded", { exact: true })).toBeInTheDocument();
     expect(screen.getByText("Access token only")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Revoke Remote MCP" }));

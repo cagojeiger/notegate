@@ -100,7 +100,7 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
               <ListItemButton aria-label={`Select ${row.label}${row.current ? " This session" : ""} ${row.description}`} selected={active} disabled={revoke.isPending}
                 onClick={() => select(row.id)} className="items-center">
                 <RowIcon size={16} className="shrink-0 text-muted" />
-                <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="truncate text-sm font-medium">{row.label}</span>{row.current ? <span className="shrink-0 text-xs text-primary">This session</span> : null}</span><span className="block truncate text-xs text-muted" title={row.description}>{row.description}</span></span>
+                <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="truncate text-sm font-medium">{row.label}</span>{row.current ? <>{" "}<span className="shrink-0 text-xs text-primary">This session</span></> : null}</span>{" "}<span className="block truncate text-xs text-muted" title={row.description}>{row.description}</span></span>
                 <ChevronRight size={15} className="shrink-0 text-muted" />
               </ListItemButton>
             </li>;
