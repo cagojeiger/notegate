@@ -116,6 +116,19 @@ class SuiteContracts(unittest.TestCase):
         self.assertEqual(set(split), baseline)
         self.assertEqual(len(split), len(baseline))
 
+    def test_prepared_driver_argv_is_fixed_and_inputs_travel_as_environment(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+                runner, "logged", return_value=(0, .1, [self.header, "test unit ... ok"])) as logged:
+            output = Path(directory)
+            prepared = output / "--bundle with spaces.tar"
+            runner.run_group("self-contained", "unit", [test()], self.artifacts,
+                             output, {"runs": []}, prepared)
+            command, _path, env = logged.call_args.args
+            self.assertEqual(command, [sys.executable, str(Path(runner.__file__).resolve()), "_execute"])
+            self.assertEqual(env["CI_RUST_PREPARED_PATH"], str(prepared))
+            self.assertEqual(env["CI_RUST_GROUP"], "self-contained")
+            self.assertEqual(env["CI_RUST_OUTPUT_PATH"], str(output / "driver"))
+
 
 class PreparedContracts(unittest.TestCase):
     """Exercise real bundle transport and libtest processes without compiling Rust."""
@@ -205,6 +218,19 @@ case "$*" in
   *) echo cleanup >> "$RUNNER_CALLS"; cat >/dev/null;;
 esac
 ''')
+        (self.bin / "objcopy").write_text('''#!/usr/bin/env python3
+import os, pathlib, sys
+if sys.argv[1:] == ["--version"]:
+    print(os.environ.get("TEST_OBJCOPY_VERSION", "GNU objcopy (fixture)"))
+    sys.exit(0)
+assert len(sys.argv) == 4 and sys.argv[1] == "--strip-debug"
+source, output = map(pathlib.Path, sys.argv[2:])
+assert not output.exists(), "Only one temporary payload may exist"
+if os.environ.get("TEST_OBJCOPY_FAILURE"):
+    sys.exit(17)
+output.write_bytes(b"\\n".join(line for line in source.read_bytes().splitlines()
+                             if not line.startswith(b"# DEBUG-PADDING")) + b"\\n")
+''')
         for command in self.bin.iterdir():
             command.chmod(0o755)
 
@@ -228,6 +254,15 @@ esac
         self.assertTrue(os.access(self.companion, os.X_OK))
         self.assertTrue(os.access(self.executable, os.X_OK))
         self.assertEqual(self.summary["bundle"]["executable_count"], 2)
+
+    def test_internal_driver_requires_valid_environment_before_execution(self):
+        for group in ("", "unexpected-group"):
+            completed = self.consume("_execute", CI_RUST_PREPARED_PATH=str(self.bundle),
+                                     CI_RUST_OUTPUT_PATH=str(self.root / "target/driver"),
+                                     CI_RUST_GROUP=group)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("requires valid CI_RUST_* environment", completed.stderr)
+            self.assertFalse(self.harness_log.exists())
 
     def test_prepared_split_retains_baseline_active_and_ignored_coverage_without_cargo(self):
         results = []
@@ -299,6 +334,15 @@ esac
         self.assertIn("test inventory mismatch", completed.stderr)
         self.assertFalse(self.harness_log.exists())
 
+    def test_exact_rejects_unsupported_libtest_arguments_before_execution(self):
+        for argument in ("--skip", "--test-threads=2", "--format=json", "unexpected-filter"):
+            with self.subTest(argument=argument):
+                completed = self.consume("exact", "--package", "example", "--target-kind", "lib",
+                                         "--target", "example", "--test-name", "unit", "--", argument)
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("Unsupported exact libtest argument", completed.stderr)
+                self.assertFalse(self.harness_log.exists())
+
     def test_source_and_environment_mismatch_fail_before_execution(self):
         completed = self.consume("self-contained", GITHUB_RUN_ID="different-run")
         self.assertNotEqual(completed.returncode, 0)
@@ -338,6 +382,56 @@ esac
         for name in ("../outside", "backend/crates/example/file", "/tmp/absolute"):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "Invalid prepared executable path"):
                 runner.bundle_path(name)
+
+    def test_strip_debug_packages_copies_preserves_originals_and_restores_runnable_payload(self):
+        originals = {}
+        for source in (self.executable, self.companion):
+            with source.open("ab") as binary:
+                binary.write(b"\n# DEBUG-PADDING " + b"x" * 32768 + b"\n")
+            originals[source] = (source.read_bytes(), source.stat().st_mode)
+        expected_provenance = runner.provenance()
+        summary = {}
+        with patch.dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ["PATH"]), \
+                patch.object(runner.platform, "system", return_value="Linux"), \
+                patch.object(runner, "provenance", return_value=expected_provenance):
+            runner.export_prepared(self.bundle, self.cases, self.artifacts,
+                                   {str(self.companion)}, summary, strip_debug=True)
+        self.assertTrue(summary["bundle"]["strip_debug"])
+        self.assertGreater(summary["bundle"]["original_executable_bytes"],
+                           summary["bundle"]["executable_bytes"])
+        self.assertEqual(summary["bundle"]["original_executable_bytes"],
+                         sum(len(data) for data, _mode in originals.values()))
+        for source, (data, mode) in originals.items():
+            self.assertEqual((source.read_bytes(), source.stat().st_mode), (data, mode))
+            source.unlink()
+        with tarfile.open(self.bundle) as archive:
+            self.assertEqual(archive.getnames()[-1], runner.BUNDLE_MANIFEST)
+        completed = self.consume("self-contained")
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertNotIn(b"DEBUG-PADDING", self.executable.read_bytes())
+        self.assertTrue(os.access(self.companion, os.X_OK))
+
+    def test_strip_debug_failure_does_not_publish_bundle_or_modify_cargo_outputs(self):
+        original = self.executable.read_bytes()
+        failed = self.root / "target/failed.tar"
+        with patch.dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
+                        TEST_OBJCOPY_FAILURE="1"), \
+                patch.object(runner.platform, "system", return_value="Linux"):
+            with self.assertRaises(subprocess.CalledProcessError):
+                runner.export_prepared(failed, self.cases, self.artifacts, set(), {}, strip_debug=True)
+        self.assertEqual(self.executable.read_bytes(), original)
+        self.assertFalse(failed.exists())
+        self.assertFalse(failed.with_name(failed.name + ".pending").exists())
+
+    def test_strip_debug_requires_linux_and_gnu_objcopy(self):
+        with patch.object(runner.platform, "system", return_value="Darwin"):
+            with self.assertRaisesRegex(ValueError, "requires Linux"):
+                runner.pack_bundle(self.bundle, "tests", [], {}, strip_debug=True)
+        with patch.dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
+                        TEST_OBJCOPY_VERSION="llvm-objcopy"), \
+                patch.object(runner.platform, "system", return_value="Linux"):
+            with self.assertRaisesRegex(ValueError, "requires GNU objcopy"):
+                runner.pack_bundle(self.bundle, "tests", [], {}, strip_debug=True)
 
 
 if __name__ == "__main__":

@@ -219,6 +219,8 @@ CI에서는 `Rust Build`가 정적 검사, 테스트 컴파일·inventory 생성
 API·seed는 `rust-e2e-api` artifact로 전달한다. `Rust`는 두 테스트 그룹을, `Browser E2E`는
 API·Web 기능을 실행하며 두 job에서 Cargo 재빌드는 하지 않는다. Browser는 `Rust Build`,
 Web, Hygiene 완료 후 Rust 테스트와 병렬로 진행한다. 빌드 실패는 필수 `Rust` 검사도 실패시킨다.
+CI 전달용 복사본에서 debug 정보만 제외하고 zstd로 압축한다. Cargo 빌드 원본은 유지하며,
+전달본은 상세 backtrace의 소스 행 정보가 줄어들 수 있다. 원본·전달본 크기를 빌드 보고서에 기록한다.
 전달한 파일은 같은 checkout 경로·커밋·실행·플랫폼·toolchain에서만 사용하고, package별
 작업 디렉터리, 테스트 분류·누락 검증, run 단위 DB 정리를 유지한다. 기존 로컬 Make 명령은
 직접 컴파일·실행하는 경로를 유지한다. 빌드 시간과 artifact 전송 시간은 테스트 실행 시간과

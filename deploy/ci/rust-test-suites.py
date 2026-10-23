@@ -15,6 +15,7 @@ import statistics
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -163,24 +164,47 @@ def bundle_path(name):
     return path
 
 
-def pack_bundle(path, kind, executables, summary, **metadata):
+def pack_bundle(path, kind, executables, summary, strip_debug=False, **metadata):
     started = time.monotonic()
+    if strip_debug:
+        if platform.system() != "Linux":
+            raise ValueError("--strip-debug requires Linux and GNU objcopy")
+        version = subprocess.check_output(["objcopy", "--version"], text=True)
+        if not version.startswith("GNU objcopy"):
+            raise ValueError("--strip-debug requires GNU objcopy")
     files = {}
-    for name in sorted(executables):
-        source = bundle_path(name)
-        if not source.is_file() or source.is_symlink() or not os.access(source, os.X_OK):
-            raise ValueError(f"Prepared executable is not a regular executable: {name}")
-        files[name] = {"sha256": digest(source), "size": source.stat().st_size}
-    manifest = dict(schema_version=1, kind=kind, provenance=provenance(), files=files, **metadata)
+    source_provenance = provenance()
+    original_bytes = 0
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(path, "w") as archive:
-        data = (json.dumps(manifest, indent=2) + "\n").encode()
-        header = tarfile.TarInfo(BUNDLE_MANIFEST)
-        header.size = len(data)
-        archive.addfile(header, io.BytesIO(data))
-        for name in files:
-            archive.add(bundle_path(name), arcname=name, recursive=False)
+    pending = path.with_name(path.name + ".pending")
+    try:
+        with tempfile.TemporaryDirectory() as directory, tarfile.open(pending, "w") as archive:
+            stripped = Path(directory) / "executable"
+            for name in sorted(executables):
+                source = bundle_path(name)
+                if not source.is_file() or source.is_symlink() or not os.access(source, os.X_OK):
+                    raise ValueError(f"Prepared executable is not a regular executable: {name}")
+                original_bytes += source.stat().st_size
+                payload = source
+                if strip_debug:
+                    subprocess.run(["objcopy", "--strip-debug", str(source), str(stripped)], check=True)
+                    stripped.chmod(source.stat().st_mode & 0o777)
+                    payload = stripped
+                files[name] = {"sha256": digest(payload), "size": payload.stat().st_size}
+                archive.add(payload, arcname=name, recursive=False)
+                if strip_debug:
+                    stripped.unlink()
+            manifest = dict(schema_version=1, kind=kind, provenance=source_provenance,
+                            files=files, **metadata)
+            data = (json.dumps(manifest, indent=2) + "\n").encode()
+            header = tarfile.TarInfo(BUNDLE_MANIFEST)
+            header.size = len(data)
+            archive.addfile(header, io.BytesIO(data))
+        pending.replace(path)
+    finally:
+        pending.unlink(missing_ok=True)
     summary["bundle"] = {"path": str(path), "bytes": path.stat().st_size,
+                         "strip_debug": strip_debug, "original_executable_bytes": original_bytes,
                          "executable_bytes": sum(item["size"] for item in files.values()),
                          "executable_count": len(files),
                          "export_seconds": time.monotonic() - started}
@@ -243,10 +267,11 @@ def restore_bundle(path, kind, summary, exact_target=None):
     return manifest
 
 
-def export_prepared(path, tests, artifacts, companions, summary):
+def export_prepared(path, tests, artifacts, companions, summary, strip_debug=False):
     targets = {str(Path(executable).relative_to(ROOT)): target for executable, target in artifacts.items()}
     executables = {str(Path(executable).relative_to(ROOT)) for executable in set(artifacts) | companions}
-    pack_bundle(path, "tests", executables, summary, tests=tests, artifacts=targets)
+    pack_bundle(path, "tests", executables, summary, strip_debug=strip_debug,
+                tests=tests, artifacts=targets)
 
 
 def load_prepared(path, summary, exact_target=None, verify_inventory=True):
@@ -311,25 +336,33 @@ def execute_prepared(group, tests, artifacts):
 
 
 def run_exact(test, artifacts, extra_args, output, summary):
+    allowed = ("--ignored", "--show-output", "--nocapture", "--test-threads=1")
+    if any(argument not in allowed for argument in extra_args):
+        raise ValueError("Unsupported exact libtest argument")
+    # Build arguments from literals rather than forwarding arbitrary CLI input.
+    # Capture keeps the result line intact; show-output retains measurements.
+    canonical_args = []
+    if "--ignored" in extra_args:
+        canonical_args.append("--ignored")
+    if "--show-output" in extra_args or "--nocapture" in extra_args:
+        canonical_args.append("--show-output")
+    if "--test-threads=1" in extra_args:
+        canonical_args.append("--test-threads=1")
     targets = [(executable, target) for executable, target in artifacts.items()
                if all(test[field] == target[field] for field in SELECTORS[:-1])]
     if len(targets) != 1:
         raise ValueError("Exact test executable not found once")
     executable, target = targets[0]
-    # Keep libtest's result line intact while retaining successful test output.
-    # With --nocapture, a measurement may print between `test NAME ...` and `ok`.
-    extra_args = ["--show-output" if argument == "--nocapture" else argument
-                  for argument in extra_args]
     header = f"     Running prepared tests ({executable})"
     print(header, flush=True)
-    command = [executable, "--format", "pretty", "--color", "never", "--exact", test["test"], *extra_args]
+    command = [executable, "--format", "pretty", "--color", "never", "--exact", test["test"], *canonical_args]
     code, seconds, lines = logged(command, output / "exact.log", harness_environment(executable, target),
                                   cwd=ROOT / target["cwd"])
     actual = executed([header, *lines], artifacts)
     if actual.keys() != {test_id(test)}:
         raise ValueError("Exact test did not execute once")
     if code == 0:
-        verify_results([dict(test, ignored=test["ignored"] and "--ignored" not in extra_args)], actual)
+        verify_results([dict(test, ignored=test["ignored"] and "--ignored" not in canonical_args)], actual)
     summary["runs"].append({"label": test["test"], "exit_code": code,
                             "wall_seconds": seconds,
                             "results": [dict(zip(SELECTORS, identity), status=status)
@@ -399,9 +432,9 @@ def run_group(group, label, tests, artifacts, output, summary, prepared=None):
     timing_file.unlink(missing_ok=True)
     env["NOTEGATE_TEST_TIMING_FILE"] = str(timing_file)
     if prepared:
-        command = [sys.executable, str(Path(__file__).resolve()), "_execute",
-                   "--prepared", str(prepared), "--group", group,
-                   "--output", str(output / "driver")]
+        env.update(CI_RUST_PREPARED_PATH=str(prepared), CI_RUST_GROUP=group,
+                   CI_RUST_OUTPUT_PATH=str(output / "driver"))
+        command = [sys.executable, str(Path(__file__).resolve()), "_execute"]
         if group != "self-contained":
             command = [str(ROOT / "deploy/ci/test-rust.sh"), "--command", *command]
     else:
@@ -434,6 +467,7 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "target/test-suites")
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument("--bundle", type=Path)
+    parser.add_argument("--strip-debug", action="store_true")
     parser.add_argument("--prepared", type=Path)
     parser.add_argument("--group", choices=(*GROUPS, "baseline"))
     parser.add_argument("--package")
@@ -444,12 +478,24 @@ def main():
     separator = arguments.index("--") if "--" in arguments else len(arguments)
     args = parser.parse_args(arguments[:separator])
     extra_args = arguments[separator + 1:]
+    if args.mode == "_execute":
+        prepared_path = os.environ.pop("CI_RUST_PREPARED_PATH", "")
+        output_path = os.environ.pop("CI_RUST_OUTPUT_PATH", "")
+        args.group = os.environ.pop("CI_RUST_GROUP", "")
+        if not prepared_path or not output_path or args.group not in (*GROUPS, "baseline"):
+            parser.error("Internal prepared driver requires valid CI_RUST_* environment")
+        args.prepared = Path(prepared_path)
+        args.output = Path(output_path)
     if args.repetitions < 1:
         parser.error("--repetitions must be positive")
     if extra_args and args.mode != "exact":
         parser.error("libtest arguments are supported only by exact mode")
     if args.mode in ("prepare", "pack-api") and not args.bundle:
         parser.error("--bundle is required")
+    if args.strip_debug and args.mode not in ("prepare", "pack-api"):
+        parser.error("--strip-debug is supported only by prepare and pack-api")
+    if args.strip_debug and platform.system() != "Linux":
+        parser.error("--strip-debug requires Linux and GNU objcopy")
     if args.mode in ("restore-api", "exact", "_execute") and not args.prepared:
         parser.error("--prepared is required")
     if args.mode == "_execute" and not args.group:
@@ -466,7 +512,8 @@ def main():
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()}
     try:
         if args.mode == "pack-api":
-            pack_bundle(args.bundle.resolve(), "api", API_EXECUTABLES, summary)
+            pack_bundle(args.bundle.resolve(), "api", API_EXECUTABLES, summary,
+                        strip_debug=args.strip_debug)
             return 0
         if args.mode == "restore-api":
             restore_bundle(args.prepared.resolve(), "api", summary)
@@ -507,7 +554,8 @@ def main():
             if code:
                 raise RuntimeError(f"Doctests failed with exit {code}")
         if args.mode == "prepare":
-            export_prepared(args.bundle.resolve(), tests, artifacts, companions, summary)
+            export_prepared(args.bundle.resolve(), tests, artifacts, companions, summary,
+                            strip_debug=args.strip_debug)
         return 0
     except (ValueError, RuntimeError, OSError, KeyError, tarfile.TarError,
             subprocess.CalledProcessError) as error:
