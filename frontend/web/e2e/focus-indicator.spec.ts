@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { contrastRatio } from "./support/accessibility";
+
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/me", async (route) => {
     await route.fulfill({
@@ -33,29 +35,14 @@ for (const theme of ["light", "dark"] as const) {
         outlineStyle: computed.outlineStyle,
         outlineWidth: computed.outlineWidth,
         outlineColor: computed.outlineColor,
-        surfaceColor: getComputedStyle(button.closest("main") ?? document.body).backgroundColor
+        backgroundColor: computed.backgroundColor
       };
     });
     expect(style.focusVisible).toBe(true);
     expect(style.outlineStyle).toBe("solid");
     expect(Number.parseFloat(style.outlineWidth)).toBeGreaterThanOrEqual(2);
-    const outlineContrast = contrastRatio(style.outlineColor, style.surfaceColor);
+    const outlineContrast = contrastRatio(style.outlineColor, style.backgroundColor);
     expect(outlineContrast).toBeGreaterThanOrEqual(3);
     console.log(`FOCUS_INDICATOR_METRIC ${JSON.stringify({ theme, outlineContrast })}`);
   });
-}
-
-function contrastRatio(first: string, second: string): number {
-  const luminance = (color: string) => {
-    const channels = color.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
-    if (!channels) throw new Error(`Expected a solid RGB color, got ${color}`);
-    const [red, green, blue] = channels.slice(1).map((value) => {
-      const channel = Number(value) / 255;
-      return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
-    });
-    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-  };
-  const a = luminance(first);
-  const b = luminance(second);
-  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }

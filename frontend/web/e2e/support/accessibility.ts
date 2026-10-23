@@ -13,3 +13,18 @@ export async function expectNoAccessibilityViolations(page: Page, includeSelecto
     JSON.stringify(result.violations, null, 2)
   ).toEqual([]);
 }
+
+export function contrastRatio(first: string, second: string): number {
+  const luminance = (color: string) => {
+    const channels = color.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
+    if (!channels) throw new Error(`Expected a solid RGB color, got ${color}`);
+    const [red, green, blue] = channels.slice(1).map((value) => {
+      const channel = Number(value) / 255;
+      return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  };
+  const a = luminance(first);
+  const b = luminance(second);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}

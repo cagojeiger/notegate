@@ -13,7 +13,7 @@ export function SignupPreview() {
         <p>Preview only. Nothing is saved and no account is created.</p>
       </Notice>
       <p className="mt-5 text-sm leading-6 text-muted">
-        Review the <a href="/terms" target="_blank" rel="noopener noreferrer" className="rounded text-link underline underline-offset-4">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noopener noreferrer" className="rounded text-link underline underline-offset-4">Privacy Policy</a>. Their content is still being prepared.
+        Review the <a href="/terms" target="_blank" rel="noopener noreferrer" className="rounded-workbench text-link underline underline-offset-4">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noopener noreferrer" className="rounded-workbench text-link underline underline-offset-4">Privacy Policy</a>. Their content is still being prepared.
       </p>
 
       <form

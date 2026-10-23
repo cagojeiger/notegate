@@ -2,6 +2,8 @@ import { createServer } from "node:http";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { contrastRatio } from "./support/accessibility";
+
 async function captureAuthViews(page: Page, name: string) {
   const links = page.getByRole("navigation", { name: "Legal and support" });
   for (const [label, path] of [["Terms", "/terms"], ["Privacy", "/privacy"], ["Support", "/support"]]) {
@@ -24,6 +26,27 @@ async function captureAuthViews(page: Page, name: string) {
         await expect.poll(() => approveButton.evaluate((element) => getComputedStyle(element).color)).toBe(foreground);
         await page.screenshot({ path: `test-results/browser-functional/${name}-${theme}-approve-hover.png`, fullPage: true });
         await page.locator("#auth-theme").hover();
+        await approveButton.focus();
+        await page.keyboard.press("Shift+Tab");
+        await page.keyboard.press("Tab");
+        await expect(approveButton).toBeFocused();
+        const style = await approveButton.evaluate((button) => {
+          const computed = getComputedStyle(button);
+          return {
+            focusVisible: button.matches(":focus-visible"),
+            outlineStyle: computed.outlineStyle,
+            outlineWidth: computed.outlineWidth,
+            outlineColor: computed.outlineColor,
+            backgroundColor: computed.backgroundColor
+          };
+        });
+        expect(style.focusVisible).toBe(true);
+        expect(style.outlineStyle).toBe("solid");
+        expect(Number.parseFloat(style.outlineWidth)).toBeGreaterThanOrEqual(2);
+        const outlineContrast = contrastRatio(style.outlineColor, style.backgroundColor);
+        expect(outlineContrast).toBeGreaterThanOrEqual(3);
+        console.log(`FOCUS_INDICATOR_METRIC ${JSON.stringify({ name, theme, outlineContrast })}`);
+        await approveButton.evaluate((button) => button.blur());
       }
       if (device === "mobile") {
         const heights = await page.locator("button:visible, input:visible, summary:visible").evaluateAll(
