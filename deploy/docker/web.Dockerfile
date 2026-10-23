@@ -72,7 +72,7 @@ COPY --from=planner /app/recipe.json recipe.json
 # Queries are runtime-checked (no sqlx `query!`/`query_as!` macros), so the build
 # needs neither offline `.sqlx` metadata nor SQLX_OFFLINE / a live DB.
 RUN --mount=type=cache,id=notegate-sccache,target=/sccache,sharing=locked \
-    cargo chef cook --release --locked --recipe-path recipe.json
+    cargo chef cook --release --locked --bin notegate-api --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY backend ./backend
 COPY frontend/web/src/design/theme.css ./frontend/web/src/design/theme.css
