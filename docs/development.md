@@ -255,6 +255,7 @@ DB 없는 단위 검증에는 실행·저장 의존성을 명시적으로 주입
 | --- | --- |
 | PR·main CI | Rust 단위·외부 의존성 테스트, Web 검사·번들 크기 예산, browser 기능·접근성 검증, 실제 API의 Workbench·OAuth 계약 |
 | PR | 의존성 변경 검사, RustSec, production 이미지 빌드·취약점 검사, 관련 변경의 DAST 파일럿 |
+| main push | Docker 의존성 단계의 linux/amd64·linux/arm64 공용 캐시 준비 |
 | 실제 릴리즈 게시 성공 후·수동 | Workbench 성능 3회 반복, Lighthouse 3회, 텍스트 쓰기 기준 버전 비교 |
 | 정기 보안 검사 | 최신 advisory에 대한 의존성·발행 이미지 검사 |
 
@@ -262,6 +263,16 @@ Web job이 manifest를 포함한 production `dist`를 한 번 만들고, 같은 
 `web-dist` artifact를 받아 API의 정적 파일 서빙으로 live Workbench를 검증한다. 기존 mock 기반
 E2E는 Vite 개발 서버를 사용한다. 릴리즈 측정은 성공한 main CI의 run ID와 commit SHA가
 일치하는 artifact를 사용하며, 수동 측정은 선택한 commit에서 빌드한다.
+
+main push는 Docker `dependencies` 단계까지 빌드해 GitHub Actions의
+`notegate-main-deps-v1-amd64`·`notegate-main-deps-v1-arm64` 캐시를 갱신한다.
+PR은 자신의 PR 캐시와 같은 아키텍처의 main 공용·release 캐시를 읽고 자신의 PR 캐시에만 저장한다.
+Release는 같은 아키텍처의 main 공용·기존 release 캐시를 읽는다.
+
+공용 캐시 준비는 기능 검사와 병렬로 실행하며, 실패해도 CI를 실패시키지 않는 선택 작업이다.
+캐시가 없으면 각 빌드가 의존성을 다시 준비한다. 준비 작업에는 별도 runner 시간과 캐시 전송·저장 공간이 든다.
+준비가 기능 검사보다 오래 걸리면 main CI 완료와 Release 시작도 늦어질 수 있다.
+정식 이미지·CLI 발행은 Release가 담당하며, 기존 Cargo 캐시와 같은 CI 실행의 artifact 공유 정책은 유지한다.
 
 `playwright.functional.config.ts`의 Workbench는 한 번 실행하고, standalone OAuth 4개 검증은
 별도 identity로 실행한다. 각 project 직전에 identity를 생성해 이력·휴지통 fixture를 격리하고,
