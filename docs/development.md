@@ -293,7 +293,7 @@ Release는 같은 아키텍처의 main 공용·기존 release 캐시를 읽는�
 준비가 기능 검사보다 오래 걸리면 main CI 완료와 Release 시작도 늦어질 수 있다.
 정식 이미지·CLI 발행은 Release가 담당하며, 기존 Cargo 캐시와 같은 CI 실행의 artifact 공유 정책은 유지한다.
 
-`playwright.functional.config.ts`의 Workbench는 한 번 실행하고, standalone OAuth 4개 검증은
+`playwright.functional.config.ts`의 Workbench는 한 번 실행하고, standalone OAuth 검증은
 별도 identity로 실행한다. 각 project 직전에 identity를 생성해 이력·휴지통 fixture를 격리하고,
 5분짜리 일회용 OAuth 동의를 재사용하지 않는다. 이 검증은 trace와 retry를 끈다.
 
