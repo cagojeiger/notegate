@@ -19,10 +19,43 @@ jobs:
   hygiene:
     name: Hygiene
     runs-on: ubuntu-latest
+    outputs:
+      rust_build: ${{ steps.impact.outputs.rust_build }}
+      rust: ${{ steps.impact.outputs.rust }}
+      web: ${{ steps.impact.outputs.web }}
+      browser: ${{ steps.impact.outputs.browser }}
+      postgres: ${{ steps.impact.outputs.postgres }}
+      image: ${{ steps.impact.outputs.image }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Select CI checks
+        id: impact
+        run: |
+          set -euo pipefail
+          paths="$RUNNER_TEMP/ci-changed-paths"
+          plan="$RUNNER_TEMP/ci-impact-plan"
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]] \
+            && git rev-parse --verify 'HEAD^2' >/dev/null 2>&1 \
+            && git diff --no-renames --name-only -z 'HEAD^1' HEAD > "$paths"; then
+            python3 deploy/ci/ci-impact.py --event "$GITHUB_EVENT_NAME" --paths-file "$paths" > "$plan"
+          else
+            python3 deploy/ci/ci-impact.py --event "$GITHUB_EVENT_NAME" > "$plan"
+          fi
+          for key in rust_build rust web browser postgres image; do
+            grep -Eq "^${key}=(true|false)$" "$plan"
+          done
+          cat "$plan" >> "$GITHUB_OUTPUT"
+          {
+            echo '### Selected CI checks'
+            echo '```text'
+            cat "$plan"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install actionlint
         env:
@@ -49,6 +82,8 @@ jobs:
 
   rust-build:
     name: Rust Build
+    needs: hygiene
+    if: needs.hygiene.outputs.rust_build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -61,12 +96,15 @@ jobs:
           shared-key: rust
 
       - name: Check
+        if: needs.hygiene.outputs.rust == 'true'
         run: cargo check --locked --workspace --all-targets
 
       - name: Clippy
+        if: needs.hygiene.outputs.rust == 'true'
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Prepare Rust tests and doctests
+        if: needs.hygiene.outputs.rust == 'true'
         run: python3 deploy/ci/rust-test-suites.py prepare --strip-debug --output target/test-suites/prepare --bundle target/ci-artifacts/rust-tests.tar
 
       - name: Build API and seed executable
@@ -81,10 +119,11 @@ jobs:
       - name: Compress prepared bundles
         run: |
           zstd --version
-          zstd -T0 -3 --long=27 --rm target/ci-artifacts/rust-tests.tar target/ci-artifacts/api.tar
+          zstd -T0 -3 --long=27 --rm target/ci-artifacts/*.tar
           stat --format='%n %s bytes' target/ci-artifacts/*.tar.zst | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Retain prepared Rust tests
+        if: needs.hygiene.outputs.rust == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rust-prepared-tests
@@ -113,8 +152,8 @@ jobs:
 
   rust:
     name: Rust
-    needs: rust-build
-    if: ${{ !cancelled() }}
+    needs: [hygiene, rust-build]
+    if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.hygiene.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -228,6 +267,8 @@ jobs:
 
   postgres18:
     name: PostgreSQL 18
+    needs: hygiene
+    if: needs.hygiene.outputs.postgres == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -278,6 +319,8 @@ jobs:
 
   web:
     name: Web
+    needs: hygiene
+    if: needs.hygiene.outputs.web == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -328,7 +371,8 @@ jobs:
 
   image-pr:
     name: PR Image Gate
-    if: github.event_name == 'pull_request'
+    needs: hygiene
+    if: github.event_name == 'pull_request' && needs.hygiene.outputs.image == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -400,6 +444,7 @@ jobs:
   browser:
     name: Browser E2E
     needs: [hygiene, rust-build, web]
+    if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.hygiene.outputs.browser == 'true' }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -434,6 +479,12 @@ jobs:
       NOTEGATE_S3__FORCE_PATH_STYLE: "true"
 
     steps:
+      - name: Require successful browser inputs
+        env:
+          RUST_BUILD_RESULT: ${{ needs.rust-build.result }}
+          WEB_RESULT: ${{ needs.web.result }}
+        run: test "$RUST_BUILD_RESULT" = success && test "$WEB_RESULT" = success
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
