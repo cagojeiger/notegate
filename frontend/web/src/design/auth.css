@@ -59,7 +59,7 @@
 }
 .auth-card button:not(.ng-google-button):hover, .auth-theme:hover { background: var(--ng-hover); color: var(--ng-text); }
 .auth-card button[value="approve"], .auth-card .auth-primary { border-color: transparent; background: var(--ng-primary); color: var(--ng-primary-contrast); box-shadow: var(--ng-inset-shadow); }
-.auth-card button[value="approve"]:hover, .auth-card .auth-primary:hover { background: var(--ng-primary-hover); }
+.auth-card button[value="approve"]:hover, .auth-card .auth-primary:hover { background: var(--ng-primary-hover); color: var(--ng-primary-contrast); }
 .auth-card .auth-danger { color: var(--ng-danger); }
 .auth-card .auth-danger:hover { color: var(--ng-danger); }
 .auth-field { display: grid; gap: 8px; margin-top: 20px; font-weight: 500; }

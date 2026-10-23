@@ -16,6 +16,15 @@ async function captureAuthViews(page: Page, name: string) {
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      const approveButton = page.locator('button[value="approve"]');
+      if (device === "desktop" && (await approveButton.count()) > 0) {
+        await page.locator("#auth-theme").hover();
+        const foreground = await approveButton.evaluate((element) => getComputedStyle(element).color);
+        await approveButton.hover();
+        await expect.poll(() => approveButton.evaluate((element) => getComputedStyle(element).color)).toBe(foreground);
+        await page.screenshot({ path: `test-results/browser-performance/${name}-${theme}-approve-hover.png`, fullPage: true });
+        await page.locator("#auth-theme").hover();
+      }
       if (device === "mobile") {
         const heights = await page.locator("button:visible, input:visible, summary:visible").evaluateAll(
           (elements) => elements.map((element) => element.getBoundingClientRect().height)
