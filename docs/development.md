@@ -258,7 +258,8 @@ E2E는 Vite 개발 서버를 사용한다. 릴리즈 측정은 성공한 main CI
 `Browser Performance`와 `Text Write Performance`는 PR에서 실행하지 않는다. Release의
 `should_release` 판정과 실제 게시 성공을 모두 확인한 뒤, 게시한 commit SHA로 호출한다.
 텍스트 쓰기는 직전 실제 공개 릴리즈의 고정 SHA와 비교하며, 기준 버전이 없으면 비교 불가를
-명시한다. 측정 실패는 이미 게시한 릴리즈를 되돌리지 않는다.
+명시한다. 수동 기준도 후보 커밋의 조상만 지정할 수 있다. 측정 실패는 이미 게시한 릴리즈를
+되돌리지 않는다.
 
 빌드한 번들만 검사하려면 `pnpm --filter web check:preview-bundle`, 같은 번들로 Lighthouse를
 실행하려면 `pnpm --filter web test:lighthouse:built`를 사용한다. 기존 `test:lighthouse` 명령은

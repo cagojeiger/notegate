@@ -34,6 +34,8 @@ def resolve(release_pages, base_ref=""):
         if baseline == candidate:
             return {"candidate_sha": candidate, "sha": "", "ref": "",
                     "reason": "Baseline equals candidate; comparison skipped"}
+        if git("merge-base", "--is-ancestor", baseline, candidate).returncode:
+            raise ValueError("Manual baseline must be an ancestor of the candidate")
         choices = [(baseline, base_ref)]
     else:
         releases = [release for page in release_pages for release in page
@@ -59,7 +61,7 @@ def resolve(release_pages, base_ref=""):
 
 
 def main():
-    baseline = resolve(json.loads(Path(sys.argv[1]).read_text()), sys.argv[2])
+    baseline = resolve(json.load(sys.stdin), os.environ.get("BASE_REF", ""))
     results = Path("text-write-results")
     results.mkdir(exist_ok=True)
     (results / "baseline.json").write_text(json.dumps(baseline, indent=2) + "\n")
@@ -67,8 +69,7 @@ def main():
                f"Candidate: `{baseline['candidate_sha']}`\n\n")
     if baseline["sha"]:
         summary += f"Baseline: `{baseline['ref']}` (`{baseline['sha']}`)\n\n"
-    with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as output:
-        output.write(summary)
+    (results / "baseline.md").write_text(summary)
     print(f"sha={baseline['sha']}")
 
 

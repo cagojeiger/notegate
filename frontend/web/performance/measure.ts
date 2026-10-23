@@ -98,7 +98,7 @@ export function writeReport(measurements: Measurement[], fixture: Record<string,
   const directory = "test-results/browser-performance";
   mkdirSync(directory, { recursive: true });
   writeFileSync(`${directory}/measurements.json`, JSON.stringify({
-    commit: process.env.NOTEGATE_MEASUREMENT_SHA ?? null, completed, fixture, measurements
+    commit: process.env.BROWSER_MEASUREMENT_SHA ?? null, completed, fixture, measurements
   }, null, 2));
   const lines = [
     "## Authenticated browser baseline", "",

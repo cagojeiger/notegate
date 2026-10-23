@@ -88,15 +88,35 @@ class BaselineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             baseline.resolve([], "missing")
 
+    def test_manual_nonancestor_is_rejected_before_build(self):
+        self.git("commit", "--allow-empty", "-qm", "future")
+        self.git("tag", "future")
+        self.git("checkout", "-q", self.base)
+        self.git("checkout", "-qb", "side-branch")
+        self.git("commit", "--allow-empty", "-qm", "side branch")
+        self.git("checkout", "-q", self.candidate)
+        for ref in ["future", "side-branch"]:
+            with self.subTest(ref=ref), self.assertRaisesRegex(ValueError, "ancestor"):
+                baseline.resolve([], ref)
+
     def test_cli_reports_skip_and_retains_candidate(self):
-        Path("releases.json").write_text(json.dumps([[self.release("v2", 22)]]))
         output = subprocess.check_output(
-            [sys.executable, baseline.__file__, "releases.json", ""], text=True,
-            env={**os.environ, "GITHUB_STEP_SUMMARY": "summary.md"})
+            [sys.executable, baseline.__file__], text=True,
+            input=json.dumps([[self.release("v2", 22)]]),
+            env={**os.environ, "BASE_REF": ""})
         self.assertEqual(output, "sha=\n")
-        self.assertIn("comparison skipped", Path("summary.md").read_text())
+        self.assertIn("comparison skipped", Path("text-write-results/baseline.md").read_text())
         retained = json.loads(Path("text-write-results/baseline.json").read_text())
         self.assertEqual(retained["candidate_sha"], self.candidate)
+
+    def test_cli_manual_ref_uses_fixed_report_paths(self):
+        output = subprocess.check_output(
+            [sys.executable, baseline.__file__], text=True,
+            input=json.dumps([[self.release("v2", 22)]]),
+            env={**os.environ, "BASE_REF": "v1", "GITHUB_STEP_SUMMARY": "external.md"})
+        self.assertEqual(output, f"sha={self.base}\n")
+        self.assertFalse(Path("external.md").exists())
+        self.assertIn("Manual baseline", Path("text-write-results/baseline.md").read_text())
 
 
 if __name__ == "__main__":

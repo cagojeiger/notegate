@@ -3,10 +3,6 @@ name: Browser Performance
 on:
   workflow_dispatch:
     inputs:
-      candidate_sha:
-        description: Full candidate commit SHA (defaults to the selected workflow ref)
-        required: false
-        type: string
       web_artifact_run_id:
         description: Successful main CI run providing web-dist (empty builds locally)
         required: false
@@ -69,16 +65,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.candidate_sha || github.sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || inputs.candidate_sha }}
           persist-credentials: false
 
       - name: Verify candidate and frontend artifact producer
         env:
-          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CANDIDATE_SHA: ${{ github.event_name == 'workflow_dispatch' && github.sha || inputs.candidate_sha }}
           WEB_ARTIFACT_RUN_ID: ${{ inputs.web_artifact_run_id }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "NOTEGATE_MEASUREMENT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "BROWSER_MEASUREMENT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           if [ -n "$CANDIDATE_SHA" ]; then
             [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
             test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
