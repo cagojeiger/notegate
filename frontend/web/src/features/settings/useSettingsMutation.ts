@@ -1,14 +1,22 @@
-import { useMutation, useMutationState, useQueryClient, type MutationState, type UseMutationOptions } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQueryClient, type MutationState, type QueryKey, type UseMutationOptions } from "@tanstack/react-query";
 
-type Operation = "trash" | "delete-agent" | "revoke-browser" | "revoke-cli" | "revoke-mcp";
+import { useIsCurrentApiCache } from "../../api/ApiProvider";
+
+type Operation = "trash" | "delete-agent" | "revoke-browser" | "revoke-cli" | "revoke-mcp" | "revoke-api-key";
 
 // Non-secret settings operations outlive their view in the authenticated query cache.
-export function useSettingsMutation<TData, TVariables>(operation: Operation, options: UseMutationOptions<TData, Error, TVariables>) {
+export function useSettingsMutation<TData, TVariables>(operation: Operation, options: UseMutationOptions<TData, Error, TVariables>, scope?: QueryKey) {
   const client = useQueryClient();
+  const isCurrentCache = useIsCurrentApiCache();
   const cache = client.getMutationCache();
-  const mutationKey = ["settings-operation", operation] as const;
+  const mutationKey = scope ? ["settings-operation", operation, scope] as const : ["settings-operation", operation] as const;
   const filters = { mutationKey, exact: true };
-  const mutation = useMutation({ ...options, mutationKey });
+  const mutation = useMutation({
+    ...options, mutationKey,
+    onSuccess: (...args) => { if (isCurrentCache()) return options.onSuccess?.(...args); },
+    onError: (...args) => { if (isCurrentCache()) return options.onError?.(...args); },
+    onSettled: (...args) => { if (isCurrentCache()) return options.onSettled?.(...args); }
+  });
   const states = useMutationState<MutationState<TData, Error, TVariables>>({
     filters, select: (item) => item.state
   });
@@ -25,7 +33,7 @@ export function useSettingsMutation<TData, TVariables>(operation: Operation, opt
     variables: state?.variables,
     mutate: (variables: TVariables) => {
       // Check the cache synchronously, including calls from a stale or remounted view.
-      if (pending()) return;
+      if (!isCurrentCache() || pending()) return;
       clear();
       mutation.mutate(variables);
     },

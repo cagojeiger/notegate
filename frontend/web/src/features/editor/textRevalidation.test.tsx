@@ -15,7 +15,10 @@ import { useTextEditorSession } from "./useTextEditorSession";
 const client = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
 
 // Keep the real text adapter and QueryClient cancellation/deduplication behavior.
-vi.mock("../../api/ApiProvider", () => ({ useApiClient: () => client }));
+vi.mock("../../api/ApiProvider", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../api/ApiProvider")>(),
+  useApiClient: () => client
+}));
 
 const original = "A".repeat(2_048);
 const originalSha = "a".repeat(64);

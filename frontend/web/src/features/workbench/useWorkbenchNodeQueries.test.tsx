@@ -4,18 +4,19 @@ import {
   type InfiniteData,
   type QueryClient
 } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { deleteNode, moveNode, updateNodeExternalAccessPolicy, updateNodeWriteLock } from "../../api/nodes";
+import { createNode, deleteNode, moveNode, updateNodeExternalAccessPolicy, updateNodeWriteLock } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import { updateTextEncryption } from "../../api/text";
 import type { ChildrenResponse, RestNode } from "../../api/types";
-import { makeRestNode } from "../../test/fixtures";
+import { makeRestNode, makeSpace } from "../../test/fixtures";
 import { createTestQueryClient } from "../../test/queryClient";
 import {
   createUpdateNodeWriteLockMutationOptions,
+  useCreateNodeMutation,
   useDeleteNodeMutation,
   useMoveNodeMutation,
   useUpdateNodeExternalAccessPolicyMutation,
@@ -23,9 +24,12 @@ import {
   useUpdateTextEncryptionMutation
 } from "./useWorkbenchNodeQueries";
 
+const cacheOwner = vi.hoisted(() => ({ current: true }));
 vi.mock("../../api/ApiProvider", () => ({
-  useApiClient: () => ({})
+  useApiClient: () => ({}),
+  useIsCurrentApiCache: () => () => cacheOwner.current
 }));
+beforeEach(() => { cacheOwner.current = true; });
 
 vi.mock("../../api/nodes", () => ({
   createNode: vi.fn(),
@@ -350,6 +354,56 @@ describe("workbench node mutations", () => {
     });
     expect(resetQueries).toHaveBeenCalledTimes(3);
     expect(invalidateQueries).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not open a late created node after its authenticated cache is replaced", async () => {
+    const queryClient = createTestQueryClient();
+    const created = node("old-owner-note", "space-1", "text");
+    let finish!: (node: RestNode) => void;
+    vi.mocked(createNode).mockReturnValueOnce(new Promise<RestNode>((resolve) => { finish = resolve; }));
+    const onCreated = vi.fn();
+    const result = renderMutationHook(queryClient, () => useCreateNodeMutation(makeSpace(), onCreated));
+    let pending!: Promise<RestNode>;
+    act(() => { pending = result.current.mutateAsync({ parentId: "root-1", kind: "text", name: "Private old note" }); });
+    await waitFor(() => expect(createNode).toHaveBeenCalled());
+    cacheOwner.current = false;
+    await act(async () => { finish(created); await pending; });
+    expect(onCreated).not.toHaveBeenCalled();
+  });
+
+  it("does not roll an old owner's failed optimistic lock back into the new workspace", async () => {
+    const queryClient = createTestQueryClient();
+    const current = node("text-1", "space-1", "text");
+    let fail!: (error: Error) => void;
+    vi.mocked(updateNodeWriteLock).mockReturnValueOnce(new Promise<RestNode>((_resolve, reject) => { fail = reject; }));
+    const onUpdated = vi.fn();
+    const result = renderMutationHook(queryClient, () => useUpdateNodeWriteLockMutation(onUpdated));
+    let pending!: Promise<RestNode>;
+    act(() => { pending = result.current.mutateAsync({ node: current, enabled: true }); });
+    await waitFor(() => expect(onUpdated).toHaveBeenCalledTimes(1));
+    onUpdated.mockClear();
+    cacheOwner.current = false;
+    await act(async () => {
+      fail(new Error("Old lock failed"));
+      await expect(pending).rejects.toThrow("Old lock failed");
+    });
+    expect(onUpdated).not.toHaveBeenCalled();
+  });
+
+  it("rechecks cache ownership after asynchronous node deletion cleanup before changing editor groups", async () => {
+    const queryClient = createTestQueryClient();
+    let finishCleanup!: () => void;
+    const cleanup = new Promise<void>((resolve) => { finishCleanup = resolve; });
+    const cancel = vi.spyOn(queryClient, "cancelQueries").mockReturnValue(cleanup);
+    vi.mocked(deleteNode).mockResolvedValueOnce(undefined);
+    const onDeleted = vi.fn();
+    const result = renderMutationHook(queryClient, () => useDeleteNodeMutation(onDeleted));
+    let pending!: Promise<unknown>;
+    act(() => { pending = result.current.mutateAsync({ node: node("old-owner-note", "space-1", "text"), recursive: false }); });
+    await waitFor(() => expect(cancel).toHaveBeenCalled());
+    cacheOwner.current = false;
+    await act(async () => { finishCleanup(); await pending; });
+    expect(onDeleted).not.toHaveBeenCalled();
   });
 });
 

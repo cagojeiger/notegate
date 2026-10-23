@@ -170,14 +170,15 @@ export function useCreateApiKeyMutation(queryKey: QueryKey, create: (input: { na
 
 export function useRevokeApiKeyMutation(queryKey: QueryKey, revoke: (id: string) => Promise<void>, onRevoked: () => void) {
   const queryClient = useQueryClient();
-  return useMutation({
+  return useSettingsMutation("revoke-api-key", {
+    meta: { silentError: true },
     mutationFn: revoke,
     onSuccess: () => {
       onRevoked();
       void queryClient.invalidateQueries({ queryKey });
       invalidateAuditEvents(queryClient);
     }
-  });
+  }, queryKey);
 }
 
 export function useAgentKeyManagerProps(agentId: string) {

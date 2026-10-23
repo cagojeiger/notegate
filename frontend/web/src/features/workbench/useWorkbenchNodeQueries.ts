@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient, type UseMutationOptions } from "@tanstack/react-query";
 
-import { useApiClient } from "../../api/ApiProvider";
+import { useApiClient, useIsCurrentApiCache } from "../../api/ApiProvider";
 import { updateNodeCaches } from "../../api/nodeCache";
 import {
   createNode,
@@ -37,6 +37,7 @@ type UpdateNodeWriteLockVariables = {
 
 export function useCreateNodeMutation(activeSpace: Space | null, onCreated: (node: RestNode) => void) {
   const client = useApiClient();
+  const isCurrentCache = useIsCurrentApiCache();
   const queryClient = useQueryClient();
   return useMutation({
     meta: { silentError: true },
@@ -48,13 +49,14 @@ export function useCreateNodeMutation(activeSpace: Space | null, onCreated: (nod
       queryClient.setQueryData(queryKeys.node(node.space_id, node.id), node);
       invalidateNodeLists(queryClient, node.space_id, [node.parent_id]);
       invalidateSpaceLinks(queryClient, node.space_id);
-      onCreated(node);
+      if (isCurrentCache()) onCreated(node);
     }
   });
 }
 
 export function useUpdateNodeMutation(onUpdated: (node: RestNode) => void) {
   const client = useApiClient();
+  const isCurrentCache = useIsCurrentApiCache();
   const queryClient = useQueryClient();
   return useMutation({
     meta: { silentError: true },
@@ -68,13 +70,14 @@ export function useUpdateNodeMutation(onUpdated: (node: RestNode) => void) {
         removeMarkdownImagePreviewQuery(queryClient, node.space_id, previousNode.path);
       }
       invalidateSpaceLinks(queryClient, node.space_id);
-      onUpdated(node);
+      if (isCurrentCache()) onUpdated(node);
     }
   });
 }
 
 export function useUpdateNodeExternalAccessPolicyMutation(onUpdated: (node: RestNode) => void) {
   const client = useApiClient();
+  const isCurrentCache = useIsCurrentApiCache();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ node, enabled }: { node: RestNode; enabled: boolean }) =>
@@ -82,7 +85,7 @@ export function useUpdateNodeExternalAccessPolicyMutation(onUpdated: (node: Rest
     onSuccess: (node) => {
       updateNodeCaches(queryClient, node, () => node);
       invalidateRecentNodes(queryClient, node.space_id);
-      onUpdated(node);
+      if (isCurrentCache()) onUpdated(node);
     }
   });
 }
@@ -120,12 +123,13 @@ export function createUpdateNodeWriteLockMutationOptions(
 
 export function useUpdateNodeWriteLockMutation(onUpdated: (node: RestNode) => void) {
   const client = useApiClient();
+  const isCurrentCache = useIsCurrentApiCache();
   const queryClient = useQueryClient();
   return useMutation(
     createUpdateNodeWriteLockMutationOptions(
       ({ node, enabled }) => updateNodeWriteLock(client, node.space_id, node.id, enabled),
       queryClient,
-      onUpdated
+      (node) => { if (isCurrentCache()) onUpdated(node); }
     )
   );
 }
@@ -145,6 +149,7 @@ function applyDirectWriteLock(node: RestNode, enabled: boolean): RestNode {
 
 export function useUpdateTextEncryptionMutation(onUpdated: (node: RestNode) => void) {
   const client = useApiClient();
+  const isCurrentCache = useIsCurrentApiCache();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ node, enabled }: { node: RestNode; enabled: boolean }) =>
@@ -154,7 +159,7 @@ export function useUpdateTextEncryptionMutation(onUpdated: (node: RestNode) => v
       invalidateRecentNodes(queryClient, node.space_id);
       invalidateText(queryClient, node.space_id, node.id);
       invalidateSpaceLinks(queryClient, node.space_id);
-      onUpdated(node);
+      if (isCurrentCache()) onUpdated(node);
     }
   });
 }
@@ -164,6 +169,7 @@ export function useMoveNodeMutation(
   options: MoveNodeMutationOptions = {}
 ) {
   const client = useApiClient();
+  const isCurrentCache = useIsCurrentApiCache();
   const queryClient = useQueryClient();
   return useMutation({
     meta: options.silentError ? { silentError: true } : undefined,
@@ -177,20 +183,21 @@ export function useMoveNodeMutation(
         removeMarkdownImagePreviewQuery(queryClient, node.space_id, previousNode.path);
       }
       invalidateSpaceLinks(queryClient, node.space_id);
-      onMoved(node);
+      if (isCurrentCache()) onMoved(node);
     }
   });
 }
 
 export function useDeleteNodeMutation(onDeleted: (node: NodeSummary) => void) {
   const client = useApiClient();
+  const isCurrentCache = useIsCurrentApiCache();
   const queryClient = useQueryClient();
   return useMutation({
     meta: { silentError: true },
     mutationFn: ({ node, recursive }: { node: NodeSummary; recursive: boolean }) => deleteNode(client, node.space_id, node.id, recursive).then(() => node),
     onSuccess: async (node, { recursive }) => {
       await removeDeletedNodeQueries(queryClient, node, recursive);
-      onDeleted(node);
+      if (isCurrentCache()) onDeleted(node);
       void queryClient.invalidateQueries({ queryKey: queryKeys.trash });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       if (recursive && node.kind === "folder") {

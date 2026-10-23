@@ -152,6 +152,56 @@ describe("KeyManager", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Revoke other-key" })).toBeEnabled());
   });
 
+  it("keeps a pending revocation locked across remounts without blocking a different agent", async () => {
+    const key = { id: "key-1", name: "ci-key", created_at: "2026-10-01T00:00:00Z", expires_at: "2026-10-31T00:00:00Z" };
+    let finish!: () => void;
+    const revoke = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const queryClient = createTestQueryClient();
+    const props = { queryClient, queryKey: ["agents", "a", "keys"], list: vi.fn().mockResolvedValue({ ...emptyKeys, keys: [key] }), revoke };
+    const user = userEvent.setup();
+    const first = renderKeyManager(props);
+    await user.click(await screen.findByRole("button", { name: "Revoke ci-key" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(revoke).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    const other = renderKeyManager({ ...props, queryKey: ["agents", "b", "keys"] });
+    expect(await screen.findByRole("button", { name: "Revoke ci-key" })).toBeEnabled();
+    expect(screen.queryByText("Revoking API key…")).not.toBeInTheDocument();
+    other.unmount();
+
+    renderKeyManager(props);
+    expect(screen.getByRole("status")).toHaveTextContent("Revoking API key…");
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    expect(confirm).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await user.click(confirm);
+    expect(revoke).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(); });
+    await waitFor(() => expect(screen.queryByText("Revoking API key…")).not.toBeInTheDocument());
+  });
+
+  it("restores a late revocation failure after remount and allows an explicit retry", async () => {
+    const key = { id: "key-1", name: "ci-key", created_at: "2026-10-01T00:00:00Z", expires_at: "2026-10-31T00:00:00Z" };
+    let fail!: (error: Error) => void;
+    const revoke = vi.fn().mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { fail = reject; })).mockResolvedValue(undefined);
+    const props = { queryClient: createTestQueryClient(), list: vi.fn().mockResolvedValue({ ...emptyKeys, keys: [key] }), revoke };
+    const user = userEvent.setup();
+    const first = renderKeyManager(props);
+    await user.click(await screen.findByRole("button", { name: "Revoke ci-key" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    first.unmount();
+    await act(async () => { fail(new Error("Key service unavailable")); });
+    renderKeyManager(props);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Key service unavailable");
+    expect(revoke).toHaveBeenCalledTimes(1);
+    await user.click(await screen.findByRole("button", { name: "Revoke ci-key" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(revoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
   it("distinguishes a failed read from an empty key list and retries it", async () => {
     const list = vi.fn().mockRejectedValueOnce(new Error("Unavailable")).mockResolvedValue(emptyKeys);
     const user = userEvent.setup();

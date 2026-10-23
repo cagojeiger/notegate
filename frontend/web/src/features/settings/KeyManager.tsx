@@ -39,6 +39,7 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
     if (!document.activeElement?.closest('[role="tablist"]')) element?.querySelector("button")?.focus();
   }, []);
   const revokeMutation = useRevokeApiKeyMutation(queryKey, revoke, () => setConfirmId(null));
+  const revokingId = revokeMutation.isPending ? revokeMutation.variables : null;
 
   const canCreate = name.trim().length > 0 && !createMutation.isPending && !created;
   const options = expiryOptions(maxTtlDays);
@@ -63,6 +64,8 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
     <div className="space-y-4">
       {createMutation.isPending ? <p role="status" className="text-sm text-muted">Creating API key…</p> : null}
       {createMutation.isError ? <p role="alert" className="text-sm text-danger">{createMutation.error?.message || "Could not create API key. Try again."}</p> : null}
+      {revokeMutation.isPending ? <p role="status" className="text-sm text-muted">Revoking API key…</p> : null}
+      {revokeMutation.error ? <p role="alert" className="text-sm text-danger">{revokeMutation.error.message}</p> : null}
       {created ? (
         <Card tone="success">
           <div className="text-sm font-semibold text-text">Key “{created.name}” created</div>
@@ -93,13 +96,13 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
                 <div className="truncate font-medium">{key.name}</div>
                 <div className="text-xs text-muted">created {key.created_at.slice(0, 10)} · expires {key.expires_at.slice(0, 10)}</div>
               </div>
-              {confirmId === key.id ? (
+              {(revokingId ?? confirmId) === key.id ? (
                 <div className="flex shrink-0 items-center gap-2">
                   <Button size="sm" variant="danger" disabled={revokeMutation.isPending} onClick={() => revokeMutation.mutate(key.id)}>Confirm</Button>
                   <Button size="sm" secondary disabled={revokeMutation.isPending} onClick={() => setConfirmId(null)}>Cancel</Button>
                 </div>
               ) : (
-                <IconButton label={`Revoke ${key.name}`} disabled={revokeMutation.isPending} onClick={() => setConfirmId(key.id)}><Trash2 size={15} className="text-danger" /></IconButton>
+                <IconButton label={`Revoke ${key.name}`} disabled={revokeMutation.isPending} onClick={() => { revokeMutation.reset(); setConfirmId(key.id); }}><Trash2 size={15} className="text-danger" /></IconButton>
               )}
             </li>
           ))}

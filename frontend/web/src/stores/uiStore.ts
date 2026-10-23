@@ -44,6 +44,7 @@ type UiState = {
   discardNavigationTarget: (groupId: number, direction: EditorNavigationDirection, expectedNodeId: string) => boolean;
   setGroupMode: (index: number, mode: "preview" | "edit") => void;
   resetGroups: () => void;
+  resetSessionWorkspace: () => void;
   toggleFolder: (id: string) => void;
   addExpanded: (ids: string[]) => void;
   setExpanded: (ids: string[]) => void;
@@ -135,6 +136,11 @@ export function createUiStore(persistence: UiStorePersistence): UiStore {
   },
   setGroupMode: (index, mode) => set((state) => ({ editorGroups: setEditorGroupModeState(state.editorGroups, index, mode) })),
   resetGroups: () => set((state) => resetEditorGroupsState(state)),
+  resetSessionWorkspace: () => set((state) => ({
+    ...resetEditorGroupsState(state), activeSpaceId: null,
+    expandedFolderIds: new Set(), expandedFolderIdsBySpace: {},
+    mobileTreeOpen: false, mobileAuxOpen: false, toast: null, saveState: "idle"
+  })),
   toggleFolder: (id) =>
     set((state) => {
       const next = new Set(state.expandedFolderIds);
