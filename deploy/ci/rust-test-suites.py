@@ -473,6 +473,25 @@ def run_group(group, label, tests, artifacts, output, summary, prepared=None):
     print(f"{label}: {seconds:.2f}s, exact test coverage verified", flush=True)
 
 
+def internal_driver():
+    """Consume the fixed child protocol without modifying public CLI options."""
+    prepared_value = os.environ.pop("CI_RUST_PREPARED_PATH", "")
+    output_value = os.environ.pop("CI_RUST_OUTPUT_PATH", "")
+    group = os.environ.pop("CI_RUST_GROUP", "")
+    if not prepared_value or not output_value or group not in (*GROUPS, "baseline"):
+        raise ValueError("Internal prepared driver requires valid CI_RUST_* environment")
+    prepared = target_tree_path(prepared_value)
+    output = target_tree_path(output_value)
+    output.mkdir(parents=True, exist_ok=True)
+    summary = {"mode": "_execute", "runs": []}
+    try:
+        tests, artifacts = load_prepared(prepared, summary, verify_inventory=False)
+        (output / "inventory.json").write_text(json.dumps(tests, indent=2) + "\n")
+        return execute_prepared(group, tests, artifacts)
+    finally:
+        (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=(*GROUPS, "split", "measure", "prepare", "exact",
@@ -483,7 +502,6 @@ def main():
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--strip-debug", action="store_true")
     parser.add_argument("--prepared", type=Path, help="same-source bundle under repository target/")
-    parser.add_argument("--group", choices=(*GROUPS, "baseline"))
     parser.add_argument("--package")
     parser.add_argument("--target-kind", choices=("lib", "bin", "test"))
     parser.add_argument("--target")
@@ -493,16 +511,12 @@ def main():
     args = parser.parse_args(arguments[:separator])
     extra_args = arguments[separator + 1:]
     if args.mode == "_execute":
-        prepared_path = os.environ.pop("CI_RUST_PREPARED_PATH", "")
-        output_path = os.environ.pop("CI_RUST_OUTPUT_PATH", "")
-        args.group = os.environ.pop("CI_RUST_GROUP", "")
-        if not prepared_path or not output_path or args.group not in (*GROUPS, "baseline"):
-            parser.error("Internal prepared driver requires valid CI_RUST_* environment")
         try:
-            args.prepared = target_tree_path(prepared_path)
-            args.output = target_tree_path(output_path)
-        except ValueError as error:
-            parser.error(str(error))
+            return internal_driver()
+        except (ValueError, RuntimeError, OSError, KeyError, tarfile.TarError,
+                subprocess.CalledProcessError) as error:
+            print(error, file=sys.stderr)
+            return 1
     if args.repetitions < 1:
         parser.error("--repetitions must be positive")
     if extra_args and args.mode != "exact":
@@ -513,10 +527,8 @@ def main():
         parser.error("--strip-debug is supported only by prepare and pack-api")
     if args.strip_debug and platform.system() != "Linux":
         parser.error("--strip-debug requires Linux and GNU objcopy")
-    if args.mode in ("restore-api", "exact", "_execute") and not args.prepared:
+    if args.mode in ("restore-api", "exact") and not args.prepared:
         parser.error("--prepared is required")
-    if args.mode == "_execute" and not args.group:
-        parser.error("--group is required")
     if args.mode == "exact" and not all((args.package, args.target_kind, args.target, args.test_name)):
         parser.error("exact requires --package, --target-kind, --target and --test-name")
     if args.mode in ("external", "split", "measure"):
@@ -524,8 +536,8 @@ def main():
             if not os.environ.get(name, "").strip():
                 parser.error(f"{name} is required")
     try:
-        if args.prepared:
-            args.prepared = target_tree_path(args.prepared)
+        prepared = target_tree_path(args.prepared) if args.prepared else None
+        if prepared:
             output = target_tree_path(args.output)
         else:
             output = args.output.resolve()
@@ -540,17 +552,14 @@ def main():
                         strip_debug=args.strip_debug)
             return 0
         if args.mode == "restore-api":
-            restore_bundle(args.prepared.resolve(), "api", summary)
+            restore_bundle(prepared, "api", summary)
             return 0
-        if args.prepared:
+        if prepared:
             exact_target = (args.package, args.target_kind, args.target) if args.mode == "exact" else None
-            tests, artifacts = load_prepared(args.prepared.resolve(), summary, exact_target,
-                                             verify_inventory=args.mode != "_execute")
+            tests, artifacts = load_prepared(prepared, summary, exact_target)
             (output / "inventory.json").write_text(json.dumps(tests, indent=2) + "\n")
         else:
             tests, artifacts, companions = prepare(output, summary)
-        if args.mode == "_execute":
-            return execute_prepared(args.group, tests, artifacts)
         if args.mode == "exact":
             identity = (args.package, args.target_kind, args.target, args.test_name)
             selected = [test for test in tests if test_id(test) == identity]
@@ -562,12 +571,12 @@ def main():
                 order = ("baseline", *GROUPS) if index % 2 == 0 else (*GROUPS, "baseline")
                 for group in order:
                     run_group(group, f"round-{index + 1}-{group}", tests, artifacts, output, summary,
-                              args.prepared)
+                              prepared)
         elif args.mode != "prepare":
             for group in GROUPS if args.mode == "split" else (args.mode,):
-                run_group(group, group, tests, artifacts, output, summary, args.prepared)
+                run_group(group, group, tests, artifacts, output, summary, prepared)
         # Doctests belong to the self-contained phase, once per split execution.
-        if args.mode != "external" and not args.prepared:
+        if args.mode != "external" and not prepared:
             env = dict(os.environ)
             for name in list(env):
                 if name.startswith("NOTEGATE_TEST_"):
