@@ -5,6 +5,10 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -111,6 +115,229 @@ class SuiteContracts(unittest.TestCase):
         split = [runner.test_id(case) for result in summary["runs"][1:] for case in result["results"]]
         self.assertEqual(set(split), baseline)
         self.assertEqual(len(split), len(baseline))
+
+
+class PreparedContracts(unittest.TestCase):
+    """Exercise real bundle transport and libtest processes without compiling Rust."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name).resolve()
+        self.root_patch = patch.object(runner, "ROOT", self.root)
+        self.root_patch.start()
+        self.addCleanup(self.root_patch.stop)
+        scripts = self.root / "deploy/ci"
+        scripts.mkdir(parents=True)
+        for name in ("rust-test-suites.py", "test-rust.sh"):
+            shutil.copy2(Path(__file__).with_name(name), scripts / name)
+        self.script = scripts / "rust-test-suites.py"
+        self.rules = [rule("external", test="external"), rule()]
+        (scripts / "rust-test-resources.json").write_text(json.dumps(
+            {"schema_version": 1, "rules": self.rules}))
+        (self.root / "rust-toolchain.toml").write_text('[toolchain]\nchannel = "test"\n')
+        (self.root / ".gitignore").write_text("target/\n")
+        self.cwd = self.root / "backend/crates/example"
+        self.cwd.mkdir(parents=True)
+        (self.cwd / "Cargo.toml").write_text("# test fixture\n")
+        self.executable = self.root / "target/debug/deps/example-123"
+        self.executable.parent.mkdir(parents=True)
+        self.executable.write_text('''#!/usr/bin/env python3
+import json, os, pathlib, sys
+names = ["unit", "external", "diagnostic"]
+if "--list" in sys.argv:
+    print("\\n".join(name + ": test" for name in names if "--ignored" not in sys.argv or name == "diagnostic"))
+    sys.exit(0)
+selected = [name for name in names if "--exact" not in sys.argv or name in sys.argv]
+record = dict(names=selected, cwd=os.getcwd(), args=sys.argv[1:],
+              env={name: value for name, value in os.environ.items()
+                   if name.startswith(("NOTEGATE_TEST_", "CARGO_"))})
+with open(os.environ["HARNESS_LOG"], "a") as log:
+    log.write(json.dumps(record) + "\\n")
+code = 0
+for name in selected:
+    status = "ignored, explicit only" if name == "diagnostic" and "--ignored" not in sys.argv else "ok"
+    if name == "external":
+        if not os.environ.get("NOTEGATE_TEST_DATABASE_URL"):
+            status, code = "FAILED", 101
+        elif os.environ.get("FAIL_EXTERNAL"):
+            status, code = "FAILED", 23
+        elif os.environ.get("NOTEGATE_TEST_TIMING_FILE"):
+            pathlib.Path(os.environ["NOTEGATE_TEST_TIMING_FILE"]).write_text(
+                json.dumps(dict(schema="owned", phase="setup")) + "\\n" +
+                json.dumps(dict(schema="owned", phase="cleanup", schema_dropped=True)) + "\\n")
+    if name == "diagnostic" and "--nocapture" in sys.argv:
+        print("test " + name + " ... Command completion: measured\\nok", flush=True)
+    else:
+        print("test " + name + " ... " + status, flush=True)
+        if name == "diagnostic" and "--show-output" in sys.argv:
+            print("\\n---- diagnostic stdout ----\\nCommand completion: measured", flush=True)
+sys.exit(code)
+''')
+        self.executable.chmod(0o755)
+        self.companion = self.root / "target/debug/example-cli"
+        self.companion.write_text("#!/bin/sh\nexit 0\n")
+        self.companion.chmod(0o755)
+        self.target = dict(package="example", target_kind="lib", target="example",
+                           cwd="backend/crates/example",
+                           runtime_env={"CARGO_MANIFEST_DIR": str(self.cwd),
+                                        "CARGO_PKG_NAME": "example"})
+        self.cases = [dict(self.target, test=name, ignored=name == "diagnostic")
+                      for name in ("unit", "external", "diagnostic")]
+        runner.classify(self.cases, self.rules)
+        self.artifacts = {str(self.executable): self.target}
+        self.bundle = self.root / "target/tests.tar"
+        subprocess.run(["git", "init", "--quiet", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=CI test",
+                        "-c", "user.email=ci@example.test", "commit", "--quiet", "-m", "fixture"], check=True)
+        self.summary = {}
+        runner.export_prepared(self.bundle, self.cases, self.artifacts,
+                               {str(self.companion)}, self.summary)
+        self.harness_log = self.root / "target/harness.jsonl"
+        self.calls = self.root / "target/calls"
+        self.bin = self.root / "target/bin"
+        self.bin.mkdir()
+        (self.bin / "cargo").write_text('#!/bin/sh\necho cargo >> "$RUNNER_CALLS"\nexit 99\n')
+        (self.bin / "psql").write_text('''#!/bin/sh
+case "$*" in
+  *"SELECT 1"*) echo preflight >> "$RUNNER_CALLS";;
+  *) echo cleanup >> "$RUNNER_CALLS"; cat >/dev/null;;
+esac
+''')
+        for command in self.bin.iterdir():
+            command.chmod(0o755)
+
+    def consume(self, mode, *arguments, **extra_env):
+        env = {name: value for name, value in os.environ.items() if not name.startswith("NOTEGATE_TEST_")}
+        env.update(PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
+                   HARNESS_LOG=str(self.harness_log), RUNNER_CALLS=str(self.calls), **extra_env)
+        return subprocess.run([sys.executable, str(self.script), mode, "--prepared", str(self.bundle),
+                               "--output", str(self.root / "target/results" / mode), *arguments],
+                              env=env, cwd=self.root, text=True, capture_output=True, check=False)
+
+    def records(self):
+        return [json.loads(line) for line in self.harness_log.read_text().splitlines()]
+
+    def test_bundle_restores_companion_executable_and_exact_inventory(self):
+        self.executable.unlink()
+        self.companion.unlink()
+        cases, artifacts = runner.load_prepared(self.bundle, {})
+        self.assertEqual(cases, self.cases)
+        self.assertEqual(artifacts, self.artifacts)
+        self.assertTrue(os.access(self.companion, os.X_OK))
+        self.assertTrue(os.access(self.executable, os.X_OK))
+        self.assertEqual(self.summary["bundle"]["executable_count"], 2)
+
+    def test_prepared_split_retains_baseline_active_and_ignored_coverage_without_cargo(self):
+        results = []
+        for mode in runner.GROUPS:
+            completed = self.consume(mode, NOTEGATE_TEST_DATABASE_URL="postgres://example",
+                                     NOTEGATE_TEST_S3_ENDPOINT="http://s3", NOTEGATE_TEST_RUN_ID="inherited",
+                                     NOTEGATE_TEST_SKIP_INTEGRATION="1")
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            summary = json.loads((self.root / "target/results" / mode / "summary.json").read_text())
+            results.extend(summary["runs"][0]["results"])
+        self.assertEqual({runner.test_id(case) for case in results},
+                         {runner.test_id(case) for case in self.cases})
+        self.assertEqual(len(results), len(self.cases))
+        self.assertEqual(self.calls.read_text().splitlines(), ["preflight", "cleanup"])
+        self_contained, external = self.records()
+        self.assertEqual(self_contained["cwd"], str(self.cwd))
+        self.assertEqual(self_contained["env"]["CARGO_PKG_NAME"], "example")
+        self.assertNotIn("NOTEGATE_TEST_DATABASE_URL", self_contained["env"])
+        self.assertNotIn("NOTEGATE_TEST_S3_ENDPOINT", self_contained["env"])
+        self.assertNotIn("NOTEGATE_TEST_RUN_ID", self_contained["env"])
+        self.assertNotIn("NOTEGATE_TEST_SKIP_INTEGRATION", external["env"])
+        self.assertRegex(external["env"]["NOTEGATE_TEST_RUN_ID"], r"^[0-9a-f]{16}$")
+
+    def test_external_harness_failure_still_cleans_up_without_cargo(self):
+        completed = self.consume("external", NOTEGATE_TEST_DATABASE_URL="postgres://example",
+                                 NOTEGATE_TEST_S3_ENDPOINT="http://s3", FAIL_EXTERNAL="1")
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        summary = json.loads((self.root / "target/results/external/summary.json").read_text())
+        self.assertEqual(summary["runs"][0]["exit_code"], 23)
+        self.assertEqual(self.calls.read_text().splitlines(), ["preflight", "cleanup"])
+
+    def test_exact_runs_real_test_with_inherited_env_and_propagates_failure(self):
+        completed = self.consume("exact", "--package", "example", "--target-kind", "lib",
+                                 "--target", "example", "--test-name", "external", "--", "--nocapture",
+                                 NOTEGATE_TEST_SKIP_INTEGRATION="inherited")
+        self.assertEqual(completed.returncode, 101, completed.stdout + completed.stderr)
+        record, = self.records()
+        self.assertEqual(record["names"], ["external"])
+        self.assertEqual(record["env"]["NOTEGATE_TEST_SKIP_INTEGRATION"], "inherited")
+        self.assertIn("--show-output", record["args"])
+        self.assertNotIn("--nocapture", record["args"])
+        self.assertFalse(self.calls.exists())
+
+    def test_unknown_exact_identity_fails_before_execution(self):
+        completed = self.consume("exact", "--package", "example", "--target-kind", "lib",
+                                 "--target", "example", "--test-name", "missing")
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("Exact test identity not found", completed.stderr)
+        self.assertFalse(self.harness_log.exists())
+
+    def test_exact_executes_selected_ignored_measurement(self):
+        completed = self.consume("exact", "--package", "example", "--target-kind", "lib",
+                                 "--target", "example", "--test-name", "diagnostic", "--",
+                                 "--ignored", "--nocapture", "--test-threads=1")
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        record, = self.records()
+        self.assertEqual(record["names"], ["diagnostic"])
+        self.assertIn("test diagnostic ... ok", completed.stdout)
+        self.assertIn("Command completion: measured", completed.stdout)
+        self.assertIn("--show-output", record["args"])
+        self.assertNotIn("--nocapture", record["args"])
+        self.assertFalse(self.calls.exists())
+
+    def test_missing_inventory_identity_is_rejected_against_real_harness(self):
+        runner.export_prepared(self.bundle, self.cases[1:], self.artifacts,
+                               {str(self.companion)}, {})
+        completed = self.consume("self-contained")
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("test inventory mismatch", completed.stderr)
+        self.assertFalse(self.harness_log.exists())
+
+    def test_source_and_environment_mismatch_fail_before_execution(self):
+        completed = self.consume("self-contained", GITHUB_RUN_ID="different-run")
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("provenance mismatch", completed.stderr)
+        (self.cwd / "Cargo.toml").write_text("changed source\n")
+        completed = self.consume("self-contained")
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertFalse(self.harness_log.exists())
+
+    def test_corrupt_executable_is_rejected_before_execution(self):
+        self.executable.unlink()
+        with self.bundle.open("r+b") as archive:
+            with tarfile.open(fileobj=archive, mode="r:") as contents:
+                member = contents.getmember(str(self.executable.relative_to(self.root)))
+            archive.seek(member.offset_data)
+            archive.write(b"!")
+        completed = self.consume("self-contained")
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("digest mismatch", completed.stderr)
+        self.assertFalse(self.harness_log.exists())
+
+    def test_api_bundle_restores_only_fixed_executables_and_rejects_test_bundle(self):
+        for name in runner.API_EXECUTABLES:
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(self.companion, path)
+        api_bundle = self.root / "target/api.tar"
+        runner.pack_bundle(api_bundle, "api", runner.API_EXECUTABLES, {})
+        for name in runner.API_EXECUTABLES:
+            (self.root / name).unlink()
+        runner.restore_bundle(api_bundle, "api", {})
+        self.assertTrue(all(os.access(self.root / name, os.X_OK) for name in runner.API_EXECUTABLES))
+        with self.assertRaisesRegex(ValueError, "Unsupported prepared bundle"):
+            runner.restore_bundle(self.bundle, "api", {})
+
+    def test_archive_paths_cannot_escape_target_directory(self):
+        for name in ("../outside", "backend/crates/example/file", "/tmp/absolute"):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "Invalid prepared executable path"):
+                runner.bundle_path(name)
 
 
 if __name__ == "__main__":
