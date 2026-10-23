@@ -95,7 +95,7 @@ for (const profile of [
       await closeSettingsInspector(page);
       await view.getByRole("tab", { name: "Connections", exact: true }).click();
       await view.getByRole("tab", { name: "MCP", exact: true }).click();
-      await view.getByRole("button", { name: "Select Remote MCP", exact: true }).click();
+      await view.getByRole("button", { name: /^Select Remote MCP / }).click();
       await showSettingsInspector(page);
       await view.getByRole("button", { name: "Revoke Remote MCP", exact: true }).click();
       const confirmation = view.getByRole("group", { name: "Confirm revocation", exact: true });
@@ -105,7 +105,7 @@ for (const profile of [
         await expect(confirm).toBeDisabled();
         await expect(confirm).toHaveAttribute("aria-busy", "true");
         await expect(confirmation.getByRole("button", { name: "Cancel", exact: true })).toBeDisabled();
-        await expect(view.getByRole("button", { name: "Select Remote MCP", exact: true })).toBeDisabled();
+        await expect(view.getByRole("button", { name: /^Select Remote MCP / })).toBeDisabled();
         expect(requests).toBe(1);
         await capture(page, view, testInfo, `revoke-pending-${profile.name}`, confirmation);
       } finally { release(); }
@@ -121,7 +121,7 @@ for (const profile of [
       await capture(page, view, testInfo, `revoke-success-${profile.name}`, success);
       await closeSettingsInspector(page);
       await view.getByRole("tab", { name: "CLI", exact: true }).click();
-      await expect(view.getByRole("button", { name: "Select NoteGate CLI", exact: true })).toBeVisible();
+      await expect(view.getByRole("button", { name: /^Select NoteGate CLI / })).toBeVisible();
       await closeSettingsInspector(page);
       await view.getByRole("tab", { name: "Account", exact: true }).click();
       await expect(view.getByRole("list", { name: "Browser sessions" }).getByRole("button")).toHaveCount(2);

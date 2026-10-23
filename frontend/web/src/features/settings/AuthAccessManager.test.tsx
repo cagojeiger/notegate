@@ -54,13 +54,17 @@ afterEach(() => vi.restoreAllMocks());
 describe("AuthAccessManager", () => {
   it("keeps browser, CLI and MCP lists separate and moves selected details to the Inspector", async () => {
     const { user, requests } = setup();
-    expect(await screen.findByRole("button", { name: "Select Chrome on macOS (this session)" })).toBeInTheDocument();
+    const currentSession = await screen.findByRole("button", { name: /^Select Chrome on macOS This session Signed in / });
+    expect(within(currentSession).getByText("This session")).toBeInTheDocument();
+    expect(currentSession).toHaveAccessibleName(`Select Chrome on macOS This session ${within(currentSession).getByText(/^Signed in /).textContent}`);
     expect(screen.queryByText("NoteGate CLI · CLI")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: /^CLI/ }));
     expect(await screen.findByText("NoteGate CLI on Linux", { exact: true })).toBeInTheDocument();
     expect(screen.getByText("Access & refresh tokens")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Select Chrome/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: /^MCP/ }));
+    const mcpConnection = screen.getByRole("button", { name: /^Select Remote MCP / });
+    expect(mcpConnection).toHaveAccessibleName(`Select Remote MCP ${within(mcpConnection).getByText(/^Execution environment not recorded · Connected /).textContent}`);
     expect(screen.getByText("Execution environment not recorded", { exact: true })).toBeInTheDocument();
     expect(screen.getByText("Access token only")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Revoke Remote MCP" }));
@@ -102,7 +106,7 @@ describe("AuthAccessManager", () => {
     const { user, requests, onSignOut } = setup();
     if (label.includes("CLI")) await user.click(await screen.findByRole("tab", { name: /^CLI/ }));
     else if (label.includes("MCP")) await user.click(await screen.findByRole("tab", { name: /^MCP/ }));
-    else if (label.includes("Android")) await user.click(await screen.findByRole("button", { name: "Select Chrome on Android" }));
+    else if (label.includes("Android")) await user.click(await screen.findByRole("button", { name: /^Select Chrome on Android Signed in / }));
     await user.click(await screen.findByRole("button", { name: label }));
     expect(requests).toEqual([]);
     await user.click(screen.getByRole("button", { name: "Confirm" }));
@@ -134,7 +138,7 @@ describe("AuthAccessManager", () => {
     expect(confirm).toBeDisabled();
     expect(confirm).toHaveAttribute("aria-busy", "true");
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Select Remote MCP" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Select Remote MCP / })).toBeDisabled();
     expect(requests).toEqual(["/api/v1/me/oauth-grants/mcp"]);
     await act(async () => { release(); });
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not revoke access");

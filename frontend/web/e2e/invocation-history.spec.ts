@@ -180,7 +180,7 @@ for (const viewport of [
       for (const tab of ["Account", "Connections", "Agents", "General"]) {
         await settings.getByRole("tab", { name: tab, exact: true }).click();
         if (tab === "Account") {
-          await expect(settings.getByRole("button", { name: "Select Chrome on Linux (this session)", exact: true })).toBeAttached();
+          await expect(settings.getByRole("button", { name: /^Select Chrome on Linux This session Signed in / })).toBeAttached();
         }
         if (tab === "Agents") {
           await expect(page.getByRole("button", { name: "Toggle settings inspector" })).toBeDisabled();
@@ -198,7 +198,7 @@ for (const viewport of [
         if (tab === "Connections") {
           for (const [kind, client] of [["CLI", "NoteGate CLI"], ["MCP", "Remote MCP"]]) {
             await settings.getByRole("tab", { name: kind, exact: true }).click();
-            await settings.getByRole("button", { name: `Select ${client}`, exact: true }).click();
+            await settings.getByRole("button", { name: new RegExp(`^Select ${client} `) }).click();
             await settings.getByRole("button", { name: `Revoke ${client}`, exact: true }).click();
             const confirmation = settings.getByRole("group", { name: "Confirm revocation" });
             await expect(confirmation).toBeFocused();
