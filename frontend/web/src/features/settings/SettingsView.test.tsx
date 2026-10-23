@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -31,7 +31,7 @@ const agentMe: Me = {
 
 type SpacePermission = "read" | "write" | "none";
 
-type SettingsApiOptions = { failPermissionUpdate?: boolean; initialSpacePermission?: SpacePermission; failedRead?: "agents" | "spaces" | "connections" };
+type SettingsApiOptions = { failPermissionUpdate?: boolean; initialSpacePermission?: SpacePermission; failedRead?: "agents" | "spaces" | "connections"; createAgent?: () => Promise<void> };
 
 function mockSettingsApi(me: unknown = userMe, options: SettingsApiOptions = {}) {
   let spacePermission: SpacePermission = options.initialSpacePermission ?? "write";
@@ -39,9 +39,11 @@ function mockSettingsApi(me: unknown = userMe, options: SettingsApiOptions = {})
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const path = String(input);
     if (path === "/api/v1/agents" && init?.method === "POST") {
-      const agent = { id: "agent-2", name: JSON.parse(String(init.body)).name as string, owner_user_id: "user-1" };
-      agents.push(agent);
-      return jsonResponse(agent, 201);
+      return Promise.resolve(options.createAgent?.()).then(() => {
+        const agent = { id: "agent-2", name: JSON.parse(String(init.body)).name as string, owner_user_id: "user-1" };
+        agents.push(agent);
+        return jsonResponse(agent, 201);
+      });
     }
     if (path === "/api/v1/me/sessions") return jsonResponse({ sessions: [] });
     if (path === "/api/v1/me/oauth-grants") return jsonResponse({ grants: [] });
@@ -166,8 +168,56 @@ describe("SettingsView", () => {
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     expect(await screen.findByRole("region", { name: "Settings for review-bot" })).toBeInTheDocument();
+    expect(screen.getByText("Agent created.")).toHaveAttribute("role", "status");
     expect(screen.getByRole("heading", { name: "review-bot" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Settings for ci-bot" })).not.toBeInTheDocument();
+  });
+
+  it("keeps agent creation retryable without losing the entered name", async () => {
+    vi.restoreAllMocks();
+    let rejectCreation: (error: Error) => void = () => undefined;
+    const createAgent = vi.fn()
+      .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectCreation = reject; }))
+      .mockResolvedValue(undefined);
+    mockSettingsApi(userMe, { createAgent });
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("tab", { name: "Agents" }));
+    await user.click(screen.getByRole("button", { name: "Add agent" }));
+    await user.type(screen.getByLabelText("New agent name"), "review-bot");
+    const create = screen.getByRole("button", { name: "Create" });
+    await user.click(create);
+    expect(create).toBeDisabled();
+    expect(create).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("Creating agent…");
+    await act(async () => { rejectCreation(new Error("Unavailable")); });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not create this agent.");
+    expect(screen.getByLabelText("New agent name")).toHaveValue("review-bot");
+    await user.click(create);
+    expect(await screen.findByText("Agent created.")).toHaveAttribute("role", "status");
+    expect(await screen.findByRole("region", { name: "Settings for review-bot" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(createAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a late agent creation failure after leaving the view", async () => {
+    vi.restoreAllMocks();
+    let rejectCreation: (error: Error) => void = () => undefined;
+    mockSettingsApi(userMe, { createAgent: () => new Promise<void>((_resolve, reject) => { rejectCreation = reject; }) });
+    const onMutationError = vi.fn();
+    const user = userEvent.setup();
+    render(<ApiProvider authCacheKey="browser-session:0" onMutationError={onMutationError}>
+      <SettingsView me={userMe} onClose={vi.fn()} onSignOut={vi.fn()} />
+    </ApiProvider>);
+    await user.click(screen.getByRole("tab", { name: "Agents" }));
+    await user.click(screen.getByRole("button", { name: "Add agent" }));
+    await user.type(screen.getByLabelText("New agent name"), "review-bot");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await user.click(screen.getByRole("tab", { name: "General" }));
+    await act(async () => { rejectCreation(new Error("Agent service unavailable")); });
+    await waitFor(() => expect(onMutationError).toHaveBeenCalledWith("Agent service unavailable"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("tabpanel", { name: "General" })).toBeInTheDocument();
   });
 
   it("collects user MCP, agent MCP and REST API endpoints in Connections", async () => {
@@ -283,7 +333,8 @@ describe("SettingsView", () => {
     const permissionSelect = await screen.findByRole("combobox", { name: "Personal permission" });
     await user.selectOptions(permissionSelect, "read");
 
-    await waitFor(() => expect(permissionSelect).toHaveValue("read"));
+    expect(await screen.findByText("Space access updated.")).toHaveAttribute("role", "status");
+    expect(permissionSelect).toHaveValue("read");
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
       "/api/v1/spaces/space-1/agents/agent-1",
       expect.objectContaining({ method: "PUT", body: JSON.stringify({ permission: "read" }) })
@@ -314,7 +365,8 @@ describe("SettingsView", () => {
 
   it("rolls back an optimistic permission update when the request fails", async () => {
     vi.restoreAllMocks();
-    mockSettingsApi(userMe, { failPermissionUpdate: true });
+    const options = { failPermissionUpdate: true };
+    mockSettingsApi(userMe, options);
 
     const user = userEvent.setup();
     renderSettings();
@@ -328,10 +380,16 @@ describe("SettingsView", () => {
     await user.selectOptions(permissionSelect, "read");
 
     await waitFor(() => expect(permissionSelect).toHaveValue("write"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not update access.");
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
       "/api/v1/spaces/space-1/agents/agent-1",
       expect.objectContaining({ method: "PUT", body: JSON.stringify({ permission: "read" }) })
     );
+    options.failPermissionUpdate = false;
+    await user.selectOptions(permissionSelect, "read");
+    expect(await screen.findByText("Space access updated.")).toHaveAttribute("role", "status");
+    expect(permissionSelect).toHaveValue("read");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("disconnects agent space access from the permission select", async () => {

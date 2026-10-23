@@ -19,7 +19,8 @@ pub(super) fn consent(auth: &Authorization, account: &str, redirect: &url::Url) 
 <p><strong>{}</strong> requests access to your NoteGate documents.</p>
 <p>Returns to <code>{}</code></p>
 <ul class="auth-permissions"><li>Read and change documents in Spaces with MCP &amp; API access enabled. Existing permissions and write locks still apply.</li>{offline}</ul>
-<p class="auth-note">Only approve a connection you started in an application you recognize. For a localhost or loopback redirect, that application must be running on this device.</p>
+<section class="auth-note" aria-labelledby="connection-safety-title"><h2 id="connection-safety-title">Before you allow access</h2>
+<p>Only approve a connection you started in an application you recognize. For a localhost or loopback redirect, that application must be running on this device.</p></section>
 <details><summary>Connection details</summary><dl>
 <dt>Client</dt><dd><code>{}</code></dd><dt>Redirect</dt><dd><code>{}</code></dd>
 <dt>Resource</dt><dd><code>{}</code></dd><dt>Scopes</dt><dd><code>{}</code></dd></dl></details>
@@ -46,7 +47,8 @@ pub(super) fn device(account: &str, code: &str) -> Response {
             r#"<p class="auth-account">Signed in as <strong>{}</strong></p>
 <p>Connect the NoteGate CLI running in your terminal.</p>
 <ul class="auth-permissions"><li>Read and change documents in enabled Spaces, subject to existing permissions.</li><li>Reconnect without signing in again until the grant expires or you revoke it.</li></ul>
-<p class="auth-note">Only approve a code displayed by a CLI login you started.</p>
+<section class="auth-note" aria-labelledby="device-safety-title"><h2 id="device-safety-title">Check the code</h2>
+<p>Only approve a code displayed by a CLI login you started.</p></section>
 <form method="post" action="/oauth/device"><label class="auth-field">Code shown in your terminal
 <input name="user_code" maxlength="32" required autocomplete="off" autocapitalize="characters" spellcheck="false" value="{}"></label>
 <div class="auth-actions"><button type="submit" name="decision" value="approve">Connect CLI</button><button type="submit" name="decision" value="deny">Deny</button></div></form>"#,
@@ -59,7 +61,9 @@ pub(super) fn device(account: &str, code: &str) -> Response {
 
 pub(super) fn connections(account: &str, grants: &[OAuthGrant]) -> Response {
     let mut body = format!(
-        r#"<p class="auth-account">Signed in as <strong>{}</strong></p><p>Manage applications connected to your account. Revoking a connection immediately disables its access and refresh tokens.</p>"#,
+        r#"<p class="auth-account">Signed in as <strong>{}</strong></p><p>Manage applications connected to your account.</p>
+<section class="auth-note" aria-labelledby="revocation-impact-title"><h2 id="revocation-impact-title">Revoking access</h2>
+<p>Revoking a connection immediately disables its access and refresh tokens.</p></section>"#,
         escape_html(account)
     );
     if grants.is_empty() {

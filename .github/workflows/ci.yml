@@ -752,6 +752,17 @@ jobs:
           retention-days: 7
           path: frontend/web/test-results/login-*.png
 
+      - name: Upload authentication UI screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: authentication-ui
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            frontend/web/test-results/browser-functional/oauth-*.png
+            frontend/web/test-results/settings-auth-*.png
+
       - name: Upload revision UI screenshots
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

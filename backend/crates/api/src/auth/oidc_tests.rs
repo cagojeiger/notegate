@@ -841,7 +841,9 @@ async fn standalone_oidc_callback_preserves_existing_owner_without_upstream_refr
     )
     .await;
     assert_eq!(denied.status(), StatusCode::FORBIDDEN);
-    let _ = to_bytes(denied.into_body(), 10_000).await?;
+    let html = String::from_utf8(to_bytes(denied.into_body(), 100_000).await?.to_vec())?;
+    assert!(html.contains("Account linking required"));
+    assert!(html.contains("What to do next"));
     db.cleanup().await;
     Ok(())
 }

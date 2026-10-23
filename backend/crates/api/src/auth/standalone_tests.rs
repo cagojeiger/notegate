@@ -28,6 +28,34 @@ use uuid::Uuid;
 async fn body(response: Response) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), 100_000).await.unwrap()).unwrap()
 }
+
+async fn browser_error_html(response: Response, status: StatusCode) -> String {
+    assert_eq!(response.status(), status);
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "text/html; charset=utf-8"
+    );
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    assert_eq!(response.headers()[header::X_FRAME_OPTIONS], "DENY");
+    assert_eq!(response.headers()[header::REFERRER_POLICY], "same-origin");
+    assert!(!response.headers().contains_key(header::LOCATION));
+    let policy = response.headers()[header::CONTENT_SECURITY_POLICY]
+        .to_str()
+        .unwrap();
+    assert!(policy.contains("default-src 'none'"));
+    assert!(!policy.contains("unsafe-inline"));
+    let html = String::from_utf8(
+        to_bytes(response.into_body(), 100_000)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains(r#"class="auth-note auth-note--danger""#));
+    assert!(html.contains("What to do next"));
+    assert!(!html.contains("<form"));
+    html
+}
 fn app(state: crate::state::AppState) -> Router {
     authorization_server::routes().with_state(state)
 }
@@ -95,30 +123,43 @@ async fn device_http_flow_rejects_csrf_and_uses_own_tokens_without_authgate()
         "user_code={}&decision=approve",
         device["user_code"].as_str().unwrap()
     );
-    assert_eq!(
+    browser_error_html(
         post(
             &router,
             "/oauth/device",
             &approval,
             Some(&cookie),
-            Some("https://evil.test")
+            Some("https://evil.test"),
         )
-        .await
-        .status(),
-        StatusCode::BAD_REQUEST
-    );
-    assert_eq!(
+        .await,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    let unavailable = browser_error_html(
         post(
             &router,
             "/oauth/device",
-            &approval,
+            "user_code=not-a-real-code&decision=approve",
             Some(&cookie),
-            Some("http://localhost:9191")
+            Some("http://localhost:9191"),
         )
-        .await
-        .status(),
-        StatusCode::OK
-    );
+        .await,
+        StatusCode::OK,
+    )
+    .await;
+    assert!(unavailable.contains("Code unavailable"));
+    let completed = post(
+        &router,
+        "/oauth/device",
+        &approval,
+        Some(&cookie),
+        Some("http://localhost:9191"),
+    )
+    .await;
+    assert_eq!(completed.status(), StatusCode::OK);
+    let completed = String::from_utf8(to_bytes(completed.into_body(), 100_000).await?.to_vec())?;
+    assert!(completed.contains(r#"class="auth-note auth-note--success""#));
+    assert!(completed.contains("Request completed"));
     let poll = format!(
         "grant_type=urn:ietf:params:oauth:grant-type:device_code&client_id=notegate-cli-local&device_code={}",
         device["device_code"].as_str().unwrap()
@@ -402,6 +443,56 @@ async fn authorization_consent_is_bound_single_use_and_explicit()
             .await
             .is_err()
     );
+    let denied_id = Uuid::new_v4();
+    let denied_payload = state.security.encrypt_oauth_state(
+        &denied_id.to_string(),
+        &serde_json::to_string(&Some("denied-client-state"))?,
+    )?;
+    let denied_auth = Authorization {
+        id: denied_id,
+        private_payload: serde_json::to_value(denied_payload)?,
+        ..auth
+    };
+    state.oauth.store.insert_authorization(&denied_auth).await?;
+    let denied_cookie = format!(
+        "{BROWSER_SESSION_COOKIE}={session}; notegate_authorization_{denied_id}={flow_secret}"
+    );
+    let denied = post(
+        &router,
+        "/oauth/approve",
+        &format!("id={denied_id}&decision=deny"),
+        Some(&denied_cookie),
+        Some("http://localhost:9191"),
+    )
+    .await;
+    assert_eq!(denied.status(), StatusCode::SEE_OTHER);
+    let redirect = url::Url::parse(denied.headers()[header::LOCATION].to_str()?)?;
+    let query: std::collections::HashMap<_, _> = redirect.query_pairs().into_owned().collect();
+    assert_eq!(
+        redirect.origin(),
+        url::Url::parse(&denied_auth.redirect_uri)?.origin()
+    );
+    assert_eq!(
+        query.get("error").map(|value| value.as_ref()),
+        Some("access_denied")
+    );
+    assert_eq!(
+        query.get("state").map(|value| value.as_ref()),
+        Some("denied-client-state")
+    );
+    assert_eq!(
+        query.get("iss").map(|value| value.as_ref()),
+        Some("http://localhost:9191")
+    );
+    assert!(!query.contains_key("code"));
+    assert!(
+        state
+            .oauth
+            .store
+            .list_grants(user, Utc::now())
+            .await?
+            .is_empty()
+    );
     db.cleanup().await;
     Ok(())
 }
@@ -500,6 +591,7 @@ async fn malformed_oauth_requests_return_private_protocol_errors()
         let response = post(&router, path, "unexpected=value", None, None).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
         assert_eq!(body(response).await["error"], "invalid_request");
     }
     let response = router
@@ -516,7 +608,168 @@ async fn malformed_oauth_requests_return_private_protocol_errors()
         .await?;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert!(response.headers().contains_key(header::WWW_AUTHENTICATE));
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
     assert_eq!(body(response).await["error"], "invalid_client");
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn browser_request_errors_remain_html_and_never_issue_grants()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = standalone_state(&db)?;
+    let user = owner(&state).await;
+    let session = create_browser_session(&state, user, None).await?;
+    let cookie = format!("{BROWSER_SESSION_COOKIE}={session}");
+    let router = authorization_server::routes()
+        .route("/auth/login", axum::routing::get(crate::auth::oauth::login))
+        .route(
+            "/auth/callback",
+            axum::routing::get(crate::auth::oauth::callback),
+        )
+        .with_state(state.clone());
+
+    for path in [
+        "/oauth/approve?id=not-a-uuid",
+        "/oauth/device?user_code=first&user_code=second",
+        "/auth/login?next=first&next=second",
+        "/auth/callback?state=first&state=second",
+        "/auth/callback",
+    ] {
+        let response = router
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty())?)
+            .await?;
+        browser_error_html(response, StatusCode::BAD_REQUEST).await;
+    }
+
+    for path in [
+        "/oauth/approve",
+        "/oauth/device",
+        "/oauth/connections/revoke",
+    ] {
+        browser_error_html(
+            post(&router, path, "unexpected=value", None, None).await,
+            StatusCode::UNPROCESSABLE_ENTITY,
+        )
+        .await;
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        browser_error_html(response, StatusCode::UNSUPPORTED_MEDIA_TYPE).await;
+    }
+
+    let missing_id = Uuid::new_v4();
+    for (path, form) in [
+        (
+            "/oauth/approve",
+            format!("id={missing_id}&decision=approve"),
+        ),
+        (
+            "/oauth/device",
+            "user_code=missing-code&decision=approve".to_owned(),
+        ),
+        ("/oauth/connections/revoke", format!("id={missing_id}")),
+    ] {
+        let missing_session = browser_error_html(
+            post(&router, path, &form, None, Some("http://localhost:9191")).await,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+        assert!(missing_session.contains("Sign-in required"));
+        browser_error_html(
+            post(
+                &router,
+                path,
+                &form,
+                Some(&cookie),
+                Some("https://untrusted.example.test"),
+            )
+            .await,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+    }
+
+    let id = Uuid::new_v4();
+    let secret = "expired-flow-fixture";
+    state
+        .oauth
+        .store
+        .insert_authorization(&Authorization {
+            id,
+            client_id: "https://client.test/metadata".to_owned(),
+            client_name: "Expired flow fixture".to_owned(),
+            resource: state.config.resource_url.clone(),
+            redirect_uri: "https://client.test/callback".to_owned(),
+            scope: "mcp offline_access".to_owned(),
+            code_challenge: pkce_challenge("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGH"),
+            cookie_hash: state.security.oauth_hash("authorization-cookie", secret)?,
+            private_payload: json!({}),
+            user_id: None,
+            code_hash: None,
+            expires_at: Utc::now() - Duration::seconds(1),
+            consumed_at: None,
+        })
+        .await?;
+    let expired_cookie = format!("{cookie}; notegate_authorization_{id}={secret}");
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/oauth/approve?id={id}"))
+                .header(header::COOKIE, &expired_cookie)
+                .body(Body::empty())?,
+        )
+        .await?;
+    browser_error_html(response, StatusCode::BAD_REQUEST).await;
+    browser_error_html(
+        post(
+            &router,
+            "/oauth/approve",
+            &format!("id={id}&decision=approve"),
+            Some(&expired_cookie),
+            Some("http://localhost:9191"),
+        )
+        .await,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM oauth_authorizations WHERE code_hash IS NOT NULL"
+        )
+        .fetch_one(&db.pool)
+        .await?,
+        0,
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM oauth_grants")
+            .fetch_one(&db.pool)
+            .await?,
+        0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM browser_sessions")
+            .fetch_one(&db.pool)
+            .await?,
+        1
+    );
+    assert_eq!(
+        crate::auth::session::verify_browser_session(&state, &session)
+            .await?
+            .account_id(),
+        user
+    );
     db.cleanup().await;
     Ok(())
 }

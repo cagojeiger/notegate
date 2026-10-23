@@ -3,16 +3,29 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { ApiProvider } from "../api/ApiProvider";
 import { ApiError } from "../api/errors";
 import type { Me } from "../api/types";
+import { AuthPage } from "../auth/AuthPage";
 import { LoginGate } from "../auth/LoginGate";
 import { useSessionQuery } from "../auth/useAuthQueries";
 import { useBrowserSessionActivity } from "../auth/useBrowserSessionActivity";
+import { PublicInformationPage } from "../features/public-information/PublicInformationPage";
+import { SignupPreview } from "../features/public-information/SignupPreview";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
-import { Button } from "../shared/ui";
+import { Button, Notice } from "../shared/ui";
 import { useUiStore } from "../stores/uiStore";
 
 const AuthenticatedWorkspace = lazy(() => import("./AuthenticatedWorkspace"));
 
 export function App() {
+  switch (window.location.pathname) {
+    case "/signup/preview": return <SignupPreview />;
+    case "/terms": return <PublicInformationPage page="terms" />;
+    case "/privacy": return <PublicInformationPage page="privacy" />;
+    case "/support": return <PublicInformationPage page="support" />;
+    default: return <SessionApp />;
+  }
+}
+
+function SessionApp() {
   const [sessionRevision, setSessionRevision] = useState(0);
   const showToast = useUiStore((state) => state.showToast);
 
@@ -45,6 +58,7 @@ function AuthBoundary({
   sessionRevision: number;
   onSessionChanged: () => void;
 }) {
+  const [isRetryingAuth, setIsRetryingAuth] = useState(false);
   const meQuery = useSessionQuery(sessionRevision);
   const me = meQuery.data;
   const authViewState = deriveAuthViewState({
@@ -63,20 +77,27 @@ function AuthBoundary({
   useBrowserSessionActivity(authViewState.kind === "authenticated" && accountId === cacheOwner, onSessionChanged);
 
   // A different successful /me response must never render against the previous owner's cache.
-  if (authViewState.kind === "checking" || replaceCache || (accountId !== null && cacheOwner === null)) return <FullScreenStatus label="Checking session" />;
-
-  if (authViewState.kind === "temporarilyUnavailable") {
+  if (authViewState.kind === "checking" || replaceCache || (accountId !== null && cacheOwner === null)) {
     return (
-      <FullScreenStatus
-        variant="status"
-        label="Authentication temporarily unavailable"
-        detail="Your session was not cleared. Try again once the auth service is reachable."
-        action={
-          <Button onClick={() => void meQuery.refetch()} disabled={meQuery.isFetching}>
-            Retry
+      <AuthPage title="Checking session">
+        <Notice role="status" aria-busy="true"><p>Checking your existing browser session…</p></Notice>
+      </AuthPage>
+    );
+  }
+
+  if (authViewState.kind === "temporarilyUnavailable" || isRetryingAuth) {
+    return (
+      <AuthPage title="Authentication temporarily unavailable">
+        <Notice role="status"><p>Your session was not cleared. Try again once the auth service is reachable.</p></Notice>
+        <div className="auth-actions">
+          <Button className="auth-primary" aria-busy={isRetryingAuth} onClick={() => {
+            setIsRetryingAuth(true);
+            void meQuery.refetch().finally(() => setIsRetryingAuth(false));
+          }} disabled={isRetryingAuth || meQuery.isFetching}>
+            {isRetryingAuth ? "Retrying…" : "Retry"}
           </Button>
-        }
-      />
+        </div>
+      </AuthPage>
     );
   }
 

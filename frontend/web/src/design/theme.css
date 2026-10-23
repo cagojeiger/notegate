@@ -47,6 +47,18 @@
   --ng-google-hover: #e9e9f6;
 }
 
+:where(button, a, input, textarea, select, summary, [tabindex]):focus-visible,
+[role="switch"]:focus-visible > [data-switch-track],
+[data-docx-preview][data-frame-focused="true"] {
+  outline: 2px solid var(--ng-control-focus-color, var(--ng-focus-ring));
+  outline-offset: var(--ng-control-focus-offset, -2px);
+}
+
+/* The track owns the switch's visible surface; its hit area can be larger. */
+[role="switch"]:focus-visible {
+  outline: none;
+}
+
 @media (max-width: 767px), (any-pointer: coarse) {
   :root {
     --ng-workbench-header-size: 48px;

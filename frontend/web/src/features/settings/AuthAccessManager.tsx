@@ -6,7 +6,7 @@ import { useApiClient } from "../../api/ApiProvider";
 import { invalidateAuditEvents } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import { listBrowserSessions, listOAuthGrants } from "../../api/sessions";
-import { Button, Card, ListItemButton, PanelSection, SectionHeader } from "../../shared/ui";
+import { Button, Card, ListItemButton, Notice, PanelSection, SectionHeader } from "../../shared/ui";
 import { formatEventTime } from "../events/eventDisplay";
 import { SettingsControls, SettingsInspectorSection, useSettingsInspector } from "./SettingsInspector";
 
@@ -88,19 +88,19 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
   };
 
   const body = <>
-      {revoke.isPending ? <p role="status" className="mb-3 text-xs text-muted">{kind === "browser" ? "Signing out…" : "Revoking access…"}</p> : null}
+      {revoke.isPending ? <Notice role="status" className="mb-3">{kind === "browser" ? "Signing out…" : "Revoking access…"}</Notice> : null}
       {kind === "browser" ? <SectionHeader title="Browser sessions" actions={count} /> : null}
-      {query.isLoading ? <p role="status" className="text-sm text-muted">Loading connections…</p> : query.isError ? (
-        <div><p role="alert">Could not load {TITLES[kind].toLowerCase()}.</p><Button secondary onClick={() => { void query.refetch(); }}>Retry {kind === "browser" ? "sessions" : `${kind.toUpperCase()} connections`}</Button></div>
-      ) : rows.length === 0 ? <p className="text-sm text-muted">{kind === "browser" ? "No active browser sessions." : `No active ${kind.toUpperCase()} connections.`}</p> : (
+      {query.isLoading ? <Notice role="status">Loading connections…</Notice> : query.isError ? (
+        <Notice tone="danger" role="alert" className="flex flex-wrap items-center gap-2"><p>Could not load {TITLES[kind].toLowerCase()}.</p><Button secondary disabled={query.isFetching} onClick={() => { void query.refetch(); }}>Retry {kind === "browser" ? "sessions" : `${kind.toUpperCase()} connections`}</Button></Notice>
+      ) : rows.length === 0 ? <Notice>{kind === "browser" ? "No active browser sessions." : `No active ${kind.toUpperCase()} connections.`}</Notice> : (
         <Card key={kind} ref={scroll} as="ul" aria-label={TITLES[kind]} padding="none" className="min-h-0 flex-1 divide-y divide-seam overflow-y-auto overscroll-contain">
           {rows.slice(0, visibleCount).map((row) => {
             const active = row.id === (session?.id ?? grant?.id);
             return <li key={row.id}>
-              <ListItemButton aria-label={`Select ${row.label}${row.current ? " (this session)" : ""}`} selected={active} disabled={revoke.isPending}
+              <ListItemButton aria-label={`Select ${row.label}${row.current ? " This session" : ""} ${row.description}`} selected={active} disabled={revoke.isPending}
                 onClick={() => select(row.id)} className="items-center">
                 <RowIcon size={16} className="shrink-0 text-muted" />
-                <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="truncate text-sm font-medium">{row.label}</span>{row.current ? <span className="shrink-0 text-xs text-primary">This session</span> : null}</span><span className="block truncate text-xs text-muted" title={row.description}>{row.description}</span></span>
+                <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="truncate text-sm font-medium">{row.label}</span>{row.current ? <>{" "}<span className="shrink-0 text-xs text-primary">This session</span></> : null}</span>{" "}<span className="block truncate text-xs text-muted" title={row.description}>{row.description}</span></span>
                 <ChevronRight size={15} className="shrink-0 text-muted" />
               </ListItemButton>
             </li>;
@@ -115,8 +115,8 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
   const inspectorContents = <>
         <SettingsInspectorSection title="Selected connection">
           <div role="region" aria-label="Selected connection">
-            {notice ? <p ref={focusNotice} role="status" tabIndex={-1} className="mb-3 outline-none">{notice}</p> : null}
-            {revoke.isError ? <p role="alert" className="mb-3">Could not revoke access. Try again.</p> : null}
+            {notice ? <Notice tone="success" className="mb-3"><p ref={focusNotice} role="status" tabIndex={-1} className="outline-none">{notice}</p></Notice> : null}
+            {revoke.isError ? <Notice tone="danger" role="alert" className="mb-3">Could not revoke access. Try again.</Notice> : null}
             {session ? <>
               <p className="break-words font-medium">{session.client_environment ?? "Environment not recorded"}{session.current ? " · This session" : ""}</p>
               <dl className="my-4 space-y-3 text-xs">
@@ -142,8 +142,11 @@ export function AuthAccessManager({ kind = "browser", onSignOut, summary, naviga
         {confirmation ? <PanelSection><div ref={focusConfirmation} tabIndex={-1} role="group" aria-label="Confirm revocation" className="outline-none">
           <Card className="space-y-3 text-sm">
             <p className="break-words">{confirmation.label}?</p>
+            <p className="text-muted">{confirmation.path.includes("/sessions")
+              ? "The selected browser sessions will be signed out. CLI, MCP and Agent API keys stay connected."
+              : "The selected connections and their access and refresh tokens will stop working. Other connections, browser sessions and Agent API keys stay connected."}</p>
             <div className="flex flex-wrap gap-2">
-              <Button variant="danger" disabled={revoke.isPending} onClick={() => revoke.mutate(confirmation)}>Confirm</Button>
+              <Button variant="danger" disabled={revoke.isPending} aria-busy={revoke.isPending} onClick={() => revoke.mutate(confirmation)}>Confirm</Button>
               <Button secondary disabled={revoke.isPending} onClick={() => { setConfirmation(null); requestAnimationFrame(() => actionRef.current?.focus()); }}>Cancel</Button>
             </div>
           </Card>

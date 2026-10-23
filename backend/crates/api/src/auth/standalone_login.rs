@@ -34,7 +34,7 @@ pub(super) async fn login(state: &AppState, jar: CookieJar, next: Option<String>
             html_page(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Login unavailable",
-                "Please try again later.",
+                "Sign-in is temporarily unavailable. Return to NoteGate and try again later.",
             )
         }
     }
@@ -121,7 +121,7 @@ pub(super) async fn callback(
                 html_page(
                     StatusCode::BAD_GATEWAY,
                     "Login failed",
-                    "Identity verification failed. Please sign in again.",
+                    "NoteGate could not verify your identity. Return to NoteGate and start a new sign-in.",
                 ),
             )
                 .into_response();
@@ -159,6 +159,6 @@ fn invalid() -> Response {
     html_page(
         StatusCode::BAD_REQUEST,
         "Login failed",
-        "The login request expired or was already used.",
+        "The sign-in request is invalid, expired, or was already used. Return to NoteGate and start a new sign-in.",
     )
 }

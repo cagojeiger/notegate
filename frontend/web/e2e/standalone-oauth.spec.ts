@@ -2,15 +2,52 @@ import { createServer } from "node:http";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { contrastRatio } from "./support/accessibility";
+
 async function captureAuthViews(page: Page, name: string) {
+  const links = page.getByRole("navigation", { name: "Legal and support" });
+  for (const [label, path] of [["Terms", "/terms"], ["Privacy", "/privacy"], ["Support", "/support"]]) {
+    await expect(links.getByRole("link", { name: label, exact: true })).toHaveAttribute("href", path);
+  }
   for (const theme of ["light", "dark"] as const) {
+    if (await page.locator("html").getAttribute("data-theme") !== theme) {
+      await page.getByRole("button", { name: `Use ${theme} theme`, exact: true }).click();
+    }
     for (const [device, width, height] of [["desktop", 1440, 900], ["mobile", 390, 844]] as const) {
       await page.setViewportSize({ width, height });
-      await page.evaluate((value) => localStorage.setItem("notegate.theme", value), theme);
-      await page.reload();
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      const approveButton = page.locator('button[value="approve"]');
+      if (device === "desktop" && (await approveButton.count()) > 0) {
+        await page.locator("#auth-theme").hover();
+        const foreground = await approveButton.evaluate((element) => getComputedStyle(element).color);
+        await approveButton.hover();
+        await expect.poll(() => approveButton.evaluate((element) => getComputedStyle(element).color)).toBe(foreground);
+        await page.screenshot({ path: `test-results/browser-functional/${name}-${theme}-approve-hover.png`, fullPage: true });
+        await page.locator("#auth-theme").hover();
+        await approveButton.focus();
+        await page.keyboard.press("Shift+Tab");
+        await page.keyboard.press("Tab");
+        await expect(approveButton).toBeFocused();
+        const style = await approveButton.evaluate((button) => {
+          const computed = getComputedStyle(button);
+          return {
+            focusVisible: button.matches(":focus-visible"),
+            outlineStyle: computed.outlineStyle,
+            outlineWidth: computed.outlineWidth,
+            outlineColor: computed.outlineColor,
+            backgroundColor: computed.backgroundColor
+          };
+        });
+        expect(style.focusVisible).toBe(true);
+        expect(style.outlineStyle).toBe("solid");
+        expect(Number.parseFloat(style.outlineWidth)).toBeGreaterThanOrEqual(2);
+        const outlineContrast = contrastRatio(style.outlineColor, style.backgroundColor);
+        expect(outlineContrast).toBeGreaterThanOrEqual(3);
+        console.log(`FOCUS_INDICATOR_METRIC ${JSON.stringify({ name, theme, outlineContrast })}`);
+        await approveButton.evaluate((button) => button.blur());
+      }
       if (device === "mobile") {
         const heights = await page.locator("button:visible, input:visible, summary:visible").evaluateAll(
           (elements) => elements.map((element) => element.getBoundingClientRect().height)
@@ -44,11 +81,14 @@ test("standalone CLI approval and connection revocation", async ({ browser, play
     const approvalPage = await page.goto(device.verification_uri_complete);
     expect(approvalPage?.headers()["content-security-policy"]).toBe("default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
     await expect(page.getByRole("heading", { name: "Connect NoteGate CLI" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "Check the code", exact: true })).toBeVisible();
     await captureAuthViews(page, "oauth-device");
     const approvalRequest = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/oauth/device");
     await page.getByRole("button", { name: "Connect CLI", exact: true }).click();
     expect((await (await approvalRequest).allHeaders()).origin).toBe(new URL(baseURL!).origin);
     await expect(page.getByRole("heading", { name: "Request completed" })).toBeVisible();
+    await expect(page.locator(".auth-note--success")).toBeVisible();
+    await captureAuthViews(page, "oauth-device-complete");
     const tokenResponse = await request.post("/oauth/token", {
       form: {
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",
@@ -62,6 +102,7 @@ test("standalone CLI approval and connection revocation", async ({ browser, play
     expect(typeof tokens.access_token).toBe("string");
     await page.goto("/oauth/connections");
     await expect(page.getByRole("heading", { name: "Connected applications" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "Revoking access", exact: true })).toBeVisible();
     await expect(page.getByText("NoteGate CLI", { exact: true })).toBeVisible();
     await captureAuthViews(page, "oauth-connections");
     await page.screenshot({ path: "test-results/browser-functional/oauth-connections.png" });
@@ -73,6 +114,11 @@ test("standalone CLI approval and connection revocation", async ({ browser, play
     });
     expect(revoked.status()).toBe(400);
     expect((await revoked.json()).error).toBe("invalid_grant");
+    await page.goto(device.verification_uri_complete);
+    await page.getByRole("button", { name: "Connect CLI", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Code unavailable", exact: true })).toBeVisible();
+    await expect(page.locator(".auth-note--danger")).toContainText("instead of resending this page");
+    await captureAuthViews(page, "oauth-device-code-unavailable");
   } finally {
     await context.close();
     await request.dispose();
@@ -110,6 +156,7 @@ test("standalone MCP consent follows its registered callback and exchanges the P
     const page = await context.newPage();
     await page.goto(`/oauth/approve?id=${fixture.id}`);
     await expect(page.getByRole("heading", { name: "Connect application" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "Before you allow access", exact: true })).toBeVisible();
     await captureAuthViews(page, "oauth-consent");
     await page.getByRole("button", { name: "Allow access", exact: true }).click();
     await expect(page).toHaveURL(`${callback.origin}/done`);
@@ -130,6 +177,11 @@ test("standalone MCP consent follows its registered callback and exchanges the P
     expect((await request.post("/oauth/revoke", {
       form: { client_id: fixture.client_id, token: tokens.refresh_token }
     })).status()).toBe(200);
+    const reused = await page.goto(`/oauth/approve?id=${fixture.id}`);
+    expect(reused?.status()).toBe(400);
+    await expect(page.getByRole("heading", { name: "Request unavailable", exact: true })).toBeVisible();
+    await expect(page.locator(".auth-note--danger")).toContainText("Do not resend this page.");
+    await captureAuthViews(page, "oauth-consent-unavailable");
   } finally {
     await context.close();
     await request.dispose();
@@ -178,6 +230,46 @@ test("authentication theme remains usable when browser storage is unavailable", 
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await page.getByRole("button", { name: "Use light theme", exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  } finally {
+    await context.close();
+  }
+});
+
+test("browser completion and failed form submissions keep the authentication layout", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL });
+  try {
+    const page = await context.newPage();
+    await page.goto("/auth/success");
+    await expect(page.getByRole("heading", { name: "Login complete", exact: true })).toBeVisible();
+    await expect(page.locator(".auth-note--success")).toBeVisible();
+    await captureAuthViews(page, "oauth-login-complete");
+
+    const response = page.waitForResponse((value) => new URL(value.url()).pathname === "/oauth/device" && value.request().method() === "POST");
+    await page.evaluate(() => {
+      const form = document.createElement("form");
+      form.method = "post";
+      form.action = "/oauth/device";
+      for (const [name, value] of [["user_code", "missing-session-fixture"], ["decision", "approve"]]) {
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = name;
+        input.value = value;
+        form.append(input);
+      }
+      document.body.append(form);
+      form.requestSubmit();
+    });
+    expect((await response).status()).toBe(400);
+    await expect(page.getByRole("heading", { name: "Sign-in required", exact: true })).toBeVisible();
+    await expect(page.locator(".auth-note--danger")).toContainText("Return to NoteGate to sign in");
+    await expect(page.locator("form")).toHaveCount(0);
+    await captureAuthViews(page, "oauth-session-required");
+
+    const invalid = await page.goto("/auth/callback");
+    expect(invalid?.status()).toBe(400);
+    await expect(page.getByRole("heading", { name: "Login failed", exact: true })).toBeVisible();
+    await expect(page.locator(".auth-note--danger")).toContainText("start a new sign-in");
+    await captureAuthViews(page, "oauth-login-request-unavailable");
   } finally {
     await context.close();
   }

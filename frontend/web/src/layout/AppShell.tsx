@@ -156,7 +156,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
   };
 
   if (workbench.loading) return <FullScreenStatus label="Loading spaces" />;
-  if (workbench.error) return <FullScreenStatus label="Could not load spaces" detail={workbench.error} />;
+  if (workbench.error) return <FullScreenStatus variant="status" label="Could not load spaces" detail={workbench.error} />;
 
   return (
     <MarkdownOutlineProvider>

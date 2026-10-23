@@ -3,6 +3,7 @@ mod clients;
 mod pages;
 pub(crate) use clients::ClientRegistry;
 
+use axum::extract::rejection::{FormRejection, QueryRejection};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -142,19 +143,23 @@ struct ConsentForm {
 async fn consent(
     State(state): State<AppState>,
     jar: CookieJar,
-    Query(query): Query<ConsentQuery>,
+    query: Result<Query<ConsentQuery>, QueryRejection>,
 ) -> Response {
+    let Query(query) = match query {
+        Ok(query) => query,
+        Err(error) => return browser_input_error(error.status()),
+    };
     let next = format!("/oauth/approve?id={}", query.id);
     let Some(caller) = recent_user(&state, &jar).await else {
         return login_redirect(&next);
     };
     let auth = match bound_authorization(&state, &jar, query.id).await {
         Ok(auth) => auth,
-        Err(error) => return oauth_error(error),
+        Err(error) => return browser_error(error),
     };
     let redirect = match url::Url::parse(&auth.redirect_uri) {
         Ok(redirect) => redirect,
-        Err(_) => return oauth_error("server_error"),
+        Err(_) => return browser_error("server_error"),
     };
     pages::consent(&auth, &caller.account.display_name, &redirect)
 }
@@ -182,21 +187,25 @@ async fn approve(
     State(state): State<AppState>,
     jar: CookieJar,
     headers: HeaderMap,
-    Form(form): Form<ConsentForm>,
+    form: Result<Form<ConsentForm>, FormRejection>,
 ) -> Response {
+    let Form(form) = match form {
+        Ok(form) => form,
+        Err(error) => return browser_input_error(error.status()),
+    };
     if !has_trusted_browser_origin(&headers, &state) {
-        return oauth_error("invalid_request");
+        return browser_error("invalid_request");
     }
     let Some(caller) = recent_user(&state, &jar).await else {
-        return oauth_error("login_required");
+        return browser_error("login_required");
     };
     let auth = match bound_authorization(&state, &jar, form.id).await {
         Ok(auth) => auth,
-        Err(error) => return oauth_error(error),
+        Err(error) => return browser_error(error),
     };
     let mut redirect = match url::Url::parse(&auth.redirect_uri) {
         Ok(url) => url,
-        Err(_) => return oauth_error("server_error"),
+        Err(_) => return browser_error("server_error"),
     };
     let result = async {
         if form.decision == "approve" {
@@ -232,12 +241,12 @@ async fn approve(
     .await;
     let pair = match result {
         Ok(Some(pair)) => pair,
-        Ok(None) => return oauth_error("invalid_request"),
-        Err(_) => return oauth_error("server_error"),
+        Ok(None) => return browser_error("invalid_request"),
+        Err(_) => return browser_error("server_error"),
     };
     let original_state = match authorization_state(&state, &auth) {
         Ok(value) => value,
-        Err(_) => return oauth_error("server_error"),
+        Err(_) => return browser_error("server_error"),
     };
     {
         let mut query = redirect.query_pairs_mut();
@@ -494,8 +503,12 @@ struct DeviceApproval {
 async fn device_page(
     State(state): State<AppState>,
     jar: CookieJar,
-    Query(query): Query<DeviceQuery>,
+    query: Result<Query<DeviceQuery>, QueryRejection>,
 ) -> Response {
+    let Query(query) = match query {
+        Ok(query) => query,
+        Err(error) => return browser_input_error(error.status()),
+    };
     let code = query
         .user_code
         .filter(|s| s.len() <= 32)
@@ -515,15 +528,19 @@ async fn device_approve(
     State(state): State<AppState>,
     jar: CookieJar,
     headers: HeaderMap,
-    Form(form): Form<DeviceApproval>,
+    form: Result<Form<DeviceApproval>, FormRejection>,
 ) -> Response {
+    let Form(form) = match form {
+        Ok(form) => form,
+        Err(error) => return browser_input_error(error.status()),
+    };
     if !has_trusted_browser_origin(&headers, &state)
         || !["approve", "deny"].contains(&form.decision.as_str())
     {
-        return oauth_error("invalid_request");
+        return browser_error("invalid_request");
     }
     let Some(caller) = recent_user(&state, &jar).await else {
-        return oauth_error("login_required");
+        return browser_error("login_required");
     };
     match state
         .oauth
@@ -535,17 +552,18 @@ async fn device_approve(
         )
         .await
     {
-        Ok(true) => page(
+        Ok(true) => super::page::browser_page(
+            StatusCode::OK,
             "Request completed",
-            "<p>Return to your terminal. You can close this tab.</p>",
+            r#"<section class="auth-note auth-note--success" aria-labelledby="completion-title"><h2 id="completion-title">Next step</h2><p>Return to your terminal. You can close this tab.</p></section>"#,
             None,
         ),
-        Ok(false) => page(
+        Ok(false) => super::page::html_page(
+            StatusCode::OK,
             "Code unavailable",
-            "<p>The code expired, was already used, or is incorrect. Start a new CLI login.</p>",
-            None,
+            "The code expired, was already used, or is incorrect. Start a new CLI login in your terminal instead of resending this page.",
         ),
-        Err(_) => oauth_error("server_error"),
+        Err(_) => browser_error("server_error"),
     }
 }
 
@@ -560,20 +578,24 @@ async fn connections(State(state): State<AppState>, jar: CookieJar) -> Response 
         .await
     {
         Ok(grants) => pages::connections(&caller.account.display_name, &grants),
-        Err(_) => oauth_error("server_error"),
+        Err(_) => browser_error("server_error"),
     }
 }
 async fn revoke_connection(
     State(state): State<AppState>,
     jar: CookieJar,
     headers: HeaderMap,
-    Form(form): Form<ConsentQuery>,
+    form: Result<Form<ConsentQuery>, FormRejection>,
 ) -> Response {
+    let Form(form) = match form {
+        Ok(form) => form,
+        Err(error) => return browser_input_error(error.status()),
+    };
     if !has_trusted_browser_origin(&headers, &state) {
-        return oauth_error("invalid_request");
+        return browser_error("invalid_request");
     }
     let Some(caller) = session_user(&state, &jar).await else {
-        return oauth_error("login_required");
+        return browser_error("login_required");
     };
     match state
         .oauth
@@ -582,7 +604,7 @@ async fn revoke_connection(
         .await
     {
         Ok(()) => Redirect::to("/oauth/connections").into_response(),
-        Err(_) => oauth_error("server_error"),
+        Err(_) => browser_error("server_error"),
     }
 }
 
@@ -632,14 +654,44 @@ fn login_redirect(next: &str) -> Response {
 }
 fn oauth_error(error: &'static str) -> Response {
     tracing::debug!(event = "oauth.rejected", reason = error);
-    let status = if error == "temporarily_unavailable" {
+    no_store((oauth_error_status(error), Json(json!({"error":error}))).into_response())
+}
+
+fn oauth_error_status(error: &str) -> StatusCode {
+    if error == "temporarily_unavailable" {
         StatusCode::SERVICE_UNAVAILABLE
     } else if error == "server_error" {
         StatusCode::INTERNAL_SERVER_ERROR
     } else {
         StatusCode::BAD_REQUEST
+    }
+}
+
+fn browser_error(error: &'static str) -> Response {
+    tracing::debug!(event = "oauth.rejected", reason = error);
+    let (title, message) = match error {
+        "login_required" => (
+            "Sign-in required",
+            "Your NoteGate session is missing, expired, or no longer recent enough. Return to NoteGate to sign in, then start this action again.",
+        ),
+        "server_error" | "temporarily_unavailable" => (
+            "Request unavailable",
+            "NoteGate could not complete this request. Try again later by starting a new request from your application. Do not resend this page.",
+        ),
+        _ => (
+            "Request unavailable",
+            "This request is invalid, expired, or was already used. Start a new connection request from your application, or return to NoteGate to manage connections. Do not resend this page.",
+        ),
     };
-    no_store((status, Json(json!({"error":error}))).into_response())
+    super::page::html_page(oauth_error_status(error), title, message)
+}
+
+fn browser_input_error(status: StatusCode) -> Response {
+    super::page::html_page(
+        status,
+        "Request unavailable",
+        "This request is incomplete or invalid. Start a new request from your application, or return to NoteGate to manage connections. Do not resend this page.",
+    )
 }
 fn no_store(mut response: Response) -> Response {
     response.headers_mut().insert(
@@ -651,10 +703,6 @@ fn no_store(mut response: Response) -> Response {
         .insert(header::PRAGMA, header::HeaderValue::from_static("no-cache"));
     response
 }
-fn page(title: &str, body: &str, form_redirect: Option<&url::Url>) -> Response {
-    super::page::browser_page(StatusCode::OK, title, body, form_redirect)
-}
-
 async fn private_response(
     request: axum::http::Request<axum::body::Body>,
     next: axum::middleware::Next,
