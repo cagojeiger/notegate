@@ -436,3 +436,25 @@ jobs:
               --generate-notes \
               /tmp/cli-release/*
           fi
+
+  browser-measurement:
+    name: Released browser measurement
+    needs: [version, release]
+    if: ${{ needs.version.outputs.should_release == 'true' && needs.release.result == 'success' }}
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/browser-performance.yml
+    with:
+      candidate_sha: ${{ github.event.workflow_run.head_sha }}
+      web_artifact_run_id: ${{ format('{0}', github.event.workflow_run.id) }}
+
+  text-write-measurement:
+    name: Released text write measurement
+    needs: [version, release]
+    if: ${{ needs.version.outputs.should_release == 'true' && needs.release.result == 'success' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/text-write-performance.yml
+    with:
+      candidate_sha: ${{ github.event.workflow_run.head_sha }}

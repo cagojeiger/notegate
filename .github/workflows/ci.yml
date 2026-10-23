@@ -227,6 +227,18 @@ jobs:
       - name: Build
         run: pnpm --filter web build
 
+      - name: Check production bundle budgets
+        run: pnpm --filter web check:preview-bundle
+
+      - name: Retain production frontend
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-dist
+          path: frontend/web/dist/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
   image-pr:
     name: PR Image Gate
     if: github.event_name == 'pull_request'
@@ -356,6 +368,12 @@ jobs:
       - name: Install Chromium
         run: pnpm --filter web exec playwright install --with-deps chromium
 
+      - name: Download production frontend
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-dist
+          path: frontend/web/dist
+
       - name: Start MinIO
         env:
           MINIO_API_CORS_ALLOW_ORIGIN: http://127.0.0.1:5173
@@ -380,6 +398,7 @@ jobs:
       - name: Start application
         env:
           NOTEGATE_METRICS_ENABLED: "true"
+          NOTEGATE_WEB_DIST_DIR: ${{ github.workspace }}/frontend/web/dist
         run: |
           mkdir -p browser-e2e
           cargo build --locked --quiet --package notegate-api --bins
@@ -493,6 +512,48 @@ jobs:
           pnpm --filter web test:e2e
           kill -0 "$api_pid"
 
+      - name: Seed live workbench identity
+        id: workbench_identity
+        run: |
+          output=$(target/debug/examples/seed_user workbench)
+          key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
+          session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
+          test -n "$key"
+          test -n "$session"
+          echo "::add-mask::$key"
+          echo "::add-mask::$session"
+          echo "agent_api_key=$key" >> "$GITHUB_OUTPUT"
+          echo "browser_session=$session" >> "$GITHUB_OUTPUT"
+
+      - name: Test live workbench contracts
+        env:
+          NOTEGATE_WEB_BASE_URL: http://localhost:9191
+          NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.workbench_identity.outputs.browser_session }}
+          NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.workbench_identity.outputs.agent_api_key }}
+        run: pnpm --filter web exec playwright test --config playwright.functional.config.ts --project workbench
+
+      - name: Seed standalone OAuth identity
+        id: oauth_identity
+        run: |
+          output=$(target/debug/examples/seed_user oauth)
+          session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
+          consent=$(printf '%s\n' "$output" | sed -n 's/^OAUTH_CONSENT_FIXTURE=//p')
+          test -n "$session"
+          test -n "$consent"
+          echo "::add-mask::$session"
+          echo "::add-mask::$(printf '%s' "$consent" | jq -r .secret)"
+          echo "::add-mask::$(printf '%s' "$consent" | jq -r .verifier)"
+          echo "::add-mask::$consent"
+          echo "browser_session=$session" >> "$GITHUB_OUTPUT"
+          echo "oauth_consent=$consent" >> "$GITHUB_OUTPUT"
+
+      - name: Test standalone OAuth contracts
+        env:
+          NOTEGATE_OAUTH_BASE_URL: http://localhost:9191
+          NOTEGATE_WEB_E2E_OAUTH_BROWSER_SESSION: ${{ steps.oauth_identity.outputs.browser_session }}
+          NOTEGATE_WEB_E2E_OAUTH_CONSENT: ${{ steps.oauth_identity.outputs.oauth_consent }}
+        run: pnpm --filter web exec playwright test --config playwright.functional.config.ts --project standalone-oauth
+
       - name: Upload login UI screenshots
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -530,9 +591,6 @@ jobs:
           path: |
             frontend/web/test-results/invocation-history-*.png
             frontend/web/test-results/dialog-*.png
-
-      - name: Test Lighthouse budgets
-        run: pnpm --filter web test:lighthouse
 
       - name: Upload browser diagnostics
         if: failure()

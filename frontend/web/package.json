@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build --manifest",
     "check:contrast": "node scripts/check-theme-contrast.mjs",
+    "check:preview-bundle": "node scripts/check-preview-bundle.mjs",
     "export:icons": "bash scripts/export-brand-icons.sh",
     "lint": "eslint src --max-warnings 0",
-    "test:lighthouse": "pnpm test:preview-bundle && node scripts/run-lighthouse.mjs",
-    "test:preview-bundle": "tsc -b && vite build --manifest && node scripts/check-preview-bundle.mjs",
+    "test:lighthouse": "pnpm test:preview-bundle && pnpm test:lighthouse:built",
+    "test:lighthouse:built": "node scripts/run-lighthouse.mjs",
+    "test:preview-bundle": "pnpm build && pnpm check:preview-bundle",
     "typecheck": "tsc -b --pretty false",
     "test": "node --test scripts/check-preview-bundle.test-node.mjs && vitest run --config vitest.config.ts",
     "test:e2e": "playwright test"

@@ -1,29 +1,24 @@
 name: Text Write Performance
 
 on:
-  pull_request:
-    paths:
-      - backend/crates/db/src/files/commands/save.rs
-      - backend/crates/db/src/files/revisions.rs
-      - backend/crates/service/src/files/mutate.rs
-      - backend/crates/service/tests/text_write_performance.rs
-      - deploy/ci/compare-text-write.sh
-      - deploy/ci/summarize-text-write.py
-      - .github/workflows/text-write-performance.yml
   workflow_dispatch:
     inputs:
       base_ref:
-        description: Existing baseline commit or ref to compare
+        description: Ancestor baseline commit or ref (empty uses the previous compatible published release)
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      candidate_sha:
         required: true
         type: string
-        default: main
+      base_ref:
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   compare:
@@ -50,16 +45,36 @@ jobs:
       - name: Checkout candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || inputs.candidate_sha }}
+          fetch-depth: 0
           persist-credentials: false
 
+      - name: Resolve immutable published baseline
+        id: baseline
+        env:
+          CANDIDATE_SHA: ${{ github.event_name == 'workflow_dispatch' && github.sha || inputs.candidate_sha }}
+          BASE_REF: ${{ inputs.base_ref }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CANDIDATE_SHA" ]; then
+            [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+            test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          fi
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            | python3 deploy/ci/resolve-text-write-baseline.py >> "$GITHUB_OUTPUT"
+          cat text-write-results/baseline.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Checkout baseline
+        if: steps.baseline.outputs.sha != ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha || inputs.base_ref }}
+          ref: ${{ steps.baseline.outputs.sha }}
           path: comparison-base
           persist-credentials: false
 
       - name: Cache cargo
+        if: steps.baseline.outputs.sha != ''
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: text-write-performance
@@ -68,6 +83,7 @@ jobs:
             . -> target/candidate
 
       - name: Compare baseline and candidate
+        if: steps.baseline.outputs.sha != ''
         run: deploy/ci/compare-text-write.sh "$GITHUB_WORKSPACE/comparison-base"
 
       - name: Retain measurements

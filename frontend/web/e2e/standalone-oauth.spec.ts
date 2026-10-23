@@ -17,7 +17,7 @@ async function captureAuthViews(page: Page, name: string) {
         );
         expect(heights.every((value) => value >= 44)).toBe(true);
       }
-      await page.screenshot({ path: `test-results/browser-performance/${name}-${theme}-${device}.png`, fullPage: true });
+      await page.screenshot({ path: `test-results/browser-functional/${name}-${theme}-${device}.png`, fullPage: true });
     }
   }
   await page.setViewportSize({ width: 320, height: 844 });
@@ -26,7 +26,7 @@ async function captureAuthViews(page: Page, name: string) {
 }
 
 test("standalone CLI approval and connection revocation", async ({ browser, playwright, baseURL }) => {
-  const session = process.env.NOTEGATE_WEB_E2E_BROWSER_SESSION;
+  const session = process.env.NOTEGATE_WEB_E2E_OAUTH_BROWSER_SESSION;
   expect(Boolean(session)).toBe(true);
   const request = await playwright.request.newContext({ baseURL });
   const context = await browser.newContext({ baseURL });
@@ -64,7 +64,7 @@ test("standalone CLI approval and connection revocation", async ({ browser, play
     await expect(page.getByRole("heading", { name: "Connected applications" })).toBeVisible();
     await expect(page.getByText("NoteGate CLI", { exact: true })).toBeVisible();
     await captureAuthViews(page, "oauth-connections");
-    await page.screenshot({ path: "test-results/browser-performance/oauth-connections.png" });
+    await page.screenshot({ path: "test-results/browser-functional/oauth-connections.png" });
     await page.getByRole("button", { name: "Revoke connection" }).click();
     await expect(page.getByRole("button", { name: "Revoke connection" })).toHaveCount(0);
     await expect(page.getByText(/No connected applications/)).toBeVisible();
@@ -80,7 +80,7 @@ test("standalone CLI approval and connection revocation", async ({ browser, play
 });
 
 test("standalone MCP consent follows its registered callback and exchanges the PKCE code", async ({ browser, playwright, baseURL }) => {
-  const session = process.env.NOTEGATE_WEB_E2E_BROWSER_SESSION;
+  const session = process.env.NOTEGATE_WEB_E2E_OAUTH_BROWSER_SESSION;
   const rawFixture = process.env.NOTEGATE_WEB_E2E_OAUTH_CONSENT;
   expect(Boolean(session && rawFixture)).toBe(true);
   const fixture = JSON.parse(rawFixture!) as {
@@ -138,7 +138,7 @@ test("standalone MCP consent follows its registered callback and exchanges the P
 });
 
 test("CLI consent works without JavaScript and does not depend on browser storage", async ({ browser, playwright, baseURL }) => {
-  const session = process.env.NOTEGATE_WEB_E2E_BROWSER_SESSION;
+  const session = process.env.NOTEGATE_WEB_E2E_OAUTH_BROWSER_SESSION;
   expect(Boolean(session)).toBe(true);
   const request = await playwright.request.newContext({ baseURL });
   const context = await browser.newContext({ baseURL, javaScriptEnabled: false });
