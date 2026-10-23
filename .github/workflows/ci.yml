@@ -42,9 +42,9 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == pull_request ]] \
             && git rev-parse --verify 'HEAD^2' >/dev/null 2>&1 \
             && git diff --no-renames --name-only -z 'HEAD^1' HEAD > "$paths"; then
-            python3 deploy/ci/ci-impact.py --event "$GITHUB_EVENT_NAME" --paths-file "$paths" > "$plan"
+            python3 deploy/ci/ci-impact.py --event "$GITHUB_EVENT_NAME" < "$paths" > "$plan"
           else
-            python3 deploy/ci/ci-impact.py --event "$GITHUB_EVENT_NAME" > "$plan"
+            python3 deploy/ci/ci-impact.py --event "$GITHUB_EVENT_NAME" < /dev/null > "$plan"
           fi
           for key in rust_build rust web browser postgres image; do
             grep -Eq "^${key}=(true|false)$" "$plan"
