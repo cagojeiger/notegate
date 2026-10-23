@@ -187,41 +187,76 @@ describe("useSpaceChangeSync", () => {
   });
 
   it("resets a backed-off cadence after focus and reconnect", async () => {
+    vi.useFakeTimers();
     vi.spyOn(Math, "random").mockReturnValue(0.5);
     get.mockResolvedValue(response(10));
     const queryClient = createTestQueryClient();
 
-    renderHook(() => useSpaceChangeSync("space-1"), {
+    const { unmount } = renderHook(() => useSpaceChangeSync("space-1"), {
       wrapper: createWrapper(queryClient)
     });
 
-    await waitForSignal(queryClient, 10);
-    await refetchSignal(queryClient);
-    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-    await refetchSignal(queryClient);
-    await waitFor(() => expect(get).toHaveBeenCalledTimes(3));
-    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[2]);
+    const advance = async (milliseconds: number) => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(milliseconds);
+      });
+    };
+    const expectNextPoll = async (milliseconds: number, expectedRequests: number) => {
+      await advance(milliseconds - 1);
+      expect(get).toHaveBeenCalledTimes(expectedRequests - 1);
+      await advance(1);
+      expect(get).toHaveBeenCalledTimes(expectedRequests);
+    };
 
-    act(() => {
-      focusManager.setFocused(false);
-      focusManager.setFocused(true);
-    });
-    expect(get).toHaveBeenCalledTimes(3);
-    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
+    try {
+      await advance(0);
+      expect(get).toHaveBeenCalledTimes(1);
+      expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
 
-    await refetchSignal(queryClient);
-    await waitFor(() => expect(get).toHaveBeenCalledTimes(4));
-    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
-    await refetchSignal(queryClient);
-    await waitFor(() => expect(get).toHaveBeenCalledTimes(5));
-    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[1]);
+      for (const [index, interval] of POLLING.spaceChangesIdleMs.slice(0, 3).entries()) {
+        await expectNextPoll(interval, index + 2);
+        expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[index + 1]);
+      }
 
-    act(() => {
-      onlineManager.setOnline(false);
-      onlineManager.setOnline(true);
-    });
-    expect(get).toHaveBeenCalledTimes(5);
-    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
+      // Offset the reset from the previous response so an uncancelled old timer
+      // would fire before a later expected poll instead of sharing its deadline.
+      await advance(1_000);
+      await act(async () => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      await advance(0);
+      expect(get).toHaveBeenCalledTimes(4);
+      expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
+
+      await expectNextPoll(POLLING.spaceChangesIdleMs[0], 5);
+      expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
+      await expectNextPoll(POLLING.spaceChangesIdleMs[0], 6);
+      expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[1]);
+
+      await advance(1_000);
+      await act(async () => {
+        onlineManager.setOnline(false);
+        onlineManager.setOnline(true);
+      });
+      await advance(0);
+      expect(get).toHaveBeenCalledTimes(6);
+      expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
+
+      await expectNextPoll(POLLING.spaceChangesIdleMs[0], 7);
+      expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
+      for (const [index, interval] of POLLING.spaceChangesIdleMs.slice(0, 3).entries()) {
+        await expectNextPoll(interval, index + 8);
+        expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[index + 1]);
+      }
+    } finally {
+      unmount();
+      queryClient.clear();
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync();
+      });
+      vi.useRealTimers();
+    }
   });
 
   it("pauses while hidden and restarts at the initial cadence when visible", async () => {

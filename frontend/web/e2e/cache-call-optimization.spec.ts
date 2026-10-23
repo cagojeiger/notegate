@@ -73,13 +73,25 @@ for (const viewport of [
     expect(count(requests, `/api/v1/spaces/${space.id}/nodes`)).toBe(1);
 
     if (viewport.name === "desktop") {
-      await page.context().setOffline(true);
-      await page.context().setOffline(false);
-      expect(count(requests, `/api/v1/spaces/${space.id}/file-change-sync`)).toBe(6);
+      const reconnect = await observePollingReconnect(page);
+      try {
+        await page.context().setOffline(true);
+        await expect.poll(() => reconnect.evaluate((state) => state.offline)).toBe(true);
+        await page.context().setOffline(false);
+        // Network emulation completes before React/Query necessarily installs
+        // the reset interval. Keep virtual time paused until it is ready.
+        await expect.poll(() => reconnect.evaluate(
+          (state) => state.online && state.activeIntervals.size === 1
+        )).toBe(true);
+        expect(count(requests, syncPath)).toBe(6);
 
-      await page.clock.runFor(30_001);
-      await waitForSync(7);
-      expect(count(requests, syncPath)).toBe(7);
+        await page.clock.runFor(30_001);
+        await waitForSync(7);
+        expect(count(requests, syncPath)).toBe(7);
+      } finally {
+        await reconnect.evaluate((state) => state.restore());
+        await reconnect.dispose();
+      }
     }
   });
 }
@@ -549,6 +561,42 @@ function textNode(): RestNode {
 
 function count(requests: Map<string, number>, path: string): number {
   return requests.get(path) ?? 0;
+}
+
+async function observePollingReconnect(page: Page) {
+  return page.evaluateHandle(() => {
+    const state = {
+      offline: false,
+      online: false,
+      activeIntervals: new Set<number>()
+    };
+    const onOffline = () => { state.offline = true; };
+    const onOnline = () => { state.online = true; };
+    window.addEventListener("offline", onOffline, { once: true });
+    window.addEventListener("online", onOnline, { once: true });
+    const timers: Window = window;
+    const originalSetInterval = timers.setInterval;
+    const originalClearInterval = timers.clearInterval;
+    timers.setInterval = (handler, delay, ...args) => {
+      const id = originalSetInterval.call(window, handler, delay, ...args);
+      // This fixture's 30-second interval is the Space change poll. Observe
+      // only new timers; handlers, delays and cancellation stay untouched.
+      if (delay === 30_000) state.activeIntervals.add(id);
+      return id;
+    };
+    timers.clearInterval = (id) => {
+      if (id !== undefined) state.activeIntervals.delete(id);
+      originalClearInterval.call(window, id);
+    };
+    return Object.assign(state, {
+      restore() {
+        timers.setInterval = originalSetInterval;
+        timers.clearInterval = originalClearInterval;
+        window.removeEventListener("offline", onOffline);
+        window.removeEventListener("online", onOnline);
+      }
+    });
+  });
 }
 
 async function leaveAndReturnAfterStale(page: import("@playwright/test").Page) {
