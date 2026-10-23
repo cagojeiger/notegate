@@ -4,6 +4,7 @@ import type { Me, RestNode, Space } from "../src/api/types";
 import { expectNoAccessibilityViolations } from "./support/accessibility";
 import { routeJsonApi } from "./support/api";
 import { usageResponse } from "./support/usage";
+import { expectOutlineContrast, setFocusTestTheme } from "./support/focus";
 
 const space: Space = {
   id: "space-1",
@@ -75,11 +76,42 @@ const docxNode: RestNode = {
   file_preview_kind: "docx"
 };
 
+for (const theme of ["light", "dark"] as const) {
+  for (const width of [1440, 390]) {
+    test(`DOCX keyboard entry keeps a visible focus boundary in ${theme} mode at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 });
+      await mockFilePreviewApi(page);
+      await page.goto("/");
+      await setFocusTestTheme(page, theme);
+      if (width < 768) await page.getByRole("button", { name: "Toggle left sidebar", exact: true }).click();
+      await page.getByRole("button", { name: docxNode.name, exact: true }).click();
+      const preview = page.getByRole("region", { name: `${docxNode.name} DOCX preview`, exact: true });
+      const frame = page.getByTitle(`${docxNode.name} DOCX document`, { exact: true });
+      await expect(page.frameLocator(`iframe[title="${docxNode.name} DOCX document"]`).getByText("NoteGate DOCX preview", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "More actions", exact: true }).focus();
+      await page.keyboard.press("Tab");
+      await expect(frame).toBeFocused();
+      await page.screenshot({ path: testInfo.outputPath("docx-focus.png") });
+      await expectOutlineContrast(preview);
+      await page.keyboard.press("Tab");
+      await expect(frame).not.toBeFocused();
+      await expect(preview).toHaveCSS("outline-style", "none");
+      await page.keyboard.press("Shift+Tab");
+      await expect(frame).toBeFocused();
+      await expectOutlineContrast(preview);
+      await page.keyboard.press("Shift+Tab");
+      await expect(page.getByRole("button", { name: "More actions", exact: true })).toBeFocused();
+      await expect(preview).toHaveCSS("outline-style", "none");
+    });
+  }
+}
+
 for (const viewport of [
   { name: "wide desktop", width: 1920, height: 1080, mobile: false },
   { name: "desktop", width: 1440, height: 900, mobile: false },
   { name: "tablet", width: 900, height: 1024, mobile: false },
-  { name: "mobile", width: 390, height: 844, mobile: true }
+  { name: "mobile", width: 390, height: 844, mobile: true },
+  { name: "small mobile", width: 320, height: 568, mobile: true }
 ]) {
   test(`image, PDF, and DOCX previews stay inside the editor on ${viewport.name}`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
@@ -106,6 +138,10 @@ for (const viewport of [
     await expect(pdfPreview.locator("canvas")).toBeVisible();
     const pageInput = pdfPreview.getByRole("spinbutton", { name: "Page number" });
     await expect(pageInput).toHaveValue("1");
+    expect((await pageInput.boundingBox())?.height).toBe(viewport.mobile ? 44 : 28);
+    if (viewport.mobile) expect((await pageInput.boundingBox())?.width).toBeGreaterThanOrEqual(44);
+    await expectInsideActiveEditor(page, pageInput);
+    await expectInsideActiveEditor(page, pdfPreview.getByRole("button", { name: "Next page" }));
     await expect(pdfPreview.getByText("/ 2")).toBeVisible();
     await expectInsideActiveEditor(page, pdfPreview);
 
@@ -113,6 +149,9 @@ for (const viewport of [
     await expect(pageInput).toHaveValue("2");
     await pdfPreview.getByRole("button", { name: "Zoom in" }).click();
     await expect(pdfPreview.getByRole("button", { name: "Reset zoom: 125%", exact: true })).toHaveText("125%");
+    expect((await pdfPreview.getByRole("button", { name: "Reset zoom: 125%", exact: true }).boundingBox())?.height)
+      .toBe(viewport.mobile ? 44 : 28);
+    await expectInsideActiveEditor(page, pdfPreview.getByRole("button", { name: "Reset zoom: 125%", exact: true }));
     await expectNoAccessibilityViolations(page);
 
     if (viewport.mobile) {

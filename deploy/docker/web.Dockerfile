@@ -66,13 +66,17 @@ RUN pnpm --filter web build
 # the notegate-api binary. Keep Cargo registry/git data and target artifacts in
 # the dependency layer so the GitHub Actions cache can restore them on fresh
 # builders. The sccache mount remains a local build accelerator.
-FROM chef AS builder
+# Main CI can warm this target without building the application or frontend.
+FROM chef AS dependencies
 
 COPY --from=planner /app/recipe.json recipe.json
 # Queries are runtime-checked (no sqlx `query!`/`query_as!` macros), so the build
 # needs neither offline `.sqlx` metadata nor SQLX_OFFLINE / a live DB.
 RUN --mount=type=cache,id=notegate-sccache,target=/sccache,sharing=locked \
-    cargo chef cook --release --locked --recipe-path recipe.json
+    cargo chef cook --release --locked --bin notegate-api --recipe-path recipe.json
+
+FROM dependencies AS builder
+
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY backend ./backend
 COPY frontend/web/src/design/theme.css ./frontend/web/src/design/theme.css

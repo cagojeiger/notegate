@@ -1,10 +1,11 @@
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createContext, ReactNode, useContext, useMemo, useRef } from "react";
+import { createContext, ReactNode, useContext, useLayoutEffect, useMemo, useRef } from "react";
 
 import { createApiClient, type ApiClient } from "./client";
 import { ApiError } from "./errors";
 
 const ApiClientContext = createContext<ApiClient | null>(null);
+const CurrentApiCacheContext = createContext<() => boolean>(() => true);
 
 type ApiProviderProps = {
   authCacheKey: string;
@@ -19,13 +20,15 @@ export function ApiProvider({ authCacheKey, onUnauthorized, onMutationError, chi
   const client = useMemo(() => createApiClient(), []);
   const onUnauthorizedRef = useRef(onUnauthorized);
   const onMutationErrorRef = useRef(onMutationError);
+  const activeCacheKey = useRef(authCacheKey);
   onUnauthorizedRef.current = onUnauthorized;
   onMutationErrorRef.current = onMutationError;
+  activeCacheKey.current = authCacheKey;
+  const isCurrentCache = useMemo(() => () => activeCacheKey.current === authCacheKey, [authCacheKey]);
 
   const queryClient = useMemo(
     () => {
       // Each authenticated identity gets an isolated query cache.
-      void authCacheKey;
       return new QueryClient({
         defaultOptions: {
           queries: {
@@ -42,6 +45,7 @@ export function ApiProvider({ authCacheKey, onUnauthorized, onMutationError, chi
         // render the login page without a duplicate global reset.
         queryCache: new QueryCache({
           onError: (error, query) => {
+            if (!isCurrentCache()) return;
             if (error instanceof ApiError && error.status === 401 && query.meta?.authSessionCheck !== true) {
               onUnauthorizedRef.current?.();
             }
@@ -51,6 +55,7 @@ export function ApiProvider({ authCacheKey, onUnauthorized, onMutationError, chi
         // 401 -> re-auth, anything else -> a toast so writes never fail silently.
         mutationCache: new MutationCache({
           onError: (error, _variables, _context, mutation) => {
+            if (!isCurrentCache()) return;
             if (error instanceof ApiError && error.status === 401) {
               onUnauthorizedRef.current?.();
               return;
@@ -64,12 +69,19 @@ export function ApiProvider({ authCacheKey, onUnauthorized, onMutationError, chi
         })
       });
     },
-    [authCacheKey]
+    [isCurrentCache]
   );
+  const previousCache = useRef(queryClient);
+  useLayoutEffect(() => {
+    if (previousCache.current !== queryClient) previousCache.current.clear();
+    previousCache.current = queryClient;
+  }, [queryClient]);
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ApiClientContext.Provider value={client}>{children}</ApiClientContext.Provider>
+      <CurrentApiCacheContext value={isCurrentCache}>
+        <ApiClientContext.Provider value={client}>{children}</ApiClientContext.Provider>
+      </CurrentApiCacheContext>
     </QueryClientProvider>
   );
 }
@@ -78,4 +90,8 @@ export function useApiClient(): ApiClient {
   const client = useContext(ApiClientContext);
   if (!client) throw new Error("ApiProvider is missing");
   return client;
+}
+
+export function useIsCurrentApiCache() {
+  return useContext(CurrentApiCacheContext);
 }

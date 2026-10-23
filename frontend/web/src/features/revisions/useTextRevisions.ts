@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { useApiClient } from "../../api/ApiProvider";
+import { useApiClient, useIsCurrentApiCache } from "../../api/ApiProvider";
 import { updateNodeCaches } from "../../api/nodeCache";
 import { invalidateFileChangeEvents, invalidateRecentNodes, invalidateSpaceLinks } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
@@ -14,6 +14,7 @@ const scopedRead = { gcTime: 0, retry: false, refetchOnWindowFocus: false, refet
 
 export function useTextRevisions(node: RestNode, selectedId: string | null, onRestored: () => void) {
   const client = useApiClient();
+  const isCurrentCache = useIsCurrentApiCache();
   const queryClient = useQueryClient();
   const list = useInfiniteQuery({
     ...scopedRead,
@@ -44,9 +45,11 @@ export function useTextRevisions(node: RestNode, selectedId: string | null, onRe
       content
     }),
     onSuccess: async ({ result, content }) => {
+      if (!isCurrentCache()) return;
       const textKey = queryKeys.text(node.space_id, node.id);
       // Discard any older in-flight read, then publish the restored body before reopening the editor.
       await queryClient.cancelQueries({ queryKey: textKey, exact: true });
+      if (!isCurrentCache()) return;
       const previous = queryClient.getQueryData<ReadTextResponse>(textKey) ?? baseline.data;
       if (previous) queryClient.setQueryData<ReadTextResponse>(textKey, {
         ...previous,

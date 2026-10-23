@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo } from "react";
 
+import { useSettingsViewState } from "../settings/settingsViewState";
 import type { FileChangeEvent, Space } from "../../api/types";
 import { EmptyState, SelectField } from "../../shared/ui";
 import {
@@ -21,7 +22,7 @@ export function FileChangeEventsPanel({
   initialSpaceId: string | null;
   canViewOwnedHistory?: boolean;
 }) {
-  const [selectedSpaceId, setSelectedSpaceId] = useState(() => selectInitialSpaceId(spaces, initialSpaceId) ?? (canViewOwnedHistory ? "all-owned" : null));
+  const [selectedSpaceId, setSelectedSpaceId] = useSettingsViewState("history-files-space", () => selectInitialSpaceId(spaces, initialSpaceId) ?? (canViewOwnedHistory ? "all-owned" : null));
   const selectedSpace = spaces.find((space) => space.id === selectedSpaceId) ?? null;
   const ownedHistory = canViewOwnedHistory && selectedSpaceId === "all-owned";
   const query = useFileChangeEventsQuery(selectedSpace?.id ?? null, null, ownedHistory);
@@ -29,32 +30,32 @@ export function FileChangeEventsPanel({
 
   useEffect(() => {
     if (!selectedSpace && !ownedHistory) setSelectedSpaceId(spaces[0]?.id ?? (canViewOwnedHistory ? "all-owned" : null));
-  }, [selectedSpace, spaces, ownedHistory, canViewOwnedHistory]);
+  }, [selectedSpace, spaces, ownedHistory, canViewOwnedHistory, setSelectedSpaceId]);
 
   return (
-    <section className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <SelectField label="Space" className="w-full sm:w-72" value={selectedSpaceId ?? ""} onChange={(event) => setSelectedSpaceId(event.target.value || null)} disabled={spaces.length === 0 && !canViewOwnedHistory}>
-          {canViewOwnedHistory ? <option value="all-owned">All owned spaces (including removed)</option> : null}
-          {spaces.length === 0 && !canViewOwnedHistory ? <option value="">No spaces available</option> : null}
-          {spaces.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}
-        </SelectField>
-        <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} disabled={!selectedSpace && !ownedHistory} />
-      </div>
-      {!selectedSpace && !ownedHistory ? <EmptyState>No space selected.</EmptyState> : <EventQueryState query={query} itemCount={events.length} emptyLabel="No changes yet." />}
-      {ownedHistory ? <p className="text-xs text-muted">Changes are retained for 90 days. Removed document bodies cannot be opened from this history.</p> : null}
-      {events.length > 0 ? (
-        <ol className="rounded-lg border border-border bg-surface px-4">
-          {events.map((event) => <FileChangeEventRow key={event.id} event={event} />)}
-        </ol>
-      ) : null}
-      <LoadMore query={query} />
-    </section>
+    <>
+      <SelectField label="Space" className="min-w-0 flex-1" value={selectedSpaceId ?? ""} onChange={(event) => setSelectedSpaceId(event.target.value || null)} disabled={spaces.length === 0 && !canViewOwnedHistory}>
+        {canViewOwnedHistory ? <option value="all-owned">All owned spaces (including removed)</option> : null}
+        {spaces.length === 0 && !canViewOwnedHistory ? <option value="">No spaces available</option> : null}
+        {spaces.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}
+      </SelectField>
+      <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} disabled={!selectedSpace && !ownedHistory} />
+      <section className="w-full space-y-3">
+        {!selectedSpace && !ownedHistory ? <EmptyState>No space selected.</EmptyState> : <EventQueryState query={query} itemCount={events.length} emptyLabel="No changes yet." />}
+        {ownedHistory ? <p className="text-xs text-muted">Changes are retained for 90 days. Removed document bodies cannot be opened from this history.</p> : null}
+        {events.length > 0 ? (
+          <ol className="rounded-workbench-surface border border-border bg-surface px-4">
+            {events.map((event) => <FileChangeEventRow key={event.id} event={event} />)}
+          </ol>
+        ) : null}
+        <LoadMore query={query} />
+      </section>
+    </>
   );
 }
 
 function FileChangeEventRow({ event }: { event: FileChangeEvent }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useSettingsViewState(`history-change-${event.space_id}-${event.id}-expanded`, false);
   const detailsId = useId();
   const target = formatFileChangeTarget(event);
   const actor = formatActor(event.actor, event.actor_account_id);
@@ -80,7 +81,7 @@ function FileChangeEventRow({ event }: { event: FileChangeEvent }) {
                 aria-controls={detailsId}
                 title={toggleLabel}
                 onClick={() => setOpen((value) => !value)}
-                className="grid size-7 place-items-center rounded-lg text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
+                className="grid size-workbench-control place-items-center rounded-workbench-surface text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text"
               >
                 <ChevronRight size={14} className={`transition ${open ? "rotate-90" : ""}`} />
               </button>

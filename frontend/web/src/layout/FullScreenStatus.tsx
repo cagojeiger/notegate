@@ -18,7 +18,7 @@ export function FullScreenStatus({
 }) {
   return (
     <main className="grid h-full place-items-center bg-bg text-text">
-      <div className="min-w-64 rounded-2xl border border-border bg-surface p-6 text-center shadow-[var(--ng-focus-shadow)]">
+      <div className="min-w-64 rounded-workbench-surface border border-border bg-surface p-6 text-center shadow-[var(--ng-focus-shadow)]">
         <BrandAppIcon size={36} decorative className="mx-auto mb-4" />
         {variant === "loading" ? (
           <Loader2 className="mx-auto mb-3 animate-spin text-primary" size={20} aria-hidden="true" />

@@ -2,7 +2,7 @@ import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query
 import { History, RefreshCw } from "lucide-react";
 
 import type { AuditEventListResponse, BackgroundJobListResponse, CommandInvocationListResponse, FileChangeEventListResponse } from "../../api/types";
-import { Button, EmptyState } from "../../shared/ui";
+import { Button, EmptyState, IconButton } from "../../shared/ui";
 import { formatEventTime, formatEventTimeCompact } from "./eventDisplay";
 
 export type EventListResponse = AuditEventListResponse | BackgroundJobListResponse | CommandInvocationListResponse | FileChangeEventListResponse;
@@ -18,9 +18,9 @@ export function RefreshButton({
   disabled?: boolean;
 }) {
   return (
-    <Button size="sm" secondary onClick={onRefresh} disabled={disabled || isFetching}>
-      <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /> Refresh
-    </Button>
+    <IconButton label="Refresh" onClick={onRefresh} disabled={disabled || isFetching}>
+      <RefreshCw size={16} className={isFetching ? "animate-spin" : ""} />
+    </IconButton>
   );
 }
 
@@ -33,7 +33,7 @@ export function EventQueryState<T extends EventListResponse>({ query, itemCount,
 
 export function EventTime({ value }: { value: string }) {
   return (
-    <time className="text-xs text-muted" dateTime={value}>
+    <time className="shrink-0 whitespace-nowrap text-xs text-muted" dateTime={value}>
       <History size={14} className="mr-1 inline-block align-[-2px]" />
       <span className="sm:hidden">{formatEventTimeCompact(value)}</span>
       <span className="hidden sm:inline">{formatEventTime(value)}</span>

@@ -16,7 +16,7 @@ type TextEditorViewProps = Parameters<typeof TextEditorView>[0];
 type TextDocumentQuery = ReturnType<typeof useTextDocument>;
 type TextDocumentQueryMock = Pick<
   TextDocumentQuery,
-  "data" | "isError" | "isLoading" | "isSuccess" | "refetch"
+  "data" | "isError" | "isFetching" | "isLoading" | "isSuccess" | "refetch"
 >;
 type SaveTextMutation = ReturnType<typeof useSaveTextDocument>;
 type SaveTextMutationMock = Pick<SaveTextMutation, "mutate" | "isPending">;
@@ -84,6 +84,7 @@ function mockTextDocument(data: ReadTextResponse = partialText) {
   const query = {
     data,
     isError: false,
+    isFetching: false,
     isLoading: false,
     isSuccess: true,
     refetch: vi.fn()
@@ -149,6 +150,29 @@ describe("TextEditorView", () => {
     expect(screen.getByText(/Loaded 5000 of 5001 lines/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy content" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
+  });
+
+  it("cancels transient editor actions while inactive without discarding the draft", async () => {
+    const user = userEvent.setup();
+    mockFullText("saved text");
+    const props = makeTextEditorViewProps({ mode: "edit" });
+    const view = render(<TextEditorView {...props} />);
+    const editor = screen.getByRole("textbox", { name: "Edit text content" });
+    await user.clear(editor);
+    await user.type(editor, "unsaved draft");
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    expect(await screen.findByRole("menu", { name: "Editor actions" })).toBeInTheDocument();
+
+    view.rerender(<TextEditorView {...props} workspaceActive={false} />);
+    expect(screen.queryByRole("menu", { name: "Editor actions" })).not.toBeInTheDocument();
+    expect(editor).toHaveValue("unsaved draft");
+    view.rerender(<TextEditorView {...props} workspaceActive />);
+
+    expect(screen.queryByRole("menu", { name: "Editor actions" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Edit text content" })).toBe(editor);
+    expect(editor).toHaveValue("unsaved draft");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(props.onSetMode).not.toHaveBeenCalled();
   });
 
   it("switches CSV previews between table and exact source", async () => {

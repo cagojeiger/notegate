@@ -369,6 +369,46 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  image-cache:
+    name: Main dependency cache (${{ matrix.arch }})
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    # Cache preparation is optional; the normal image builds remain strict.
+    continue-on-error: true
+    concurrency:
+      group: main-image-dependencies-${{ matrix.arch }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Prepare shared production dependencies
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/web.Dockerfile
+          target: dependencies
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=cacheonly
+          cache-from: |
+            type=gha,scope=notegate-main-deps-v1-${{ matrix.arch }}
+            type=gha,scope=notegate-release-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=notegate-main-deps-v1-${{ matrix.arch }},ignore-error=true
+
   image-pr:
     name: PR Image Gate
     needs: hygiene
@@ -392,7 +432,11 @@ jobs:
           context: .
           file: deploy/docker/web.Dockerfile
           platforms: linux/amd64
-          cache-from: type=gha,scope=notegate-release-amd64
+          cache-from: |
+            type=gha,scope=notegate-pr-${{ github.event.pull_request.number }}-amd64
+            type=gha,scope=notegate-main-deps-v1-amd64
+            type=gha,scope=notegate-release-amd64
+          cache-to: type=gha,mode=max,scope=notegate-pr-${{ github.event.pull_request.number }}-amd64,ignore-error=true
           tags: notegate-pr:${{ github.sha }}
           load: true
           push: false

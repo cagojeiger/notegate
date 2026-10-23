@@ -54,17 +54,18 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
         </>
       }
     >
-      <div ref={breadcrumbsRef} role="navigation" aria-label="Destination path" className="flex h-9 items-center gap-1 overflow-x-auto whitespace-nowrap text-xs text-muted">
+      <div ref={breadcrumbsRef} role="navigation" aria-label="Destination path" className="flex min-h-workbench-control items-center gap-1 overflow-x-auto whitespace-nowrap p-1 text-xs text-muted">
         {stack.map((crumb, index) => (
           <span key={crumb.id} className="flex shrink-0 items-center gap-1">
             {index > 0 ? <ChevronRight size={12} className="text-faint" /> : null}
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setStack((prev) => prev.slice(0, index + 1))}
-              className={`rounded px-1 py-0.5 hover:bg-surface hover:text-text ${index === stack.length - 1 ? "font-semibold text-text" : ""}`}
+              className={index === stack.length - 1 ? "font-semibold text-text" : undefined}
             >
               {crumb.name === "/" ? "Root" : crumb.name}
-            </button>
+            </Button>
           </span>
         ))}
       </div>
@@ -89,7 +90,7 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
                 onClick={() => setStack((prev) => [...prev, { id: folder.id, name: folder.name }])}
                 disabled={folder.effective_write_locked}
                 title={folder.effective_write_locked ? "Write locked" : undefined}
-                className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-muted hover:bg-panel hover:text-text disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted"
+                className="flex min-h-workbench-control w-full items-center justify-between rounded-workbench-surface px-3 py-2 text-left text-workbench text-muted hover:bg-panel hover:text-text disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted"
               >
                 <span className="flex min-w-0 items-center gap-2"><Folder size={14} className="shrink-0" /><span className="truncate">{folder.name}</span></span>
                 {folder.effective_write_locked

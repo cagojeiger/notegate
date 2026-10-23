@@ -1,5 +1,5 @@
 import { CircleHelp } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 export function HelpTooltip({
   label,
@@ -12,11 +12,36 @@ export function HelpTooltip({
 }) {
   const tooltipId = useId();
   const rootRef = useRef<HTMLSpanElement>(null);
+  const tooltipRef = useRef<HTMLSpanElement>(null);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [latched, setLatched] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const open = !dismissed && (hovered || focused || latched);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    function positionTooltip() {
+      const root = rootRef.current;
+      const tooltip = tooltipRef.current;
+      if (!root || !tooltip) return;
+      const anchor = root.getBoundingClientRect();
+      const width = tooltip.getBoundingClientRect().width;
+      const preferredLeft = align === "end" ? anchor.right - width : anchor.left;
+      const left = Math.max(16, Math.min(preferredLeft, document.documentElement.clientWidth - width - 16));
+      tooltip.style.left = `${left - anchor.left}px`;
+      tooltip.style.right = "auto";
+    }
+
+    positionTooltip();
+    window.addEventListener("resize", positionTooltip);
+    window.addEventListener("scroll", positionTooltip, true);
+    return () => {
+      window.removeEventListener("resize", positionTooltip);
+      window.removeEventListener("scroll", positionTooltip, true);
+    };
+  }, [align, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -72,7 +97,7 @@ export function HelpTooltip({
     >
       <button
         type="button"
-        className="inline-grid size-workbench-control shrink-0 place-items-center rounded text-muted outline-none hover:bg-panel-strong hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45 md:size-6"
+        className="inline-grid size-[var(--ng-min-target-size)] shrink-0 place-items-center rounded-workbench text-muted outline-none hover:bg-panel-strong hover:text-text"
         aria-label={label}
         aria-describedby={tooltipId}
         onClick={() => {
@@ -88,11 +113,12 @@ export function HelpTooltip({
         <CircleHelp size={13} />
       </button>
       <span
+        ref={tooltipRef}
         id={tooltipId}
         role="tooltip"
         hidden={!open}
         className={[
-          "absolute top-workbench-control z-20 w-64 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-panel px-2.5 py-2 text-xs font-normal normal-case leading-5 text-text shadow-lg md:top-6",
+          "absolute top-[var(--ng-min-target-size)] z-20 w-64 max-w-[calc(100vw-2rem)] rounded-workbench-surface border border-border bg-panel px-2.5 py-2 text-xs font-normal normal-case leading-5 text-text shadow-lg",
           align === "end" ? "right-0" : "left-0"
         ].join(" ")}
       >

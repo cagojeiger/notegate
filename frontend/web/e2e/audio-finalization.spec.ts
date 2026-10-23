@@ -13,6 +13,12 @@ test("a browser recording is finalized into seekable WebM audio", async ({ page 
     const { finalizeRecordedAudio } = await import(/* @vite-ignore */ moduleUrl) as {
       finalizeRecordedAudio: (blob: Blob) => Promise<Blob>;
     };
+    const { loadEbml } = await import(/* @vite-ignore */ `${location.origin}/src/features/recording/ebmlBrowser.ts`) as typeof import("../src/features/recording/ebmlBrowser");
+    const ebml = await loadEbml();
+    const decoder = new ebml.Decoder();
+    const reader = new ebml.Reader();
+    reader.logging = false;
+    reader.drop_default_duration = false;
     const context = new AudioContext({ sampleRate: 48_000 });
     const oscillator = context.createOscillator();
     const gain = context.createGain();
@@ -26,13 +32,24 @@ test("a browser recording is finalized into seekable WebM audio", async ({ page 
       audioBitsPerSecond: 64_000
     });
     const chunks: Blob[] = [];
-    const firstChunk = new Promise<void>((resolve, reject) => {
+    let processing = Promise.resolve();
+    const usableRecording = new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error("audio recording timed out")), 10_000);
       recorder.addEventListener("dataavailable", (event) => {
         if (event.data.size === 0) return;
         chunks.push(event.data);
-        clearTimeout(timeout);
-        resolve();
+        processing = processing.then(async () => {
+          for (const element of decoder.decode(await event.data.arrayBuffer())) reader.read(element);
+          // The first nonempty chunk can still have zero media duration.
+          // Stop only after the encoded stream contains usable audio metadata.
+          if (reader.metadataSize > 0 && reader.duration > 0 && reader.cues.length > 0) {
+            clearTimeout(timeout);
+            resolve();
+          }
+        }).catch((error) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
       });
       recorder.addEventListener("error", () => {
         clearTimeout(timeout);
@@ -44,10 +61,12 @@ test("a browser recording is finalized into seekable WebM audio", async ({ page 
     });
     oscillator.start();
     recorder.start(100);
-    await firstChunk;
+    await usableRecording;
     recorder.stop();
     oscillator.stop();
     await stopped;
+    await processing;
+    reader.stop();
     await context.close();
 
     const raw = new Blob(chunks, { type: recorder.mimeType });

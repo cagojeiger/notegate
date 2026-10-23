@@ -1,4 +1,4 @@
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -15,18 +15,22 @@ const emptyKeys: ApiKeyListResponse = {
 function renderKeyManager({
   maxTtlDays = 30,
   create = vi.fn(),
-  list = vi.fn().mockResolvedValue(emptyKeys)
+  list = vi.fn().mockResolvedValue(emptyKeys),
+  revoke = vi.fn().mockResolvedValue(undefined),
+  queryClient = createTestQueryClient(),
+  queryKey = ["keys", maxTtlDays]
 }: {
   maxTtlDays?: number;
   create?: (input: { name: string; expires_at: string }) => Promise<MintedKey>;
   list?: () => Promise<ApiKeyListResponse>;
+  revoke?: (id: string) => Promise<void>;
+  queryClient?: QueryClient;
+  queryKey?: QueryKey;
 } = {}) {
-  const queryClient = createTestQueryClient();
-  const revoke = vi.fn().mockResolvedValue(undefined);
-  render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <KeyManager
-        queryKey={["keys", maxTtlDays]}
+        queryKey={queryKey}
         list={list}
         create={create}
         revoke={revoke}
@@ -34,10 +38,170 @@ function renderKeyManager({
       />
     </QueryClientProvider>
   );
-  return { list, revoke, queryClient };
+  return { ...view, list, revoke, queryClient };
 }
 
 describe("KeyManager", () => {
+  const mintedKey: MintedKey = {
+    id: "key-retained", name: "retained-key", token: "dummy-one-time-token",
+    created_at: "2026-10-22T00:00:00Z", expires_at: "2026-11-21T00:00:00Z"
+  };
+
+  async function submitKey(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole("button", { name: "Add API key" }));
+    await user.type(screen.getByLabelText("Name"), "retained-key");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+  }
+
+  it("retains a pending mint and its one-time result across remounts until Done", async () => {
+    let finish!: (key: MintedKey) => void;
+    const create = vi.fn(() => new Promise<MintedKey>((resolve) => { finish = resolve; }));
+    const queryClient = createTestQueryClient();
+    const props = { queryClient, create };
+    const user = userEvent.setup();
+    const first = renderKeyManager(props);
+    await submitKey(user);
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    const second = renderKeyManager(props);
+    expect(screen.getByRole("status")).toHaveTextContent("Creating API key");
+    expect(screen.getByRole("button", { name: "Add API key" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Add API key" }));
+    await act(async () => { finish(mintedKey); });
+    expect(await screen.findByText(mintedKey.token)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add API key" })).toBeDisabled();
+    expect(create).toHaveBeenCalledTimes(1);
+    second.unmount();
+
+    const third = renderKeyManager(props);
+    expect(screen.getByText(mintedKey.token)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByText(mintedKey.token)).not.toBeInTheDocument();
+    expect(queryClient.getMutationCache().getAll()).toHaveLength(0);
+    third.unmount();
+
+    renderKeyManager(props);
+    expect(screen.queryByRole("button", { name: "Copy token" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add API key" })).toBeEnabled();
+  });
+
+  it("keeps a late mint failure retryable after returning to the view", async () => {
+    let fail!: (error: Error) => void;
+    const create = vi.fn().mockImplementationOnce(() => new Promise<MintedKey>((_resolve, reject) => { fail = reject; })).mockResolvedValue(mintedKey);
+    const queryClient = createTestQueryClient();
+    const props = { queryClient, create };
+    const user = userEvent.setup();
+    const first = renderKeyManager(props);
+    await submitKey(user);
+    first.unmount();
+    await act(async () => { fail(new Error("Agent API key limit reached")); });
+    renderKeyManager(props);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Agent API key limit reached");
+    expect(create).toHaveBeenCalledTimes(1);
+    await submitKey(user);
+    expect(await screen.findByText(mintedKey.token)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("isolates retained issuance by agent and authenticated query cache", async () => {
+    let finish!: (key: MintedKey) => void;
+    const create = vi.fn(() => new Promise<MintedKey>((resolve) => { finish = resolve; }));
+    const queryClient = createTestQueryClient();
+    const queryKey = ["agents", "agent-a", "keys"];
+    const user = userEvent.setup();
+    const first = renderKeyManager({ queryClient, queryKey, create });
+    await submitKey(user);
+    first.unmount();
+
+    const otherAgent = renderKeyManager({ queryClient, queryKey: ["agents", "agent-b", "keys"], create });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add API key" })).toBeEnabled();
+    await act(async () => { finish(mintedKey); });
+    expect(screen.queryByText(mintedKey.token)).not.toBeInTheDocument();
+    otherAgent.unmount();
+
+    const otherIdentity = renderKeyManager({ queryKey, create });
+    expect(screen.queryByText(mintedKey.token)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add API key" })).toBeEnabled();
+    otherIdentity.unmount();
+
+    renderKeyManager({ queryClient, queryKey, create });
+    expect(screen.getByText(mintedKey.token)).toBeInTheDocument();
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("prevents repeated revocation and target changes while a revocation is pending", async () => {
+    const keys = ["ci-key", "other-key"].map((name, index) => ({ id: `key-${index}`, name, created_at: "2026-10-01T00:00:00Z", expires_at: "2026-10-31T00:00:00Z" }));
+    let finish!: () => void;
+    const revoke = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const user = userEvent.setup();
+    renderKeyManager({ list: vi.fn().mockResolvedValue({ ...emptyKeys, keys }), revoke });
+    await user.click(await screen.findByRole("button", { name: "Revoke ci-key" }));
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    await user.click(confirm);
+
+    expect(confirm).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Revoke other-key" })).toBeDisabled();
+    await user.click(confirm);
+    expect(revoke).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Revoke other-key" })).toBeEnabled());
+  });
+
+  it("keeps a pending revocation locked across remounts without blocking a different agent", async () => {
+    const key = { id: "key-1", name: "ci-key", created_at: "2026-10-01T00:00:00Z", expires_at: "2026-10-31T00:00:00Z" };
+    let finish!: () => void;
+    const revoke = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const queryClient = createTestQueryClient();
+    const props = { queryClient, queryKey: ["agents", "a", "keys"], list: vi.fn().mockResolvedValue({ ...emptyKeys, keys: [key] }), revoke };
+    const user = userEvent.setup();
+    const first = renderKeyManager(props);
+    await user.click(await screen.findByRole("button", { name: "Revoke ci-key" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(revoke).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    const other = renderKeyManager({ ...props, queryKey: ["agents", "b", "keys"] });
+    expect(await screen.findByRole("button", { name: "Revoke ci-key" })).toBeEnabled();
+    expect(screen.queryByText("Revoking API key…")).not.toBeInTheDocument();
+    other.unmount();
+
+    renderKeyManager(props);
+    expect(screen.getByRole("status")).toHaveTextContent("Revoking API key…");
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    expect(confirm).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await user.click(confirm);
+    expect(revoke).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(); });
+    await waitFor(() => expect(screen.queryByText("Revoking API key…")).not.toBeInTheDocument());
+  });
+
+  it("restores a late revocation failure after remount and allows an explicit retry", async () => {
+    const key = { id: "key-1", name: "ci-key", created_at: "2026-10-01T00:00:00Z", expires_at: "2026-10-31T00:00:00Z" };
+    let fail!: (error: Error) => void;
+    const revoke = vi.fn().mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { fail = reject; })).mockResolvedValue(undefined);
+    const props = { queryClient: createTestQueryClient(), list: vi.fn().mockResolvedValue({ ...emptyKeys, keys: [key] }), revoke };
+    const user = userEvent.setup();
+    const first = renderKeyManager(props);
+    await user.click(await screen.findByRole("button", { name: "Revoke ci-key" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    first.unmount();
+    await act(async () => { fail(new Error("Key service unavailable")); });
+    renderKeyManager(props);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Key service unavailable");
+    expect(revoke).toHaveBeenCalledTimes(1);
+    await user.click(await screen.findByRole("button", { name: "Revoke ci-key" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(revoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
   it("distinguishes a failed read from an empty key list and retries it", async () => {
     const list = vi.fn().mockRejectedValueOnce(new Error("Unavailable")).mockResolvedValue(emptyKeys);
     const user = userEvent.setup();
@@ -66,9 +230,11 @@ describe("KeyManager", () => {
   });
 
   it("uses the user-key 30-day cap by default", async () => {
+    const user = userEvent.setup();
     renderKeyManager();
 
     await screen.findByText("No active keys.");
+    await user.click(screen.getByRole("button", { name: "Add API key" }));
 
     const expires = screen.getByLabelText("Expires");
     expect(within(expires).getByRole("option", { name: "30 days" })).toBeInTheDocument();
@@ -90,6 +256,7 @@ describe("KeyManager", () => {
     renderKeyManager({ maxTtlDays: 365, create });
 
     await screen.findByText("No active keys.");
+    await user.click(screen.getByRole("button", { name: "Add API key" }));
     await user.type(screen.getByLabelText("Name"), "agent");
     await user.selectOptions(screen.getByLabelText("Expires"), "365");
     await user.click(screen.getByRole("button", { name: "Create" }));
@@ -100,16 +267,37 @@ describe("KeyManager", () => {
         expires_at: "2027-06-14T23:55:00.000Z"
       });
     });
+    expect(screen.getByRole("button", { name: "Copy token" })).toHaveFocus();
+    expect(screen.getByText("ngk_v2_token")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByText("ngk_v2_token")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add API key" })).toHaveFocus());
   });
 
   it("does not expose custom expiry input for agent keys", async () => {
+    const user = userEvent.setup();
     renderKeyManager({ maxTtlDays: 365 });
 
     await screen.findByText("No active keys.");
+    await user.click(screen.getByRole("button", { name: "Add API key" }));
 
     const expires = screen.getByLabelText("Expires");
     expect(within(expires).getByRole("option", { name: "365 days" })).toBeInTheDocument();
     expect(within(expires).queryByRole("option", { name: "Custom" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Custom days/)).not.toBeInTheDocument();
+  });
+
+  it("opens the creation form from the list footer and restores focus after cancellation", async () => {
+    const create = vi.fn();
+    const user = userEvent.setup();
+    renderKeyManager({ create });
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add API key" }));
+    expect(screen.getByLabelText("Name")).toHaveFocus();
+    await user.type(screen.getByLabelText("Name"), "unfinished");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add API key" })).toHaveFocus());
+    expect(create).not.toHaveBeenCalled();
   });
 });

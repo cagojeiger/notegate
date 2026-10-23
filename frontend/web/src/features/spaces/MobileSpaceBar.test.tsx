@@ -22,7 +22,6 @@ describe("MobileSpaceBar", () => {
     const onSelectSpace = vi.fn();
     const onCreateSpace = vi.fn();
     const onOpenLibrary = vi.fn();
-    const onOpenHistory = vi.fn();
     const onOpenSettings = vi.fn();
 
     render(
@@ -33,7 +32,6 @@ describe("MobileSpaceBar", () => {
         onSelectSpace={onSelectSpace}
         onCreateSpace={onCreateSpace}
         onOpenLibrary={onOpenLibrary}
-        onOpenHistory={onOpenHistory}
         onOpenSettings={onOpenSettings}
       />
     );
@@ -41,13 +39,11 @@ describe("MobileSpaceBar", () => {
     await user.click(screen.getByTitle("Work"));
     await user.click(screen.getByRole("button", { name: "Open space library" }));
     await user.click(screen.getByRole("button", { name: "Add space" }));
-    await user.click(screen.getByRole("button", { name: "History" }));
     await user.click(screen.getByRole("button", { name: "Settings" }));
 
     expect(onSelectSpace).toHaveBeenCalledWith(spaces[1]);
     expect(onOpenLibrary).toHaveBeenCalledTimes(1);
     expect(onCreateSpace).toHaveBeenCalledTimes(1);
-    expect(onOpenHistory).toHaveBeenCalledTimes(1);
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
@@ -59,7 +55,6 @@ describe("MobileSpaceBar", () => {
         canCreateSpace
         onSelectSpace={vi.fn()}
         onCreateSpace={vi.fn()}
-        onOpenHistory={vi.fn()}
         onOpenSettings={vi.fn()}
       />
     );
@@ -80,7 +75,6 @@ describe("MobileSpaceBar", () => {
         onCreateSpace={vi.fn()}
         onOpenLibrary={vi.fn()}
         libraryActive
-        onOpenHistory={vi.fn()}
         onOpenSettings={vi.fn()}
       />
     );
@@ -100,14 +94,12 @@ describe("MobileSpaceBar", () => {
         onSelectSpace={vi.fn()}
         onCreateSpace={vi.fn()}
         onOpenLibrary={vi.fn()}
-        onOpenHistory={vi.fn()}
         onOpenSettings={vi.fn()}
       />
     );
 
     expect(screen.getByRole("button", { name: "Open space library" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Daily" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "History" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Settings" })).toBeDisabled();
   });
 

@@ -101,7 +101,7 @@ export function NodeRow({
         data-node-open
         aria-current={opened ? "page" : undefined}
         aria-describedby={node.effective_write_locked ? lockDescriptionId : undefined}
-        className="flex min-w-0 flex-1 self-stretch items-center gap-1.5 text-left outline-none focus-visible:rounded-workbench focus-visible:ring-2 focus-visible:ring-primary/50"
+        className="flex min-w-0 flex-1 self-stretch items-center gap-1.5 text-left outline-none focus-visible:rounded-workbench"
         onClick={handleOpen}
       >
         <span className="relative grid size-4 shrink-0 place-items-center">

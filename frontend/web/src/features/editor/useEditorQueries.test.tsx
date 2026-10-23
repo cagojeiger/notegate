@@ -21,7 +21,8 @@ import {
 
 const mockClient = vi.hoisted(() => ({}));
 
-vi.mock("../../api/ApiProvider", () => ({
+vi.mock("../../api/ApiProvider", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../api/ApiProvider")>(),
   useApiClient: () => mockClient
 }));
 

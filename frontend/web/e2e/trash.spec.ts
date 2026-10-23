@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+import { openSettings, closeSettingsInspector, selectTrashItem } from "./support/settings";
+
 import { makeSpace } from "../src/test/fixtures";
 import type { TrashItem } from "../src/api/trash";
 import { routeJsonApi } from "./support/api";
@@ -39,8 +41,8 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
       const loading = new Promise<void>((resolve) => { release = resolve; });
       await page.route("**/api/v1/me/trash?**", async (route) => { await loading; await route.fallback(); });
       await page.goto("/");
-      await page.getByRole("button", { name: "Trash", exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: "Trash" });
+      await openSettings(page, "Trash");
+      const dialog = page.locator("[data-settings-view]");
       const bounds = await dialog.boundingBox();
       try {
         await expect(dialog.getByText("Loading trash…")).toBeVisible();
@@ -50,7 +52,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
       await expect(dialog.getByRole("button", { name: "Select meeting.md" })).toHaveAttribute("aria-pressed", "true");
       expect(await dialog.boundingBox()).toEqual(bounds);
       await expect(dialog.getByRole("button", { name: "Restore reports" })).toHaveCount(0);
-      await dialog.getByRole("button", { name: "Select reports" }).click();
+      await selectTrashItem(page, "reports");
       await expect(dialog.getByRole("region", { name: "Details for reports" })).toContainText("Items deleted separately stay in Trash.");
       await expect(dialog.getByRole("button", { name: "Restore reports" })).toBeVisible();
       await expect(dialog.getByRole("button", { name: "Restore meeting.md" })).toHaveCount(0);
@@ -59,21 +61,22 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
       const detailBounds = await dialog.getByRole("region", { name: "Details for reports" }).boundingBox();
       if (!listBounds || !detailBounds) throw new Error("Trash panes missing");
       if (viewport.name === "desktop") expect(detailBounds.x).toBeGreaterThan(listBounds.x + listBounds.width);
-      else expect(detailBounds.y).toBeGreaterThan(listBounds.y + listBounds.height);
+      else await expect(page.getByRole("dialog", { name: "Trash Inspector" })).toBeVisible();
       expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
-      const accessibility = await new AxeBuilder({ page }).include('[role="dialog"]').withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+      const accessibility = await new AxeBuilder({ page }).include('[data-settings-view]').withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
       expect(accessibility.violations, JSON.stringify(accessibility.violations, null, 2)).toEqual([]);
       await testInfo.attach(`trash-${viewport.name}-${theme}`, { body: await page.screenshot({ path: `test-results/trash-${viewport.name}-${theme}.png` }), contentType: "image/png" });
-      await dialog.getByRole("button", { name: "Select old.png" }).click();
+      await selectTrashItem(page, "old.png");
       await expect(dialog.getByRole("button", { name: "Restore old.png" })).toBeDisabled();
       await expect(dialog.getByRole("button", { name: "Permanently delete old.png" })).toBeDisabled();
       expect(await dialog.boundingBox()).toEqual(bounds);
       items.length = 0;
+      await closeSettingsInspector(page);
       await dialog.getByRole("button", { name: "Refresh", exact: true }).click();
       await expect(dialog.getByText("Trash is empty.")).toBeVisible();
       expect(await dialog.boundingBox()).toEqual(bounds);
-      await expect(dialog.getByRole("button", { name: "Close", exact: true })).toBeInViewport();
+      await expect(dialog.getByRole("button", { name: "Close settings", exact: true })).toBeInViewport();
       await page.screenshot({ path: `test-results/trash-${viewport.name}-${theme}-empty.png` });
     });
   }
@@ -100,11 +103,12 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
       throw new Error(`Unhandled request: ${url.pathname}`);
     });
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "Trash", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Settings", exact: true })).toBeVisible();
     await page.screenshot({ path: `test-results/trash-${viewport.name}-sidebar.png` });
-    await page.getByRole("button", { name: "Trash", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Trash" });
+    await openSettings(page, "Trash");
+    const dialog = page.locator("[data-settings-view]");
     await expect(dialog.getByRole("button", { name: "Select meeting.md" })).toBeVisible();
+    await selectTrashItem(page, "meeting.md");
     const bounds = await dialog.boundingBox();
     await expect(dialog.getByRole("region", { name: "Details for meeting.md" })).toContainText("/notes/meeting.md");
     await testInfo.attach(`trash-${viewport.name}`, { body: await page.screenshot({ path: `test-results/trash-${viewport.name}.png` }), contentType: "image/png" });
@@ -127,8 +131,9 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     expect(await dialog.boundingBox()).toEqual(bounds);
     await expect(dialog.getByRole("status")).toBeInViewport();
     current = item;
+    await closeSettingsInspector(page);
     await dialog.getByRole("button", { name: "Refresh" }).click();
-    await dialog.getByRole("button", { name: "Select meeting.md" }).click();
+    await selectTrashItem(page, "meeting.md");
     await dialog.getByRole("button", { name: "Permanently delete meeting.md" }).click();
     expect(deletionRequests).toBe(0);
     await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
@@ -167,8 +172,8 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
       throw new Error(`Unhandled request: ${url.pathname}`);
     });
     await page.goto("/");
-    await page.getByRole("button", { name: "Trash", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Trash" });
+    await openSettings(page, "Trash");
+    const dialog = page.locator("[data-settings-view]");
     const list = dialog.getByRole("list", { name: "Deleted items" });
     await expect(list.getByRole("button")).toHaveCount(50);
     const initialScrollHeight = await dialog.evaluate((element) => element.scrollHeight);
@@ -192,7 +197,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     expect(await dialog.evaluate((element) => element.scrollTop), "Wheeling at the list boundary must not move the outer dialog").toBe(outerScrollTop);
     await page.screenshot({ path: `test-results/trash-${viewport.name}-list-end.png` });
-    await dialog.getByRole("button", { name: "Select note-55.md" }).click();
+    await selectTrashItem(page, "note-55.md");
     const scrollTop = await list.evaluate((element) => element.scrollTop);
     expect(scrollTop).toBeGreaterThan(0);
     await dialog.getByRole("button", { name: "Permanently delete note-55.md" }).click();
@@ -200,7 +205,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
     expect(await list.evaluate((element) => element.scrollTop)).toBe(scrollTop);
     if (viewport.name === "desktop") {
       expect.soft(await dialog.evaluate((element) => element.scrollTop), "Selecting or confirming an item must not scroll the modal heading away").toBe(0);
-      await expect.soft(dialog.getByRole("heading", { name: "Trash", exact: true })).toBeInViewport();
+      await expect.soft(dialog.getByRole("tab", { name: "Trash", exact: true })).toBeInViewport();
     }
     await dialog.getByRole("button", { name: "Restore note-55.md" }).click();
     await expect(list.getByRole("button", { name: "Select note-55.md" })).toHaveCount(0);
@@ -240,18 +245,18 @@ for (const viewport of [{ name: "short-desktop", width: 900, height: 540 }, { na
         throw new Error(`Unhandled request: ${request.method()} ${url.pathname}`);
       });
       await page.goto("/");
-      const opener = page.getByRole("button", { name: "Trash", exact: true });
-      await opener.click();
-      const dialog = page.getByRole("dialog", { name: "Trash" });
+      const opener = page.getByRole("button", { name: "Settings", exact: true });
+      await openSettings(page, "Trash");
+      const dialog = page.locator("[data-settings-view]");
       const list = dialog.getByRole("list", { name: "Deleted items" });
       const bounds = await dialog.boundingBox();
-      await dialog.getByRole("button", { name: `Select ${documentName}` }).click();
+      await selectTrashItem(page, documentName);
       const documentDetails = dialog.getByRole("region", { name: `Details for ${documentName}`, exact: true });
-      const scrollArea = viewport.name === "short-desktop" ? documentDetails.locator("..") : dialog.getByRole("region", { name: "Trash contents", exact: true });
+      const scrollArea = dialog.locator(".ng-settings-inspector");
       await documentDetails.getByRole("heading", { name: documentName, exact: true }).hover();
       await page.mouse.wheel(0, 1200);
       await expect.poll(() => scrollArea.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-      await dialog.getByRole("button", { name: `Select ${folderName}` }).click();
+      await selectTrashItem(page, folderName);
       const folderDetails = dialog.getByRole("region", { name: `Details for ${folderName}`, exact: true });
       if (viewport.name === "short-desktop") {
         await expect.soft(folderDetails.getByRole("heading", { name: folderName, exact: true }), "A new selection must reveal its heading").toBeInViewport();
@@ -265,19 +270,19 @@ for (const viewport of [{ name: "short-desktop", width: 900, height: 540 }, { na
       await expect(cancel).toBeFocused();
       await expect(cancel).toBeInViewport();
       expect(await dialog.boundingBox()).toEqual(bounds);
-      await expect(dialog.getByRole("heading", { name: "Trash", exact: true })).toBeInViewport();
+      await expect(dialog.getByRole("tab", { name: "Trash", exact: true })).toBeInViewport();
       await testInfo.attach(`trash-${viewport.name}-${theme}-long-confirmation`, { body: await page.screenshot({ path: `test-results/trash-${viewport.name}-${theme}-long-confirmation.png` }), contentType: "image/png" });
       await cancel.click();
       await expect(purge).toBeFocused();
       await expect.soft(purge, "Cancelling confirmation must return focus to a visible action").toBeInViewport();
       expect(await dialog.boundingBox()).toEqual(bounds);
       await page.screenshot({ path: `test-results/trash-${viewport.name}-${theme}-long-details.png` });
-      await page.keyboard.press("Escape");
+      await closeSettingsInspector(page);
+      await dialog.getByRole("button", { name: "Close settings", exact: true }).click();
       await expect(dialog).toHaveCount(0);
       await expect(opener).toBeFocused();
-      await opener.click();
-      await expect(dialog.getByRole("button", { name: "Close", exact: true })).toBeFocused();
-      await expect(dialog.getByRole("heading", { name: "Trash", exact: true })).toBeInViewport();
+      await openSettings(page, "Trash");
+      await expect(dialog.getByRole("tab", { name: "Trash", exact: true })).toBeInViewport();
       expect(await dialog.evaluate((element) => element.scrollTop)).toBe(0);
       expect(await list.evaluate((element) => element.scrollTop)).toBe(0);
       expect(mutations).toBe(0);

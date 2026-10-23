@@ -1,4 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
+
+import { openSettings, chooseHistorySection, closeSettingsInspector } from "./support/settings";
 
 import type { CommandInvocation } from "../src/api/types";
 import { makeSpace } from "../src/test/fixtures";
@@ -8,17 +10,20 @@ import { usageResponse } from "./support/usage";
 const space = makeSpace();
 const emptyPage = { limit: 50, returned: 0, has_more: false, next_cursor: null };
 const operation = "PUT /api/v2/spaces/{space_id}/text/{node_id}";
+const actorName = "Daily notebook automation with a long but valid agent name";
+const spaceName = "Daily research and project decisions archive";
 const invocations: CommandInvocation[] = Array.from({ length: 51 }, (_, index) => ({
   id: 51 - index,
   invocation_id: `d78b5f11-620e-44a5-9881-${String(51 - index).padStart(12, "0")}`,
   created_at: new Date(Date.UTC(2026, 9, 11, 13, 50) - index * 60_000).toISOString(),
   actor_account_id: "38339a28-3c37-4ba4-b11f-000000000001",
+  actor: index === 0 ? { id: "38339a28-3c37-4ba4-b11f-000000000001", kind: "agent", display_name: actorName } : undefined,
   caller_kind: "agent",
   surface: "api",
   tool: "http",
   op: operation,
   purpose: index === 0 ? "회의록의 결정 사항과 후속 작업 반영" : null,
-  space_name: null,
+  space_name: index === 0 ? spaceName : null,
   input: { method: "PUT", route: operation.slice(4), path_ids: {}, body_recorded: false },
   response: { status: 200, body_recorded: false },
   outcome: "success",
@@ -71,14 +76,14 @@ for (const viewport of [
       });
 
       await page.goto("/");
-      await page.getByRole("button", { name: "History", exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: "History" });
+      await openSettings(page, "History");
+      const dialog = page.locator("[data-settings-view]");
       await expect(dialog.getByText("No changes yet.")).toBeVisible();
       const bounds = await dialog.boundingBox();
       if (!bounds) throw new Error("History dialog missing");
-      expect(bounds.y).toBeGreaterThanOrEqual(16);
-      expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height - 16);
-      const tabs = dialog.getByRole("tablist");
+      expect(bounds.y).toBeGreaterThanOrEqual(0);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
+      const tabs = dialog.getByRole("tablist", { name: "Settings sections" });
       const tabBounds = await tabs.boundingBox();
       expect(historyRequests).toHaveLength(0);
       let release!: () => void;
@@ -88,7 +93,7 @@ for (const viewport of [
         await route.fallback();
       });
       try {
-        await dialog.getByRole("tab", { name: "API", exact: true }).click();
+        await chooseHistorySection(page, "API");
         await expect(dialog.getByText("Loading…", { exact: true })).toBeVisible();
         expect(await dialog.boundingBox()).toEqual(bounds);
       } finally {
@@ -98,11 +103,39 @@ for (const viewport of [
       await expect(rows).toHaveCount(50);
       expect(await dialog.boundingBox()).toEqual(bounds);
       expect(historyRequests.map((url) => url.search)).toEqual(["?surface=api&limit=50"]);
-      const panel = dialog.locator("section");
+      const panel = dialog.getByRole("region", { name: "History", exact: true });
       expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 
-      await rows.first().getByText("Response", { exact: true }).click();
-      await expect(rows.first().locator("pre")).toContainText('"status": 200');
+      await expect(rows.first().getByText(operation, { exact: true })).toHaveCount(0);
+      await rows.first().getByRole("button").click();
+      const callDetails = dialog.getByRole("region", { name: "Details for API call 51", exact: true });
+      if (viewport.name === "mobile") {
+        const close = page.getByRole("dialog", { name: "History Inspector", exact: true }).getByRole("button", { name: "Close", exact: true });
+        const input = callDetails.locator("summary", { hasText: "Input" });
+        const response = callDetails.locator("summary", { hasText: "Response" });
+        await expect(close).toBeFocused();
+        await page.keyboard.press("Tab");
+        await expect(input).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(input.locator("..")).toHaveAttribute("open", "");
+        await page.keyboard.press("Tab");
+        await expect(response).toBeFocused();
+        await page.keyboard.press("Tab");
+        await expect(close).toBeFocused();
+        await page.keyboard.press("Shift+Tab");
+        await expect(response).toBeFocused();
+      }
+      await callDetails.getByText("Response", { exact: true }).click();
+      await expect(callDetails.locator("details").filter({ has: page.locator("summary", { hasText: "Response" }) }).locator("pre")).toContainText('"status": 200');
+      if (viewport.name === "short-desktop") {
+        const inspector = dialog.locator(".ng-settings-inspector");
+        await inspector.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+        expect(await inspector.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+        await rows.nth(1).getByRole("button").click();
+        await expect(dialog.getByRole("region", { name: "Details for API call 50", exact: true })).toBeAttached();
+        await expect.poll(() => inspector.evaluate((element) => element.scrollTop)).toBe(0);
+        await rows.first().getByRole("button").click();
+      }
       expect(await dialog.boundingBox()).toEqual(bounds);
       expect(historyRequests).toHaveLength(1);
       await testInfo.attach(`invocation-history-${viewport.name}-${theme}`, {
@@ -110,11 +143,11 @@ for (const viewport of [
         contentType: "image/png"
       });
 
-      await dialog.getByRole("tab", { name: "CLI", exact: true }).click();
+      await chooseHistorySection(page, "CLI");
       await expect(dialog.getByText("No CLI calls.")).toBeVisible();
       expect(await dialog.boundingBox()).toEqual(bounds);
       await page.screenshot({ path: `test-results/invocation-history-empty-${viewport.name}-${theme}.png` });
-      await dialog.getByRole("tab", { name: "API", exact: true }).click();
+      await chooseHistorySection(page, "API");
       await expect(rows).toHaveCount(50);
       expect(historyRequests.map((url) => url.searchParams.get("surface"))).toEqual(["api", "cli"]);
 
@@ -122,51 +155,132 @@ for (const viewport of [
       await expect(rows).toHaveCount(51);
       expect(historyRequests.at(-1)?.search).toBe("?surface=api&limit=50&cursor=api-page-2");
       await expect(dialog.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
-      expect(await dialog.getByRole("tabpanel").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-      expect(await tabs.boundingBox()).toEqual(tabBounds);
+      expect(await dialog.getByRole("tabpanel", { name: / history$/ }).evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      expect(await tabs.boundingBox()).toMatchObject({ x: tabBounds!.x, y: tabBounds!.y, height: tabBounds!.height });
       expect(await dialog.boundingBox()).toEqual(bounds);
       expect(await dialog.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
       for (const [tab, empty] of [["MCP", "No MCP calls."], ["Audit", "No audit events."], ["Jobs", "No background jobs yet."], ["Changes", "No changes yet."]]) {
-        await dialog.getByRole("tab", { name: tab, exact: true }).click();
+        await chooseHistorySection(page, tab);
         await expect(dialog.getByText(empty, { exact: true })).toBeVisible();
         expect(await dialog.boundingBox()).toEqual(bounds);
-        expect(await dialog.getByRole("tabpanel").evaluate((element) => element.scrollTop)).toBe(0);
+        if (tab !== "API") expect(await dialog.getByRole("tabpanel", { name: / history$/ }).evaluate((element) => element.scrollTop)).toBe(0);
       }
 
-      await dialog.getByRole("button", { name: "Close", exact: true }).click();
+      await chooseHistorySection(page, "API");
+      await expect(rows).toHaveCount(51);
+      if (viewport.width < 768) await page.getByRole("button", { name: "Open call details", exact: true }).click();
+      await expect(callDetails.locator("details").filter({ has: page.getByText("Response", { exact: true }) })).toHaveAttribute("open", "");
+      expect(await dialog.getByRole("tabpanel", { name: "API history", exact: true }).evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      await chooseHistorySection(page, "Changes");
+
+      await dialog.getByRole("button", { name: "Close settings", exact: true }).click();
       await page.getByRole("button", { name: "Settings", exact: true }).click();
-      const settings = page.getByRole("dialog", { name: "Settings" });
+      const settings = page.locator("[data-settings-view]");
       const settingsBounds = await settings.boundingBox();
-      for (const tab of ["Account", "Agents", "General"]) {
+      for (const tab of ["Account", "Connections", "Agents", "General"]) {
         await settings.getByRole("tab", { name: tab, exact: true }).click();
         if (tab === "Account") {
-          await expect(settings.getByText("Chrome on Linux · This session", { exact: true })).toBeAttached();
-          await expect(settings.getByText("NoteGate CLI · CLI", { exact: true })).toBeAttached();
-          await expect(settings.getByText("Remote MCP · MCP", { exact: true })).toBeAttached();
+          await expect(settings.getByRole("button", { name: "Select Chrome on Linux (this session)", exact: true })).toBeAttached();
         }
         if (tab === "Agents") {
-          await expect(settings.getByRole("button", { name: "Toggle Agent 29 details", exact: true })).toBeAttached();
-          await settings.getByRole("button", { name: "Toggle Agent 29 details", exact: true }).scrollIntoViewIfNeeded();
-          expect(await settings.getByRole("tabpanel").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+          await expect(page.getByRole("button", { name: "Toggle settings inspector" })).toBeDisabled();
+          await expect(settings.getByRole("button", { name: "Select Agent 29", exact: true })).toBeAttached();
+          await settings.getByRole("button", { name: "Select Agent 29", exact: true }).scrollIntoViewIfNeeded();
+          expect(await settings.locator("[data-settings-content]").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+          await closeSettingsInspector(page);
         } else {
           expect(await settings.getByRole("tabpanel").evaluate((element) => element.scrollTop)).toBe(0);
         }
         expect(await settings.boundingBox()).toEqual(settingsBounds);
         expect(await settings.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
-        await expect(settings.getByRole("tablist")).toBeInViewport();
-        await expect(settings.getByRole("button", { name: "Close", exact: true })).toBeInViewport();
-        if (tab === "Account") {
+        await expect(settings.getByRole("tablist", { name: "Settings sections" })).toBeInViewport();
+        await expect(settings.getByRole("button", { name: "Close settings", exact: true })).toBeInViewport();
+        if (tab === "Connections") {
           for (const [kind, client] of [["CLI", "NoteGate CLI"], ["MCP", "Remote MCP"]]) {
-            const connections = settings.getByRole("region", { name: `${kind} connections` });
-            await connections.getByRole("button", { name: `Revoke ${client}`, exact: true }).click();
-            const confirmation = connections.getByRole("group", { name: "Confirm revocation" });
+            await settings.getByRole("tab", { name: kind, exact: true }).click();
+            await settings.getByRole("button", { name: `Select ${client}`, exact: true }).click();
+            await settings.getByRole("button", { name: `Revoke ${client}`, exact: true }).click();
+            const confirmation = settings.getByRole("group", { name: "Confirm revocation" });
             await expect(confirmation).toBeFocused();
             await expect(confirmation.getByRole("button", { name: "Confirm", exact: true })).toBeInViewport();
             await page.screenshot({ path: `test-results/dialog-auth-${kind.toLowerCase()}-${viewport.name}-${theme}.png` });
             await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+            await closeSettingsInspector(page);
           }
         }
       }
+
+      // Returning after query GC must restore scroll once the list loads again.
+      await settings.getByRole("tab", { name: "History", exact: true }).click();
+      await chooseHistorySection(page, "API");
+      const history = settings.getByRole("tabpanel", { name: "API history", exact: true });
+      await expect(rows).toHaveCount(51);
+      await history.evaluate((element) => { element.scrollTop = 900; });
+      await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(900);
+      await page.clock.install();
+      await settings.getByRole("tab", { name: "General", exact: true }).click();
+      await page.clock.fastForward(301_000);
+      await settings.getByRole("tab", { name: "History", exact: true }).click();
+      await expect(rows).toHaveCount(50);
+      await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(900);
+
+      if (viewport.name === "mobile") {
+        await closeSettingsInspector(page);
+        await page.setViewportSize({ width: 320, height: 844 });
+        const row = rows.first();
+        await row.scrollIntoViewIfNeeded();
+        const separators = await textRectangles(row.getByText("·", { exact: true }));
+        expect(separators).toHaveLength(2);
+        const groups = await Promise.all([`${actorName} (Agent)`, "Success"].map((label) => textRectangles(row.getByText(label, { exact: true }))));
+        for (const [index, group] of groups.entries()) {
+          expect.soft(group.some((rect) => rect.top < separators[index].bottom && rect.bottom > separators[index].top),
+            "metadata separators share a line with their following value").toBe(true);
+        }
+
+        const time = await row.locator("time").evaluate((element) => {
+          const box = (rect: DOMRect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom });
+          const text = Array.from(element.querySelectorAll("span")).find((span) => span.getBoundingClientRect().width > 0)!;
+          const range = document.createRange();
+          range.selectNodeContents(text);
+          const button = element.closest("button")!;
+          const rect = button.getBoundingClientRect();
+          const style = getComputedStyle(button);
+          return {
+            icon: box(element.querySelector("svg")!.getBoundingClientRect()),
+            text: Array.from(range.getClientRects(), box),
+            content: {
+              left: rect.left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft),
+              right: rect.right - Number.parseFloat(style.borderRightWidth) - Number.parseFloat(style.paddingRight),
+              top: rect.top + Number.parseFloat(style.borderTopWidth) + Number.parseFloat(style.paddingTop),
+              bottom: rect.bottom - Number.parseFloat(style.borderBottomWidth) - Number.parseFloat(style.paddingBottom)
+            }
+          };
+        });
+        expect.soft(time.text, "event time remains on one line").toHaveLength(1);
+        for (const rect of time.text) {
+          expect.soft(rect.top < time.icon.bottom && rect.bottom > time.icon.top,
+            "event time icon and text share a line").toBe(true);
+        }
+        for (const rect of [time.icon, ...time.text]) {
+          expect.soft(rect.left, "event time stays inside the row").toBeGreaterThanOrEqual(time.content.left - 0.5);
+          expect.soft(rect.right, "event time stays inside the row").toBeLessThanOrEqual(time.content.right + 0.5);
+          expect.soft(rect.top, "event time stays inside the row").toBeGreaterThanOrEqual(time.content.top - 0.5);
+          expect.soft(rect.bottom, "event time stays inside the row").toBeLessThanOrEqual(time.content.bottom + 0.5);
+        }
+        await testInfo.attach("history-row-geometry-320", {
+          body: JSON.stringify({ separators, groups, time }, null, 2), contentType: "application/json"
+        });
+      }
     });
   }
+}
+
+async function textRectangles(locator: Locator) {
+  return locator.evaluateAll((elements) => elements.flatMap((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return Array.from(range.getClientRects(), (rect) => ({
+      left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom
+    }));
+  }));
 }
