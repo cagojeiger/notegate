@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +18,7 @@ function AccessHarness({ onSignOut }: { onSignOut: () => void }) {
   </SettingsViewSession>;
 }
 
-function setup(fail = false, extraSessions = 0) {
+function setup(fail = false, extraSessions = 0, beforeDelete?: () => Promise<void>) {
   let failed = fail;
   const sessions = [
     { ...dates, id: "current", current: true, client_environment: "Chrome on macOS", last_used_at: null },
@@ -34,6 +34,7 @@ function setup(fail = false, extraSessions = 0) {
     const path = String(input);
     if (init?.method === "DELETE") {
       requests.push(path);
+      await beforeDelete?.();
       if (failed) return new Response(JSON.stringify({ error: { code: "unavailable", message: "Unavailable" } }), { status: 503 });
       if (path.endsWith("/oauth-grants/mcp")) grants = grants.filter((grant) => grant.id !== "mcp");
       const kind = new URL(path, "https://preview.invalid").searchParams.get("kind");
@@ -122,16 +123,31 @@ describe("AuthAccessManager", () => {
   });
 
   it("preserves the list after a failed revocation and allows an explicit retry", async () => {
-    const { user, onSignOut, recover } = setup(true);
+    let release: () => void = () => undefined;
+    const response = new Promise<void>((resolve) => { release = resolve; });
+    const { user, requests, onSignOut, recover } = setup(true, 0, () => response);
     await user.click(await screen.findByRole("tab", { name: /^MCP/ }));
     await user.click(await screen.findByRole("button", { name: "Revoke Remote MCP" }));
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    await user.click(confirm);
+    expect(screen.getByRole("status")).toHaveTextContent("Revoking access…");
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Select Remote MCP" })).toBeDisabled();
+    expect(requests).toEqual(["/api/v1/me/oauth-grants/mcp"]);
+    await act(async () => { release(); });
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not revoke access");
     expect(screen.getByText("Remote MCP · MCP")).toBeInTheDocument();
     expect(onSignOut).not.toHaveBeenCalled();
     recover();
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(screen.queryByText("Remote MCP · MCP")).not.toBeInTheDocument());
+    expect(await screen.findByText("Access revoked.")).toHaveAttribute("role", "status");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /^CLI/ }));
+    expect(await screen.findByText("NoteGate CLI · CLI")).toBeInTheDocument();
+    expect(requests).toEqual(["/api/v1/me/oauth-grants/mcp", "/api/v1/me/oauth-grants/mcp"]);
     expect(onSignOut).not.toHaveBeenCalled();
   });
 });

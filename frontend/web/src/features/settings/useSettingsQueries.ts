@@ -38,7 +38,6 @@ export function useDeleteAgentMutation() {
   return useSettingsMutation("delete-agent", {
     meta: { silentError: true },
     mutationFn: (id: string) => deleteAgent(client, id),
-    meta: { silentError: true },
     onSuccess: () => {
       invalidateAgentsList(queryClient);
       invalidateAuditEvents(queryClient);
@@ -174,7 +173,6 @@ export function useRevokeApiKeyMutation(queryKey: QueryKey, revoke: (id: string)
   return useSettingsMutation("revoke-api-key", {
     meta: { silentError: true },
     mutationFn: revoke,
-    meta: { silentError: true },
     onSuccess: () => {
       onRevoked();
       void queryClient.invalidateQueries({ queryKey });

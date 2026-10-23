@@ -4,8 +4,7 @@ import { useCallback, useRef, useState } from "react";
 
 import type { ApiKeyListResponse, MintedKey } from "../../api/keys";
 import { copyText } from "../../shared/lib/clipboard";
-import { AddButton, Button, Card, EmptyState, IconButton, SelectField, TextField } from "../../shared/ui";
-import { useUiStore } from "../../stores/uiStore";
+import { AddButton, Button, Card, IconButton, Notice, SelectField, TextField } from "../../shared/ui";
 import { useApiKeysQuery, useCreateApiKeyMutation, useRevokeApiKeyMutation } from "./useSettingsQueries";
 
 function expiryOptions(maxTtlDays: number) {
@@ -24,12 +23,12 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
   emptyLabel?: string;
   maxTtlDays?: number;
 }) {
-  const showToast = useUiStore((state) => state.showToast);
   const keysQuery = useApiKeysQuery(queryKey, list);
   const [name, setName] = useState("");
   const [days, setDays] = useState(Math.min(30, maxTtlDays));
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<{ keyId: string; copied: boolean } | null>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const returnToAdd = () => { requestAnimationFrame(() => addButtonRef.current?.focus()); };
 
@@ -51,42 +50,48 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
 
   function createKey() {
     if (!canCreate) return;
+    setCopyFeedback(null);
     createMutation.mutate(createInput());
   }
 
   async function copyCreatedToken() {
     if (!created) return;
-    showToast((await copyText(created.token)) ? "Copied" : "Could not copy token");
+    setCopyFeedback({ keyId: created.id, copied: await copyText(created.token) });
   }
 
   const keys = keysQuery.data?.keys ?? [];
   return (
     <div className="space-y-4">
-      {createMutation.isPending ? <p role="status" className="text-sm text-muted">Creating API key…</p> : null}
-      {createMutation.isError ? <p role="alert" className="text-sm text-danger">{createMutation.error?.message || "Could not create API key. Try again."}</p> : null}
-      {revokeMutation.isPending ? <p role="status" className="text-sm text-muted">Revoking API key…</p> : null}
-      {revokeMutation.error ? <p role="alert" className="text-sm text-danger">{revokeMutation.error.message}</p> : null}
+      {createMutation.isPending ? <Notice role="status">Creating API key…</Notice> : null}
+      {createMutation.isError ? <Notice tone="danger" role="alert">{createMutation.error?.message || "Could not create API key. Try again."}</Notice> : null}
+      {revokeMutation.isPending ? <Notice role="status">Revoking API key…</Notice> : null}
+      {revokeMutation.error ? <Notice tone="danger" role="alert">{revokeMutation.error.message}</Notice> : null}
+      {revokeMutation.isSuccess ? <Notice tone="success" role="status">API key revoked.</Notice> : null}
       {created ? (
-        <Card tone="success">
-          <div className="break-words text-sm font-semibold text-text">Key “{created.name}” created</div>
-          <p className="mt-1 text-xs text-muted">Copy it before selecting Done. You cannot retrieve it afterwards.</p>
-          <div ref={focusCreatedToken} className="mt-3 flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-workbench-surface border border-border bg-bg px-3 py-2 font-mono text-xs">{created.token}</code>
-            <IconButton label="Copy token" onClick={() => { void copyCreatedToken(); }}><Copy size={15} /></IconButton>
-          </div>
-          <div className="mt-3 text-right"><Button secondary onClick={() => { createMutation.reset(); setName(""); setAdding(false); returnToAdd(); }}>Done</Button></div>
-        </Card>
+        <div className="space-y-3">
+          <Notice tone="success" role="status" className="break-words" title={`Key “${created.name}” created`}>
+            <p>Copy it before selecting Done. You cannot retrieve it afterwards.</p>
+          </Notice>
+          <Card>
+            <div ref={focusCreatedToken} className="flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded-workbench-surface border border-border bg-bg px-3 py-2 font-mono text-xs">{created.token}</code>
+              <IconButton label="Copy token" onClick={() => { void copyCreatedToken(); }}><Copy size={15} /></IconButton>
+            </div>
+            {copyFeedback?.keyId === created.id ? <Notice className="mt-3" tone={copyFeedback.copied ? "success" : "danger"} role={copyFeedback.copied ? "status" : "alert"}>{copyFeedback.copied ? "Token copied." : "Could not copy token. Select and copy it manually before closing this view."}</Notice> : null}
+            <div className="mt-3 text-right"><Button secondary onClick={() => { createMutation.reset(); setCopyFeedback(null); setName(""); setAdding(false); returnToAdd(); }}>Done</Button></div>
+          </Card>
+        </div>
       ) : null}
 
       {keysQuery.isLoading ? (
-        <div className="text-sm text-muted">Loading…</div>
+        <Notice role="status">Loading…</Notice>
       ) : keysQuery.isError ? (
-        <Card tone="danger" padding="sm" className="flex flex-wrap items-center justify-between gap-2 text-workbench">
-          <p role="alert" className="text-danger">Could not load API keys.</p>
+        <Notice tone="danger" role="alert" className="flex flex-wrap items-center justify-between gap-2">
+          <p>Could not load API keys.</p>
           <Button size="sm" secondary aria-label="Retry API keys" disabled={keysQuery.isFetching} onClick={() => { void keysQuery.refetch(); }}>Retry</Button>
-        </Card>
+        </Notice>
       ) : keys.length === 0 ? (
-        <EmptyState>{emptyLabel}</EmptyState>
+        <Notice>{emptyLabel}</Notice>
       ) : (
         <Card padding="none" as="ul" className="divide-y divide-seam">
           {keys.map((key) => (
@@ -98,7 +103,7 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
               </div>
               {(revokingId ?? confirmId) === key.id ? (
                 <div className="ml-auto flex shrink-0 items-center gap-2">
-                  <Button size="sm" variant="danger" disabled={revokeMutation.isPending} onClick={() => revokeMutation.mutate(key.id)}>Confirm</Button>
+                  <Button size="sm" variant="danger" disabled={revokeMutation.isPending} aria-busy={revokeMutation.isPending} onClick={() => revokeMutation.mutate(key.id)}>Confirm</Button>
                   <Button size="sm" secondary disabled={revokeMutation.isPending} onClick={() => setConfirmId(null)}>Cancel</Button>
                 </div>
               ) : (
@@ -122,7 +127,7 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
           {options.map((option) => <option key={option.days} value={option.days}>{option.label}</option>)}
         </SelectField>
         <div className="flex gap-2">
-          <Button type="submit" disabled={!canCreate}><Plus size={15} /> Create</Button>
+          <Button type="submit" disabled={!canCreate} aria-busy={createMutation.isPending}><Plus size={15} /> Create</Button>
           <Button secondary disabled={createMutation.isPending} onClick={() => { setAdding(false); setName(""); returnToAdd(); }}>Cancel</Button>
         </div>
       </form> : <AddButton label="Add API key" ref={addButtonRef} disabled={createMutation.isPending || !!created} onClick={() => setAdding(true)} />}

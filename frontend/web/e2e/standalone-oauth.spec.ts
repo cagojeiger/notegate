@@ -22,7 +22,7 @@ async function captureAuthViews(page: Page, name: string) {
         const foreground = await approveButton.evaluate((element) => getComputedStyle(element).color);
         await approveButton.hover();
         await expect.poll(() => approveButton.evaluate((element) => getComputedStyle(element).color)).toBe(foreground);
-        await page.screenshot({ path: `test-results/browser-performance/${name}-${theme}-approve-hover.png`, fullPage: true });
+        await page.screenshot({ path: `test-results/browser-functional/${name}-${theme}-approve-hover.png`, fullPage: true });
         await page.locator("#auth-theme").hover();
       }
       if (device === "mobile") {

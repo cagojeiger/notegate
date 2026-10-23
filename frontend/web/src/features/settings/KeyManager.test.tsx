@@ -117,7 +117,7 @@ describe("KeyManager", () => {
     first.unmount();
 
     const otherAgent = renderKeyManager({ queryClient, queryKey: ["agents", "agent-b", "keys"], create });
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Creating API key…")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add API key" })).toBeEnabled();
     await act(async () => { finish(mintedKey); });
     expect(screen.queryByText(mintedKey.token)).not.toBeInTheDocument();
@@ -144,6 +144,7 @@ describe("KeyManager", () => {
     await user.click(confirm);
 
     expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("aria-busy", "true");
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Revoke other-key" })).toBeDisabled();
     await user.click(confirm);
@@ -309,11 +310,13 @@ describe("KeyManager", () => {
     const user = userEvent.setup();
     renderKeyManager({ create });
     await screen.findByText("No active keys.");
+    await user.click(screen.getByRole("button", { name: "Add API key" }));
     await user.type(screen.getByLabelText("Name"), "ci-key");
     await user.click(screen.getByRole("button", { name: "Create" }));
     expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create" })).toHaveAttribute("aria-busy", "true");
     await act(async () => { rejectCreation(new Error("Unavailable")); });
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not create this key.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unavailable");
     expect(screen.getByLabelText("Name")).toHaveValue("ci-key");
     expect(screen.queryByRole("button", { name: "Copy token" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Create" }));
@@ -329,15 +332,18 @@ describe("KeyManager", () => {
     vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new Error("Denied")).mockResolvedValue(undefined);
     renderKeyManager({ create });
     await screen.findByText("No active keys.");
+    await user.click(screen.getByRole("button", { name: "Add API key" }));
     await user.type(screen.getByLabelText("Name"), "ci-key");
     await user.click(screen.getByRole("button", { name: "Create" }));
     await user.click(await screen.findByRole("button", { name: "Copy token" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not copy token.");
     expect(screen.getByText(token)).toBeInTheDocument();
     expect(screen.getByRole("alert")).not.toHaveTextContent(token);
-    expect(screen.getByRole("status")).not.toHaveTextContent(token);
+    expect(screen.getByText(token).closest('[role="status"], [role="alert"], [aria-live]')).toBeNull();
+    for (const announcement of screen.getAllByRole("status")) expect(announcement).not.toHaveTextContent(token);
     await user.click(screen.getByRole("button", { name: "Copy token" }));
     expect(await screen.findByText("Token copied.")).toHaveAttribute("role", "status");
+    for (const announcement of screen.getAllByRole("status")) expect(announcement).not.toHaveTextContent(token);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Done" }));
     expect(screen.queryByText(token)).not.toBeInTheDocument();
