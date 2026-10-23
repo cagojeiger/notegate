@@ -235,7 +235,34 @@ DB 없는 단위 검증에는 실행·저장 의존성을 명시적으로 주입
 브라우저 CI는 `.only`와 재시도로 통과한 flaky test도 실패로 처리한다. 재시도는 진단을
 위해 한 번 유지한다. 실제 dashboard smoke는 테스트 세션이 없으면 건너뛰지 않고 실패한다.
 
-`make frontend-check`는 dependency audit, theme contrast, typecheck, lint, unit test와 production build를 실행한다.
+`make frontend-check`는 dependency audit, theme contrast, typecheck, lint, unit test와 production build를 실행하고, 생성한 번들의 크기 예산을 검사한다.
+
+### CI 실행 경계
+
+| 시점 | 실행 범위 |
+| --- | --- |
+| PR·main CI | Rust 단위·외부 의존성 테스트, Web 검사·번들 크기 예산, browser 기능·접근성 검증, 실제 API의 Workbench·OAuth 계약 |
+| PR | 의존성 변경 검사, RustSec, production 이미지 빌드·취약점 검사, 관련 변경의 DAST 파일럿 |
+| 실제 릴리즈 게시 성공 후·수동 | Workbench 성능 3회 반복, Lighthouse 3회, 텍스트 쓰기 기준 버전 비교 |
+| 정기 보안 검사 | 최신 advisory에 대한 의존성·발행 이미지 검사 |
+
+Web job이 manifest를 포함한 production `dist`를 한 번 만들고, 같은 CI 실행의 Browser E2E가
+`web-dist` artifact를 받아 API의 정적 파일 서빙으로 live Workbench를 검증한다. 기존 mock 기반
+E2E는 Vite 개발 서버를 사용한다. 릴리즈 측정은 성공한 main CI의 run ID와 commit SHA가
+일치하는 artifact를 사용하며, 수동 측정은 선택한 commit에서 빌드한다.
+
+`playwright.functional.config.ts`의 Workbench는 한 번 실행하고, standalone OAuth 4개 검증은
+별도 identity로 실행한다. 각 project 직전에 identity를 생성해 이력·휴지통 fixture를 격리하고,
+5분짜리 일회용 OAuth 동의를 재사용하지 않는다. 이 검증은 trace와 retry를 끈다.
+
+`Browser Performance`와 `Text Write Performance`는 PR에서 실행하지 않는다. Release의
+`should_release` 판정과 실제 게시 성공을 모두 확인한 뒤, 게시한 commit SHA로 호출한다.
+텍스트 쓰기는 직전 실제 공개 릴리즈의 고정 SHA와 비교하며, 기준 버전이 없으면 비교 불가를
+명시한다. 측정 실패는 이미 게시한 릴리즈를 되돌리지 않는다.
+
+빌드한 번들만 검사하려면 `pnpm --filter web check:preview-bundle`, 같은 번들로 Lighthouse를
+실행하려면 `pnpm --filter web test:lighthouse:built`를 사용한다. 기존 `test:lighthouse` 명령은
+로컬 편의를 위해 빌드부터 실행한다.
 
 ### 동적 보안 테스트 파일럿
 

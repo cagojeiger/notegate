@@ -4,6 +4,7 @@ const baseURL = process.env.NOTEGATE_WEB_BASE_URL ?? "http://127.0.0.1:5173";
 
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: ["**/standalone-oauth.spec.ts", "**/workbench-live.spec.ts"],
   timeout: 30_000,
   forbidOnly: !!process.env.CI,
   failOnFlakyTests: !!process.env.CI,

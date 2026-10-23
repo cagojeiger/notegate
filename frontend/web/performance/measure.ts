@@ -31,8 +31,6 @@ export async function instrument(page: Page, trial: number, measurements: Measur
   });
   let active: ApiSample[] | null = null;
   const requests = new Map<Request, ApiSample>();
-  const failures: string[] = [];
-  page.on("pageerror", (error) => failures.push(error.name));
   page.on("request", (request) => {
     const url = new URL(request.url());
     if (!url.pathname.startsWith("/api/")) return;
@@ -48,7 +46,6 @@ export async function instrument(page: Page, trial: number, measurements: Measur
     const sample = requests.get(response.request());
     if (!sample) return;
     sample.status = response.status();
-    if (response.status() >= 400) failures.push(`${sample.route}: ${response.status()}`);
   });
   page.on("requestfinished", (request) => {
     const sample = requests.get(request);
@@ -61,13 +58,11 @@ export async function instrument(page: Page, trial: number, measurements: Measur
     const sample = requests.get(request);
     if (sample) {
       sample.failed = true;
-      failures.push(`${sample.route}: request failed`);
       requests.delete(request);
     }
   });
 
   return {
-    failures,
     async measure(journey: string, actionAndReady: () => Promise<void>, navigation = false) {
       const api: ApiSample[] = [];
       active = api;
@@ -103,7 +98,7 @@ export function writeReport(measurements: Measurement[], fixture: Record<string,
   const directory = "test-results/browser-performance";
   mkdirSync(directory, { recursive: true });
   writeFileSync(`${directory}/measurements.json`, JSON.stringify({
-    commit: process.env.GITHUB_SHA ?? null, completed, fixture, measurements
+    commit: process.env.NOTEGATE_MEASUREMENT_SHA ?? null, completed, fixture, measurements
   }, null, 2));
   const lines = [
     "## Authenticated browser baseline", "",

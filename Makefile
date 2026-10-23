@@ -40,6 +40,7 @@ frontend-check:
 	pnpm --filter web lint
 	pnpm --filter web test
 	pnpm --filter web build
+	pnpm --filter web check:preview-bundle
 
 version-check:
 	python3 deploy/ci/check-versions.py
@@ -49,6 +50,7 @@ workflow-check: version-check
 	actionlint
 	find deploy frontend -type f -name '*.sh' -print0 | xargs -0 shellcheck
 	deploy/ci/resolve-release-version.test.sh
+	python3 -B deploy/ci/resolve-text-write-baseline.test.py
 	deploy/ci/test-rust.test.sh
 	python3 -B deploy/ci/rust-test-suites.test.py
 
