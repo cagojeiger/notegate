@@ -1,0 +1,361 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full 40-character commit SHA on notegate-core main
+        required: true
+        type: string
+      publish:
+        description: Build, scan, and publish this release (false only checks the plan)
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: cagojeiger/notegate
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+  DOCKER_BUILD_SUMMARY: "false"
+
+jobs:
+  version:
+    name: Validate source and release plan
+    if: github.repository == 'cagojeiger/notegate' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      source_sha: ${{ steps.plan.outputs.source_sha }}
+      ci_run_id: ${{ steps.plan.outputs.ci_run_id }}
+      should_release: ${{ steps.plan.outputs.should_release }}
+    steps:
+      - name: Checkout trusted distribution scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Check exact source, CI, and release version
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PUBLISH: ${{ inputs.publish }}
+        run: python3 .github/scripts/release_gate.py
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: version
+    if: needs.version.outputs.should_release == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - name: Checkout exact core source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cagojeiger/notegate-core
+          ref: ${{ needs.version.outputs.source_sha }}
+          path: source
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: source
+          file: source/deploy/docker/web.Dockerfile
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        env:
+          BUILD_DIGEST: ${{ steps.build.outputs.digest }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          [[ "$BUILD_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          mkdir -p /tmp/digests
+          printf '%s\n' "$BUILD_DIGEST" > "/tmp/digests/$ARCH"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 1
+
+  scan:
+    name: Trivy image gate linux/${{ matrix.arch }}
+    needs: [version, build]
+    if: needs.version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Download image digest
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests
+
+      - name: Select immutable image
+        id: image
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          digest="$(cat "/tmp/digests/$ARCH")"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "ref=${REGISTRY}/${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Report high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/${{ matrix.arch }}
+          TRIVY_IMAGE_SRC: remote
+        with:
+          version: v0.74.0
+          image-ref: ${{ steps.image.outputs.ref }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          format: json
+          output: trivy-linux-${{ matrix.arch }}.json
+          exit-code: "0"
+          ignore-unfixed: false
+          timeout: 10m
+
+      - name: Prepare SARIF and summary
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          trivy convert --format sarif --output "trivy-linux-$ARCH.sarif" "trivy-linux-$ARCH.json"
+          {
+            echo '### HIGH and CRITICAL findings, including unfixed'
+            jq -r '[.Results[]?.Vulnerabilities[]?] | group_by(.Severity)[] | "- \(.[0].Severity): \(length)"' "trivy-linux-$ARCH.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain scan evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-trivy-${{ matrix.arch }}
+          path: |
+            trivy-linux-${{ matrix.arch }}.json
+            trivy-linux-${{ matrix.arch }}.sarif
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish security findings
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: trivy-linux-${{ matrix.arch }}.sarif
+          category: trivy-release-linux-${{ matrix.arch }}
+
+      - name: Block fixable critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/${{ matrix.arch }}
+          TRIVY_IMAGE_SRC: remote
+        with:
+          version: v0.74.0
+          image-ref: ${{ steps.image.outputs.ref }}
+          scanners: vuln
+          severity: CRITICAL
+          format: table
+          ignore-unfixed: true
+          exit-code: "1"
+          timeout: 10m
+
+  cli:
+    name: Build CLI ${{ matrix.target }}
+    needs: version
+    if: needs.version.outputs.should_release == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-apple-darwin
+            runner: macos-15
+    steps:
+      - name: Checkout exact core source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cagojeiger/notegate-core
+          ref: ${{ needs.version.outputs.source_sha }}
+          path: source
+          persist-credentials: false
+
+      - name: Add Rust target
+        env:
+          TARGET: ${{ matrix.target }}
+        run: rustup target add "$TARGET"
+
+      - name: Build notegate-cli
+        working-directory: source
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --locked --release -p notegate-cli --target "$TARGET"
+
+      - name: Smoke test and package notegate-cli
+        working-directory: source
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$("target/$TARGET/release/notegate-cli" --version)" = "notegate-cli $VERSION"
+          asset="notegate-cli-$TARGET"
+          mkdir -p /tmp/cli-assets
+          cp "target/$TARGET/release/notegate-cli" "/tmp/cli-assets/$asset"
+          chmod 755 "/tmp/cli-assets/$asset"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "/tmp/cli-assets/$asset" | awk '{print $1}' > "/tmp/cli-assets/$asset.sha256"
+          else
+            shasum -a 256 "/tmp/cli-assets/$asset" | awk '{print $1}' > "/tmp/cli-assets/$asset.sha256"
+          fi
+
+      - name: Upload CLI assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cli-${{ matrix.target }}
+          path: /tmp/cli-assets/*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish verified release
+    needs: [version, build, scan, cli]
+    if: needs.version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout trusted distribution scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Checkout installer data without executing core scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cagojeiger/notegate-core
+          ref: ${{ needs.version.outputs.source_sha }}
+          path: source
+          sparse-checkout: deploy/cli/install.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Download amd64 digest
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: digest-amd64
+          path: /tmp/release-inputs/digests
+      - name: Download arm64 digest
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: digest-arm64
+          path: /tmp/release-inputs/digests
+      - name: Download Linux x64 CLI
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cli-x86_64-unknown-linux-gnu
+          path: /tmp/release-inputs/cli
+      - name: Download Linux arm64 CLI
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cli-aarch64-unknown-linux-gnu
+          path: /tmp/release-inputs/cli
+      - name: Download macOS x64 CLI
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cli-x86_64-apple-darwin
+          path: /tmp/release-inputs/cli
+      - name: Download macOS arm64 CLI
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cli-aarch64-apple-darwin
+          path: /tmp/release-inputs/cli
+      - name: Download amd64 scan
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-trivy-amd64
+          path: /tmp/release-inputs/scans
+      - name: Download arm64 scan
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-trivy-arm64
+          path: /tmp/release-inputs/scans
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Validate, stage, verify, and publish approved assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.version.outputs.source_sha }}
+          SOURCE_CI_RUN_ID: ${{ needs.version.outputs.ci_run_id }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PUBLISH: "true"
+        run: python3 .github/scripts/publish_release.py
