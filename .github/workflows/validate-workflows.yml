@@ -1,0 +1,54 @@
+name: Validate release infrastructure
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Keep application source out of the distribution repository
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          files = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
+          allowed = {"LICENSE", "README.md", ".gitignore", "SECURITY.md"}
+          unexpected = [path for path in files if path and path not in allowed and not path.startswith(".github/")]
+          if unexpected:
+              raise SystemExit("Unexpected distribution paths: " + ", ".join(unexpected))
+          PY
+
+      - name: Validate workflow syntax with pinned actionlint
+        run: |
+          curl -fsSL -o /tmp/actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/actionlint.tar.gz' | sha256sum --check
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          /tmp/actionlint -color
+
+      - name: Test release validation and publication boundaries
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      - name: Verify public core metadata access with this repository token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0, ".github/scripts")
+          import release_gate as gate
+          repository = gate.api(f"repos/{gate.SOURCE_REPOSITORY}")
+          assert repository["id"] == gate.SOURCE_REPOSITORY_ID and repository["private"] is False
+          runs = gate.api(f"repos/{gate.SOURCE_REPOSITORY}/actions/workflows/{gate.CI_WORKFLOW_ID}/runs?per_page=1")
+          assert runs["workflow_runs"], "Core CI is not visible to the distribution workflow"
+          print("Public core identity and CI metadata are readable; no source checkout or publication")
+          PY
