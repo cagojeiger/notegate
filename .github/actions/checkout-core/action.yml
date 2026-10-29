@@ -1,8 +1,14 @@
-name: Checkout exact public core source
-description: Anonymous checkout of a gate-validated commit from the fixed core repository
+name: Checkout exact private core source
+description: Checkout a gate-validated commit from the fixed core repository
 inputs:
   sha:
     description: Full gate-validated core commit SHA
+    required: true
+  client-id:
+    description: GitHub App client ID with read-only core contents access
+    required: true
+  private-key:
+    description: GitHub App private key
     required: true
   path:
     description: Relative checkout directory
@@ -13,27 +19,78 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Fetch exact source without credentials
+    - name: Validate checkout inputs
       shell: bash
       env:
         SOURCE_SHA: ${{ inputs.sha }}
         SOURCE_PATH: ${{ inputs.path }}
         FETCH_DEPTH: ${{ inputs.fetch-depth }}
+        APP_CLIENT_ID: ${{ inputs.client-id }}
+        APP_PRIVATE_KEY: ${{ inputs.private-key }}
       run: |
         set -euo pipefail
         [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
         [[ "$FETCH_DEPTH" =~ ^(0|[1-9][0-9]*)$ ]]
         [[ "$SOURCE_PATH" =~ ^[a-zA-Z0-9][a-zA-Z0-9/_-]*$ ]]
+        test ! -e "$GITHUB_WORKSPACE/$SOURCE_PATH"
+        test -n "$APP_CLIENT_ID"
+        test -n "$APP_PRIVATE_KEY"
+    - name: Create read-only core token
+      id: token
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+      with:
+        client-id: ${{ inputs.client-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: cagojeiger
+        repositories: notegate-core
+        permission-contents: read
+        skip-token-revoke: true
+    - name: Fetch exact source
+      shell: bash
+      env:
+        SOURCE_SHA: ${{ inputs.sha }}
+        SOURCE_PATH: ${{ inputs.path }}
+        FETCH_DEPTH: ${{ inputs.fetch-depth }}
+        CORE_TOKEN: ${{ steps.token.outputs.token }}
+      run: |
+        set -euo pipefail
         target="$GITHUB_WORKSPACE/$SOURCE_PATH"
-        test ! -e "$target"
         git init --quiet "$target"
         git -C "$target" remote add origin https://github.com/cagojeiger/notegate-core.git
+        export GIT_CONFIG_COUNT=3
+        export GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
+        export GIT_CONFIG_KEY_1=http.extraHeader GIT_CONFIG_VALUE_1=
+        export GIT_CONFIG_KEY_2=http.https://github.com/.extraheader
+        GIT_CONFIG_VALUE_2="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$CORE_TOKEN" | base64 | tr -d '\n')"
+        export GIT_CONFIG_VALUE_2
+        printf '::add-mask::%s\n' "${GIT_CONFIG_VALUE_2#AUTHORIZATION: basic }"
         if [ "$FETCH_DEPTH" = 0 ]; then
-          git -c credential.helper= -c http.extraHeader= -C "$target" fetch --no-recurse-submodules origin \
+          git -C "$target" fetch --no-recurse-submodules origin \
             'refs/heads/*:refs/remotes/origin/*' 'refs/tags/*:refs/tags/*'
-          git -c credential.helper= -c http.extraHeader= -C "$target" fetch --no-tags origin "$SOURCE_SHA"
+          git -C "$target" fetch --no-tags origin "$SOURCE_SHA"
         else
-          git -c credential.helper= -c http.extraHeader= -C "$target" fetch --no-tags --depth "$FETCH_DEPTH" origin "$SOURCE_SHA"
+          git -C "$target" fetch --no-tags --depth "$FETCH_DEPTH" origin "$SOURCE_SHA"
         fi
+        unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1 GIT_CONFIG_KEY_2 GIT_CONFIG_VALUE_2 CORE_TOKEN
         git -C "$target" checkout --quiet --detach "$SOURCE_SHA"
         test "$(git -C "$target" rev-parse HEAD)" = "$SOURCE_SHA"
+    - name: Revoke core token
+      if: ${{ always() && steps.token.outputs.token != '' }}
+      shell: bash
+      env:
+        CORE_TOKEN: ${{ steps.token.outputs.token }}
+      run: |
+        set -euo pipefail
+        status=$(printf 'header = "Authorization: Bearer %s"\n' "$CORE_TOKEN" | \
+          curl --silent --show-error --connect-timeout 10 --max-time 30 --output /dev/null --write-out '%{http_code}' \
+            --request DELETE --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' --config - \
+            https://api.github.com/installation/token)
+        test "$status" = 204
+    - name: Register trusted private-output shell
+      shell: bash
+      env:
+        CONTROL_SCRIPTS: ${{ github.action_path }}/../../scripts
+      run: |
+        test -x "$CONTROL_SCRIPTS/private_run.sh"
+        printf '%s\n' "$CONTROL_SCRIPTS" >> "$GITHUB_PATH"

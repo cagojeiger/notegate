@@ -76,12 +76,41 @@ are not automatically connected.
 ## CI execution
 
 Core dispatches CI, security scans, and manual performance measurements to this
-repository for a validated core run and exact commit. Public workers fetch core
-anonymously and do not receive the core read App credentials. They do not use
-Actions caches. A private core is not supported by these CI workers and fails
-closed; private-source credentials and public log and artifact handling require
-separate design and verification. Browser performance can reuse a validated public
-CI frontend artifact or build one for the selected commit.
+repository for a validated core run and exact commit. Core request/result jobs use
+the repository-scoped `notegate-core-wait` self-hosted runner scale set; dispatch
+and source-tag recording use `notegate-core-control`. Keeping dispatch on a separate
+scale set prevents waiting jobs from occupying every dispatcher runner. Long builds,
+tests, scans and publication use standard public GitHub-hosted runners here.
+Dependabot update jobs remain in core. Public workers do not use Actions caches.
+Browser performance can reuse a validated public CI frontend artifact or build one
+for the selected commit.
+
+PR execution is restricted to branches in core authored by the repository owner
+or the official Dependabot account. Forks and other authors fail closed. This is
+a trusted-source policy, not an untrusted-contributor sandbox. The gate validates
+the current PR head, base, synthetic merge, source run and attempt before checkout.
+
+Source Security runs Semgrep CE with pinned local Python/JavaScript/TypeScript
+security-audit rules and a Gitleaks current-tree scan. Only aggregate outcomes and
+rule identifiers are public; raw scanner output is not uploaded. RustSec, npm audit,
+Trivy and isolated DAST remain separate checks. These scanners do not reproduce
+CodeQL's analysis or GitHub Dependency Review's dependency-diff interface and policy.
+Native Dependency Review runs only while core is public. See
+[scanner rule sources](.github/security-rules/README.md) for coverage and licensing.
+
+Source build/test commands capture stdout, stderr and step summaries on the
+ephemeral runner and publish only fixed completion statuses. Failure codes and
+step outputs are preserved; diagnostic capture does not turn failures into passes.
+Docker builds use the same capture boundary. Raw compiler reports, test logs,
+Playwright traces and diagnostic directories are not uploaded. Full failure
+diagnostics require a trusted private execution instead of public raw logs.
+
+Public artifacts intentionally include stripped executable bundles for subsequent
+jobs, production frontend assets, released CLI/images, image vulnerability reports,
+UI screenshots and allowlisted measurements. Binaries can contain embedded SQL,
+configuration fixtures and other strings; private repository visibility does not
+make these deliberately distributed binaries confidential. They are not source
+archives, and Actions caches remain disabled.
 
 ## Source access
 
@@ -92,17 +121,24 @@ core's ordinary `GITHUB_TOKEN`, which creates the source tag in core.
 
 For private core checkout and CI verification, configure `CORE_READ_APP_CLIENT_ID`
 (Actions variable) and `CORE_READ_APP_PRIVATE_KEY` (Actions secret) here. The App
-installation must include `notegate-core` with Contents read and Actions read
-permissions. Each Release job that reads core creates its own short-lived token,
-restricted to core. Checkout credentials are not persisted; the source token is
-not passed to application build steps. Distribution publication uses this
+installation must include only `notegate-core` with Contents read, Actions read and
+Pull requests read permissions. Metadata gates request those read permissions;
+each source checkout requests only Contents read. Checkout credentials are not
+persisted, and the checkout token must be revoked successfully before source
+execution. A checkout or revocation failure stops the job. Distribution publication uses this
 repository's `GITHUB_TOKEN` for Releases and GHCR, not the core read token.
 
-While core remains public, the read App is optional. A private core requires the
-configured App: making core private before verifying those credentials will block
-releases. PR validation never mints an App token or checks out private application
-source. Synthetic tests do not prove private credential access; verify a trusted
-Release plan with a tagged source and successful CI after configuring the App.
+The App private key is supplied to the same job that later executes trusted source.
+Revoking the installation token does not isolate or revoke that long-lived key.
+Compromised dependencies or source with runner access remain a credential risk;
+this workflow must not execute untrusted PRs. The App has no core write permission.
+Runner-registration credentials are separate and must never be supplied here.
+
+The configured read App is required even while core is public. Validation of this
+distribution repository uses synthetic tests without App credentials or application
+checkout. Synthetic tests do not prove private access: qualify exact-SHA PR/main,
+failure and release paths before changing core visibility. Private personal core
+does not require enforced merge protection under this deployment policy.
 
 Both repositories currently remain public. No visibility change is performed by
 these workflows. Before making core private, review public build logs, artifacts,

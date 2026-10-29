@@ -30,6 +30,7 @@ class Fixture:
         }
         self.pull = {
             "number": 7, "state": "open", "merged": False, "mergeable": True,
+            "user": {"id": 18637774, "login": "cagojeiger"},
             "merge_commit_sha": MERGE, "changed_files": 1,
             "base": {"sha": BASE, "ref": "main", "repo": {"id": bridge.CORE_ID}},
             "head": {"sha": HEAD, "ref": "change", "repo": {"id": bridge.CORE_ID}},
@@ -153,7 +154,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_wrong_repository_identity_and_private_repositories_fail_closed(self):
         for repository in (bridge.CORE, bridge.PUBLIC):
-            for field, value in (("id", 1), ("full_name", "other/repository"), ("private", True)):
+            for field, value in (("id", 1), ("full_name", "other/repository"), ("private", None)) + ((("private", True),) if repository == bridge.PUBLIC else ()):
                 with self.subTest(repository=repository, field=field):
                     fixture = Fixture()
                     fixture.repositories[repository][field] = value
@@ -219,7 +220,9 @@ class BridgeTests(unittest.TestCase):
                 bridge.normalized_options(kind, options)
 
     def test_api_allows_compare_dots_but_rejects_path_traversal(self):
-        with patch.object(bridge, "urlopen", return_value=io.BytesIO(b'{"status":"identical"}')) as opened:
+        with patch.object(bridge, "build_opener") as opener:
+            opened = opener.return_value.open
+            opened.return_value = io.BytesIO(b'{"status":"identical"}')
             self.assertEqual(bridge.api(f"repos/{bridge.CORE}/compare/{HEAD}...main")["status"], "identical")
             self.assertIn("...main", opened.call_args.args[0].full_url)
         for path in ("https://evil.invalid/", "/repos/a/b", "repos/a/../secret", "repos/./a"):
@@ -228,9 +231,57 @@ class BridgeTests(unittest.TestCase):
 
     def test_api_error_does_not_expose_response_body_or_credential(self):
         failure = HTTPError("https://api.github.com/metadata", 403, "sensitive-response", {}, io.BytesIO(b"private-body"))
-        with patch.object(bridge, "urlopen", side_effect=failure):
+        with patch.object(bridge, "build_opener") as opener:
+            opener.return_value.open.side_effect = failure
             with self.assertRaisesRegex(bridge.Stopped, r"^GitHub request failed \(HTTP 403\)$"):
                 bridge.api("repos/a/b", token="test-only-credential")
+
+    def test_private_core_and_trusted_pr_authors(self):
+        fixture = Fixture("pull_request")
+        fixture.repositories[bridge.CORE]["private"] = True
+        fixture.plan()
+        fixture.pull["user"] = {"id": 49699333, "login": "dependabot[bot]"}
+        fixture.plan()
+        for author in ({"id": 18637774, "login": "other"},
+                       {"id": 2, "login": "cagojeiger"}, {}):
+            fixture.pull["user"] = author
+            with self.assertRaises(bridge.Stopped):
+                fixture.plan()
+
+    def test_fork_is_rejected_even_if_run_and_pr_match(self):
+        fixture = Fixture("pull_request")
+        fixture.pull["head"]["repo"]["id"] = 123
+        fixture.source["head_repository"]["id"] = 123
+        with self.assertRaises(bridge.Stopped):
+            fixture.plan()
+
+    def test_api_uses_core_token_only_for_exact_core_path(self):
+        with patch.dict(os.environ, {"CORE_TOKEN": "core-secret", "GH_TOKEN": "public-secret"}), \
+                patch.object(bridge, "build_opener") as opener:
+            opener.return_value.open.side_effect = lambda *args, **kwargs: io.BytesIO(b'{}')
+            for path, expected in ((f"repos/{bridge.CORE}", "core-secret"),
+                                   (f"repos/{bridge.CORE}/pulls/7", "core-secret"),
+                                   (f"repos/{bridge.CORE}-other", "public-secret"),
+                                   (f"repos/{bridge.PUBLIC}", "public-secret")):
+                bridge.api(path)
+                request = opener.return_value.open.call_args.args[0]
+                self.assertEqual(request.get_header("Authorization"), "Bearer " + expected)
+            del os.environ["CORE_TOKEN"]
+            bridge.api(f"repos/{bridge.CORE}")
+            self.assertEqual(opener.return_value.open.call_args.args[0].get_header("Authorization"),
+                             "Bearer public-secret")
+
+    def test_api_redirect_fails_without_forwarding_credentials(self):
+        failure = HTTPError("https://api.github.com/repos/a/b", 302, "redirect",
+                            {"Location": "https://evil.invalid/"}, io.BytesIO(b""))
+        with patch.object(bridge, "build_opener") as opener:
+            opener.return_value.open.side_effect = failure
+            with self.assertRaisesRegex(bridge.Stopped, "HTTP 302"):
+                bridge.api("repos/a/b", token="secret")
+            opener.assert_called_once()
+            self.assertIs(opener.call_args.args[0], bridge.NoRedirect)
+            opener.return_value.open.assert_called_once()
+        self.assertIsNone(bridge.NoRedirect().redirect_request(None, None, 302, "", {}, "https://evil.invalid/"))
 
     def test_control_tree_allows_readme_only_updates_and_rejects_definition_change(self):
         fixture = Fixture()
@@ -266,10 +317,33 @@ class BridgeTests(unittest.TestCase):
     def test_successful_native_results_require_all_jobs_and_gate(self):
         fixture = Fixture()
         results = bridge.verify_results(fixture.request, fixture.public, fixture.read)
+        self.assertEqual(results["security"], "success")
         self.assertEqual(results["web"], "success")
         self.assertEqual(results["image"], "skipped")
         fixture.jobs = [job for job in fixture.jobs if job["name"] != "Validate core request"]
         with self.assertRaisesRegex(bridge.Stopped, "Missing"):
+            bridge.verify_results(fixture.request, fixture.public, fixture.read)
+
+    def test_source_security_is_required_for_all_ci_paths(self):
+        for event in ("push", "pull_request"):
+            for conclusion in ("missing", "failure", "cancelled", "skipped"):
+                with self.subTest(event=event, conclusion=conclusion):
+                    fixture = Fixture(event)
+                    if event == "pull_request":
+                        fixture.files = [{"filename": "docs/example.md"}]
+                        fixture.jobs = fixture.make_jobs()
+                    if conclusion == "missing":
+                        fixture.jobs = [job for job in fixture.jobs if job["name"] != "Source Security"]
+                    else:
+                        next(job for job in fixture.jobs if job["name"] == "Source Security")["conclusion"] = conclusion
+                    with self.assertRaises(bridge.Stopped):
+                        bridge.verify_results(fixture.request, fixture.public, fixture.read)
+
+    def test_pr_dependency_security_requires_npm_audit(self):
+        fixture = Fixture("pull_request", "dependency-security")
+        self.assertEqual(bridge.verify_results(fixture.request, fixture.public, fixture.read)["npm_audit"], "success")
+        next(job for job in fixture.jobs if job["name"] == "Npm Audit")["conclusion"] = "skipped"
+        with self.assertRaises(bridge.Stopped):
             bridge.verify_results(fixture.request, fixture.public, fixture.read)
 
     def test_required_job_skip_duplicate_and_wrong_attempt_are_rejected(self):
@@ -420,7 +494,7 @@ class BridgeTests(unittest.TestCase):
                 with self.assertRaises(bridge.Stopped):
                     bridge.dispatcher_request(10, event_attempt, fixture.read, loader, Mock())
                 loader.assert_not_called()
-        for repository in (bridge.CORE, bridge.PUBLIC):
+        for repository in (bridge.PUBLIC,):
             fixture = Fixture()
             fixture.source["status"] = "completed"
             fixture.repositories[repository]["private"] = True

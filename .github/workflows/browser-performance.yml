@@ -41,11 +41,24 @@ jobs:
           path: .control
           persist-credentials: false
 
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
       - name: Validate immutable core request
         id: request
         env:
           REQUEST_JSON: ${{ inputs.request }}
           GH_TOKEN: ${{ github.token }}
+          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
         run: python3 .control/.github/scripts/ci_bridge.py gate --kind browser-performance >> "$GITHUB_OUTPUT"
 
   baseline:
@@ -99,14 +112,17 @@ jobs:
           path: .control
           persist-credentials: false
 
-      - name: Checkout exact public core source
+      - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
         with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           sha: ${{ needs.gate.outputs.tested_sha }}
           path: source
           fetch-depth: 1
 
       - name: Record candidate
+        shell: private_run.sh {0}
         run: echo "BROWSER_MEASUREMENT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Download frontend from the originating CI run
@@ -130,18 +146,22 @@ jobs:
           package-manager-cache: false
 
       - name: Install dependencies
+        shell: private_run.sh {0}
         run: |
           pnpm install --frozen-lockfile
           pnpm --filter web exec playwright install --with-deps chromium
 
       - name: Build production frontend for manual measurement
         if: needs.gate.outputs.web_artifact_run_id == ''
+        shell: private_run.sh {0}
         run: pnpm --filter web build
 
       - name: Build release backend
+        shell: private_run.sh {0}
         run: cargo build --locked --release --package notegate-api --bin notegate-api --example seed_user
 
       - name: Measure Lighthouse on the production frontend
+        shell: private_run.sh {0}
         run: pnpm --filter web test:lighthouse:built
 
       - name: Start MinIO
@@ -149,12 +169,14 @@ jobs:
           NOTEGATE_S3_BUCKET: ${{ env.NOTEGATE_S3__BUCKET }}
           NOTEGATE_S3_ACCESS_KEY: ${{ env.NOTEGATE_S3__ACCESS_KEY }}
           NOTEGATE_S3_SECRET_KEY: ${{ env.NOTEGATE_S3__SECRET_KEY }}
+        shell: private_run.sh {0}
         run: bash deploy/ci/start-minio.sh
 
       - name: Seed disposable identity
         id: identity
+        shell: bash
         run: |
-          output=$(target/release/examples/seed_user)
+          output=$(target/release/examples/seed_user 2>"$RUNNER_TEMP/seed-user.stderr")
           key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
           session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
           test -n "$key"
@@ -167,6 +189,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Start application
+        shell: private_run.sh {0}
         run: |
           target/release/notegate-api >"$RUNNER_TEMP/browser-performance-api.log" 2>&1 &
           api_pid=$!
@@ -186,12 +209,14 @@ jobs:
         env:
           NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.identity.outputs.browser_session }}
           NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.identity.outputs.api_key }}
+        shell: private_run.sh {0}
         run: |
           pnpm --filter web exec playwright test --config playwright.performance.config.ts workbench.spec.ts
           kill -0 "$(cat "$RUNNER_TEMP/browser-performance-api.pid")"
 
       - name: Publish summary
         if: always()
+        shell: private_run.sh {0}
         run: |
           report=frontend/web/test-results/browser-performance/summary.md
           if [ -f "$report" ]; then
@@ -204,7 +229,8 @@ jobs:
         with:
           name: browser-performance
           path: |
-            source/frontend/web/test-results/browser-performance/
-            source/frontend/web/lighthouse-reports/
+            source/frontend/web/test-results/browser-performance/summary.md
+            source/frontend/web/test-results/browser-performance/measurements.json
+            source/frontend/web/test-results/browser-performance/text-revalidation.json
           if-no-files-found: warn
           retention-days: 7
