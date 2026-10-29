@@ -457,6 +457,13 @@ def dispatch(request, read=api):
         return False
     token = os.environ.get("DISPATCH_TOKEN")
     require(token, "Public dispatch token is missing")
+    # A successful create is the only authorization to send this request.  Keep
+    # the ref after completion: a missing or ambiguous response must not permit
+    # a later dispatcher to send again.
+    ref = f"refs/heads/ci-dispatch-claims/v1-{request['kind']}-{request['run_id']}-{request['attempt']}"
+    claim = read(f"repos/{PUBLIC}/git/refs", {"ref": ref, "sha": main}, token=token)
+    require(isinstance(claim, dict) and claim.get("ref") == ref
+            and claim.get("object", {}).get("sha") == main, "Dispatch claim could not be verified")
     read(f"repos/{PUBLIC}/actions/workflows/{request['kind']}.yml/dispatches",
          {"ref": "main", "inputs": {"request": json.dumps(request, separators=(",", ":"))}}, token=token)
     return True

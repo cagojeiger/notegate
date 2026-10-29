@@ -1,10 +1,12 @@
 """Synthetic regressions for metadata-only public CI authorization."""
 import copy
+from concurrent.futures import ThreadPoolExecutor
 import io
 import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
@@ -58,6 +60,7 @@ class Fixture:
         self.jobs = self.make_jobs()
         self.artifacts = []
         self.calls = []
+        self.claims = set()
 
     def plan(self, options=None):
         return bridge.source_plan(10, 1, self.kind, options, CONTROL, self.read)
@@ -94,6 +97,11 @@ class Fixture:
             return {"sha": PUBLIC_HEAD}
         if path.startswith(f"{public}/git/trees/"):
             return {"tree": [{"path": ".github", "type": "tree", "sha": self.trees[path.rsplit("/", 1)[1]]}]}
+        if path == f"{public}/git/refs":
+            if data["ref"] in self.claims:
+                raise bridge.Stopped("GitHub request failed (HTTP 422)")
+            self.claims.add(data["ref"])
+            return {"ref": data["ref"], "object": {"sha": data["sha"]}}
         if path.endswith("/dispatches"):
             return None
         if path.startswith(f"{public}/actions/workflows/100/runs?"):
@@ -442,6 +450,82 @@ class BridgeTests(unittest.TestCase):
                 fixture.public["conclusion"] = conclusion
                 self.assertFalse(bridge.dispatch(fixture.request, fixture.read))
                 self.assertFalse(any(path.endswith('/dispatches') for path, _, _ in fixture.calls))
+
+    def test_dispatch_claim_prevents_retry_when_post_result_is_unknown(self):
+        fixture = Fixture()
+        fixture.public_rows = []
+        def lost_post(path, data=None, token=None):
+            if path.endswith('/dispatches'):
+                fixture.calls.append((path, data, token))
+                raise bridge.Stopped("GitHub request could not be completed")
+            return fixture.read(path, data, token)
+        with patch.dict(os.environ, {"DISPATCH_TOKEN": "test"}):
+            with self.assertRaises(bridge.Stopped):
+                bridge.dispatch(fixture.request, lost_post)
+            with self.assertRaises(bridge.Stopped):
+                bridge.dispatch(fixture.request, lost_post)
+        self.assertEqual(sum(path.endswith('/dispatches') for path, _, _ in fixture.calls), 1)
+
+    def test_dispatch_claim_lost_response_does_not_allow_post(self):
+        fixture = Fixture()
+        fixture.public_rows = []
+        def lost_claim(path, data=None, token=None):
+            result = fixture.read(path, data, token)
+            if path.endswith('/git/refs'):
+                raise bridge.Stopped("GitHub request could not be completed")
+            return result
+        with patch.dict(os.environ, {"DISPATCH_TOKEN": "test"}):
+            for _ in range(2):
+                with self.assertRaises(bridge.Stopped):
+                    bridge.dispatch(fixture.request, lost_claim)
+        self.assertFalse(any(path.endswith('/dispatches') for path, _, _ in fixture.calls))
+
+    def test_dispatch_claim_must_match_requested_ref_and_commit(self):
+        for invalid in (None, {}, {"ref": "unexpected", "object": {"sha": PUBLIC_HEAD}},
+                        {"ref": "refs/heads/ci-dispatch-claims/v1-ci-10-1", "object": {"sha": BASE}}):
+            with self.subTest(invalid=invalid):
+                fixture = Fixture()
+                fixture.public_rows = []
+                def read(path, data=None, token=None):
+                    if path.endswith('/git/refs'):
+                        return invalid
+                    return fixture.read(path, data, token)
+                with patch.dict(os.environ, {"DISPATCH_TOKEN": "test"}), self.assertRaises(bridge.Stopped):
+                    bridge.dispatch(fixture.request, read)
+                self.assertFalse(any(path.endswith('/dispatches') for path, _, _ in fixture.calls))
+
+    def test_concurrent_dispatch_claim_allows_only_one_post(self):
+        fixture = Fixture()
+        barrier, lock = threading.Barrier(2), threading.Lock()
+        claimed = False
+        posts = []
+        def read(path, data=None, token=None):
+            nonlocal claimed
+            if path.endswith('/commits/main'):
+                return {"sha": PUBLIC_HEAD}
+            if path.endswith('/git/refs'):
+                barrier.wait(timeout=5)
+                with lock:
+                    if claimed:
+                        raise bridge.Stopped("Reference already exists")
+                    claimed = True
+                return {"ref": data["ref"], "object": {"sha": data["sha"]}}
+            if path.endswith('/dispatches'):
+                posts.append(path)
+                return None
+            raise AssertionError(path)
+        def invoke():
+            try:
+                return bridge.dispatch(fixture.request, read)
+            except bridge.Stopped:
+                return False
+        with patch.dict(os.environ, {"DISPATCH_TOKEN": "test"}), \
+             patch.object(bridge, 'validate_request'), patch.object(bridge, 'validate_control'), \
+             patch.object(bridge, 'public_run', return_value=None):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(lambda _: invoke(), range(2)))
+        self.assertEqual(sorted(results), [False, True])
+        self.assertEqual(len(posts), 1)
 
     def test_dispatch_existing_run_still_requires_source_and_public_provenance(self):
         for mutation in ("actor", "control", "source_attempt", "duplicates"):
