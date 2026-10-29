@@ -58,6 +58,24 @@ def safe_finding(item, source):
     return f"{relative}:{rule}:{start} lines={start}-{end}"
 
 
+def safe_semgrep_finding(item, source):
+    if not isinstance(item, dict):
+        return None
+    start, end, extra = item.get("start"), item.get("end"), item.get("extra")
+    if not isinstance(start, dict) or not isinstance(end, dict) or not isinstance(extra, dict):
+        return None
+    location = safe_finding({"File": item.get("path"), "RuleID": item.get("check_id"),
+                             "StartLine": start.get("line"), "EndLine": end.get("line")}, source)
+    if location is None:
+        return None
+    severity = extra.get("severity")
+    severity = severity if isinstance(severity, str) and severity in {"INFO", "WARNING", "ERROR"} else "unknown"
+    metadata = extra.get("metadata")
+    confidence = metadata.get("confidence") if isinstance(metadata, dict) else None
+    confidence = confidence if isinstance(confidence, str) and confidence in {"LOW", "MEDIUM", "HIGH"} else "unknown"
+    return f"{location} severity={severity} confidence={confidence}"
+
+
 def error_summary(payload, source=None):
     if not isinstance(payload, dict) or not isinstance(payload.get("errors"), list):
         return ["semgrep report: unavailable"]
@@ -101,7 +119,13 @@ def diagnose(source, rules):
                 stream = kwargs["stdout"]
                 stream.flush()
                 stream.seek(0)
-                lines.extend(error_summary(json.load(stream), source))
+                payload = json.load(stream)
+                lines.extend(error_summary(payload, source))
+                findings = payload.get("results") if isinstance(payload, dict) else None
+                if isinstance(findings, list):
+                    for item in findings:
+                        location = safe_semgrep_finding(item, source)
+                        lines.append("semgrep " + location if location else "semgrep location: unavailable")
             except (ValueError, OSError):
                 lines.append("semgrep report: unavailable")
         elif command[0] == "gitleaks" and len(command) > 1 and command[1] == "dir":
@@ -157,6 +181,23 @@ class SanitizationTests(unittest.TestCase):
             self.assertEqual(error_summary(payload, root),
                              ["semgrep error type=PartialParsing level=warn code=3 count=1",
                               "semgrep error location=example.py:5"])
+
+    def test_semgrep_finding_excludes_source_and_untrusted_metadata(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "example.py").write_text("test")
+            item = {"path": "example.py", "check_id": "python.rule", "start": {"line": 2},
+                    "end": {"line": 3}, "extra": {"severity": "ERROR", "message": "secret",
+                                                        "lines": "private", "metadata": {"confidence": "HIGH"}}}
+            self.assertEqual(safe_semgrep_finding(item, root),
+                             "example.py:python.rule:2 lines=2-3 severity=ERROR confidence=HIGH")
+            item["extra"]["severity"] = "secret"
+            item["extra"]["metadata"]["confidence"] = "private"
+            self.assertEqual(safe_semgrep_finding(item, root),
+                             "example.py:python.rule:2 lines=2-3 severity=unknown confidence=unknown")
+            item["path"] = "../private"
+            self.assertIsNone(safe_semgrep_finding(item, root))
 
 
 def main():
