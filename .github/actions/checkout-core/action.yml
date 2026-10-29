@@ -1,0 +1,39 @@
+name: Checkout exact public core source
+description: Anonymous checkout of a gate-validated commit from the fixed core repository
+inputs:
+  sha:
+    description: Full gate-validated core commit SHA
+    required: true
+  path:
+    description: Relative checkout directory
+    default: source
+  fetch-depth:
+    description: History depth; zero also fetches core heads and source tags
+    default: '1'
+runs:
+  using: composite
+  steps:
+    - name: Fetch exact source without credentials
+      shell: bash
+      env:
+        SOURCE_SHA: ${{ inputs.sha }}
+        SOURCE_PATH: ${{ inputs.path }}
+        FETCH_DEPTH: ${{ inputs.fetch-depth }}
+      run: |
+        set -euo pipefail
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        [[ "$FETCH_DEPTH" =~ ^(0|[1-9][0-9]*)$ ]]
+        [[ "$SOURCE_PATH" =~ ^[a-zA-Z0-9][a-zA-Z0-9/_-]*$ ]]
+        target="$GITHUB_WORKSPACE/$SOURCE_PATH"
+        test ! -e "$target"
+        git init --quiet "$target"
+        git -C "$target" remote add origin https://github.com/cagojeiger/notegate-core.git
+        if [ "$FETCH_DEPTH" = 0 ]; then
+          git -c credential.helper= -c http.extraHeader= -C "$target" fetch --no-recurse-submodules origin \
+            'refs/heads/*:refs/remotes/origin/*' 'refs/tags/*:refs/tags/*'
+          git -c credential.helper= -c http.extraHeader= -C "$target" fetch --no-tags origin "$SOURCE_SHA"
+        else
+          git -c credential.helper= -c http.extraHeader= -C "$target" fetch --no-tags --depth "$FETCH_DEPTH" origin "$SOURCE_SHA"
+        fi
+        git -C "$target" checkout --quiet --detach "$SOURCE_SHA"
+        test "$(git -C "$target" rev-parse HEAD)" = "$SOURCE_SHA"

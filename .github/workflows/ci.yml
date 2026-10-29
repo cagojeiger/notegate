@@ -1,0 +1,1058 @@
+name: CI
+run-name: Core ci ${{ fromJSON(inputs.request).run_id }}.${{ fromJSON(inputs.request).attempt }} ${{ fromJSON(inputs.request).tested_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: Validated core workflow run and immutable source request
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-ci-${{ fromJSON(inputs.request).run_id }}-${{ fromJSON(inputs.request).attempt }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+  DOCKER_BUILD_SUMMARY: "false"
+
+jobs:
+  gate:
+    name: Validate core request
+    permissions:
+      contents: read
+      actions: read
+    if: github.repository == 'cagojeiger/notegate' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tested_sha: ${{ steps.request.outputs.tested_sha }}
+      source_event: ${{ steps.request.outputs.source_event }}
+      head_sha: ${{ steps.request.outputs.head_sha }}
+      base_sha: ${{ steps.request.outputs.base_sha }}
+      pr_number: ${{ steps.request.outputs.pr_number }}
+      run_id: ${{ steps.request.outputs.run_id }}
+      attempt: ${{ steps.request.outputs.attempt }}
+      base_ref: ${{ steps.request.outputs.base_ref }}
+      web_artifact_run_id: ${{ steps.request.outputs.web_artifact_run_id }}
+      rust_build: ${{ steps.request.outputs.rust_build }}
+      rust: ${{ steps.request.outputs.rust }}
+      web: ${{ steps.request.outputs.web }}
+      browser: ${{ steps.request.outputs.browser }}
+      postgres: ${{ steps.request.outputs.postgres }}
+      image: ${{ steps.request.outputs.image }}
+      impact_scope: ${{ steps.request.outputs.impact_scope }}
+      impact_reason: ${{ steps.request.outputs.impact_reason }}
+
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Validate immutable core request
+        id: request
+        env:
+          REQUEST_JSON: ${{ inputs.request }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .control/.github/scripts/ci_bridge.py gate --kind ci >> "$GITHUB_OUTPUT"
+
+  hygiene:
+    needs: gate
+    name: Hygiene
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    outputs:
+      rust_build: ${{ steps.impact.outputs.rust_build }}
+      rust: ${{ steps.impact.outputs.rust }}
+      web: ${{ steps.impact.outputs.web }}
+      browser: ${{ steps.impact.outputs.browser }}
+      postgres: ${{ steps.impact.outputs.postgres }}
+      image: ${{ steps.impact.outputs.image }}
+
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Checkout exact public core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 2
+
+      - name: Select CI checks
+        id: impact
+        env:
+          RUST_BUILD: ${{ needs.gate.outputs.rust_build }}
+          RUST: ${{ needs.gate.outputs.rust }}
+          WEB: ${{ needs.gate.outputs.web }}
+          BROWSER: ${{ needs.gate.outputs.browser }}
+          POSTGRES: ${{ needs.gate.outputs.postgres }}
+          IMAGE: ${{ needs.gate.outputs.image }}
+          IMPACT_SCOPE: ${{ needs.gate.outputs.impact_scope }}
+          IMPACT_REASON: ${{ needs.gate.outputs.impact_reason }}
+        run: |
+          set -euo pipefail
+          plan="$RUNNER_TEMP/ci-impact-plan"
+          for key in rust_build rust web browser postgres image; do
+            var="${key^^}"
+            value="${!var}"
+            [[ "$value" == true || "$value" == false ]]
+            printf '%s=%s\n' "$key" "$value" >> "$plan"
+          done
+          printf 'scope=%s\nreason=%s\n' "$IMPACT_SCOPE" "$IMPACT_REASON" >> "$plan"
+          cat "$plan" >> "$GITHUB_OUTPUT"
+          {
+            echo '### Selected CI checks'
+            echo '```text'
+            cat "$plan"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install actionlint
+        env:
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          bin_dir="$RUNNER_TEMP/actionlint-bin"
+          curl --fail --location --silent --show-error \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            --output "$archive"
+          printf '%s  %s\n' "$ACTIONLINT_SHA256" "$archive" | sha256sum --check --status
+          mkdir -p "$bin_dir"
+          tar -xzf "$archive" -C "$bin_dir" actionlint
+          echo "$bin_dir" >> "$GITHUB_PATH"
+
+      - name: Workflow checks
+        run: make workflow-check
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Diff check
+        run: git diff --check
+
+  rust-build:
+    name: Rust Build
+    needs: [gate, hygiene]
+    if: needs.hygiene.outputs.rust_build == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    timeout-minutes: 25
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Checkout exact public core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 1
+
+      - name: Check
+        if: needs.hygiene.outputs.rust == 'true'
+        run: cargo check --locked --workspace --all-targets
+
+      - name: Clippy
+        if: needs.hygiene.outputs.rust == 'true'
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Prepare Rust tests and doctests
+        if: needs.hygiene.outputs.rust == 'true'
+        run: python3 deploy/ci/rust-test-suites.py prepare --strip-debug --output target/test-suites/prepare --bundle target/ci-artifacts/rust-tests.tar
+
+      - name: Build API and seed executable
+        run: cargo build --locked --package notegate-api --bin notegate-api --example seed_user
+
+      - name: Package API and seed executable
+        run: python3 deploy/ci/rust-test-suites.py pack-api --strip-debug --output target/test-suites/api --bundle target/ci-artifacts/api.tar
+
+      - name: Report prepared bundle sizes
+        run: stat --format='%n %s bytes' target/ci-artifacts/*.tar | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Compress prepared bundles
+        run: |
+          zstd --version
+          zstd -T0 -3 --long=27 --rm target/ci-artifacts/*.tar
+          stat --format='%n %s bytes' target/ci-artifacts/*.tar.zst | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain prepared Rust tests
+        if: needs.hygiene.outputs.rust == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rust-prepared-tests
+          path: source/target/ci-artifacts/rust-tests.tar.zst
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Retain API and seed executable
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rust-e2e-api
+          path: source/target/ci-artifacts/api.tar.zst
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Retain Rust build coverage and timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rust-build-report
+          path: source/target/test-suites/
+          if-no-files-found: warn
+          retention-days: 7
+
+  rust:
+    name: Rust
+    needs: [gate, hygiene, rust-build]
+    if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.hygiene.outputs.rust == 'true' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: notegate
+          POSTGRES_PASSWORD: notegate
+          POSTGRES_DB: notegate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notegate -d notegate"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NOTEGATE_TEST_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
+      NOTEGATE_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+      NOTEGATE_TEST_S3_PUBLIC_ENDPOINT: http://127.0.0.1:9000
+      NOTEGATE_TEST_S3_REGION: us-east-1
+      NOTEGATE_TEST_S3_BUCKET: notegate-test
+      NOTEGATE_TEST_S3_ACCESS_KEY: notegate-app
+      NOTEGATE_TEST_S3_SECRET_KEY: notegate-app-secret
+
+    steps:
+      - name: Require successful Rust build
+        working-directory: ${{ github.workspace }}
+        env:
+          BUILD_RESULT: ${{ needs.rust-build.result }}
+        run: test "$BUILD_RESULT" = success
+
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Checkout exact public core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 1
+
+      - name: Download prepared Rust tests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: rust-prepared-tests
+          path: source/target/ci-artifacts
+
+      - name: Decompress prepared Rust tests
+        run: zstd --decompress --rm target/ci-artifacts/rust-tests.tar.zst
+
+      - name: Start MinIO
+        env:
+          NOTEGATE_S3_BUCKET: notegate-test
+          NOTEGATE_S3_ACCESS_KEY: notegate-app
+          NOTEGATE_S3_SECRET_KEY: notegate-app-secret
+        run: bash deploy/ci/start-minio.sh
+
+      - name: Test runner cleanup
+        run: deploy/ci/test-rust.test.sh --postgres
+
+      - name: Test without external services
+        run: python3 deploy/ci/rust-test-suites.py self-contained --prepared target/ci-artifacts/rust-tests.tar --output target/test-suites/self-contained
+
+      - name: Test with PostgreSQL and S3
+        run: python3 deploy/ci/rust-test-suites.py external --prepared target/ci-artifacts/rust-tests.tar --output target/test-suites/external
+
+      - name: Reject missing integration settings
+        run: |
+          assert_missing_setting_fails() {
+            local setting="$1"
+            shift
+            local log="$RUNNER_TEMP/missing-$setting.log"
+            if env -u "$setting" -u NOTEGATE_TEST_SKIP_INTEGRATION "$@" >"$log" 2>&1; then
+              echo "::error::Tests succeeded without $setting"
+              exit 1
+            fi
+            if ! grep -Fq "$setting is required" "$log"; then
+              cat "$log"
+              exit 1
+            fi
+            echo "Confirmed $setting is required by the selected integration test"
+          }
+          assert_missing_setting_fails NOTEGATE_TEST_DATABASE_URL \
+            python3 deploy/ci/rust-test-suites.py exact --prepared target/ci-artifacts/rust-tests.tar \
+            --package notegate-db --target-kind test --target files_commands \
+            --test-name resolved_paths_and_search_candidates_preserve_all_node_fields \
+            --output target/test-suites/missing-database
+          assert_missing_setting_fails NOTEGATE_TEST_S3_ENDPOINT \
+            python3 deploy/ci/rust-test-suites.py exact --prepared target/ci-artifacts/rust-tests.tar \
+            --package notegate-api --target-kind bin --target notegate-api \
+            --test-name rest::file_upload_tests::verified_docx_bytes_use_the_dedicated_preview_url \
+            --output target/test-suites/missing-s3
+
+      - name: Measure search date candidate filtering
+        run: >-
+          python3 deploy/ci/rust-test-suites.py exact --prepared target/ci-artifacts/rust-tests.tar
+          --package notegate-service --target-kind test --target search
+          --test-name search_date_filters_measure_candidate_work
+          --output target/test-suites/measure-search -- --ignored --show-output
+
+      - name: Measure command completion and history capture
+        run: |
+          python3 deploy/ci/rust-test-suites.py exact --prepared target/ci-artifacts/rust-tests.tar \
+            --package notegate-api --target-kind bin --target notegate-api \
+            --test-name command_api::tests::measure_command_completion \
+            --output target/test-suites/measure-command-api -- --ignored --show-output --test-threads=1
+          python3 deploy/ci/rust-test-suites.py exact --prepared target/ci-artifacts/rust-tests.tar \
+            --package notegate-api --target-kind bin --target notegate-api \
+            --test-name mcp::invocation::tests::measure_command_completion \
+            --output target/test-suites/measure-command-mcp -- --ignored --show-output --test-threads=1
+
+      - name: Retain Rust test coverage and timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rust-test-suites
+          path: source/target/test-suites/
+          retention-days: 7
+
+  postgres18:
+    name: PostgreSQL 18
+    needs: [gate, hygiene]
+    if: needs.hygiene.outputs.postgres == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    timeout-minutes: 25
+    env:
+      COMPOSE_PROJECT_NAME: notegate-pg18-${{ github.run_id }}-${{ github.run_attempt }}
+      POSTGRES_PORT: "5433"
+      NOTEGATE_TEST_DATABASE_URL: postgres://notegate:notegate@localhost:5433/notegate
+
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Checkout exact public core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 1
+
+      - name: Prepare Compose environment
+        run: cp .env.example .env
+
+      - name: Verify PostgreSQL volume upgrade and persistence
+        run: bash deploy/ci/postgres-upgrade-smoke.sh
+
+      - name: Test database migrations and repositories on PostgreSQL 18
+        run: cargo test --locked -p notegate-db --tests
+
+      - name: Stop Compose
+        if: always()
+        run: |
+          if [[ -f .env ]]; then
+            docker compose -f docker-compose.yml down
+          fi
+
+  rust-audit:
+    needs: gate
+    name: Main RustSec Audit
+    if: needs.gate.outputs.source_event == 'push'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Checkout exact public core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 1
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: cargo-audit@0.22.2
+          fallback: none
+
+      - name: Audit Rust dependencies
+        run: cargo audit --deny yanked
+
+  web:
+    name: Web
+    needs: [gate, hygiene]
+    if: needs.hygiene.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Checkout exact public core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: source/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: source/.node-version
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit dependencies
+        run: pnpm audit --audit-level moderate
+
+      - name: Check theme contrast
+        run: pnpm --filter web check:contrast
+
+      - name: Typecheck
+        run: pnpm --filter web typecheck
+
+      - name: Lint
+        run: pnpm --filter web lint
+
+      - name: Test
+        run: pnpm --filter web test
+
+      - name: Build
+        run: pnpm --filter web build
+
+      - name: Check production bundle budgets
+        run: pnpm --filter web check:preview-bundle
+
+      - name: Retain production frontend
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-dist
+          path: source/frontend/web/dist/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  image-pr:
+    name: PR Image Gate
+    needs: [gate, hygiene]
+    if: needs.gate.outputs.source_event == 'pull_request' && needs.hygiene.outputs.image == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Checkout exact public core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          cache-binary: false
+
+      - name: Build PR image locally
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: source
+          file: source/deploy/docker/web.Dockerfile
+          platforms: linux/amd64
+          tags: notegate-pr:${{ needs.gate.outputs.tested_sha }}
+          load: true
+          push: false
+
+      - name: Report high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_IMAGE_SRC: docker
+        with:
+          version: v0.74.0
+          cache: false
+          image-ref: notegate-pr:${{ needs.gate.outputs.tested_sha }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          format: json
+          output: source/trivy.json
+          ignore-unfixed: false
+          exit-code: "0"
+          timeout: 10m
+
+      - name: Summarize image findings
+        run: |
+          {
+            echo '### HIGH and CRITICAL findings, including unfixed'
+            jq -r '[.Results[]?.Vulnerabilities[]?] | group_by(.Severity)[] | "- \(.[0].Severity): \(length)"' trivy.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain scan report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pr-image-trivy
+          path: source/trivy.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Block fixable critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_IMAGE_SRC: docker
+        with:
+          version: v0.74.0
+          cache: false
+          image-ref: notegate-pr:${{ needs.gate.outputs.tested_sha }}
+          scanners: vuln
+          severity: CRITICAL
+          format: table
+          ignore-unfixed: true
+          exit-code: "1"
+          timeout: 10m
+
+  browser-ui:
+    name: Browser UI
+    needs: [gate, hygiene]
+    if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.hygiene.outputs.browser == 'true' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Checkout exact public core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: source/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: source/.node-version
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter web exec playwright install --with-deps chromium
+
+      - name: Start frontend without API or external services
+        run: |
+          mkdir -p browser-ui
+          pnpm --filter web dev --host 127.0.0.1 >browser-ui/web.log 2>&1 &
+          web_pid=$!
+          for _ in $(seq 1 60); do
+            if ! kill -0 "$web_pid" 2>/dev/null; then
+              cat browser-ui/web.log
+              exit 1
+            fi
+            if curl --fail --silent http://127.0.0.1:5173/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat browser-ui/web.log
+          exit 1
+
+      - name: Test browser UI without external services
+        id: browser_tests
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/browser-ui-test-results.json
+        run: pnpm --filter web test:e2e --project=desktop-chromium --reporter=dot,json
+
+      - name: Collect browser UI test timings
+        id: browser_timings
+        if: ${{ !cancelled() && (steps.browser_tests.outcome == 'success' || steps.browser_tests.outcome == 'failure') }}
+        shell: bash
+        run: |
+          python3 -B deploy/ci/browser-test-timings.py \
+            < "$RUNNER_TEMP/browser-ui-test-results.json" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain browser UI test timings
+        if: ${{ !cancelled() && steps.browser_timings.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-ui-test-timings
+          path: source/browser-e2e/browser-test-timings.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload login UI screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: login-ui
+          if-no-files-found: ignore
+          retention-days: 7
+          path: source/frontend/web/test-results/login-*.png
+
+      - name: Upload authentication UI screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: authentication-ui
+          if-no-files-found: ignore
+          retention-days: 7
+          path: source/frontend/web/test-results/settings-auth-*.png
+
+      - name: Upload revision UI screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: text-revisions-ui
+          if-no-files-found: ignore
+          retention-days: 7
+          path: source/frontend/web/test-results/text-revisions-*.png
+
+      - name: Upload trash UI screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: trash-ui
+          if-no-files-found: ignore
+          retention-days: 7
+          path: source/frontend/web/test-results/trash-*.png
+
+      - name: Upload history and action dialog UI screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: invocation-history-ui
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            source/frontend/web/test-results/invocation-history-*.png
+            source/frontend/web/test-results/dialog-*.png
+
+      - name: Upload browser UI diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-ui-diagnostics
+          if-no-files-found: ignore
+          path: |
+            source/browser-ui/*.log
+            source/frontend/web/test-results
+            !source/frontend/web/test-results/openapi-docs-*/**
+
+  browser-api:
+    name: Browser API
+    needs: [gate, hygiene, rust-build, web]
+    if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.hygiene.outputs.browser == 'true' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: notegate
+          POSTGRES_PASSWORD: notegate
+          POSTGRES_DB: notegate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notegate -d notegate"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NOTEGATE_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
+      NOTEGATE_OIDC__ISSUER: https://authgate.project-jelly.io
+      NOTEGATE_OIDC__CLIENT_ID: notegate-web
+      NOTEGATE_PUBLIC_URL: http://localhost:9191
+      NOTEGATE_CLI_OAUTH_CLIENT_ID: notegate-cli-local
+      NOTEGATE_ENC_ROOT_KEY_ID: e2e-enc
+      NOTEGATE_ENC_ROOT_SECRET: e2e-distinct-enc-root-secret-32-bytes
+      NOTEGATE_LOOKUP_ROOT_KEY_ID: e2e-lookup
+      NOTEGATE_LOOKUP_ROOT_SECRET: e2e-distinct-lookup-root-secret-32b
+      NOTEGATE_S3__ENDPOINT: http://127.0.0.1:9000
+      NOTEGATE_S3__PUBLIC_ENDPOINT: http://127.0.0.1:9000
+      NOTEGATE_S3__REGION: us-east-1
+      NOTEGATE_S3__BUCKET: notegate-e2e
+      NOTEGATE_S3__ACCESS_KEY: notegate-app
+      NOTEGATE_S3__SECRET_KEY: notegate-app-secret
+      NOTEGATE_S3__FORCE_PATH_STYLE: "true"
+
+    steps:
+      - name: Require successful browser inputs
+        working-directory: ${{ github.workspace }}
+        env:
+          RUST_BUILD_RESULT: ${{ needs.rust-build.result }}
+          WEB_RESULT: ${{ needs.web.result }}
+        run: test "$RUST_BUILD_RESULT" = success && test "$WEB_RESULT" = success
+
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Checkout exact public core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 1
+
+      - name: Download API and seed executable
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: rust-e2e-api
+          path: source/target/ci-artifacts
+
+      - name: Restore API and seed executable
+        run: |
+          zstd --decompress --rm target/ci-artifacts/api.tar.zst
+          python3 deploy/ci/rust-test-suites.py restore-api --prepared target/ci-artifacts/api.tar --output target/test-suites/browser-api
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: source/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: source/.node-version
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter web exec playwright install --with-deps chromium
+
+      - name: Download production frontend
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-dist
+          path: source/frontend/web/dist
+
+      - name: Start MinIO
+        env:
+          MINIO_API_CORS_ALLOW_ORIGIN: http://127.0.0.1:5173
+          NOTEGATE_S3_BUCKET: ${{ env.NOTEGATE_S3__BUCKET }}
+          NOTEGATE_S3_ACCESS_KEY: ${{ env.NOTEGATE_S3__ACCESS_KEY }}
+          NOTEGATE_S3_SECRET_KEY: ${{ env.NOTEGATE_S3__SECRET_KEY }}
+        run: bash deploy/ci/start-minio.sh
+
+      - name: Seed test identities
+        id: seed_test_identity
+        run: |
+          output=$(target/debug/examples/seed_user)
+          agent_api_key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
+          session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
+          test -n "$agent_api_key"
+          test -n "$session"
+          echo "::add-mask::$agent_api_key"
+          echo "::add-mask::$session"
+          echo "agent_api_key=$agent_api_key" >> "$GITHUB_OUTPUT"
+          echo "browser_session=$session" >> "$GITHUB_OUTPUT"
+
+      - name: Start application
+        env:
+          NOTEGATE_METRICS_ENABLED: "true"
+          NOTEGATE_WEB_DIST_DIR: ${{ github.workspace }}/source/frontend/web/dist
+        run: |
+          mkdir -p browser-e2e
+          target/debug/notegate-api >browser-e2e/api.log 2>&1 &
+          api_pid=$!
+          echo "$api_pid" >browser-e2e/api.pid
+          pnpm --filter web dev --host 127.0.0.1 >browser-e2e/web.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if ! kill -0 "$api_pid" 2>/dev/null; then
+              cat browser-e2e/api.log
+              exit 1
+            fi
+            if curl --fail --silent http://127.0.0.1:9191/ready >/dev/null && \
+               curl --fail --silent http://127.0.0.1:5173/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat browser-e2e/api.log
+          cat browser-e2e/web.log
+          exit 1
+
+      - name: Test public V2 API
+        env:
+          NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.seed_test_identity.outputs.agent_api_key }}
+          NOTEGATE_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
+          REDOCLY_TELEMETRY: "off"
+          REDOCLY_SUPPRESS_UPDATE_NOTICE: "true"
+        run: |
+          curl --fail --silent \
+            --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
+            http://127.0.0.1:9191/api/v2/me >/dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
+            http://127.0.0.1:9191/api/v2/spaces)" = "200"
+          test "$(curl --silent \
+            --dump-header browser-e2e/public-v2-error.headers \
+            --output browser-e2e/public-v2-error.json \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
+            http://127.0.0.1:9191/api/v2/spaces/not-a-uuid)" = "400"
+          jq --exit-status \
+            '.error == "invalid_input" and .kind == "invalid_input"' \
+            source/browser-e2e/public-v2-error.json >/dev/null
+          grep --ignore-case --quiet \
+            '^cache-control: private, no-store' \
+            source/browser-e2e/public-v2-error.headers
+          curl --fail --silent \
+            --cookie "notegate_browser_session=$NOTEGATE_BROWSER_SESSION" \
+            --output browser-e2e/openapi-v2.json \
+            http://127.0.0.1:9191/openapi/v2.json
+          pnpm exec redocly lint --extends=spec browser-e2e/openapi-v2.json
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
+            http://127.0.0.1:9191/api/v1/me)" = "401"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:9191/api/v2/me)" = "401"
+
+      - name: Check API concurrency and latency smoke budgets
+        timeout-minutes: 2
+        shell: bash
+        env:
+          NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.seed_test_identity.outputs.agent_api_key }}
+          NOTEGATE_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
+        run: |
+          # Observe only the disposable local DB; never export SQL text or bind values.
+          psql postgres://notegate:notegate@localhost:5432/notegate \
+            --no-psqlrc --no-align --tuples-only --set=ON_ERROR_STOP=1 \
+            >browser-e2e/api-load-postgres.txt 2>&1 <<'SQL' &
+          SELECT json_build_object(
+            'at', statement_timestamp(),
+            'waits', coalesce(json_agg(w), '[]'::json)
+          ) FROM (
+            SELECT state, wait_event_type, wait_event,
+              CASE
+                WHEN query LIKE '%FOR UPDATE OF acc%' THEN 'owner_lock'
+                WHEN query LIKE '%FROM spaces%FOR UPDATE%' THEN 'space_lock'
+                WHEN query LIKE '%INSERT INTO command_invocations%' THEN 'invocation_insert'
+                ELSE 'other'
+              END AS operation,
+              count(*) AS connections,
+              max(extract(epoch FROM statement_timestamp() - query_start) * 1000) AS max_query_age_ms
+            FROM pg_stat_activity
+            WHERE datname = current_database() AND pid <> pg_backend_pid()
+              AND state <> 'idle'
+            GROUP BY 1, 2, 3, 4
+          ) w;
+          \watch 0.2
+          SQL
+          observer_pid=$!
+          trap 'kill "$observer_pid" 2>/dev/null || true; wait "$observer_pid" 2>/dev/null || true' EXIT
+          node deploy/ci/api-load-smoke.mjs | tee -a "$GITHUB_STEP_SUMMARY"
+          kill -0 "$observer_pid"
+
+      - name: Upload API latency diagnostics
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: api-load-diagnostics
+          if-no-files-found: ignore
+          retention-days: 7
+          path: source/browser-e2e/api-load-*
+
+      - name: Test browser API workflows
+        id: browser_tests
+        env:
+          NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
+          NOTEGATE_WEB_E2E_API_KEY: ${{ steps.seed_test_identity.outputs.agent_api_key }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/browser-api-test-results.json
+        run: |
+          api_pid=$(cat browser-e2e/api.pid)
+          kill -0 "$api_pid"
+          pnpm --filter web test:e2e --project=live-api --reporter=dot,json
+          kill -0 "$api_pid"
+
+      - name: Collect browser API test timings
+        id: browser_timings
+        if: ${{ !cancelled() && (steps.browser_tests.outcome == 'success' || steps.browser_tests.outcome == 'failure') }}
+        shell: bash
+        run: |
+          python3 -B deploy/ci/browser-test-timings.py \
+            < "$RUNNER_TEMP/browser-api-test-results.json" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain browser API test timings
+        if: ${{ !cancelled() && steps.browser_timings.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-api-test-timings
+          path: source/browser-e2e/browser-test-timings.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Seed live workbench identity
+        id: workbench_identity
+        run: |
+          output=$(target/debug/examples/seed_user workbench)
+          key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
+          session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
+          test -n "$key"
+          test -n "$session"
+          echo "::add-mask::$key"
+          echo "::add-mask::$session"
+          echo "agent_api_key=$key" >> "$GITHUB_OUTPUT"
+          echo "browser_session=$session" >> "$GITHUB_OUTPUT"
+
+      - name: Test live workbench contracts
+        env:
+          NOTEGATE_WEB_BASE_URL: http://localhost:9191
+          NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.workbench_identity.outputs.browser_session }}
+          NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.workbench_identity.outputs.agent_api_key }}
+        run: pnpm --filter web exec playwright test --config playwright.functional.config.ts --project workbench
+
+      - name: Seed standalone OAuth identity
+        id: oauth_identity
+        run: |
+          output=$(target/debug/examples/seed_user oauth)
+          session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
+          consent=$(printf '%s\n' "$output" | sed -n 's/^OAUTH_CONSENT_FIXTURE=//p')
+          test -n "$session"
+          test -n "$consent"
+          echo "::add-mask::$session"
+          echo "::add-mask::$(printf '%s' "$consent" | jq -r .secret)"
+          echo "::add-mask::$(printf '%s' "$consent" | jq -r .verifier)"
+          echo "::add-mask::$consent"
+          echo "browser_session=$session" >> "$GITHUB_OUTPUT"
+          echo "oauth_consent=$consent" >> "$GITHUB_OUTPUT"
+
+      - name: Test standalone OAuth contracts
+        env:
+          NOTEGATE_OAUTH_BASE_URL: http://localhost:9191
+          NOTEGATE_WEB_E2E_OAUTH_BROWSER_SESSION: ${{ steps.oauth_identity.outputs.browser_session }}
+          NOTEGATE_WEB_E2E_OAUTH_CONSENT: ${{ steps.oauth_identity.outputs.oauth_consent }}
+        run: pnpm --filter web exec playwright test --config playwright.functional.config.ts --project standalone-oauth
+
+      - name: Upload authentication API screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: authentication-api
+          if-no-files-found: ignore
+          retention-days: 7
+          path: source/frontend/web/test-results/browser-functional/oauth-*.png
+
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-e2e-diagnostics
+          if-no-files-found: ignore
+          path: |
+            source/browser-e2e/*.log
+            source/frontend/web/test-results
+            !source/frontend/web/test-results/openapi-docs-*/**
+            source/frontend/web/lighthouse-reports
+
+  browser:
+    name: Browser E2E
+    needs: [gate, hygiene, browser-ui, browser-api]
+    # A skipped required check can satisfy branch protection; inspect cancelled suites too.
+    if: ${{ always() && needs.hygiene.result == 'success' && needs.hygiene.outputs.browser == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require both browser suites to pass
+        env:
+          UI_RESULT: ${{ needs.browser-ui.result }}
+          API_RESULT: ${{ needs.browser-api.result }}
+        run: test "$UI_RESULT" = success && test "$API_RESULT" = success
