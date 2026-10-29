@@ -48,20 +48,51 @@ class WorkflowBoundaryTests(unittest.TestCase):
                 self.assertIn(f'ci_bridge.py gate --kind {kind}', text)
                 self.assertIn('  gate:\n    name: Validate core request\n    permissions:\n      contents: read\n      actions: read', text)
                 self.assertIn('ref: ${{ github.sha }}\n          path: .control\n          persist-credentials: false', text)
-                for forbidden in ('Swatinem/rust-cache', 'cache-from:', 'cache-to:', 'cache: pnpm', 'CORE_READ_APP_', 'RELEASE_APP_'):
+                for forbidden in ('Swatinem/rust-cache', 'cache-from:', 'cache-to:', 'cache: pnpm', 'RELEASE_APP_'):
                     self.assertNotIn(forbidden, text)
+                gate = text.split('      - name: Validate immutable core request', 1)[0]
+                self.assertIn('permission-pull-requests: read', gate)
+                self.assertIn('CORE_TOKEN: ${{ steps.core-token.outputs.token }}', text)
                 for step in re.split(r'(?m)^      - ', text):
+                    if 'uses: ./.control/.github/actions/checkout-core' in step:
+                        self.assertIn('client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}', step)
+                        self.assertIn('private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}', step)
                     if 'uses: aquasecurity/trivy-action@' in step:
                         self.assertRegex(step, r'(?m)^          cache: false$')
                     if 'uses: docker/setup-buildx-action@' in step:
                         self.assertRegex(step, r'(?m)^          cache-binary: false$')
 
-    def test_core_checkout_is_fixed_and_anonymous(self):
+    def test_core_checkout_is_fixed_scoped_and_revoked_before_source_execution(self):
         action = (ROOT / '.github/actions/checkout-core/action.yml').read_text()
         self.assertIn('https://github.com/cagojeiger/notegate-core.git', action)
-        self.assertIn('credential.helper= -c http.extraHeader=', action)
-        self.assertNotIn('token:', action)
+        self.assertIn('repositories: notegate-core', action)
+        self.assertIn('permission-contents: read', action)
+        self.assertNotIn('permission-actions:', action)
+        self.assertIn('GIT_CONFIG_COUNT=3', action)
+        self.assertIn('GIT_CONFIG_KEY_0=credential.helper', action)
+        self.assertIn('GIT_CONFIG_KEY_1=http.extraHeader', action)
+        self.assertIn('always() && steps.token.outputs.token', action)
+        self.assertIn('https://api.github.com/installation/token', action)
+        self.assertIn('test "$status" = 204', action)
+        self.assertNotIn('continue-on-error', action)
         self.assertIn('rev-parse HEAD', action)
+
+    def test_source_security_and_dependency_audits_are_not_path_or_event_optional(self):
+        text = (WORKFLOWS / 'ci.yml').read_text()
+        job = text.split('  security:\n', 1)[1].split('\n  hygiene:\n', 1)[0]
+        self.assertIn('needs: gate', job)
+        self.assertNotIn('\n    if:', job)
+        self.assertIn('uses: ./.control/.github/actions/setup-security-scanners', job)
+        setup = (ROOT / '.github/actions/setup-security-scanners/action.yml').read_text()
+        self.assertIn('16b9e6d45f10649f6a531ec4838ed9924372c3bc', setup)
+        self.assertIn('semgrep==1.182.0', setup)
+        self.assertIn('sha256sum --check', setup)
+        self.assertIn('security_scan.py semgrep source', job)
+        self.assertIn('security_scan.py gitleaks source', job)
+        self.assertNotIn('upload-artifact', job)
+        dependency = (WORKFLOWS / 'dependency-security.yml').read_text()
+        self.assertIn('name: Npm Audit', dependency)
+        self.assertNotIn("source_event != 'pull_request'", dependency)
 
     def test_cross_run_download_has_job_actions_permission(self):
         for kind in KINDS:

@@ -11,7 +11,7 @@ import sys
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 import zipfile
 
 import ci_impact
@@ -56,14 +56,17 @@ def api(path, data=None, token=None, missing=False):
             and all(part not in {".", ".."} for part in path.split("?", 1)[0].split("/")),
             "Invalid GitHub API path")
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
-    credential = token or os.environ.get("GH_TOKEN")
+    core_path = path.split("?", 1)[0]
+    core_prefix = f"repos/{CORE}"
+    is_core = core_path == core_prefix or core_path.startswith(core_prefix + "/")
+    credential = token or (os.environ.get("CORE_TOKEN") if is_core else None) or os.environ.get("GH_TOKEN")
     if credential:
         headers["Authorization"] = "Bearer " + credential
     body = None if data is None else json.dumps(data).encode()
     if body is not None:
         headers["Content-Type"] = "application/json"
     try:
-        with urlopen(Request("https://api.github.com/" + path, data=body, headers=headers), timeout=30) as response:
+        with build_opener(NoRedirect).open(Request("https://api.github.com/" + path, data=body, headers=headers), timeout=30) as response:
             result = response.read(8 * 1024 * 1024 + 1)
             require(len(result) <= 8 * 1024 * 1024, "GitHub response exceeded its limit")
             return json.loads(result) if result else None
@@ -79,8 +82,8 @@ def checked_repository(name, identity, read=api):
     repository = read(f"repos/{name}")
     require(repository.get("id") == identity and repository.get("full_name") == name
             and not repository.get("archived"), "Repository identity changed")
-    require(repository.get("private") is False,
-            "General CI currently requires public repositories; private checkout is not qualified")
+    require(type(repository.get("private")) is bool and (name == CORE or repository["private"] is False),
+            "Unexpected repository visibility")
     return repository
 
 
@@ -193,8 +196,13 @@ def source_plan(run_id, attempt, kind, options=None, control_sha=None, read=api)
                 and pull.get("base", {}).get("repo", {}).get("id") == CORE_ID
                 and pull["base"].get("ref") == "main"
                 and pull.get("head", {}).get("sha") == head
-                and pull["head"].get("repo", {}).get("id") == run.get("head_repository", {}).get("id")
+                and pull["head"].get("repo", {}).get("id") == CORE_ID
+                and run.get("head_repository", {}).get("id") == CORE_ID
                 and pull["head"].get("ref") == run.get("head_branch"), "Pull request identity changed")
+        author = pull.get("user") or {}
+        require((author.get("id"), author.get("login")) in {(18637774, "cagojeiger"),
+                                                               (49699333, "dependabot[bot]")},
+                "Pull request author is not trusted")
         base, tested = pull["base"].get("sha", ""), pull.get("merge_commit_sha", "")
         require(SHA.fullmatch(base) and isinstance(tested, str) and SHA.fullmatch(tested)
                 and pull.get("mergeable") is True, "Pull request merge is not ready")
@@ -298,7 +306,7 @@ def expected_jobs(request, impact):
     event = request["event"]
     if request["kind"] == "ci":
         return {
-            "hygiene": ("Hygiene", True), "rust_build": ("Rust Build", impact["rust_build"]),
+            "hygiene": ("Hygiene", True), "security": ("Source Security", True), "rust_build": ("Rust Build", impact["rust_build"]),
             "rust": ("Rust", impact["rust"]), "postgres18": ("PostgreSQL 18", impact["postgres"]),
             "web": ("Web", impact["web"]), "browser": ("Browser E2E", impact["browser"]),
             "main_audit": ("Main RustSec Audit", event == "push"),
@@ -307,7 +315,7 @@ def expected_jobs(request, impact):
         }
     return {
         "dependency-security": {"rust_audit": ("RustSec Audit", True),
-                                "npm_audit": ("Scheduled Npm Audit", event != "pull_request")},
+                                "npm_audit": ("Npm Audit", True)},
         "image-security": {"image_resolve": ("Resolve latest image", True),
                            "image_amd64": ("Trivy linux/amd64", True), "image_arm64": ("Trivy linux/arm64", True)},
         "security-dast": {"dast": ("Isolated adversarial scenarios", True)},

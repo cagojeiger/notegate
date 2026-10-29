@@ -57,12 +57,57 @@ jobs:
           path: .control
           persist-credentials: false
 
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
       - name: Validate immutable core request
         id: request
         env:
           REQUEST_JSON: ${{ inputs.request }}
           GH_TOKEN: ${{ github.token }}
+          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
         run: python3 .control/.github/scripts/ci_bridge.py gate --kind ci >> "$GITHUB_OUTPUT"
+
+  security:
+    needs: gate
+    name: Source Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Set up pinned local scanners
+        uses: ./.control/.github/actions/setup-security-scanners
+
+      - name: Checkout exact core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+
+      - name: Check source security without publishing source diagnostics
+        run: |
+          semgrep_status=0
+          gitleaks_status=0
+          python3 .control/.github/scripts/security_scan.py semgrep source --rules-repo .rules || semgrep_status=$?
+          python3 .control/.github/scripts/security_scan.py gitleaks source || gitleaks_status=$?
+          test "$semgrep_status" = 0 && test "$gitleaks_status" = 0
 
   hygiene:
     needs: gate
@@ -87,9 +132,11 @@ jobs:
           path: .control
           persist-credentials: false
 
-      - name: Checkout exact public core source
+      - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
         with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           sha: ${{ needs.gate.outputs.tested_sha }}
           path: source
           fetch-depth: 2
@@ -163,9 +210,11 @@ jobs:
           path: .control
           persist-credentials: false
 
-      - name: Checkout exact public core source
+      - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
         with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           sha: ${{ needs.gate.outputs.tested_sha }}
           path: source
           fetch-depth: 1
@@ -270,9 +319,11 @@ jobs:
           path: .control
           persist-credentials: false
 
-      - name: Checkout exact public core source
+      - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
         with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           sha: ${{ needs.gate.outputs.tested_sha }}
           path: source
           fetch-depth: 1
@@ -377,9 +428,11 @@ jobs:
           path: .control
           persist-credentials: false
 
-      - name: Checkout exact public core source
+      - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
         with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           sha: ${{ needs.gate.outputs.tested_sha }}
           path: source
           fetch-depth: 1
@@ -417,9 +470,11 @@ jobs:
           path: .control
           persist-credentials: false
 
-      - name: Checkout exact public core source
+      - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
         with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           sha: ${{ needs.gate.outputs.tested_sha }}
           path: source
           fetch-depth: 1
@@ -450,9 +505,11 @@ jobs:
           path: .control
           persist-credentials: false
 
-      - name: Checkout exact public core source
+      - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
         with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           sha: ${{ needs.gate.outputs.tested_sha }}
           path: source
           fetch-depth: 1
@@ -520,9 +577,11 @@ jobs:
           path: .control
           persist-credentials: false
 
-      - name: Checkout exact public core source
+      - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
         with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           sha: ${{ needs.gate.outputs.tested_sha }}
           path: source
           fetch-depth: 1
@@ -604,9 +663,11 @@ jobs:
           path: .control
           persist-credentials: false
 
-      - name: Checkout exact public core source
+      - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
         with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           sha: ${{ needs.gate.outputs.tested_sha }}
           path: source
           fetch-depth: 1
@@ -783,9 +844,11 @@ jobs:
           path: .control
           persist-credentials: false
 
-      - name: Checkout exact public core source
+      - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
         with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           sha: ${{ needs.gate.outputs.tested_sha }}
           path: source
           fetch-depth: 1

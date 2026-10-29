@@ -44,11 +44,24 @@ jobs:
           path: .control
           persist-credentials: false
 
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
       - name: Validate immutable core request
         id: request
         env:
           REQUEST_JSON: ${{ inputs.request }}
           GH_TOKEN: ${{ github.token }}
+          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
         run: python3 .control/.github/scripts/ci_bridge.py gate --kind security-dast >> "$GITHUB_OUTPUT"
 
   pilot:
@@ -102,9 +115,11 @@ jobs:
           path: .control
           persist-credentials: false
 
-      - name: Checkout exact public core source
+      - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
         with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           sha: ${{ needs.gate.outputs.tested_sha }}
           path: source
           fetch-depth: 1
