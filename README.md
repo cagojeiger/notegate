@@ -25,8 +25,8 @@ The v0.1.119 release assets are mirrored without modification from the original 
 ```text
 LICENSE                      Existing AGPL license, unchanged
 README.md                    Distribution and release instructions
-.github/workflows/           Release and workflow validation
-.github/scripts/             Release gates, publication, and their tests
+.github/workflows/           Release, Web comparison, and workflow validation
+.github/scripts/             Source gates, publication, and their tests
 ```
 
 Application code, Dockerfiles, development documentation, and ordinary CI stay in
@@ -71,6 +71,14 @@ existing GHCR package's **Manage Actions access**. Replace the old core publishi
 workflow with the tag-and-dispatch controller before enabling it; only this
 repository publishes images and release assets. Ordinary core CI remains in core.
 Post-release browser/text performance workflows are not automatically connected.
+
+## Web CI comparison
+
+`Web CI shadow` repeats the core Web checks for a completed main push CI run.
+Manual dispatch takes `source_sha`, `source_ci_run_id`, and `source_ci_attempt`.
+It compares the exact source and attempt without replacing core Web, its browser
+test artifact, required checks, or release validation. The comparison uses no
+Actions cache and uploads no source artifacts. PR CI migration is separate.
 
 ## Source access
 
