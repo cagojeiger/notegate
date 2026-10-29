@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 import zipfile
 
 import ci_bridge as bridge
@@ -235,6 +235,105 @@ class BridgeTests(unittest.TestCase):
             opener.return_value.open.side_effect = failure
             with self.assertRaisesRegex(bridge.Stopped, r"^GitHub request failed \(HTTP 403\)$"):
                 bridge.api("repos/a/b", token="test-only-credential")
+
+    def test_transient_read_is_retried_but_dispatch_is_not_replayed(self):
+        unavailable = HTTPError("https://api.github.com/x", 503, "unavailable", {}, io.BytesIO(b""))
+        with patch.object(bridge, "build_opener") as opener, patch.object(bridge.time, "sleep") as sleep:
+            opener.return_value.open.side_effect = [unavailable, io.BytesIO(b'{"ok":true}')]
+            self.assertEqual(bridge.api("repos/a/b"), {"ok": True})
+            self.assertEqual(opener.return_value.open.call_count, 2)
+            sleep.assert_called_once()
+        with patch.object(bridge, "build_opener") as opener, patch.object(bridge.time, "sleep") as sleep:
+            opener.return_value.open.side_effect = unavailable
+            with self.assertRaisesRegex(bridge.Stopped, "HTTP 503"):
+                bridge.api("repos/a/b/dispatches", data={"request": "x"})
+            opener.return_value.open.assert_called_once()
+            sleep.assert_not_called()
+
+    def test_rate_limited_reads_honor_retry_after_without_retrying_permission_errors(self):
+        limited = HTTPError("https://api.github.com/x", 429, "limited", {"Retry-After": "4"}, io.BytesIO(b""))
+        with patch.object(bridge, "build_opener") as opener, patch.object(bridge.time, "sleep") as sleep:
+            opener.return_value.open.side_effect = [limited, io.BytesIO(b'{"ok":true}')]
+            self.assertEqual(bridge.api("repos/a/b"), {"ok": True})
+            sleep.assert_called_once()
+            self.assertGreaterEqual(sleep.call_args.args[0], 4)
+            self.assertLessEqual(sleep.call_args.args[0], 4.25)
+        denied = HTTPError("https://api.github.com/x", 403, "denied", {}, io.BytesIO(b""))
+        with patch.object(bridge, "build_opener") as opener, patch.object(bridge.time, "sleep") as sleep:
+            opener.return_value.open.side_effect = denied
+            with self.assertRaisesRegex(bridge.Stopped, "HTTP 403"):
+                bridge.api("repos/a/b")
+            opener.return_value.open.assert_called_once()
+            sleep.assert_not_called()
+
+    def test_rate_limit_longer_than_retry_budget_fails_without_early_retry(self):
+        limited = HTTPError("https://api.github.com/x", 429, "limited", {"Retry-After": "300"}, io.BytesIO(b""))
+        with patch.object(bridge, "build_opener") as opener, patch.object(bridge.time, "sleep") as sleep:
+            opener.return_value.open.side_effect = limited
+            with self.assertRaisesRegex(bridge.Stopped, "HTTP 429"):
+                bridge.api("repos/a/b")
+            opener.return_value.open.assert_called_once()
+            sleep.assert_not_called()
+
+    def test_transient_read_retries_are_bounded(self):
+        unavailable = HTTPError("https://api.github.com/x", 503, "unavailable", {}, io.BytesIO(b""))
+        with patch.object(bridge, "build_opener") as opener, patch.object(bridge.time, "sleep") as sleep:
+            opener.return_value.open.side_effect = unavailable
+            with self.assertRaisesRegex(bridge.Stopped, "HTTP 503"):
+                bridge.api("repos/a/b")
+            self.assertEqual(opener.return_value.open.call_count, 3)
+            self.assertEqual(sleep.call_count, 2)
+
+    def test_dispatch_transport_error_is_not_retried(self):
+        with patch.object(bridge, "build_opener") as opener, patch.object(bridge.time, "sleep") as sleep:
+            opener.return_value.open.side_effect = URLError("timeout")
+            with self.assertRaisesRegex(bridge.Stopped, "could not be completed"):
+                bridge.api("repos/a/b/dispatches", data={"request": "x"})
+            opener.return_value.open.assert_called_once()
+            sleep.assert_not_called()
+
+    def test_unexpected_not_modified_is_not_accepted_without_cache(self):
+        unchanged = HTTPError("https://api.github.com/x", 304, "not modified", {}, io.BytesIO(b""))
+        with patch.object(bridge, "build_opener") as opener:
+            opener.return_value.open.side_effect = unchanged
+            with self.assertRaisesRegex(bridge.Stopped, "HTTP 304"):
+                bridge.api("repos/a/b", token="one", poll_cache={})
+
+    def test_poll_cache_revalidates_etag_and_is_scoped_by_credential(self):
+        class Response(io.BytesIO):
+            headers = {"ETag": '"v1"'}
+
+        unchanged = HTTPError("https://api.github.com/x", 304, "not modified", {}, io.BytesIO(b""))
+        cache = {}
+        with patch.object(bridge, "build_opener") as opener:
+            opener.return_value.open.side_effect = [Response(b'{"status":"running"}'), unchanged,
+                                                    Response(b'{"status":"completed"}')]
+            first = bridge.api("repos/a/b", token="one", poll_cache=cache)
+            first["status"] = "mutated locally"
+            self.assertEqual(bridge.api("repos/a/b", token="one", poll_cache=cache), {"status": "running"})
+            request = opener.return_value.open.call_args.args[0]
+            self.assertEqual(request.get_header("If-none-match"), '"v1"')
+            self.assertEqual(bridge.api("repos/a/b", token="two", poll_cache=cache), {"status": "completed"})
+            request = opener.return_value.open.call_args.args[0]
+            self.assertIsNone(request.get_header("If-none-match"))
+
+    def test_wait_caches_only_poll_reads_and_revalidates_final_result(self):
+        fixture = Fixture("pull_request")
+        fixture.public["status"] = "in_progress"
+        calls = []
+
+        def reader(path, *args, **kwargs):
+            calls.append((path, "poll_cache" in kwargs))
+            return fixture.read(path, *args)
+
+        def finish(_):
+            fixture.public["status"] = "completed"
+
+        with patch.object(bridge, "api", side_effect=reader) as api:
+            bridge.wait(fixture.request, read=api, pause=finish)
+        self.assertTrue(any(cached and "/actions/runs/10" in path for path, cached in calls))
+        self.assertTrue(any(cached and "/actions/runs/20" in path for path, cached in calls))
+        self.assertTrue(any(not cached and "/actions/runs/20/attempts/" in path for path, cached in calls))
 
     def test_private_core_and_trusted_pr_authors(self):
         fixture = Fixture("pull_request")

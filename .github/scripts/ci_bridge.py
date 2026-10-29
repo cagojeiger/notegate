@@ -2,10 +2,12 @@
 """Bind public CI execution to one current core workflow attempt."""
 
 import argparse
+import copy
 import io
 import json
 import os
 from pathlib import Path
+import random
 import re
 import sys
 import time
@@ -51,7 +53,7 @@ def positive(value):
     return int(value)
 
 
-def api(path, data=None, token=None, missing=False):
+def api(path, data=None, token=None, missing=False, poll_cache=None):
     require(isinstance(path, str) and not path.startswith(("/", "http"))
             and all(part not in {".", ".."} for part in path.split("?", 1)[0].split("/")),
             "Invalid GitHub API path")
@@ -65,17 +67,47 @@ def api(path, data=None, token=None, missing=False):
     body = None if data is None else json.dumps(data).encode()
     if body is not None:
         headers["Content-Type"] = "application/json"
-    try:
-        with build_opener(NoRedirect).open(Request("https://api.github.com/" + path, data=body, headers=headers), timeout=30) as response:
-            result = response.read(8 * 1024 * 1024 + 1)
-            require(len(result) <= 8 * 1024 * 1024, "GitHub response exceeded its limit")
-            return json.loads(result) if result else None
-    except HTTPError as error:
-        if missing and error.code == 404:
-            return None
-        raise Stopped(f"GitHub request failed (HTTP {error.code})") from None
-    except (URLError, TimeoutError):
-        raise Stopped("GitHub request could not be completed") from None
+    # Only cache authenticated polling reads, and revalidate every use with GitHub.
+    cache_key = (credential, path) if body is None and credential and poll_cache is not None else None
+    cached = poll_cache.get(cache_key) if cache_key is not None else None
+    if cached:
+        headers["If-None-Match"] = cached[0]
+    for attempt in range(3):
+        try:
+            with build_opener(NoRedirect).open(Request("https://api.github.com/" + path, data=body, headers=headers), timeout=30) as response:
+                result = response.read(8 * 1024 * 1024 + 1)
+                require(len(result) <= 8 * 1024 * 1024, "GitHub response exceeded its limit")
+                value = json.loads(result) if result else None
+                etag = getattr(response, "headers", {}).get("ETag")
+                if cache_key is not None and etag:
+                    poll_cache[cache_key] = (etag, copy.deepcopy(value))
+                elif cache_key is not None:
+                    poll_cache.pop(cache_key, None)
+                return value
+        except HTTPError as error:
+            if error.code == 304 and cached is not None:
+                return copy.deepcopy(cached[1])
+            if missing and error.code == 404:
+                return None
+            rate_limited = error.code == 429 or (error.code == 403 and
+                (error.headers.get("Retry-After") or error.headers.get("X-RateLimit-Remaining") == "0"))
+            transient = error.code in {500, 502, 503, 504}
+            if body is None and attempt < 2 and (rate_limited or transient):
+                try:
+                    delay = float(error.headers.get("Retry-After", "60" if rate_limited else str(2 ** attempt)))
+                    if rate_limited and error.headers.get("X-RateLimit-Remaining") == "0":
+                        delay = max(delay, float(error.headers.get("X-RateLimit-Reset", "0")) - time.time())
+                except (TypeError, ValueError):
+                    delay = 61
+                if 0 <= delay <= 60:
+                    time.sleep(delay + random.uniform(0, 0.25))
+                    continue
+            raise Stopped(f"GitHub request failed (HTTP {error.code})") from None
+        except (URLError, TimeoutError):
+            if body is None and attempt < 2:
+                time.sleep(2 ** attempt + random.uniform(0, 0.25))
+                continue
+            raise Stopped("GitHub request could not be completed") from None
 
 
 def checked_repository(name, identity, read=api):
@@ -480,9 +512,11 @@ def wait(request, read=api, pause=time.sleep, clock=time.monotonic, timeout=5100
     validate_request(request, read)
     deadline = clock() + timeout
     run = None
+    poll_cache = {}
+    poll_read = (lambda path: api(path, poll_cache=poll_cache)) if read is api else read
     while clock() < deadline:
-        active_source(request, read)
-        run = (read(f"repos/{PUBLIC}/actions/runs/{run['id']}") if run else public_run(request, read))
+        active_source(request, poll_read)
+        run = (poll_read(f"repos/{PUBLIC}/actions/runs/{run['id']}") if run else public_run(request, read))
         if run and run.get("status") == "completed":
             # Discover again to reject duplicates and recheck actor, definition and latest attempt.
             verified = public_run(request, read)
