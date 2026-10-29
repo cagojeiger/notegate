@@ -3,8 +3,16 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      source_tag:
+        description: Annotated release tag on notegate-core (vMAJOR.MINOR.PATCH)
+        required: true
+        type: string
       source_sha:
-        description: Full 40-character commit SHA on notegate-core main
+        description: Full 40-character source commit SHA identified by the core tag
+        required: true
+        type: string
+      source_ci_run_id:
+        description: Successful core main push CI run for this source commit
         required: true
         type: string
       publish:
@@ -37,6 +45,8 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
       source_sha: ${{ steps.plan.outputs.source_sha }}
       ci_run_id: ${{ steps.plan.outputs.ci_run_id }}
+      tag_object_sha: ${{ steps.plan.outputs.tag_object_sha }}
+      notes_sha256: ${{ steps.plan.outputs.notes_sha256 }}
       should_release: ${{ steps.plan.outputs.should_release }}
     steps:
       - name: Checkout trusted distribution scripts
@@ -45,11 +55,36 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Check optional core access configuration
+        env:
+          CORE_APP_CLIENT_ID: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          CORE_APP_PRIVATE_KEY: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -n "$CORE_APP_CLIENT_ID" && -z "$CORE_APP_PRIVATE_KEY" ]]; then
+            echo '::error::CORE_READ_APP_PRIVATE_KEY is required when CORE_READ_APP_CLIENT_ID is configured'
+            exit 1
+          fi
+
+      - name: Create short-lived core read token
+        id: core-token
+        if: vars.CORE_READ_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+
       - name: Check exact source, CI, and release version
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
+          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
           SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_CI_RUN_ID: ${{ inputs.source_ci_run_id }}
           PUBLISH: ${{ inputs.publish }}
         run: python3 .github/scripts/release_gate.py
 
@@ -73,10 +108,23 @@ jobs:
             runner: ubuntu-24.04-arm
             arch: arm64
     steps:
+      - name: Create short-lived core read token
+        id: core-token
+        if: vars.CORE_READ_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+
       - name: Checkout exact core source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
+          token: ${{ steps.core-token.outputs.token || github.token }}
           ref: ${{ needs.version.outputs.source_sha }}
           path: source
           persist-credentials: false
@@ -228,10 +276,23 @@ jobs:
           - target: aarch64-apple-darwin
             runner: macos-15
     steps:
+      - name: Create short-lived core read token
+        id: core-token
+        if: vars.CORE_READ_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+
       - name: Checkout exact core source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
+          token: ${{ steps.core-token.outputs.token || github.token }}
           ref: ${{ needs.version.outputs.source_sha }}
           path: source
           persist-credentials: false
@@ -290,10 +351,23 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Create short-lived core read token
+        id: core-token
+        if: vars.CORE_READ_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+
       - name: Checkout installer data without executing core scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
+          token: ${{ steps.core-token.outputs.token || github.token }}
           ref: ${{ needs.version.outputs.source_sha }}
           path: source
           sparse-checkout: deploy/cli/install.sh
@@ -354,8 +428,12 @@ jobs:
       - name: Validate, stage, verify, and publish approved assets
         env:
           GH_TOKEN: ${{ github.token }}
+          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
+          SOURCE_TAG: ${{ needs.version.outputs.tag }}
           SOURCE_SHA: ${{ needs.version.outputs.source_sha }}
           SOURCE_CI_RUN_ID: ${{ needs.version.outputs.ci_run_id }}
+          SOURCE_TAG_OBJECT_SHA: ${{ needs.version.outputs.tag_object_sha }}
+          RELEASE_NOTES_SHA256: ${{ needs.version.outputs.notes_sha256 }}
           VERSION: ${{ needs.version.outputs.version }}
           PUBLISH: "true"
         run: python3 .github/scripts/publish_release.py

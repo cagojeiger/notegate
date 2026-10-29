@@ -36,29 +36,63 @@ repository's history. Public policy files may be added after review.
 
 ## Release
 
-Run **Release** from this repository's `main`, supplying the full current core
-`main` SHA. `publish=false` only validates the plan; it does not build, push an
-image, or publish a release. `publish=true` builds both Linux container images and
-four native CLI binaries, scans the immutable images, and publishes verified
-assets to this repository and `ghcr.io/cagojeiger/notegate`.
+Merge a release PR in core with the version change and a `## Release notes`
+section containing only approved public release notes. After that commit's main
+CI succeeds, the core dispatcher creates an annotated `vMAJOR.MINOR.PATCH` source
+tag and dispatches **Release** here with the tag, its exact source SHA, and the CI
+run ID. The annotated tag message holds the approved release notes. Build and
+publication workflows are maintained only in this distribution repository.
 
-The current core commit must have successful main CI, including RustSec, Rust,
-PostgreSQL, Web, and Browser E2E. The version must be newer than the latest public
-release and unused by a distribution tag, draft, release, or image version tag.
+Manual dispatch from this repository's `main` takes the same `source_tag`,
+`source_sha`, and `source_ci_run_id` inputs. `publish=false` validates only the
+plan; it does not build, push an image, or publish a release. `publish=true` builds
+both Linux container images and four native CLI binaries, scans the immutable
+images, and publishes verified assets here and to `ghcr.io/cagojeiger/notegate`.
+
+The annotated source tag must match core's VERSION and remain an ancestor of core
+main. Newer main commits do not change the selected source. The supplied CI must
+be the latest run for that exact commit and have successful required jobs,
+including RustSec, Rust, PostgreSQL, Web, and Browser E2E. Later checks reject a
+moved tag or changed release notes. The version must be newer than the latest
+public release and unused by a distribution tag, draft, release, or image tag.
 Fixable CRITICAL image vulnerabilities block publication; HIGH and unfixed
 CRITICAL findings remain visible in the published reports.
 
-Release notes and `image-digests.json` identify the real core source SHA and CI
-run. Distribution release tags point to the workflow commit in this repository.
+Release notes and `image-digests.json` identify the real core tag, source SHA, tag
+object, approved notes digest, and CI run. Distribution release tags point to the
+workflow commit in this repository; they do not identify application source.
 CLI asset names, manifest schema, installer URLs, and the container address stay
 unchanged. A stopped publication may leave an image tag or draft; diagnose that
 state before retrying. The workflow never overwrites or deletes a release.
 
 Before the first publication, grant this repository **Write** access under the
-existing GHCR package's **Manage Actions access**. Keep the core Release workflow
-disabled to avoid two publishers. Core CI and post-release browser/text performance
-workflows have not been migrated or connected to this workflow yet.
+existing GHCR package's **Manage Actions access**. Replace the old core publishing
+workflow with the tag-and-dispatch controller before enabling it; only this
+repository publishes images and release assets. Ordinary core CI remains in core.
+Post-release browser/text performance workflows are not automatically connected.
 
-Both repositories currently remain public. This first release migration requires
-public core access and stops if that changes. Private source access and a separate
-review of public logs, artifacts, and caches are required before changing visibility.
+## Source access
+
+The dispatcher in core uses `RELEASE_APP_CLIENT_ID` (Actions variable) and
+`RELEASE_APP_PRIVATE_KEY` (Actions secret) to request an App token restricted to
+this distribution repository with Actions write permission. This is separate from
+core's ordinary `GITHUB_TOKEN`, which creates the source tag in core.
+
+For private core checkout and CI verification, configure `CORE_READ_APP_CLIENT_ID`
+(Actions variable) and `CORE_READ_APP_PRIVATE_KEY` (Actions secret) here. The App
+installation must include `notegate-core` with Contents read and Actions read
+permissions. Each Release job that reads core creates its own short-lived token,
+restricted to core. Checkout credentials are not persisted; the source token is
+not passed to application build steps. Distribution publication uses this
+repository's `GITHUB_TOKEN` for Releases and GHCR, not the core read token.
+
+While core remains public, the read App is optional. A private core requires the
+configured App: making core private before verifying those credentials will block
+releases. PR validation never mints an App token or checks out private application
+source. Synthetic tests do not prove private credential access; verify a trusted
+Release plan with a tagged source and successful CI after configuring the App.
+
+Both repositories currently remain public. No visibility change is performed by
+these workflows. Before making core private, review public build logs, artifacts,
+and caches separately; private Git history alone does not make public build
+outputs confidential. The AGPL license remains unchanged.

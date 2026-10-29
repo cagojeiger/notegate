@@ -3,6 +3,7 @@
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import re
@@ -40,7 +41,9 @@ def api(path, missing_ok=False):
         "X-GitHub-Api-Version": "2026-03-10",
         "User-Agent": "notegate-release",
     }
-    token = os.environ.get("GH_TOKEN")
+    source_path = f"repos/{SOURCE_REPOSITORY}"
+    is_source = path == source_path or path.startswith(f"{source_path}/")
+    token = (os.environ.get("CORE_TOKEN") if is_source else None) or os.environ.get("GH_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(f"https://api.github.com/{path}", headers=headers)
@@ -63,28 +66,70 @@ def validate_context(environment):
     if environment.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
         raise GateError("Release requires an explicit workflow dispatch")
     source_sha = environment.get("SOURCE_SHA", "")
-    if not SHA_PATTERN.fullmatch(source_sha):
-        raise GateError("SOURCE_SHA must be a complete lowercase commit SHA")
+    source_tag = environment.get("SOURCE_TAG", "")
+    ci_run_id = environment.get("SOURCE_CI_RUN_ID", "")
+    validate_inputs(source_sha, source_tag, ci_run_id)
     publish = environment.get("PUBLISH", "")
     if publish not in {"true", "false"}:
         raise GateError("PUBLISH must be true or false")
-    return source_sha, publish == "true"
+    return source_sha, source_tag, int(ci_run_id), publish == "true"
 
 
-def validate_source(source_sha, read=api):
+def validate_inputs(source_sha, source_tag, ci_run_id):
     if not SHA_PATTERN.fullmatch(source_sha):
         raise GateError("Source commit must be a complete lowercase SHA")
+    if not source_tag.startswith("v") or not VERSION_PATTERN.fullmatch(source_tag[1:]):
+        raise GateError("Source tag must be v followed by a stable major.minor.patch version")
+    if not re.fullmatch(r"[1-9][0-9]*", str(ci_run_id)):
+        raise GateError("Source CI run ID must be a positive integer")
+
+
+def validate_source(source_sha, source_tag, ci_run_id, read=api):
+    validate_inputs(source_sha, source_tag, ci_run_id)
+    ci_run_id = int(ci_run_id)
     repository = read(f"repos/{SOURCE_REPOSITORY}")
     if (
         repository.get("id") != SOURCE_REPOSITORY_ID
         or repository.get("full_name") != SOURCE_REPOSITORY
         or repository.get("archived")
-        or repository.get("private") is not False
+        or repository.get("private") not in {True, False}
     ):
-        raise GateError("Source repository identity or public access changed")
+        raise GateError("Source repository identity changed")
+    if repository["private"] and not os.environ.get("CORE_TOKEN"):
+        raise GateError("Private core access requires a dedicated CORE_TOKEN")
+    reference = read(f"repos/{SOURCE_REPOSITORY}/git/ref/tags/{source_tag}")
+    tag_object_sha = reference.get("object", {}).get("sha", "")
+    if (
+        reference.get("ref") != f"refs/tags/{source_tag}"
+        or reference.get("object", {}).get("type") != "tag"
+        or not SHA_PATTERN.fullmatch(tag_object_sha)
+    ):
+        raise GateError("Source release requires an annotated tag")
+    tag = read(f"repos/{SOURCE_REPOSITORY}/git/tags/{tag_object_sha}")
+    notes = tag.get("message")
+    if (
+        tag.get("sha") != tag_object_sha
+        or tag.get("tag") != source_tag
+        or tag.get("object", {}).get("type") != "commit"
+        or tag.get("object", {}).get("sha") != source_sha
+    ):
+        raise GateError("Source tag does not identify the requested commit")
+    if not isinstance(notes, str) or not notes.strip() or len(notes.encode("utf-8")) > 16384:
+        raise GateError("Annotated tag must contain nonempty public release notes of at most 16 KiB")
+    notes_sha256 = hashlib.sha256(notes.encode("utf-8")).hexdigest()
+    for name, actual in (("SOURCE_TAG_OBJECT_SHA", tag_object_sha), ("RELEASE_NOTES_SHA256", notes_sha256)):
+        if os.environ.get(name) and os.environ[name] != actual:
+            raise GateError("Source tag or release notes changed after release approval")
     main = read(f"repos/{SOURCE_REPOSITORY}/commits/main")
-    if main.get("sha") != source_sha:
-        raise GateError("Source commit is no longer the current core main")
+    main_sha = main.get("sha", "")
+    if not SHA_PATTERN.fullmatch(main_sha):
+        raise GateError("Core main commit could not be read")
+    comparison = read(f"repos/{SOURCE_REPOSITORY}/compare/{source_sha}...{main_sha}")
+    if (
+        comparison.get("status") not in {"ahead", "identical"}
+        or comparison.get("merge_base_commit", {}).get("sha") != source_sha
+    ):
+        raise GateError("Tagged source must remain an ancestor of core main")
     version_file = read(f"repos/{SOURCE_REPOSITORY}/contents/VERSION?ref={source_sha}")
     try:
         if version_file.get("encoding") != "base64":
@@ -94,6 +139,8 @@ def validate_source(source_sha, read=api):
         raise GateError("Source VERSION could not be read") from None
     if not VERSION_PATTERN.fullmatch(version):
         raise GateError("Source VERSION must be a stable major.minor.patch version")
+    if source_tag != f"v{version}":
+        raise GateError("Source VERSION does not match the approved tag")
     query = urllib.parse.urlencode(
         {"head_sha": source_sha, "event": "push", "branch": "main", "per_page": 100}
     )
@@ -101,11 +148,23 @@ def validate_source(source_sha, read=api):
         f"repos/{SOURCE_REPOSITORY}/actions/workflows/{CI_WORKFLOW_ID}/runs?{query}"
     )
     runs = response.get("workflow_runs", [])
+    if response.get("total_count") != len(runs):
+        raise GateError("Source CI run list is incomplete")
     if not runs:
         raise GateError("No main push CI exists for the source commit")
-    run = max(runs, key=lambda item: (item["run_number"], item["run_attempt"], item["id"]))
+    latest = max(runs, key=lambda item: (item["run_number"], item["run_attempt"], item["id"]))
+    if latest.get("id") != ci_run_id:
+        raise GateError("Delivered source CI run is no longer the latest run for this commit")
+    run = read(f"repos/{SOURCE_REPOSITORY}/actions/runs/{ci_run_id}")
     if (
-        run.get("workflow_id") != CI_WORKFLOW_ID
+        not isinstance(run.get("run_attempt"), int)
+        or run["run_attempt"] < 1
+        or run.get("run_attempt") != latest.get("run_attempt")
+    ):
+        raise GateError("Source CI attempt changed during release validation")
+    if (
+        run.get("id") != ci_run_id
+        or run.get("workflow_id") != CI_WORKFLOW_ID
         or run.get("path") != ".github/workflows/ci.yml"
         or run.get("event") != "push"
         or run.get("head_branch") != "main"
@@ -130,11 +189,15 @@ def validate_source(source_sha, read=api):
             or matches[0].get("conclusion") != "success"
         ):
             raise GateError(f"Required source CI job did not pass: {name}")
-    return {"version": version, "tag": f"v{version}", "source_sha": source_sha, "ci_run_id": run["id"]}
+    return {
+        "version": version, "tag": source_tag, "source_sha": source_sha,
+        "ci_run_id": run["id"], "tag_object_sha": tag_object_sha,
+        "notes_sha256": notes_sha256, "release_notes": notes,
+    }
 
 
-def release_plan(source_sha, publish, read=api):
-    source = validate_source(source_sha, read)
+def release_plan(source_sha, source_tag, ci_run_id, publish, read=api):
+    source = validate_source(source_sha, source_tag, ci_run_id, read)
     repository = read(f"repos/{DISTRIBUTION_REPOSITORY}")
     if (
         repository.get("id") != DISTRIBUTION_REPOSITORY_ID
@@ -178,15 +241,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check-only", action="store_true", help="Recheck only the source and its CI")
     arguments = parser.parse_args()
-    source_sha, publish = validate_context(os.environ)
+    source_sha, source_tag, ci_run_id, publish = validate_context(os.environ)
     if arguments.check_only:
-        validate_source(source_sha)
-        print("Source main and required CI jobs verified")
+        validate_source(source_sha, source_tag, ci_run_id)
+        print("Annotated source tag, main ancestry, notes, and required CI jobs verified")
         return
-    result = release_plan(source_sha, publish)
+    result = release_plan(source_sha, source_tag, ci_run_id, publish)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
         for name, value in result.items():
-            output.write(f"{name}={value}\n")
+            if name != "release_notes":
+                output.write(f"{name}={value}\n")
     mode = "Release approved" if publish else "Plan only: no builds, registry writes, or release publication"
     summary = f"{mode}. Core version {result['version']}; CI run {result['ci_run_id']}.\n"
     if os.environ.get("GITHUB_STEP_SUMMARY"):

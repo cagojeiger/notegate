@@ -38,7 +38,7 @@ jobs:
       - name: Test release validation and publication boundaries
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
 
-      - name: Verify public core metadata access with this repository token
+      - name: Check available public core metadata without private credentials
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -46,8 +46,11 @@ jobs:
           import sys
           sys.path.insert(0, ".github/scripts")
           import release_gate as gate
-          repository = gate.api(f"repos/{gate.SOURCE_REPOSITORY}")
-          assert repository["id"] == gate.SOURCE_REPOSITORY_ID and repository["private"] is False
+          repository = gate.api(f"repos/{gate.SOURCE_REPOSITORY}", missing_ok=True)
+          if repository is None or repository.get("private"):
+              print("Core is not publicly readable. PR validation uses synthetic tests; private checkout and CI access require a trusted Release run with the configured App.")
+              raise SystemExit(0)
+          assert repository["id"] == gate.SOURCE_REPOSITORY_ID
           runs = gate.api(f"repos/{gate.SOURCE_REPOSITORY}/actions/workflows/{gate.CI_WORKFLOW_ID}/runs?per_page=1")
           assert runs["workflow_runs"], "Core CI is not visible to the distribution workflow"
           print("Public core identity and CI metadata are readable; no source checkout or publication")
