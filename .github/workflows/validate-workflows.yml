@@ -35,7 +35,7 @@ jobs:
           tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
           /tmp/actionlint -color
 
-      - name: Test release validation and publication boundaries
+      - name: Test release and Web shadow boundaries
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
 
       - name: Check available public core metadata without private credentials
