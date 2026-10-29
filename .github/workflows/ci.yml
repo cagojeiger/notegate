@@ -891,10 +891,10 @@ jobs:
             http://127.0.0.1:9191/api/v2/spaces/not-a-uuid)" = "400"
           jq --exit-status \
             '.error == "invalid_input" and .kind == "invalid_input"' \
-            source/browser-e2e/public-v2-error.json >/dev/null
+            browser-e2e/public-v2-error.json >/dev/null
           grep --ignore-case --quiet \
             '^cache-control: private, no-store' \
-            source/browser-e2e/public-v2-error.headers
+            browser-e2e/public-v2-error.headers
           curl --fail --silent \
             --cookie "notegate_browser_session=$NOTEGATE_BROWSER_SESSION" \
             --output browser-e2e/openapi-v2.json \
