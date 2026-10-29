@@ -50,6 +50,21 @@ class WorkflowBoundaryTests(unittest.TestCase):
         self.assertNotIn('token:', action)
         self.assertIn('rev-parse HEAD', action)
 
+    def test_cross_run_download_has_job_actions_permission(self):
+        for kind in KINDS:
+            text = (WORKFLOWS / f'{kind}.yml').read_text()
+            workflow_permissions = re.search(r'(?m)^permissions:\n((?:  [^\n]+\n)+)', text)
+            for job in re.split(r'(?m)^  [a-z][a-z0-9-]*:\n', text)[1:]:
+                for step in re.split(r'(?m)^      - ', job):
+                    if 'uses: actions/download-artifact@' in step and re.search(r'(?m)^          run-id:', step):
+                        with self.subTest(workflow=kind, step=step.splitlines()[0]):
+                            header = job.split('    steps:\n', 1)[0]
+                            job_permissions = re.search(r'(?m)^    permissions:\n((?:      [^\n]+\n)+)', header)
+                            permissions = job_permissions or workflow_permissions
+                            self.assertIsNotNone(permissions)
+                            self.assertRegex(permissions.group(1), r'(?m)^\s+actions: read$')
+                            self.assertIn('github-token: ${{ github.token }}', step)
+
     def test_selection_uses_gate_and_performance_uses_verified_producer(self):
         ci = (WORKFLOWS / 'ci.yml').read_text()
         self.assertNotIn('deploy/ci/ci-impact.py', ci)

@@ -152,6 +152,20 @@ def normalized_options(kind, options):
     return options
 
 
+def wait_for_source_start(run_id, attempt, read=api, pause=time.sleep, tries=6):
+    run_id, attempt = positive(run_id), positive(attempt)
+    for index in range(tries):
+        run = read(f"repos/{CORE}/actions/runs/{run_id}")
+        require(run.get("id") == run_id and run.get("run_attempt") == attempt,
+                "Source workflow is no longer the active attempt")
+        if run.get("status") == "in_progress":
+            return
+        require(run.get("status") == "queued", "Source workflow is no longer the active attempt")
+        if index + 1 < tries:
+            pause(5)
+    raise Stopped("Source workflow did not start before the prepare deadline")
+
+
 def source_plan(run_id, attempt, kind, options=None, control_sha=None, read=api):
     require(kind in WORKFLOWS, "Unknown source workflow")
     run_id, attempt = positive(run_id), positive(attempt)
@@ -479,6 +493,7 @@ def main():
         options = {"candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
                    "base_ref": os.environ.get("BASE_REF", ""),
                    "web_artifact_run_id": os.environ.get("WEB_ARTIFACT_RUN_ID", "")}
+        wait_for_source_start(os.environ["SOURCE_RUN_ID"], os.environ["SOURCE_ATTEMPT"])
         request = source_plan(os.environ["SOURCE_RUN_ID"], os.environ["SOURCE_ATTEMPT"], args.kind,
                               options, os.environ.get("PUBLIC_CI_REVISION"))
         require(request["tested_sha"] == os.environ.get("TESTED_SHA"), "Workflow checkout commit changed")
