@@ -102,6 +102,7 @@ jobs:
           path: source
 
       - name: Check source security without publishing source diagnostics
+        shell: bash
         run: |
           semgrep_status=0
           gitleaks_status=0
@@ -152,6 +153,7 @@ jobs:
           IMAGE: ${{ needs.gate.outputs.image }}
           IMPACT_SCOPE: ${{ needs.gate.outputs.impact_scope }}
           IMPACT_REASON: ${{ needs.gate.outputs.impact_reason }}
+        shell: private_run.sh {0}
         run: |
           set -euo pipefail
           plan="$RUNNER_TEMP/ci-impact-plan"
@@ -173,6 +175,7 @@ jobs:
       - name: Install actionlint
         env:
           ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        shell: private_run.sh {0}
         run: |
           archive="$RUNNER_TEMP/actionlint.tar.gz"
           bin_dir="$RUNNER_TEMP/actionlint-bin"
@@ -185,12 +188,15 @@ jobs:
           echo "$bin_dir" >> "$GITHUB_PATH"
 
       - name: Workflow checks
+        shell: private_run.sh {0}
         run: make workflow-check
 
       - name: Format
+        shell: private_run.sh {0}
         run: cargo fmt --all --check
 
       - name: Diff check
+        shell: private_run.sh {0}
         run: git diff --check
 
   rust-build:
@@ -221,26 +227,33 @@ jobs:
 
       - name: Check
         if: needs.hygiene.outputs.rust == 'true'
+        shell: private_run.sh {0}
         run: cargo check --locked --workspace --all-targets
 
       - name: Clippy
         if: needs.hygiene.outputs.rust == 'true'
+        shell: private_run.sh {0}
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Prepare Rust tests and doctests
         if: needs.hygiene.outputs.rust == 'true'
+        shell: private_run.sh {0}
         run: python3 deploy/ci/rust-test-suites.py prepare --strip-debug --output target/test-suites/prepare --bundle target/ci-artifacts/rust-tests.tar
 
       - name: Build API and seed executable
+        shell: private_run.sh {0}
         run: cargo build --locked --package notegate-api --bin notegate-api --example seed_user
 
       - name: Package API and seed executable
+        shell: private_run.sh {0}
         run: python3 deploy/ci/rust-test-suites.py pack-api --strip-debug --output target/test-suites/api --bundle target/ci-artifacts/api.tar
 
       - name: Report prepared bundle sizes
+        shell: private_run.sh {0}
         run: stat --format='%n %s bytes' target/ci-artifacts/*.tar | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Compress prepared bundles
+        shell: private_run.sh {0}
         run: |
           zstd --version
           zstd -T0 -3 --long=27 --rm target/ci-artifacts/*.tar
@@ -263,15 +276,6 @@ jobs:
           path: source/target/ci-artifacts/api.tar.zst
           compression-level: 0
           if-no-files-found: error
-          retention-days: 7
-
-      - name: Retain Rust build coverage and timings
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: rust-build-report
-          path: source/target/test-suites/
-          if-no-files-found: warn
           retention-days: 7
 
   rust:
@@ -335,6 +339,7 @@ jobs:
           path: source/target/ci-artifacts
 
       - name: Decompress prepared Rust tests
+        shell: private_run.sh {0}
         run: zstd --decompress --rm target/ci-artifacts/rust-tests.tar.zst
 
       - name: Start MinIO
@@ -342,18 +347,23 @@ jobs:
           NOTEGATE_S3_BUCKET: notegate-test
           NOTEGATE_S3_ACCESS_KEY: notegate-app
           NOTEGATE_S3_SECRET_KEY: notegate-app-secret
+        shell: private_run.sh {0}
         run: bash deploy/ci/start-minio.sh
 
       - name: Test runner cleanup
+        shell: private_run.sh {0}
         run: deploy/ci/test-rust.test.sh --postgres
 
       - name: Test without external services
+        shell: private_run.sh {0}
         run: python3 deploy/ci/rust-test-suites.py self-contained --prepared target/ci-artifacts/rust-tests.tar --output target/test-suites/self-contained
 
       - name: Test with PostgreSQL and S3
+        shell: private_run.sh {0}
         run: python3 deploy/ci/rust-test-suites.py external --prepared target/ci-artifacts/rust-tests.tar --output target/test-suites/external
 
       - name: Reject missing integration settings
+        shell: private_run.sh {0}
         run: |
           assert_missing_setting_fails() {
             local setting="$1"
@@ -381,6 +391,7 @@ jobs:
             --output target/test-suites/missing-s3
 
       - name: Measure search date candidate filtering
+        shell: private_run.sh {0}
         run: >-
           python3 deploy/ci/rust-test-suites.py exact --prepared target/ci-artifacts/rust-tests.tar
           --package notegate-service --target-kind test --target search
@@ -388,6 +399,7 @@ jobs:
           --output target/test-suites/measure-search -- --ignored --show-output
 
       - name: Measure command completion and history capture
+        shell: private_run.sh {0}
         run: |
           python3 deploy/ci/rust-test-suites.py exact --prepared target/ci-artifacts/rust-tests.tar \
             --package notegate-api --target-kind bin --target notegate-api \
@@ -397,14 +409,6 @@ jobs:
             --package notegate-api --target-kind bin --target notegate-api \
             --test-name mcp::invocation::tests::measure_command_completion \
             --output target/test-suites/measure-command-mcp -- --ignored --show-output --test-threads=1
-
-      - name: Retain Rust test coverage and timings
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: rust-test-suites
-          path: source/target/test-suites/
-          retention-days: 7
 
   postgres18:
     name: PostgreSQL 18
@@ -438,16 +442,20 @@ jobs:
           fetch-depth: 1
 
       - name: Prepare Compose environment
+        shell: private_run.sh {0}
         run: cp .env.example .env
 
       - name: Verify PostgreSQL volume upgrade and persistence
+        shell: private_run.sh {0}
         run: bash deploy/ci/postgres-upgrade-smoke.sh
 
       - name: Test database migrations and repositories on PostgreSQL 18
+        shell: private_run.sh {0}
         run: cargo test --locked -p notegate-db --tests
 
       - name: Stop Compose
         if: always()
+        shell: private_run.sh {0}
         run: |
           if [[ -f .env ]]; then
             docker compose -f docker-compose.yml down
@@ -486,6 +494,7 @@ jobs:
           fallback: none
 
       - name: Audit Rust dependencies
+        shell: private_run.sh {0}
         run: cargo audit --deny yanked
 
   web:
@@ -526,27 +535,35 @@ jobs:
           package-manager-cache: false
 
       - name: Install dependencies
+        shell: private_run.sh {0}
         run: pnpm install --frozen-lockfile
 
       - name: Audit dependencies
+        shell: private_run.sh {0}
         run: pnpm audit --audit-level moderate
 
       - name: Check theme contrast
+        shell: private_run.sh {0}
         run: pnpm --filter web check:contrast
 
       - name: Typecheck
+        shell: private_run.sh {0}
         run: pnpm --filter web typecheck
 
       - name: Lint
+        shell: private_run.sh {0}
         run: pnpm --filter web lint
 
       - name: Test
+        shell: private_run.sh {0}
         run: pnpm --filter web test
 
       - name: Build
+        shell: private_run.sh {0}
         run: pnpm --filter web build
 
       - name: Check production bundle budgets
+        shell: private_run.sh {0}
         run: pnpm --filter web check:preview-bundle
 
       - name: Retain production frontend
@@ -592,14 +609,12 @@ jobs:
           cache-binary: false
 
       - name: Build PR image locally
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: source
-          file: source/deploy/docker/web.Dockerfile
-          platforms: linux/amd64
-          tags: notegate-pr:${{ needs.gate.outputs.tested_sha }}
-          load: true
-          push: false
+        env:
+          SOURCE_SHA: ${{ needs.gate.outputs.tested_sha }}
+        shell: private_run.sh {0}
+        run: |
+          docker buildx build --platform linux/amd64 --file deploy/docker/web.Dockerfile \
+            --tag "notegate-pr:$SOURCE_SHA" --load .
 
       - name: Report high and critical vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -618,6 +633,7 @@ jobs:
           timeout: 10m
 
       - name: Summarize image findings
+        shell: private_run.sh {0}
         run: |
           {
             echo '### HIGH and CRITICAL findings, including unfixed'
@@ -684,12 +700,15 @@ jobs:
           package-manager-cache: false
 
       - name: Install dependencies
+        shell: private_run.sh {0}
         run: pnpm install --frozen-lockfile
 
       - name: Install Chromium
+        shell: private_run.sh {0}
         run: pnpm --filter web exec playwright install --with-deps chromium
 
       - name: Start frontend without API or external services
+        shell: private_run.sh {0}
         run: |
           mkdir -p browser-ui
           pnpm --filter web dev --host 127.0.0.1 >browser-ui/web.log 2>&1 &
@@ -711,12 +730,13 @@ jobs:
         id: browser_tests
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/browser-ui-test-results.json
+        shell: private_run.sh {0}
         run: pnpm --filter web test:e2e --project=desktop-chromium --reporter=dot,json
 
       - name: Collect browser UI test timings
         id: browser_timings
         if: ${{ !cancelled() && (steps.browser_tests.outcome == 'success' || steps.browser_tests.outcome == 'failure') }}
-        shell: bash
+        shell: private_run.sh {0}
         run: |
           python3 -B deploy/ci/browser-test-timings.py \
             < "$RUNNER_TEMP/browser-ui-test-results.json" \
@@ -777,17 +797,6 @@ jobs:
           path: |
             source/frontend/web/test-results/invocation-history-*.png
             source/frontend/web/test-results/dialog-*.png
-
-      - name: Upload browser UI diagnostics
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: browser-ui-diagnostics
-          if-no-files-found: ignore
-          path: |
-            source/browser-ui/*.log
-            source/frontend/web/test-results
-            !source/frontend/web/test-results/openapi-docs-*/**
 
   browser-api:
     name: Browser API
@@ -860,6 +869,7 @@ jobs:
           path: source/target/ci-artifacts
 
       - name: Restore API and seed executable
+        shell: private_run.sh {0}
         run: |
           zstd --decompress --rm target/ci-artifacts/api.tar.zst
           python3 deploy/ci/rust-test-suites.py restore-api --prepared target/ci-artifacts/api.tar --output target/test-suites/browser-api
@@ -876,9 +886,11 @@ jobs:
           package-manager-cache: false
 
       - name: Install dependencies
+        shell: private_run.sh {0}
         run: pnpm install --frozen-lockfile
 
       - name: Install Chromium
+        shell: private_run.sh {0}
         run: pnpm --filter web exec playwright install --with-deps chromium
 
       - name: Download production frontend
@@ -893,12 +905,14 @@ jobs:
           NOTEGATE_S3_BUCKET: ${{ env.NOTEGATE_S3__BUCKET }}
           NOTEGATE_S3_ACCESS_KEY: ${{ env.NOTEGATE_S3__ACCESS_KEY }}
           NOTEGATE_S3_SECRET_KEY: ${{ env.NOTEGATE_S3__SECRET_KEY }}
+        shell: private_run.sh {0}
         run: bash deploy/ci/start-minio.sh
 
       - name: Seed test identities
         id: seed_test_identity
+        shell: bash
         run: |
-          output=$(target/debug/examples/seed_user)
+          output=$(target/debug/examples/seed_user 2>"$RUNNER_TEMP/seed-user.stderr")
           agent_api_key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
           session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
           test -n "$agent_api_key"
@@ -912,6 +926,7 @@ jobs:
         env:
           NOTEGATE_METRICS_ENABLED: "true"
           NOTEGATE_WEB_DIST_DIR: ${{ github.workspace }}/source/frontend/web/dist
+        shell: private_run.sh {0}
         run: |
           mkdir -p browser-e2e
           target/debug/notegate-api >browser-e2e/api.log 2>&1 &
@@ -939,6 +954,7 @@ jobs:
           NOTEGATE_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
           REDOCLY_TELEMETRY: "off"
           REDOCLY_SUPPRESS_UPDATE_NOTICE: "true"
+        shell: private_run.sh {0}
         run: |
           curl --fail --silent \
             --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
@@ -971,7 +987,7 @@ jobs:
 
       - name: Check API concurrency and latency smoke budgets
         timeout-minutes: 2
-        shell: bash
+        shell: private_run.sh {0}
         env:
           NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.seed_test_identity.outputs.agent_api_key }}
           NOTEGATE_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
@@ -1020,6 +1036,7 @@ jobs:
           NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
           NOTEGATE_WEB_E2E_API_KEY: ${{ steps.seed_test_identity.outputs.agent_api_key }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/browser-api-test-results.json
+        shell: private_run.sh {0}
         run: |
           api_pid=$(cat browser-e2e/api.pid)
           kill -0 "$api_pid"
@@ -1029,7 +1046,7 @@ jobs:
       - name: Collect browser API test timings
         id: browser_timings
         if: ${{ !cancelled() && (steps.browser_tests.outcome == 'success' || steps.browser_tests.outcome == 'failure') }}
-        shell: bash
+        shell: private_run.sh {0}
         run: |
           python3 -B deploy/ci/browser-test-timings.py \
             < "$RUNNER_TEMP/browser-api-test-results.json" \
@@ -1046,8 +1063,9 @@ jobs:
 
       - name: Seed live workbench identity
         id: workbench_identity
+        shell: bash
         run: |
-          output=$(target/debug/examples/seed_user workbench)
+          output=$(target/debug/examples/seed_user workbench 2>"$RUNNER_TEMP/seed-user.stderr")
           key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
           session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
           test -n "$key"
@@ -1062,12 +1080,14 @@ jobs:
           NOTEGATE_WEB_BASE_URL: http://localhost:9191
           NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.workbench_identity.outputs.browser_session }}
           NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.workbench_identity.outputs.agent_api_key }}
+        shell: private_run.sh {0}
         run: pnpm --filter web exec playwright test --config playwright.functional.config.ts --project workbench
 
       - name: Seed standalone OAuth identity
         id: oauth_identity
+        shell: bash
         run: |
-          output=$(target/debug/examples/seed_user oauth)
+          output=$(target/debug/examples/seed_user oauth 2>"$RUNNER_TEMP/seed-user.stderr")
           session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
           consent=$(printf '%s\n' "$output" | sed -n 's/^OAUTH_CONSENT_FIXTURE=//p')
           test -n "$session"
@@ -1084,6 +1104,7 @@ jobs:
           NOTEGATE_OAUTH_BASE_URL: http://localhost:9191
           NOTEGATE_WEB_E2E_OAUTH_BROWSER_SESSION: ${{ steps.oauth_identity.outputs.browser_session }}
           NOTEGATE_WEB_E2E_OAUTH_CONSENT: ${{ steps.oauth_identity.outputs.oauth_consent }}
+        shell: private_run.sh {0}
         run: pnpm --filter web exec playwright test --config playwright.functional.config.ts --project standalone-oauth
 
       - name: Upload authentication API screenshots
@@ -1094,18 +1115,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
           path: source/frontend/web/test-results/browser-functional/oauth-*.png
-
-      - name: Upload browser diagnostics
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: browser-e2e-diagnostics
-          if-no-files-found: ignore
-          path: |
-            source/browser-e2e/*.log
-            source/frontend/web/test-results
-            !source/frontend/web/test-results/openapi-docs-*/**
-            source/frontend/web/lighthouse-reports
 
   browser:
     name: Browser E2E

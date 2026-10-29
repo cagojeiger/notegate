@@ -124,18 +124,23 @@ jobs:
 
       - name: Build and push by digest
         id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: source
-          file: source/deploy/docker/web.Dockerfile
-          platforms: ${{ matrix.platform }}
-          provenance: mode=min
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+        working-directory: source
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        shell: private_run.sh {0}
+        run: |
+          metadata="$RUNNER_TEMP/image-metadata.json"
+          docker buildx build --platform "$PLATFORM" --file deploy/docker/web.Dockerfile \
+            --provenance=mode=min --metadata-file "$metadata" \
+            --output "type=image,name=${REGISTRY}/${IMAGE},push-by-digest=true,name-canonical=true,push=true" .
+          digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$metadata")
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
 
       - name: Export digest
         env:
           BUILD_DIGEST: ${{ steps.build.outputs.digest }}
           ARCH: ${{ matrix.arch }}
+        shell: private_run.sh {0}
         run: |
           set -euo pipefail
           [[ "$BUILD_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
@@ -278,17 +283,19 @@ jobs:
       - name: Add Rust target
         env:
           TARGET: ${{ matrix.target }}
+        shell: private_run.sh {0}
         run: rustup target add "$TARGET"
 
       - name: Build notegate-cli
         working-directory: source
         env:
           TARGET: ${{ matrix.target }}
+        shell: private_run.sh {0}
         run: cargo build --locked --release -p notegate-cli --target "$TARGET"
 
       - name: Smoke test and package notegate-cli
         working-directory: source
-        shell: bash
+        shell: private_run.sh {0}
         env:
           TARGET: ${{ matrix.target }}
           VERSION: ${{ needs.version.outputs.version }}

@@ -94,6 +94,39 @@ class WorkflowBoundaryTests(unittest.TestCase):
         self.assertIn('name: Npm Audit', dependency)
         self.assertNotIn("source_event != 'pull_request'", dependency)
 
+    def test_source_steps_capture_diagnostics_without_hiding_mask_commands(self):
+        for kind in (*KINDS, 'release'):
+            text = (WORKFLOWS / f'{kind}.yml').read_text()
+            for job in re.split(r'(?m)^  [a-z][a-z0-9-]*:\n', text)[1:]:
+                source = False
+                for step in re.split(r'(?m)^      - ', job):
+                    if 'uses: ./.control/.github/actions/checkout-core' in step:
+                        source = True
+                    if source and re.search(r'(?m)^        run:', step):
+                        with self.subTest(workflow=kind, step=step.splitlines()[0]):
+                            if '::add-mask::' in step:
+                                self.assertIn('shell: bash\n', step)
+                                self.assertIn('2>"$RUNNER_TEMP/seed-user.stderr"', step)
+                            elif 'security_scan.py' in step:
+                                self.assertIn('shell: bash\n', step)
+                            else:
+                                self.assertIn('shell: private_run.sh {0}', step)
+
+    def test_raw_source_diagnostics_are_not_public_artifacts(self):
+        ci = (WORKFLOWS / 'ci.yml').read_text()
+        for forbidden in ('path: source/target/test-suites/', 'source/frontend/web/test-results\n',
+                          'source/browser-e2e/*.log', 'source/browser-ui/*.log', 'docker/build-push-action@'):
+            self.assertNotIn(forbidden, ci)
+        release = (WORKFLOWS / 'release.yml').read_text()
+        self.assertNotIn('docker/build-push-action@', release)
+        self.assertIn('--metadata-file "$metadata"', release)
+        self.assertIn('containerimage.digest', release)
+        text = (WORKFLOWS / 'text-write-performance.yml').read_text()
+        self.assertNotIn('path: source/text-write-results/\n', text)
+        self.assertIn('source/text-write-results/summary.md', text)
+        dast = (WORKFLOWS / 'security-dast.yml').read_text()
+        self.assertNotIn('path: source/security-results/', dast)
+
     def test_cross_run_download_has_job_actions_permission(self):
         for kind in KINDS:
             text = (WORKFLOWS / f'{kind}.yml').read_text()

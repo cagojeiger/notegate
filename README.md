@@ -98,6 +98,20 @@ CodeQL's analysis or GitHub Dependency Review's dependency-diff interface and po
 Native Dependency Review runs only while core is public. See
 [scanner rule sources](.github/security-rules/README.md) for coverage and licensing.
 
+Source build/test commands capture stdout, stderr and step summaries on the
+ephemeral runner and publish only fixed completion statuses. Failure codes and
+step outputs are preserved; diagnostic capture does not turn failures into passes.
+Docker builds use the same capture boundary. Raw compiler reports, test logs,
+Playwright traces and diagnostic directories are not uploaded. Full failure
+diagnostics require a trusted private execution instead of public raw logs.
+
+Public artifacts intentionally include stripped executable bundles for subsequent
+jobs, production frontend assets, released CLI/images, image vulnerability reports,
+UI screenshots and allowlisted measurements. Binaries can contain embedded SQL,
+configuration fixtures and other strings; private repository visibility does not
+make these deliberately distributed binaries confidential. They are not source
+archives, and Actions caches remain disabled.
+
 ## Source access
 
 The dispatcher in core uses `RELEASE_APP_CLIENT_ID` (Actions variable) and

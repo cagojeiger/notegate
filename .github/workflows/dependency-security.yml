@@ -98,6 +98,7 @@ jobs:
           fallback: none
 
       - name: Audit Rust dependencies
+        shell: private_run.sh {0}
         run: cargo audit --deny yanked
 
   npm-audit:
@@ -136,7 +137,9 @@ jobs:
           package-manager-cache: false
 
       - name: Install dependencies without lifecycle scripts
+        shell: private_run.sh {0}
         run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Audit all npm dependencies
+        shell: private_run.sh {0}
         run: pnpm audit --audit-level moderate

@@ -107,6 +107,7 @@ jobs:
           CANDIDATE_SHA: ${{ needs.gate.outputs.tested_sha }}
           BASE_REF: ${{ needs.gate.outputs.base_ref }}
           GH_TOKEN: ${{ github.token }}
+        shell: private_run.sh {0}
         run: |
           set -euo pipefail
           if [ -n "$CANDIDATE_SHA" ]; then
@@ -128,6 +129,7 @@ jobs:
 
       - name: Compare baseline and candidate
         if: steps.baseline.outputs.sha != ''
+        shell: private_run.sh {0}
         run: deploy/ci/compare-text-write.sh "$GITHUB_WORKSPACE/comparison-base"
 
       - name: Retain measurements
@@ -135,5 +137,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: text-write-performance
-          path: source/text-write-results/
+          path: |
+            source/text-write-results/baseline.json
+            source/text-write-results/baseline.md
+            source/text-write-results/summary.md
+            source/text-write-results/*.sha
           if-no-files-found: warn

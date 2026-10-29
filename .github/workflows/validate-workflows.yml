@@ -9,6 +9,40 @@ permissions:
   contents: read
 
 jobs:
+  private-shell-smoke:
+    name: Validate private-output shell on a hosted runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Register trusted control shell
+        run: echo "$GITHUB_WORKSPACE/.github/scripts" >> "$GITHUB_PATH"
+
+      - name: Verify successful output forwarding
+        id: passed
+        shell: private_run.sh {0}
+        run: |
+          printf 'synthetic diagnostic that must stay private\n'
+          printf 'ok=true\n' >> "$GITHUB_OUTPUT"
+          printf 'synthetic summary that must stay private\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify failures stay failures
+        id: failed
+        continue-on-error: true
+        shell: private_run.sh {0}
+        run: |
+          printf 'synthetic failure that must stay private\n' >&2
+          exit 7
+
+      - name: Check shell outcomes
+        env:
+          OUTPUT: ${{ steps.passed.outputs.ok }}
+          FAILURE: ${{ steps.failed.outcome }}
+        run: test "$OUTPUT" = true && test "$FAILURE" = failure
+
   scanner-smoke:
     name: Validate scanner compatibility with synthetic inputs
     runs-on: ubuntu-latest
