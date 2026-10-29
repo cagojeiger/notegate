@@ -13,6 +13,8 @@ from urllib.error import HTTPError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
+from release_gate import validate_source
+
 
 REPOSITORY = "cagojeiger/notegate"
 SOURCE_REPOSITORY = "cagojeiger/notegate-core"
@@ -216,8 +218,11 @@ class Registry:
         return digest, json.loads(raw)
 
 
-def revalidate_source():
-    subprocess.run(["python3", ".github/scripts/release_gate.py", "--check-only"], check=True)
+def revalidate_source(expected):
+    source = validate_source(expected["source_sha"], expected["tag"], expected["ci_run_id"])
+    for name, value in expected.items():
+        require(source.get(name) == value, f"Source {name} changed since release validation")
+    return source
 
 
 def publish():
@@ -225,13 +230,25 @@ def publish():
     require(os.environ.get("GITHUB_REF") == "refs/heads/main", "Release must run on distribution main")
     require(os.environ.get("PUBLISH") == "true", "Publishing was not explicitly requested")
     version = os.environ["VERSION"]
+    source_tag = os.environ["SOURCE_TAG"]
     source_sha = os.environ["SOURCE_SHA"]
     distribution_sha = os.environ["GITHUB_SHA"]
     ci_run_id = os.environ["SOURCE_CI_RUN_ID"]
+    tag_object_sha = os.environ["SOURCE_TAG_OBJECT_SHA"]
+    notes_sha256 = os.environ["RELEASE_NOTES_SHA256"]
     require(re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version), "Invalid release version")
-    require(SHA.fullmatch(source_sha) and SHA.fullmatch(distribution_sha), "Expected full commit SHAs")
+    require(SHA.fullmatch(source_sha) and SHA.fullmatch(distribution_sha)
+            and SHA.fullmatch(tag_object_sha), "Expected full commit and tag object SHAs")
     require(re.fullmatch(r"[1-9][0-9]*", ci_run_id), "Invalid source CI run ID")
+    require(re.fullmatch(r"[0-9a-f]{64}", notes_sha256), "Invalid release notes SHA256")
     tag = f"v{version}"
+    require(source_tag == tag, "Source tag must match the published release version")
+    expected_source = {"version": version, "tag": source_tag, "source_sha": source_sha,
+                       "ci_run_id": int(ci_run_id), "tag_object_sha": tag_object_sha,
+                       "notes_sha256": notes_sha256}
+    source = revalidate_source(expected_source)
+    require(isinstance(source.get("release_notes"), str) and source["release_notes"].strip(), "Missing approved release notes")
+    expected_source["release_notes"] = source["release_notes"]
     github = GitHub(os.environ["GH_TOKEN"])
     github.require_absent(tag)
     registry = Registry()
@@ -243,7 +260,7 @@ def publish():
         actual_digest, manifest = registry.manifest(digest)
         expected_children[arch] = linux_child(manifest, actual_digest, arch)
 
-    revalidate_source()
+    revalidate_source(expected_source)
     github.require_absent(tag)
     require(registry.manifest(version, missing=True) is None, "Image version tag appeared before publication")
     subprocess.run(["docker", "buildx", "imagetools", "create", "-t", f"{IMAGE}:{version}",
@@ -256,19 +273,24 @@ def publish():
         "schema_version": 1, "version": version, "source_sha": source_sha, "image": IMAGE,
         "index_digest": index_digest, "architectures": digests,
         "source_repository": SOURCE_REPOSITORY, "source_ci_run_id": int(ci_run_id),
+        "source_tag": source_tag, "source_tag_object_sha": tag_object_sha,
+        "source_notes_sha256": notes_sha256,
         "distribution_sha": distribution_sha,
     })
     names = [f"notegate-cli-{target}{suffix}" for target in TARGETS for suffix in ("", ".sha256")]
     names += ["notegate-cli-manifest.json", "notegate-cli-installer.sh", "image-digests.json",
               "trivy-linux-amd64.json", "trivy-linux-arm64.json"]
     require_files(output, names)
-    notes = (f"Built from [{SOURCE_REPOSITORY}@{source_sha}](https://github.com/{SOURCE_REPOSITORY}/commit/{source_sha}).\n\n"
+    notes = (f"{source['release_notes']}\n\n---\n\n"
+             f"Built from [{SOURCE_REPOSITORY}@{source_sha}](https://github.com/{SOURCE_REPOSITORY}/commit/{source_sha}).\n\n"
+             f"Source tag: [{source_tag}](https://github.com/{SOURCE_REPOSITORY}/tree/{source_tag}) "
+             f"(annotated object `{tag_object_sha}`; notes SHA256 `{notes_sha256}`).\n\n"
              f"Source validation: https://github.com/{SOURCE_REPOSITORY}/actions/runs/{ci_run_id}\n\n"
              f"Distribution workflow: https://github.com/{REPOSITORY}/actions/runs/{os.environ['GITHUB_RUN_ID']}\n\n"
              f"Image: `{IMAGE}@{index_digest}`\n\n"
              "Includes four native CLI builds and both immutable-image Trivy reports. "
              "Fixable CRITICAL vulnerabilities block publication.\n")
-    revalidate_source()
+    revalidate_source(expected_source)
     github.require_absent(tag)
     draft = github.request("POST", "releases", {"tag_name": tag, "target_commitish": distribution_sha,
                                                  "name": tag, "body": notes, "draft": True, "prerelease": False})
@@ -283,7 +305,7 @@ def publish():
         require(actual_sha == file_sha(path) and actual_size == path.stat().st_size, f"Uploaded asset verification failed: {name}")
         verified_assets[name] = {"id": uploaded["id"], "size": actual_size, "sha256": actual_sha}
 
-    revalidate_source()
+    revalidate_source(expected_source)
     current = github.request("GET", f"releases/{release_id}")
     require(current.get("draft") is True and current.get("tag_name") == tag
             and current.get("target_commitish") == distribution_sha and current.get("body") == notes,
@@ -297,6 +319,7 @@ def publish():
     public_tag = github.request("GET", f"git/ref/tags/{tag}")
     require(public_tag["object"]["type"] == "commit" and public_tag["object"]["sha"] == distribution_sha,
             "Distribution release tag does not target the trusted distribution commit")
+    revalidate_source(expected_source)
     subprocess.run(["docker", "buildx", "imagetools", "create", "-t", f"{IMAGE}:latest", f"{IMAGE}@{index_digest}"], check=True)
     require(registry.manifest("latest")[0] == index_digest, "Latest image does not match release index")
     print(f"Published {tag}: {len(names)} verified assets; image {IMAGE}@{index_digest}")
