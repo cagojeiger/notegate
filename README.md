@@ -2,7 +2,7 @@
 
 Public distribution repository for NoteGate.
 
-Source code, development, issues, and pull requests: [notegate-core](https://github.com/cagojeiger/notegate-core).
+Source code, development, issues, and pull requests: [notegate-core](https://github.com/cagojeiger/notegate-core). Access depends on the core repository visibility and your permissions.
 
 ## CLI
 
@@ -13,12 +13,12 @@ curl -fsSL https://github.com/cagojeiger/notegate/releases/latest/download/noteg
 ## Container
 
 ```sh
-docker pull ghcr.io/cagojeiger/notegate:0.1.119
+docker pull ghcr.io/cagojeiger/notegate:0.1.120
 ```
 
-The v0.1.119 release assets are mirrored without modification from the original release. Application source for this version is available at [notegate-core/v0.1.119](https://github.com/cagojeiger/notegate-core/tree/v0.1.119).
+The v0.1.119 release assets are mirrored without modification from the original release. Application source for this version is at [notegate-core/v0.1.119](https://github.com/cagojeiger/notegate-core/tree/v0.1.119) and requires access to core.
 
-[Earlier releases](https://github.com/cagojeiger/notegate-core/releases) remain in notegate-core. Source archives automatically generated for this distribution repository contain distribution metadata, not the application source.
+[Earlier releases](https://github.com/cagojeiger/notegate-core/releases) remain in notegate-core and require access to core. Source archives automatically generated for this distribution repository contain distribution metadata, not the application source.
 
 ## Repository layout
 
@@ -140,7 +140,6 @@ checkout. Synthetic tests do not prove private access: qualify exact-SHA PR/main
 failure and release paths before changing core visibility. Private personal core
 does not require enforced merge protection under this deployment policy.
 
-Both repositories currently remain public. No visibility change is performed by
-these workflows. Before making core private, review public build logs, artifacts,
+Repository visibility is managed in GitHub settings; these workflows do not change it. Before making core private, review public build logs, artifacts,
 and caches separately; private Git history alone does not make public build
 outputs confidential. The AGPL license remains unchanged.
