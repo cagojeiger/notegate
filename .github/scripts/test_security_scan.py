@@ -97,6 +97,31 @@ class ScannerTests(unittest.TestCase):
                 policy.write_text(json.dumps({"fixtures": [entry, entry]}))
                 self.assertEqual(scan([finding]), ("error", 0))
 
+    def test_reviewed_semgrep_audits_are_file_hash_and_count_bound(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as rules:
+            root = Path(directory)
+            target = root / "audited.py"
+            target.write_bytes(b"context\nfinding\n")
+            policy = root / "policy.json"
+            entry = {"path": "audited.py", "rule": "audit-rule", "max_count": 1,
+                     "sha256": hashlib.sha256(target.read_bytes()).hexdigest()}
+            policy.write_text(json.dumps({"audits": [entry]}))
+            for path in security_scan.RULES_PATHS:
+                (Path(rules) / path).mkdir(parents=True)
+            finding = {"path": str(target.resolve()), "check_id": "audit-rule"}
+            def scan(items):
+                return security_scan.scan("semgrep", root, Path(rules), FakeScanner("semgrep", {"results": items, "errors": []}))
+            with patch.object(security_scan, "AUDITS", policy):
+                self.assertEqual(scan([finding]), ("clean", 0))
+                self.assertEqual(scan([finding, finding]), ("findings", 1))
+                self.assertEqual(scan([finding, {**finding, "check_id": "new-rule"}]), ("findings", 1))
+                target.write_bytes(b"changed-context\nfinding\n")
+                self.assertEqual(scan([finding]), ("findings", 1))
+                policy.write_text(json.dumps({"audits": [{**entry, "extra": True}]}))
+                self.assertEqual(scan([finding]), ("error", 0))
+                policy.write_text(json.dumps({"audits": [entry, entry]}))
+                self.assertEqual(scan([finding]), ("error", 0))
+
     def test_wrong_version_missing_binary_and_source_ignore_fail_closed(self):
         with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as rules:
             root = Path(source)
