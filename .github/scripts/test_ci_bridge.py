@@ -464,6 +464,8 @@ class BridgeTests(unittest.TestCase):
                 bridge.dispatch(fixture.request, lost_post)
             with self.assertRaises(bridge.Stopped):
                 bridge.dispatch(fixture.request, lost_post)
+            fixture.public_rows = [fixture.public]
+            self.assertFalse(bridge.dispatch(fixture.request, lost_post))
         self.assertEqual(sum(path.endswith('/dispatches') for path, _, _ in fixture.calls), 1)
 
     def test_dispatch_claim_lost_response_does_not_allow_post(self):
