@@ -9,42 +9,6 @@ permissions:
   contents: read
 
 jobs:
-  temporary-source-scan-diagnosis:
-    name: Temporary public core scanner diagnosis
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.user.id == 18637774 &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'codex/source-scan-triage-20261029'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Test diagnostic output bounds
-        run: python3 .github/scripts/diagnose_source_scan.py --self-test
-
-      - name: Require the expected public core repository
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api repos/cagojeiger/notegate-core --jq '.id == 1253185495 and .private == false and .visibility == "public"' | grep -qx true
-
-      - uses: ./.github/actions/setup-security-scanners
-
-      - name: Check out fixed public core revision
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: cagojeiger/notegate-core
-          ref: e9fdc8cd7ac651677cebc7bd95022e9b0377c132
-          path: source
-          persist-credentials: false
-
-      - name: Emit bounded scanner metadata only
-        run: python3 .github/scripts/diagnose_source_scan.py
-
   private-shell-smoke:
     name: Validate private-output shell on a hosted runner
     runs-on: ubuntu-latest
