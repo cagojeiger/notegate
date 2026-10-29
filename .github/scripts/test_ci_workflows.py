@@ -11,6 +11,19 @@ KINDS = ('ci', 'dependency-security', 'image-security', 'security-dast',
 
 
 class WorkflowBoundaryTests(unittest.TestCase):
+    def test_api_error_diagnostics_are_read_from_the_written_paths(self):
+        text = (WORKFLOWS / 'ci.yml').read_text()
+        job = text.split('  browser-api:\n', 1)[1].split('\n  browser:\n', 1)[0]
+        self.assertIn('        working-directory: source\n', job)
+        step = job.split('      - name: Test public V2 API\n', 1)[1].split('\n      - name:', 1)[0]
+        for option, suffix in (('--output', 'json'), ('--dump-header', 'headers')):
+            path = f'browser-e2e/public-v2-error.{suffix}'
+            self.assertIn(f'{option} {path}', step)
+            self.assertEqual(step.count(path), 2)
+            self.assertNotIn(f'source/{path}', step)
+        self.assertRegex(step, r'(?s)jq --exit-status.*?browser-e2e/public-v2-error\.json')
+        self.assertRegex(step, r'(?s)grep --ignore-case --quiet.*?browser-e2e/public-v2-error\.headers')
+
     def test_run_steps_do_not_enter_source_before_checkout(self):
         for kind in KINDS:
             text = (WORKFLOWS / f'{kind}.yml').read_text()
