@@ -86,7 +86,7 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           SOURCE_CI_RUN_ID: ${{ inputs.source_ci_run_id }}
           PUBLISH: ${{ inputs.publish }}
-        run: python3 .github/scripts/release_gate.py
+        run: python3 .github/scripts/release_gate.py >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.platform }}

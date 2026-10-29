@@ -247,16 +247,12 @@ def main():
         print("Annotated source tag, main ancestry, notes, and required CI jobs verified")
         return
     result = release_plan(source_sha, source_tag, ci_run_id, publish)
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-        for name, value in result.items():
-            if name != "release_notes":
-                output.write(f"{name}={value}\n")
+    for name, value in result.items():
+        if name != "release_notes":
+            print(f"{name}={value}")
     mode = "Release approved" if publish else "Plan only: no builds, registry writes, or release publication"
     summary = f"{mode}. Core version {result['version']}; CI run {result['ci_run_id']}.\n"
-    if os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as output:
-            output.write(summary)
-    print(summary.strip())
+    print(summary.strip(), file=sys.stderr)
 
 
 if __name__ == "__main__":

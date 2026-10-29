@@ -95,6 +95,22 @@ class ReleaseGateTests(unittest.TestCase):
     def validate(self, fixture=None):
         return gate.validate_source(SOURCE_SHA, SOURCE_TAG, 10, (fixture or self.fixture).read)
 
+    def test_cli_outputs_only_metadata_without_opening_environment_paths(self):
+        result = gate.release_plan(SOURCE_SHA, SOURCE_TAG, 10, False, self.fixture.read)
+        output = io.StringIO()
+        environment = {"GITHUB_REPOSITORY": gate.DISTRIBUTION_REPOSITORY,
+                       "GITHUB_REF": "refs/heads/main", "GITHUB_EVENT_NAME": "workflow_dispatch",
+                       "SOURCE_SHA": SOURCE_SHA, "SOURCE_TAG": SOURCE_TAG,
+                       "SOURCE_CI_RUN_ID": "10", "PUBLISH": "false",
+                       "GITHUB_OUTPUT": "/nonexistent/output", "GITHUB_STEP_SUMMARY": "/nonexistent/summary"}
+        with patch.dict(os.environ, environment), patch.object(gate, "release_plan", return_value=result), \
+                patch("sys.argv", ["release_gate.py"]), patch("sys.stdout", output):
+            gate.main()
+        self.assertIn("should_release=false", output.getvalue())
+        self.assertIn(f"source_sha={SOURCE_SHA}", output.getvalue())
+        self.assertNotIn("release_notes=", output.getvalue())
+        self.assertNotIn(result["release_notes"], output.getvalue())
+
     def test_success_requires_all_main_jobs_but_allows_pr_skip(self):
         result = gate.release_plan(SOURCE_SHA, SOURCE_TAG, 10, True, self.fixture.read)
         self.assertEqual(result["should_release"], "true")
