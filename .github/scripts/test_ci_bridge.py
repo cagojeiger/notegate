@@ -3,6 +3,8 @@ import copy
 import io
 import json
 import os
+import sys
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
@@ -351,12 +353,37 @@ class BridgeTests(unittest.TestCase):
         fixture = Fixture()
         fixture.public_rows = []
         with patch.dict(os.environ, {"DISPATCH_TOKEN": "test-dispatch-only"}):
-            bridge.dispatch(fixture.request, fixture.read)
+            self.assertTrue(bridge.dispatch(fixture.request, fixture.read))
         path, body, token = fixture.calls[-1]
+        self.assertEqual(sum(path.endswith('/dispatches') for path, _, _ in fixture.calls), 1)
         self.assertTrue(path.endswith("/ci.yml/dispatches"))
         self.assertEqual(set(body), {"ref", "inputs"})
         self.assertEqual(json.loads(body["inputs"]["request"]), fixture.request)
         self.assertEqual(token, "test-dispatch-only")
+
+    def test_dispatch_existing_valid_run_sends_no_request(self):
+        for conclusion in ("success", "failure", "cancelled"):
+            with self.subTest(conclusion=conclusion):
+                fixture = Fixture()
+                fixture.public["conclusion"] = conclusion
+                self.assertFalse(bridge.dispatch(fixture.request, fixture.read))
+                self.assertFalse(any(path.endswith('/dispatches') for path, _, _ in fixture.calls))
+
+    def test_dispatch_existing_run_still_requires_source_and_public_provenance(self):
+        for mutation in ("actor", "control", "source_attempt", "duplicates"):
+            with self.subTest(mutation=mutation):
+                fixture = Fixture()
+                if mutation == "actor":
+                    fixture.public["actor"] = {"id": 1}
+                elif mutation == "control":
+                    fixture.trees[PUBLIC_HEAD] = "1" * 40
+                elif mutation == "source_attempt":
+                    fixture.source["run_attempt"] = 2
+                else:
+                    fixture.public_rows.append(copy.deepcopy(fixture.public))
+                with self.assertRaises(bridge.Stopped):
+                    bridge.dispatch(fixture.request, fixture.read)
+                self.assertFalse(any(path.endswith('/dispatches') for path, _, _ in fixture.calls))
 
     def test_dispatcher_revalidates_bounded_artifact_before_token_mint(self):
         fixture = Fixture()
@@ -369,6 +396,71 @@ class BridgeTests(unittest.TestCase):
         fixture.artifacts[0]["size_in_bytes"] = 65537
         with patch.dict(os.environ, environment), self.assertRaises(bridge.Stopped):
             bridge.dispatcher_request(10, 1, fixture.read, loader, Mock())
+
+    def test_dispatcher_ignores_completed_or_superseded_without_artifact(self):
+        for change in ({"status": "completed"}, {"run_attempt": 2}):
+            with self.subTest(change=change):
+                fixture = Fixture()
+                fixture.source.update(change)
+                loader, pause = Mock(), Mock()
+                self.assertIsNone(bridge.dispatcher_request(10, 1, fixture.read, loader, pause))
+                loader.assert_not_called()
+                pause.assert_not_called()
+                self.assertFalse(any('/artifacts?' in path for path, _, _ in fixture.calls))
+
+    def test_dispatcher_rejects_future_attempt_or_untrusted_source_metadata(self):
+        for change in ({"run_attempt": 1, "event_attempt": 2}, {"id": 11},
+                       {"workflow_id": 1}, {"path": ".github/workflows/other.yml"}):
+            with self.subTest(change=change):
+                fixture = Fixture()
+                event_attempt = change.get("event_attempt", 1)
+                fixture.source.update({k: v for k, v in change.items() if k != "event_attempt"})
+                fixture.source["status"] = "completed"
+                loader = Mock()
+                with self.assertRaises(bridge.Stopped):
+                    bridge.dispatcher_request(10, event_attempt, fixture.read, loader, Mock())
+                loader.assert_not_called()
+        for repository in (bridge.CORE, bridge.PUBLIC):
+            fixture = Fixture()
+            fixture.source["status"] = "completed"
+            fixture.repositories[repository]["private"] = True
+            with self.assertRaises(bridge.Stopped):
+                bridge.dispatcher_request(10, 1, fixture.read, Mock(), Mock())
+
+    def test_dispatcher_plan_skip_produces_no_plan_or_credential_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {"GITHUB_REPOSITORY": bridge.CORE, "GITHUB_REF": "refs/heads/main",
+                           "GITHUB_EVENT_NAME": "workflow_run", "SOURCE_RUN_ID": "10",
+                           "SOURCE_ATTEMPT": "1", "RUNNER_TEMP": directory,
+                           "REQUEST_FILE": directory + "/public-ci-dispatch.json"}
+            output = io.StringIO()
+            with patch.dict(os.environ, environment), patch.object(sys, "argv", ["ci_bridge.py", "dispatcher-plan"]), \
+                 patch.object(bridge, "dispatcher_request", return_value=None), patch.object(bridge, "api") as api, \
+                 patch("sys.stdout", output), patch("sys.stderr", io.StringIO()):
+                bridge.main()
+            self.assertEqual(output.getvalue(), "should_dispatch=false\n")
+            self.assertFalse(os.path.exists(environment["REQUEST_FILE"]))
+            api.assert_not_called()
+
+    def test_dispatcher_plan_emits_true_only_after_validated_private_plan(self):
+        fixture = Fixture()
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {"GITHUB_REPOSITORY": bridge.CORE, "GITHUB_REF": "refs/heads/main",
+                           "GITHUB_EVENT_NAME": "workflow_run", "SOURCE_RUN_ID": "10",
+                           "SOURCE_ATTEMPT": "1", "RUNNER_TEMP": directory,
+                           "REQUEST_FILE": directory + "/public-ci-dispatch.json"}
+            output = io.StringIO()
+            with patch.dict(os.environ, environment), patch.object(sys, "argv", ["ci_bridge.py", "dispatcher-plan"]), \
+                 patch.object(bridge, "dispatcher_request", return_value=fixture.request), \
+                 patch.object(bridge, "api", return_value={"sha": PUBLIC_HEAD}), \
+                 patch.object(bridge, "validate_control") as control, \
+                 patch("sys.stdout", output), patch("sys.stderr", io.StringIO()):
+                bridge.main()
+            control.assert_called_once_with(CONTROL, PUBLIC_HEAD)
+            self.assertEqual(output.getvalue(), "should_dispatch=true\n")
+            self.assertEqual(os.stat(environment["REQUEST_FILE"]).st_mode & 0o777, 0o600)
+            with open(environment["REQUEST_FILE"]) as plan:
+                self.assertEqual(json.load(plan), fixture.request)
 
     def test_missing_or_wrong_execution_artifact_is_rejected(self):
         fixture = Fixture()

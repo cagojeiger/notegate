@@ -410,14 +410,20 @@ def artifact_request(artifact_id, token):
 
 def dispatcher_request(run_id, attempt, read=api, load=artifact_request, pause=time.sleep):
     run_id, attempt = positive(run_id), positive(attempt)
-    run = read(f"repos/{CORE}/actions/runs/{run_id}")
-    kinds = [kind for kind, identity in WORKFLOWS.items() if identity == run.get("workflow_id")]
-    require(len(kinds) == 1, "Unexpected source workflow")
-    kind = kinds[0]
+    checked_repository(CORE, CORE_ID, read)
+    checked_repository(PUBLIC, PUBLIC_ID, read)
     for _ in range(24):
         run = read(f"repos/{CORE}/actions/runs/{run_id}")
-        require(run.get("status") == "in_progress" and run.get("run_attempt") == attempt,
-                "Source request is no longer active")
+        kinds = [kind for kind, identity in WORKFLOWS.items() if identity == run.get("workflow_id")]
+        require(run.get("id") == run_id and len(kinds) == 1, "Unexpected source workflow")
+        kind = kinds[0]
+        require(run.get("path", "").split("@")[0] == f".github/workflows/{kind}.yml",
+                "Unexpected source workflow")
+        current_attempt = positive(run.get("run_attempt"))
+        require(current_attempt >= attempt, "Source event refers to a future attempt")
+        if current_attempt > attempt or run.get("status") == "completed":
+            return None
+        require(run.get("status") == "in_progress", "Source request is no longer active")
         response = read(f"repos/{CORE}/actions/runs/{run_id}/artifacts?per_page=100")
         artifacts = response.get("artifacts", [])
         require(response.get("total_count") == len(artifacts), "Incomplete request artifact list")
@@ -439,11 +445,13 @@ def dispatch(request, read=api):
     validate_request(request, read)
     main = read(f"repos/{PUBLIC}/commits/main").get("sha", "")
     validate_control(request["control_sha"], main, read)
-    require(public_run(request, read) is None, "Public CI was already requested; inspect that execution")
+    if public_run(request, read) is not None:
+        return False
     token = os.environ.get("DISPATCH_TOKEN")
     require(token, "Public dispatch token is missing")
     read(f"repos/{PUBLIC}/actions/workflows/{request['kind']}.yml/dispatches",
          {"ref": "main", "inputs": {"request": json.dumps(request, separators=(",", ":"))}}, token=token)
+    return True
 
 
 def active_source(request, read=api):
@@ -503,13 +511,18 @@ def main():
         require(os.environ.get("GITHUB_REF") == "refs/heads/main"
                 and os.environ.get("GITHUB_EVENT_NAME") == "workflow_run", "Dispatcher requires trusted core main")
         request = dispatcher_request(os.environ["SOURCE_RUN_ID"], os.environ["SOURCE_ATTEMPT"])
+        if request is None:
+            print("Ignored completed or superseded source event", file=sys.stderr)
+            print("should_dispatch=false")
+            return
         main_sha = api(f"repos/{PUBLIC}/commits/main")["sha"]
         validate_control(request["control_sha"], main_sha)
         path = Path(os.environ["REQUEST_FILE"])
         require(path == Path(os.environ["RUNNER_TEMP"]) / "public-ci-dispatch.json", "Unexpected dispatch plan path")
         path.write_text(json.dumps(request))
         path.chmod(0o600)
-        print("Validated source-free request before minting public dispatch credentials")
+        print("Validated source-free request before minting public dispatch credentials", file=sys.stderr)
+        print("should_dispatch=true")
     elif args.command == "gate":
         require(os.environ.get("GITHUB_REPOSITORY") == PUBLIC and os.environ.get("GITHUB_REF") == "refs/heads/main"
                 and os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch", "Gate requires trusted public main")
@@ -537,8 +550,9 @@ def main():
         if args.command == "dispatch":
             require(os.environ.get("GITHUB_REF") == "refs/heads/main"
                     and os.environ.get("GITHUB_EVENT_NAME") == "workflow_run", "Dispatch requires trusted core main")
-            dispatch(request)
-            print("Requested immutable public CI execution")
+            created = dispatch(request)
+            print("Requested immutable public CI execution" if created
+                  else "Validated existing public CI execution; no dispatch sent")
         else:
             require(args.kind == request["kind"], "Unexpected requested workflow")
             for key, value in wait(request).items():
