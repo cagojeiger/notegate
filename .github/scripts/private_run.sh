@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # GitHub Actions shell adapter: suppress source-derived step output.
 set -u
+original_umask=$(umask)
 umask 077
 
 if [[ $# != 1 || -z "${RUNNER_TEMP:-}" || ! -d "$RUNNER_TEMP" || ! -f "$1" || ! -r "$1" ]]; then
@@ -30,7 +31,15 @@ trap cleanup EXIT
 trap 'stop 130' INT
 trap 'stop 143' TERM
 
-GITHUB_STEP_SUMMARY="$private_dir/summary" bash --noprofile --norc -e -o pipefail "$1" > "$private_dir/stdout" 2> "$private_dir/stderr" &
+if ! { : > "$private_dir/stdout" && : > "$private_dir/stderr" && : > "$private_dir/summary"; } 2>/dev/null; then
+  printf '%s\n' 'Private step could not start.' >&2
+  exit 1
+fi
+(
+  umask "$original_umask"
+  export GITHUB_STEP_SUMMARY="$private_dir/summary"
+  exec bash --noprofile --norc -e -o pipefail "$1"
+) > "$private_dir/stdout" 2> "$private_dir/stderr" &
 child=$!
 if wait "$child"; then
   status=0

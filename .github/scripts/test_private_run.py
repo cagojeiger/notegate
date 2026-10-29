@@ -45,6 +45,25 @@ class PrivateRunTests(unittest.TestCase):
                     self.assertEqual(result.stderr, "")
                     self.assertFalse(list(Path(directory).glob("private-run.*")))
 
+    def test_child_umask_is_preserved_while_capture_files_are_private(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_file, output, step = root / "source-file", root / "output", root / "step.sh"
+            step.write_text('umask\n: > "$SOURCE_FILE"\n'
+                            'python3 -c \'import os,stat; p=os.environ["GITHUB_STEP_SUMMARY"]; '
+                            'd=os.path.dirname(p); '
+                            'items=[d,p,os.path.join(d,"stdout"),os.path.join(d,"stderr")]; '
+                            'open(os.environ["GITHUB_OUTPUT"],"w").write(" ".join('
+                            'format(stat.S_IMODE(os.stat(x).st_mode),"o") for x in items))\'\n')
+            env = {**os.environ, "RUNNER_TEMP": directory, "SOURCE_FILE": str(source_file),
+                   "GITHUB_OUTPUT": str(output)}
+            result = subprocess.run(["bash", str(WRAPPER), str(step)], env=env, text=True,
+                                    capture_output=True, preexec_fn=lambda: os.umask(0o022))
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(source_file.stat().st_mode & 0o777, 0o644)
+            self.assertEqual(output.read_text(), "700 600 600 600")
+            self.assertFalse(list(root.glob("private-run.*")))
+
     def test_missing_input_fails_without_echoing_private_path(self):
         with tempfile.TemporaryDirectory() as directory:
             env = {**os.environ, "RUNNER_TEMP": directory}
