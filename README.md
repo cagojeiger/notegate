@@ -25,12 +25,12 @@ The v0.1.119 release assets are mirrored without modification from the original 
 ```text
 LICENSE                      Existing AGPL license, unchanged
 README.md                    Distribution and release instructions
-.github/workflows/           Release, Web comparison, and workflow validation
+.github/workflows/           CI execution, release, and workflow validation
 .github/scripts/             Source gates, publication, and their tests
 ```
 
-Application code, Dockerfiles, development documentation, and ordinary CI stay in
-`notegate-core`. Builds check out an exact core commit into a temporary `source/`
+Application code, Dockerfiles, and development documentation stay in
+`notegate-core`. CI and release builds check out an exact core commit into a temporary `source/`
 directory on the runner. This directory is ignored and must not enter this
 repository's history. Public policy files may be added after review.
 
@@ -69,16 +69,19 @@ state before retrying. The workflow never overwrites or deletes a release.
 Before the first publication, grant this repository **Write** access under the
 existing GHCR package's **Manage Actions access**. Replace the old core publishing
 workflow with the tag-and-dispatch controller before enabling it; only this
-repository publishes images and release assets. Ordinary core CI remains in core.
-Post-release browser/text performance workflows are not automatically connected.
+repository publishes images and release assets. Core retains the CI dispatcher and
+status checks; execution runs here. Post-release browser/text performance workflows
+are not automatically connected.
 
-## Web CI comparison
+## CI execution
 
-`Web CI shadow` repeats the core Web checks for a completed main push CI run.
-Manual dispatch takes `source_sha`, `source_ci_run_id`, and `source_ci_attempt`.
-It compares the exact source and attempt without replacing core Web, its browser
-test artifact, required checks, or release validation. The comparison uses no
-Actions cache and uploads no source artifacts. PR CI migration is separate.
+Core dispatches CI, security scans, and manual performance measurements to this
+repository for a validated core run and exact commit. Public workers fetch core
+anonymously and do not receive the core read App credentials. They do not use
+Actions caches. A private core is not supported by these CI workers and fails
+closed; private-source credentials and public log and artifact handling require
+separate design and verification. Browser performance can reuse a validated public
+CI frontend artifact or build one for the selected commit.
 
 ## Source access
 

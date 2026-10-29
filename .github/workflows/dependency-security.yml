@@ -1,0 +1,130 @@
+name: Dependency Security
+run-name: Core dependency-security ${{ fromJSON(inputs.request).run_id }}.${{ fromJSON(inputs.request).attempt }} ${{ fromJSON(inputs.request).tested_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: Validated core workflow run and immutable source request
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-dependency-security-${{ fromJSON(inputs.request).run_id }}-${{ fromJSON(inputs.request).attempt }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Validate core request
+    permissions:
+      contents: read
+      actions: read
+    if: github.repository == 'cagojeiger/notegate' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tested_sha: ${{ steps.request.outputs.tested_sha }}
+      source_event: ${{ steps.request.outputs.source_event }}
+      head_sha: ${{ steps.request.outputs.head_sha }}
+      base_sha: ${{ steps.request.outputs.base_sha }}
+      pr_number: ${{ steps.request.outputs.pr_number }}
+      run_id: ${{ steps.request.outputs.run_id }}
+      attempt: ${{ steps.request.outputs.attempt }}
+      base_ref: ${{ steps.request.outputs.base_ref }}
+      web_artifact_run_id: ${{ steps.request.outputs.web_artifact_run_id }}
+
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Validate immutable core request
+        id: request
+        env:
+          REQUEST_JSON: ${{ inputs.request }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .control/.github/scripts/ci_bridge.py gate --kind dependency-security >> "$GITHUB_OUTPUT"
+
+  rust-audit:
+    needs: gate
+    name: RustSec Audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    env:
+      SOURCE_EVENT: ${{ needs.gate.outputs.source_event }}
+
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Checkout exact public core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 1
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: cargo-audit@0.22.2
+          fallback: none
+
+      - name: Audit Rust dependencies
+        run: cargo audit --deny yanked
+
+  npm-audit:
+    needs: gate
+    name: Scheduled Npm Audit
+    # PRs and main pushes already audit the full graph in CI's Web job.
+    if: needs.gate.outputs.source_event != 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    env:
+      SOURCE_EVENT: ${{ needs.gate.outputs.source_event }}
+
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Checkout exact public core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: source/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: source/.node-version
+          package-manager-cache: false
+
+      - name: Install dependencies without lifecycle scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Audit all npm dependencies
+        run: pnpm audit --audit-level moderate

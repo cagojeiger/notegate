@@ -1,0 +1,122 @@
+name: Text Write Performance
+run-name: Core text-write-performance ${{ fromJSON(inputs.request).run_id }}.${{ fromJSON(inputs.request).attempt }} ${{ fromJSON(inputs.request).tested_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: Validated core workflow run and immutable source request
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Validate core request
+    permissions:
+      contents: read
+      actions: read
+    if: github.repository == 'cagojeiger/notegate' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tested_sha: ${{ steps.request.outputs.tested_sha }}
+      source_event: ${{ steps.request.outputs.source_event }}
+      head_sha: ${{ steps.request.outputs.head_sha }}
+      base_sha: ${{ steps.request.outputs.base_sha }}
+      pr_number: ${{ steps.request.outputs.pr_number }}
+      run_id: ${{ steps.request.outputs.run_id }}
+      attempt: ${{ steps.request.outputs.attempt }}
+      base_ref: ${{ steps.request.outputs.base_ref }}
+      web_artifact_run_id: ${{ steps.request.outputs.web_artifact_run_id }}
+
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Validate immutable core request
+        id: request
+        env:
+          REQUEST_JSON: ${{ inputs.request }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .control/.github/scripts/ci_bridge.py gate --kind text-write-performance >> "$GITHUB_OUTPUT"
+
+  compare:
+    needs: gate
+    name: Text Write Comparison
+    defaults:
+      run:
+        working-directory: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: notegate
+          POSTGRES_PASSWORD: notegate
+          POSTGRES_DB: notegate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notegate -d notegate"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NOTEGATE_TEST_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
+    steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
+      - name: Checkout exact public core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 0
+
+      - name: Resolve immutable published baseline
+        id: baseline
+        env:
+          CANDIDATE_SHA: ${{ needs.gate.outputs.tested_sha }}
+          BASE_REF: ${{ needs.gate.outputs.base_ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CANDIDATE_SHA" ]; then
+            [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+            test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          fi
+          gh api --paginate --slurp 'repos/cagojeiger/notegate/releases?per_page=100' \
+            | python3 deploy/ci/resolve-text-write-baseline.py >> "$GITHUB_OUTPUT"
+          cat text-write-results/baseline.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Checkout baseline
+        if: steps.baseline.outputs.sha != ''
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          sha: ${{ steps.baseline.outputs.sha }}
+          path: comparison-base
+
+      - name: Compare baseline and candidate
+        if: steps.baseline.outputs.sha != ''
+        run: deploy/ci/compare-text-write.sh "$GITHUB_WORKSPACE/comparison-base"
+
+      - name: Retain measurements
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: text-write-performance
+          path: source/text-write-results/
+          if-no-files-found: warn
