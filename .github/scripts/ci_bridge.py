@@ -508,16 +508,30 @@ def active_source(request, read=api):
                 and pull.get("merge_commit_sha") == request["tested_sha"], "Pull request changed during public CI")
 
 
-def wait(request, read=api, pause=time.sleep, clock=time.monotonic, timeout=5100):
+def wait(request, read=api, pause=time.sleep, clock=time.monotonic, timeout=5100, discovery_timeout=900):
     validate_request(request, read)
-    deadline = clock() + timeout
+    started = clock()
+    deadline = started + timeout
+    discovery_deadline = started + min(timeout, discovery_timeout)
     run = None
     poll_cache = {}
     poll_read = (lambda path: api(path, poll_cache=poll_cache)) if read is api else read
-    while clock() < deadline:
+    while (now := clock()) < deadline:
+        if run is None and now >= discovery_deadline:
+            raise Stopped("Public CI was not found before the discovery deadline; check the dispatcher and GitHub before retrying")
         active_source(request, poll_read)
-        run = (poll_read(f"repos/{PUBLIC}/actions/runs/{run['id']}") if run else public_run(request, read))
+        if run:
+            run_id = positive(run['id'])
+            run = poll_read(f"repos/{PUBLIC}/actions/runs/{run_id}")
+            require(isinstance(run, dict) and run.get("id") == run_id, "Public execution identity changed during polling")
+        else:
+            run = public_run(request, read)
         if run and run.get("status") == "completed":
+            if run.get("conclusion") != "success":
+                conclusion = run.get("conclusion")
+                if conclusion not in {"failure", "cancelled", "timed_out", "action_required", "neutral", "skipped", "stale", "startup_failure"}:
+                    conclusion = "unknown"
+                raise Stopped(f"Public CI finished with {conclusion}: https://github.com/{PUBLIC}/actions/runs/{positive(run['id'])}")
             # Discover again to reject duplicates and recheck actor, definition and latest attempt.
             verified = public_run(request, read)
             require(verified is not None and verified.get("id") == run.get("id")
@@ -526,7 +540,9 @@ def wait(request, read=api, pause=time.sleep, clock=time.monotonic, timeout=5100
             results = verify_results(request, verified, read)
             return {**results, "public_run_url": f"https://github.com/{PUBLIC}/actions/runs/{run['id']}"}
         pause(30)
-    raise Stopped("Public CI did not finish before the core wait deadline")
+    if run:
+        raise Stopped(f"Public CI did not finish before the core wait deadline: https://github.com/{PUBLIC}/actions/runs/{positive(run['id'])}")
+    raise Stopped("Public CI was not found before the core wait deadline; check the dispatcher and GitHub before retrying")
 
 
 def core_context():

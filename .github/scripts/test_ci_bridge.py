@@ -496,6 +496,50 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(bridge.Stopped, "deadline"):
             bridge.wait(fixture.request, fixture.read, clock=Mock(side_effect=[0, 2]), timeout=1, pause=Mock())
 
+    def test_wait_stops_when_public_run_is_not_discovered(self):
+        fixture = Fixture()
+        fixture.public_rows = []
+        now = [0]
+        def pause(seconds):
+            now[0] += seconds
+        with self.assertRaisesRegex(bridge.Stopped, "not found before the discovery deadline"):
+            bridge.wait(fixture.request, fixture.read, pause=pause, clock=lambda: now[0],
+                        timeout=120, discovery_timeout=60)
+        self.assertEqual(now[0], 60)
+        self.assertFalse(any(path.endswith('/dispatches') for path, _, _ in fixture.calls))
+
+    def test_wait_reports_public_run_after_running_deadline(self):
+        fixture = Fixture()
+        fixture.public.update(status="in_progress", conclusion=None)
+        now = [0]
+        def pause(seconds):
+            now[0] += seconds
+        with self.assertRaisesRegex(bridge.Stopped, r"core wait deadline: https://github.com/.*/actions/runs/20"):
+            bridge.wait(fixture.request, fixture.read, pause=pause, clock=lambda: now[0],
+                        timeout=60, discovery_timeout=30)
+        self.assertEqual(now[0], 60)
+
+    def test_wait_reports_failed_public_run_without_retry(self):
+        fixture = Fixture()
+        fixture.public.update(status="completed", conclusion="failure")
+        with self.assertRaisesRegex(bridge.Stopped, r"finished with failure: https://github.com/.*/actions/runs/20"):
+            bridge.wait(fixture.request, fixture.read, pause=Mock())
+        self.assertFalse(any(path.endswith('/dispatches') for path, _, _ in fixture.calls))
+
+    def test_wait_rejects_changed_public_run_identity_during_polling(self):
+        fixture = Fixture()
+        fixture.public.update(status="in_progress", conclusion=None)
+        reads = [0]
+        def read(path, data=None, token=None):
+            result = fixture.read(path, data, token)
+            if path.endswith('/actions/runs/20'):
+                reads[0] += 1
+                if reads[0] > 1:
+                    return {**result, "id": 21}
+            return result
+        with self.assertRaisesRegex(bridge.Stopped, "identity changed during polling"):
+            bridge.wait(fixture.request, read, pause=Mock())
+
     def test_wait_pins_public_run_and_keeps_poll_api_cost_bounded(self):
         fixture = Fixture()
         fixture.public.update(status="in_progress", conclusion=None)
