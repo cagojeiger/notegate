@@ -105,6 +105,34 @@ class Fixture:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_prepare_waits_only_for_queued_source_to_start(self):
+        fixture = Fixture()
+        queued = {**fixture.source, "status": "queued"}
+        reader = Mock(side_effect=[queued, queued, fixture.source])
+        pause = Mock()
+        bridge.wait_for_source_start(10, 1, reader, pause)
+        self.assertEqual(reader.call_count, 3)
+        self.assertEqual(pause.call_count, 2)
+        self.assertEqual(bridge.validate_request(fixture.request, fixture.read), fixture.request)
+
+    def test_prepare_start_wait_is_bounded_and_rejects_changed_or_terminal_runs(self):
+        fixture = Fixture()
+        reader = Mock(return_value={**fixture.source, "status": "queued"})
+        pause = Mock()
+        with self.assertRaisesRegex(bridge.Stopped, "prepare deadline"):
+            bridge.wait_for_source_start(10, 1, reader, pause)
+        self.assertEqual(reader.call_count, 6)
+        self.assertEqual(pause.call_count, 5)
+        for change in ({"id": 11}, {"run_attempt": 2}, {"status": "completed"},
+                       {"status": "cancelled"}):
+            with self.subTest(change=change):
+                reader = Mock(return_value={**fixture.source, **change})
+                pause = Mock()
+                with self.assertRaises(bridge.Stopped):
+                    bridge.wait_for_source_start(10, 1, reader, pause)
+                self.assertEqual(reader.call_count, 1)
+                pause.assert_not_called()
+
     def test_public_main_and_pr_plans_bind_the_actual_tested_commit(self):
         main, pull = Fixture(), Fixture("pull_request")
         self.assertEqual(main.request["tested_sha"], HEAD)
