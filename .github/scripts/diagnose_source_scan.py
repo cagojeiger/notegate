@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 import security_scan
 
 CORE_ID = 1253185495
-SOURCE_SHA = "02c538b499cc7cc5d70156e1f3f005c83dbaaf0c"
+SOURCE_SHA = "e9fdc8cd7ac651677cebc7bd95022e9b0377c132"
 SAFE_PATH = re.compile(r"[A-Za-z0-9_.@+/-]{1,300}")
 SAFE_RULE = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 ERROR_TYPES = {"PartialParsing", "ParseError", "SyntaxError", "LexicalError", "PatternParseError",

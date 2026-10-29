@@ -1,5 +1,6 @@
 """Synthetic scanner boundary tests; no real source is scanned."""
 import json
+import hashlib
 from pathlib import Path
 import subprocess
 import tempfile
@@ -70,6 +71,31 @@ class ScannerTests(unittest.TestCase):
                 self.assertIn("--redact", command)
                 self.assertNotIn("GITLEAKS_CONFIG", args["env"])
                 self.assertFalse(Path(args["cwd"]).exists())
+
+    def test_gitleaks_fixture_exceptions_are_exact_and_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "fixture.txt"
+            content = b"before\nfixture-secret\nafter\n"
+            target.write_bytes(content)
+            entry = {"path": "fixture.txt", "rule": "private-key", "start_line": 2, "end_line": 2,
+                     "sha256": hashlib.sha256(b"fixture-secret\n").hexdigest()}
+            policy = root / "policy.json"
+            policy.write_text(json.dumps({"fixtures": [entry]}))
+            finding = {"RuleID": "private-key", "File": "fixture.txt", "StartLine": 2, "EndLine": 2}
+            def scan(findings):
+                return security_scan.scan("gitleaks", root, run=FakeScanner("gitleaks", findings, 10))
+            with patch.object(security_scan, "FIXTURES", policy):
+                self.assertEqual(scan([finding]), ("clean", 0))
+                self.assertEqual(scan([finding, finding]), ("error", 0))
+                self.assertEqual(scan([finding, {**finding, "File": "other.txt"}]), ("findings", 1))
+                target.write_bytes(b"before\nchanged-secret\nafter\n")
+                self.assertEqual(scan([finding]), ("findings", 1))
+                target.write_bytes(content)
+                policy.write_text(json.dumps({"fixtures": [{**entry, "unexpected": True}]}))
+                self.assertEqual(scan([finding]), ("error", 0))
+                policy.write_text(json.dumps({"fixtures": [entry, entry]}))
+                self.assertEqual(scan([finding]), ("error", 0))
 
     def test_wrong_version_missing_binary_and_source_ignore_fail_closed(self):
         with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as rules:

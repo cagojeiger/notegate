@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run local scanners while exposing only aggregate outcomes."""
 import argparse
+import hashlib
 from collections import Counter
 import json
 import os
@@ -9,11 +10,69 @@ import re
 import subprocess
 import tempfile
 
+FIXTURES = Path(__file__).resolve().parents[1] / "security-rules" / "known-fixtures.json"
 SECRET_RULES = Path(__file__).resolve().parents[1] / "security-rules" / "gitleaks.toml"
 RULES_COMMIT = "16b9e6d45f10649f6a531ec4838ed9924372c3bc"
 RULES_PATHS = ("python/lang/security/audit", "javascript/lang/security/audit", "typescript/lang/security/audit")
 VERSIONS = {"semgrep": "1.182.0", "gitleaks": "8.30.1"}
 FINDINGS_EXIT = 10
+
+
+def filter_fixtures(source, findings):
+    policy = json.loads(FIXTURES.read_text())
+    if not isinstance(policy, dict) or set(policy) != {"fixtures"} or not isinstance(policy["fixtures"], list):
+        raise ValueError("Invalid fixture policy")
+    entries = {}
+    for item in policy["fixtures"]:
+        if not isinstance(item, dict) or set(item) != {"path", "rule", "start_line", "end_line", "sha256"}:
+            raise ValueError("Invalid fixture entry")
+        path, rule, start, end, digest = (item[k] for k in ("path", "rule", "start_line", "end_line", "sha256"))
+        if (not isinstance(path, str) or not path or path.startswith("/")
+                or any(part in {"", ".", ".."} for part in path.split("/"))
+                or not isinstance(rule, str) or not re.fullmatch(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*", rule)
+                or len(rule) > 128 or type(start) is not int or type(end) is not int or start < 1 or end < start
+                or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+            raise ValueError("Invalid fixture fields")
+        identity = (path, rule, start, end)
+        if identity in entries:
+            raise ValueError("Duplicate fixture")
+        entries[identity] = digest
+    remaining, used = [], set()
+    root = source.resolve()
+    for finding in findings:
+        if not isinstance(finding, dict):
+            raise ValueError("Invalid finding")
+        path = finding.get("File")
+        if isinstance(path, str) and Path(path).is_absolute():
+            try:
+                path = str(Path(path).relative_to(root))
+            except ValueError:
+                remaining.append(finding)
+                continue
+        start, end = finding.get("StartLine"), finding.get("EndLine")
+        if type(start) is not int or type(end) is not int:
+            remaining.append(finding)
+            continue
+        identity = (path, finding.get("RuleID"), start, end)
+        try:
+            digest = entries.get(identity)
+        except TypeError:
+            raise ValueError("Invalid finding identity") from None
+        if digest is None:
+            remaining.append(finding)
+            continue
+        if identity in used:
+            raise ValueError("Duplicate fixture finding")
+        used.add(identity)
+        target = root / path
+        if any((root.joinpath(*path.split("/")[:i])).is_symlink() for i in range(1, len(path.split("/")) + 1)):
+            raise ValueError("Fixture path contains symlink")
+        if not target.is_file() or not target.resolve().is_relative_to(root):
+            raise ValueError("Invalid fixture file")
+        lines = target.read_bytes().splitlines(keepends=True)
+        if identity[3] > len(lines) or hashlib.sha256(b"".join(lines[identity[2] - 1:identity[3]])).hexdigest() != digest:
+            remaining.append(finding)
+    return remaining
 
 
 def scan(scanner, source, rules_repo=None, run=subprocess.run, emit=lambda _: None):
@@ -82,6 +141,7 @@ def scan(scanner, source, rules_repo=None, run=subprocess.run, emit=lambda _: No
                              timeout=900, check=False)
                 if scanner == "semgrep":
                     if result.returncode != 0:
+                        emit(f"semgrep exit code: {result.returncode}")
                         return error(stage)
                     stdout.seek(0)
                     stage = "scanner-report"
@@ -102,6 +162,11 @@ def scan(scanner, source, rules_repo=None, run=subprocess.run, emit=lambda _: No
                     findings, key = data, "RuleID"
                     if (result.returncode == FINDINGS_EXIT) != bool(findings):
                         return error(stage)
+                    stage = "fixture-policy"
+                    findings = filter_fixtures(source, findings)
+                    if len(findings) < len(data):
+                        emit(f"reviewed fixture findings: {len(data) - len(findings)}")
+                    stage = "scanner-report"
                 counts = Counter()
                 for finding in findings:
                     rule = finding.get(key) if isinstance(finding, dict) else None
