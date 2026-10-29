@@ -146,6 +146,7 @@ jobs:
           context: source
           file: source/deploy/docker/web.Dockerfile
           platforms: ${{ matrix.platform }}
+          provenance: mode=min
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
