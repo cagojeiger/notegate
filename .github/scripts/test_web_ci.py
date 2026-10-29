@@ -1,6 +1,7 @@
 import base64
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
-import tempfile
 import unittest
 
 import web_ci as web
@@ -49,9 +50,9 @@ class Fixture:
 
 class WebGateTests(unittest.TestCase):
     def test_only_two_successful_web_results_are_a_successful_comparison(self):
-        with tempfile.TemporaryDirectory() as directory:
-            environment = {"SOURCE_SHA": SHA, "SOURCE_CI_RUN_ID": "10", "SOURCE_CI_ATTEMPT": "2",
-                           "GITHUB_STEP_SUMMARY": str(Path(directory) / "summary")}
+        environment = {"SOURCE_SHA": SHA, "SOURCE_CI_RUN_ID": "10", "SOURCE_CI_ATTEMPT": "2"}
+        summary = StringIO()
+        with redirect_stdout(summary):
             for core in ("success", "failure", ""):
                 for public in ("success", "failure", "cancelled", "skipped"):
                     for gate in ("success", "failure", "cancelled"):
@@ -62,8 +63,7 @@ class WebGateTests(unittest.TestCase):
                             else:
                                 with self.assertRaises(web.GateError):
                                     web.compare_results(values)
-            summary = Path(environment["GITHUB_STEP_SUMMARY"]).read_text()
-            self.assertIn("Core Web: **failure**; public Web: **success**", summary)
+        self.assertIn("Core Web: **failure**; public Web: **success**", summary.getvalue())
 
     def test_shadow_is_not_blocked_by_unrelated_core_failure(self):
         fixture = Fixture()

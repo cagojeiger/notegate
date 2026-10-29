@@ -5,7 +5,6 @@ import argparse
 import base64
 import json
 import os
-from pathlib import Path
 import re
 import sys
 from urllib.parse import urlencode
@@ -81,13 +80,12 @@ def validate_source(sha, run_id, attempt, read=api):
 
 def compare_results(environment):
     e = environment
-    with Path(e["GITHUB_STEP_SUMMARY"]).open("a") as summary:
-        summary.write(f"### Web shadow comparison\n\nSource: `{e['SOURCE_SHA']}`\n\n"
-                      f"Core CI: https://github.com/cagojeiger/notegate-core/actions/runs/{e['SOURCE_CI_RUN_ID']} "
-                      f"(attempt {e['SOURCE_CI_ATTEMPT']})\n\n"
-                      f"Core Web: **{e['CORE_RESULT'] or 'unavailable'}**; public Web: **{e['PUBLIC_RESULT']}**.\n\n"
-                      "Core Web, its frontend artifact, branch protection, and release requirements remain unchanged. "
-                      "This run uploads no source artifacts and uses no Actions cache.\n")
+    print(f"### Web shadow comparison\n\nSource: `{e['SOURCE_SHA']}`\n\n"
+          f"Core CI: https://github.com/cagojeiger/notegate-core/actions/runs/{e['SOURCE_CI_RUN_ID']} "
+          f"(attempt {e['SOURCE_CI_ATTEMPT']})\n\n"
+          f"Core Web: **{e['CORE_RESULT'] or 'unavailable'}**; public Web: **{e['PUBLIC_RESULT']}**.\n\n"
+          "Core Web, its frontend artifact, branch protection, and release requirements remain unchanged. "
+          "This run uploads no source artifacts and uses no Actions cache.\n", end="")
     require(e["GATE_RESULT"] == "success" and e["CORE_RESULT"] == e["PUBLIC_RESULT"] == "success",
             "Core and public Web must both pass for a successful comparison")
 

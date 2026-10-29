@@ -166,4 +166,4 @@ jobs:
           CORE_RESULT: ${{ needs.gate.outputs.core_web_conclusion }}
           PUBLIC_RESULT: ${{ needs.web.result }}
           GATE_RESULT: ${{ needs.gate.result }}
-        run: python3 .github/scripts/web_ci.py --compare
+        run: python3 .github/scripts/web_ci.py --compare >> "$GITHUB_STEP_SUMMARY"
