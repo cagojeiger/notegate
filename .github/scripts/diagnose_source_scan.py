@@ -16,7 +16,8 @@ CORE_ID = 1253185495
 SOURCE_SHA = "02c538b499cc7cc5d70156e1f3f005c83dbaaf0c"
 SAFE_PATH = re.compile(r"[A-Za-z0-9_.@+/-]{1,300}")
 SAFE_RULE = re.compile(r"[A-Za-z0-9_.-]{1,128}")
-ERROR_TYPES = {"ParseError", "PatternParseError", "RuleParseError", "SemgrepError", "Timeout", "OutOfMemory"}
+ERROR_TYPES = {"PartialParsing", "ParseError", "SyntaxError", "LexicalError", "PatternParseError",
+               "RuleParseError", "SemgrepError", "Timeout", "OutOfMemory", "IncompatibleRule"}
 LEVELS = {"error", "warn", "warning", "info"}
 
 
@@ -28,14 +29,8 @@ def public_core():
     return data.get("id") == CORE_ID and data.get("private") is False and data.get("visibility") == "public"
 
 
-def safe_finding(item, source):
-    if not isinstance(item, dict):
-        return None
-    path, rule = item.get("File"), item.get("RuleID")
-    start, end = item.get("StartLine"), item.get("EndLine")
-    if not isinstance(path, str) or not isinstance(rule, str) or not SAFE_RULE.fullmatch(rule):
-        return None
-    if type(start) is not int or type(end) is not int or not (1 <= start <= end <= 10000000):
+def safe_relative(path, source):
+    if not isinstance(path, str):
         return None
     root = source.resolve()
     target = (root / path).resolve()
@@ -45,26 +40,54 @@ def safe_finding(item, source):
         return None
     if not SAFE_PATH.fullmatch(relative) or any(part in (".", "..", ".git") for part in PurePosixPath(relative).parts):
         return None
-    if not target.is_file():
+    return relative if target.is_file() else None
+
+
+def safe_finding(item, source):
+    if not isinstance(item, dict):
+        return None
+    path, rule = item.get("File"), item.get("RuleID")
+    start, end = item.get("StartLine"), item.get("EndLine")
+    if not isinstance(path, str) or not isinstance(rule, str) or not SAFE_RULE.fullmatch(rule):
+        return None
+    if type(start) is not int or type(end) is not int or not (1 <= start <= end <= 10000000):
+        return None
+    relative = safe_relative(path, source)
+    if relative is None:
         return None
     return f"{relative}:{rule}:{start} lines={start}-{end}"
 
 
-def error_summary(payload):
+def error_summary(payload, source=None):
     if not isinstance(payload, dict) or not isinstance(payload.get("errors"), list):
         return ["semgrep report: unavailable"]
     counts = Counter()
+    locations = set()
     for error in payload["errors"]:
         if not isinstance(error, dict):
             counts[("other", "other", "unknown")] += 1
             continue
         typ, level, code = error.get("type"), error.get("level"), error.get("code")
+        if isinstance(typ, list) and typ:
+            typ = typ[0]
         typ = typ if isinstance(typ, str) and typ in ERROR_TYPES else "other"
         level = level.lower() if isinstance(level, str) and level.lower() in LEVELS else "other"
         code = str(code) if type(code) is int and 0 <= code <= 255 else "unknown"
         counts[(typ, level, code)] += 1
-    return [f"semgrep error type={typ} level={level} code={code} count={count}"
-            for (typ, level, code), count in sorted(counts.items())]
+        if source is not None:
+            spans = error.get("spans")
+            if isinstance(spans, list):
+                for span in spans:
+                    if not isinstance(span, dict):
+                        continue
+                    relative = safe_relative(span.get("file") or error.get("path"), source)
+                    start = span.get("start")
+                    line = start.get("line") if isinstance(start, dict) else None
+                    if relative and type(line) is int and 1 <= line <= 10000000:
+                        locations.add((relative, line))
+    return ([f"semgrep error type={typ} level={level} code={code} count={count}"
+             for (typ, level, code), count in sorted(counts.items())]
+            + [f"semgrep error location={path}:{line}" for path, line in sorted(locations)])
 
 
 def diagnose(source, rules):
@@ -78,7 +101,7 @@ def diagnose(source, rules):
                 stream = kwargs["stdout"]
                 stream.flush()
                 stream.seek(0)
-                lines.extend(error_summary(json.load(stream)))
+                lines.extend(error_summary(json.load(stream), source))
             except (ValueError, OSError):
                 lines.append("semgrep report: unavailable")
         elif command[0] == "gitleaks" and len(command) > 1 and command[1] == "dir":
@@ -121,6 +144,19 @@ class SanitizationTests(unittest.TestCase):
             for key, value in (("File", "../escape"), ("File", "example.py\nsecret"),
                                ("RuleID", "secret\nvalue"), ("StartLine", 0), ("EndLine", True)):
                 self.assertIsNone(safe_finding({**item, key: value}, root))
+
+    def test_partial_parsing_union_emits_only_safe_source_locations(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "example.py").write_text("test")
+            payload = {"errors": [{"type": ["PartialParsing", [{"secret": "do not print"}]],
+                                   "level": "warn", "code": 3, "message": "private message",
+                                   "spans": [{"file": "example.py", "start": {"line": 5}},
+                                             {"file": "../private", "start": {"line": 8}}]}]}
+            self.assertEqual(error_summary(payload, root),
+                             ["semgrep error type=PartialParsing level=warn code=3 count=1",
+                              "semgrep error location=example.py:5"])
 
 
 def main():
