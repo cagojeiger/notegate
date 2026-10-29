@@ -36,8 +36,9 @@ repository's history. Public policy files may be added after review.
 
 ## Release
 
-Merge a release PR in core with the version change and a `## Release notes`
-section containing only approved public release notes. After that commit's main
+Merge a release PR in core with the version change and exactly one `## Release notes`
+section containing only approved public release notes, ending at a standalone
+`<!-- release-notes:end -->` line. A missing boundary stops publication. After that commit's main
 CI succeeds, the core dispatcher creates an annotated `vMAJOR.MINOR.PATCH` source
 tag and dispatches **Release** here with the tag, its exact source SHA, and the CI
 run ID. The annotated tag message holds the approved release notes. Build and
