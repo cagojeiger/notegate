@@ -1,4 +1,4 @@
-name: Validate workflows
+name: Validate release infrastructure
 
 on:
   pull_request:
@@ -9,22 +9,117 @@ permissions:
   contents: read
 
 jobs:
+  private-shell-smoke:
+    name: Validate private-output shell on a hosted runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Register trusted control shell
+        run: echo "$GITHUB_WORKSPACE/.github/scripts" >> "$GITHUB_PATH"
+
+      - name: Verify successful output forwarding
+        id: passed
+        shell: private_run.sh {0}
+        run: |
+          printf 'synthetic diagnostic that must stay private\n'
+          printf 'ok=true\n' >> "$GITHUB_OUTPUT"
+          printf 'synthetic summary that must stay private\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify failures stay failures
+        id: failed
+        continue-on-error: true
+        shell: private_run.sh {0}
+        run: |
+          printf 'synthetic failure that must stay private\n' >&2
+          exit 7
+
+      - name: Check shell outcomes
+        env:
+          OUTPUT: ${{ steps.passed.outputs.ok }}
+          FAILURE: ${{ steps.failed.outcome }}
+        run: test "$OUTPUT" = true && test "$FAILURE" = failure
+
+  scanner-smoke:
+    name: Validate scanner compatibility with synthetic inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-security-scanners
+
+      - name: Verify clean and finding cases without core source or credentials
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import sys
+          import tempfile
+          sys.path.insert(0, '.github/scripts')
+          from security_scan import scan
+          rules = Path('.rules').resolve()
+          with tempfile.TemporaryDirectory(dir=os.environ['RUNNER_TEMP']) as directory:
+              source = Path(directory)
+              file = source / 'example.py'
+              file.write_text('print("hello")\n')
+              assert scan('semgrep', source, rules) == ('clean', 0)
+              assert scan('gitleaks', source) == ('clean', 0)
+              file.write_text('eval(input())\n')
+              assert scan('semgrep', source, rules)[0] == 'findings'
+              file.write_text('github_token = "' + 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8' + '"\n')
+              assert scan('gitleaks', source)[0] == 'findings'
+          print('Pinned scanners accept clean inputs and reject synthetic findings; no core checkout')
+          PY
+
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout public workflows
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Validate workflow syntax with official actionlint
-        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
+      - name: Keep application source out of the distribution repository
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          files = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
+          allowed = {"LICENSE", "README.md", ".gitignore", "SECURITY.md"}
+          unexpected = [path for path in files if path and path not in allowed and not path.startswith(".github/")]
+          if unexpected:
+              raise SystemExit("Unexpected distribution paths: " + ", ".join(unexpected))
+          PY
 
-      - name: Set up Python for retained release tests
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with:
-          python-version: '3.13'
+      - name: Validate workflow syntax with pinned actionlint
+        run: |
+          curl -fsSL -o /tmp/actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/actionlint.tar.gz' | sha256sum --check
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          /tmp/actionlint -color
 
-      - name: Test retained release boundaries
-        run: python3 -B -m unittest discover -s .github/scripts -p 'test_*release*.py' -v
+      - name: Test release and CI boundaries
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      - name: Check available public core metadata without private credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0, ".github/scripts")
+          import release_gate as gate
+          repository = gate.api(f"repos/{gate.SOURCE_REPOSITORY}", missing_ok=True)
+          if repository is None or repository.get("private"):
+              print("Core is not publicly readable. PR validation uses synthetic tests; private checkout and CI access require a trusted Release run with the configured App.")
+              raise SystemExit(0)
+          assert repository["id"] == gate.SOURCE_REPOSITORY_ID
+          runs = gate.api(f"repos/{gate.SOURCE_REPOSITORY}/actions/workflows/{gate.CI_WORKFLOW_ID}/runs?per_page=1")
+          assert runs["workflow_runs"], "Core CI is not visible to the distribution workflow"
+          print("Public core identity and CI metadata are readable; no source checkout or publication")
+          PY

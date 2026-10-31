@@ -1,0 +1,52 @@
+{
+  "audits": [
+    {
+      "path": ".github/scripts/release_dispatch.py",
+      "rule": "dynamic-urllib-use-detected",
+      "sha256": "4527d9beb8d02d57fa6d2ce3633c6ab30aafb7c447455d3db324eb5e466a238f",
+      "max_count": 1
+    },
+    {
+      "path": "deploy/ci/browser-test-timings.test.py",
+      "rule": "dangerous-subprocess-use-audit",
+      "sha256": "bc4b4015735e9d474079482bd7c214bca923a74db43010b3529df1ad4e242079",
+      "max_count": 1
+    },
+    {
+      "path": "deploy/ci/resolve-text-write-baseline.test.py",
+      "rule": "dangerous-subprocess-use-audit",
+      "sha256": "2fef8c7a9d91010a1399e05fcd57e2ffbbbdbd8f6341eec43418c23ca54be327",
+      "max_count": 2
+    },
+    {
+      "path": "deploy/ci/rust-test-suites.py",
+      "rule": "dangerous-subprocess-use-audit",
+      "sha256": "42323534762a8c71885d81d3519df2ef4f0ec431b8f94acb9a3df1e9d826807d",
+      "max_count": 3
+    },
+    {
+      "path": "deploy/ci/rust-test-suites.test.py",
+      "rule": "dangerous-subprocess-use-audit",
+      "sha256": "f81312aacf0e9059378137a9fe9f250d29fe9e1521851c21e92e28cb31cb3d99",
+      "max_count": 1
+    },
+    {
+      "path": "frontend/web/e2e/settings-transitions.spec.ts",
+      "rule": "detect-non-literal-regexp",
+      "sha256": "cea929ee18cd6dd0f932b710a383f326b60f92d12b28a037ce4c1770cc26c426",
+      "max_count": 1
+    },
+    {
+      "path": "frontend/web/src/features/editor/highlightCode.ts",
+      "rule": "unsafe-dynamic-method",
+      "sha256": "8a28898cddb87a6419cf225dd08015e3e0fb23d8311b924b6b62e4879c58f941",
+      "max_count": 1
+    },
+    {
+      "path": "frontend/web/src/features/settings/AuthAccessManager.test.tsx",
+      "rule": "detect-non-literal-regexp",
+      "sha256": "8e6a0df228e579ccd8a30541e33508f5e2c98dd523a471ef7050b6b8f78ca38a",
+      "max_count": 1
+    }
+  ]
+}
