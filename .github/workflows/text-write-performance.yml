@@ -20,7 +20,7 @@ jobs:
       actions: read
     if: github.repository == 'cagojeiger/notegate' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     outputs:
       tested_sha: ${{ steps.request.outputs.tested_sha }}
       source_event: ${{ steps.request.outputs.source_event }}
@@ -33,13 +33,6 @@ jobs:
       web_artifact_run_id: ${{ steps.request.outputs.web_artifact_run_id }}
 
     steps:
-      - name: Checkout trusted public control
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          path: .control
-          persist-credentials: false
-
       - name: Create scoped core metadata token
         id: core-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
@@ -52,6 +45,17 @@ jobs:
           permission-actions: read
           permission-pull-requests: read
 
+      - name: Checkout trusted private CI control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cagojeiger/notegate-core
+          ref: ad63fe04543974b991d86afd7c350adf0e2a63b6
+          token: ${{ steps.core-token.outputs.token }}
+          path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
+          persist-credentials: false
+
       - name: Validate immutable core request
         id: request
         env:
@@ -60,7 +64,18 @@ jobs:
           CORE_TOKEN: ${{ steps.core-token.outputs.token }}
         run: python3 .control/.github/scripts/ci_bridge.py gate --kind text-write-performance >> "$GITHUB_OUTPUT"
 
+      - name: Revoke gate metadata token
+        if: ${{ always() && steps.core-token.outputs.token != '' }}
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
+        run: bash .control/.github/scripts/checkout_core_revoke.sh
+
   compare:
+    permissions:
+      contents: read
+      actions: read
     needs: gate
     name: Text Write Comparison
     defaults:
@@ -85,12 +100,37 @@ jobs:
     env:
       NOTEGATE_TEST_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
     steps:
-      - name: Checkout trusted public control
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: ad63fe04543974b991d86afd7c350adf0e2a63b6
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
           persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: text-write-performance
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -108,15 +148,7 @@ jobs:
           BASE_REF: ${{ needs.gate.outputs.base_ref }}
           GH_TOKEN: ${{ github.token }}
         shell: private_run.sh {0}
-        run: |
-          set -euo pipefail
-          if [ -n "$CANDIDATE_SHA" ]; then
-            [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
-            test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
-          fi
-          gh api --paginate --slurp 'repos/cagojeiger/notegate/releases?per_page=100' \
-            | python3 deploy/ci/resolve-text-write-baseline.py >> "$GITHUB_OUTPUT"
-          cat text-write-results/baseline.md >> "$GITHUB_STEP_SUMMARY"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_text_write_baseline.sh"
 
       - name: Checkout baseline
         if: steps.baseline.outputs.sha != ''
@@ -133,7 +165,7 @@ jobs:
         run: deploy/ci/compare-text-write.sh "$GITHUB_WORKSPACE/comparison-base"
 
       - name: Retain measurements
-        if: always()
+        if: ${{ steps.worker.outcome == 'success' && (always()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: text-write-performance

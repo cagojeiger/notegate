@@ -24,7 +24,7 @@ jobs:
       actions: read
     if: github.repository == 'cagojeiger/notegate' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     outputs:
       tested_sha: ${{ steps.request.outputs.tested_sha }}
       source_event: ${{ steps.request.outputs.source_event }}
@@ -37,13 +37,6 @@ jobs:
       web_artifact_run_id: ${{ steps.request.outputs.web_artifact_run_id }}
 
     steps:
-      - name: Checkout trusted public control
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          path: .control
-          persist-credentials: false
-
       - name: Create scoped core metadata token
         id: core-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
@@ -56,6 +49,17 @@ jobs:
           permission-actions: read
           permission-pull-requests: read
 
+      - name: Checkout trusted private CI control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cagojeiger/notegate-core
+          ref: ad63fe04543974b991d86afd7c350adf0e2a63b6
+          token: ${{ steps.core-token.outputs.token }}
+          path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
+          persist-credentials: false
+
       - name: Validate immutable core request
         id: request
         env:
@@ -64,7 +68,18 @@ jobs:
           CORE_TOKEN: ${{ steps.core-token.outputs.token }}
         run: python3 .control/.github/scripts/ci_bridge.py gate --kind security-dast >> "$GITHUB_OUTPUT"
 
+      - name: Revoke gate metadata token
+        if: ${{ always() && steps.core-token.outputs.token != '' }}
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
+        run: bash .control/.github/scripts/checkout_core_revoke.sh
+
   pilot:
+    permissions:
+      contents: read
+      actions: read
     needs: gate
     name: Isolated adversarial scenarios
     runs-on: ubuntu-latest
@@ -108,12 +123,37 @@ jobs:
       NOTEGATE_WEB_DIST_DIR: ${{ github.workspace }}/source/frontend/web/dist
 
     steps:
-      - name: Checkout trusted public control
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: ad63fe04543974b991d86afd7c350adf0e2a63b6
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
           persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: security-dast
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -137,12 +177,7 @@ jobs:
 
       - name: Build application and browser probes
         shell: private_run.sh {0}
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --filter web exec playwright install --with-deps chromium
-          pnpm --filter web exec tsc -p tsconfig.e2e.json --noEmit
-          pnpm --filter web build
-          cargo build --locked --release --package notegate-api --bin notegate-api --example seed_user
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dast_build.sh"
 
       - name: Start disposable object storage
         env:
@@ -155,35 +190,12 @@ jobs:
       - name: Seed two disposable owners
         id: identity
         shell: bash
-        run: |
-          for identity in A B; do
-            output=$(target/release/examples/seed_user "dast-$identity" 2>"$RUNNER_TEMP/seed-user.stderr")
-            key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
-            session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
-            account=$(printf '%s\n' "$output" | sed -n 's/^ACCOUNT_ID=//p')
-            test -n "$key" && test -n "$session" && test -n "$account"
-            echo "::add-mask::$key"
-            echo "::add-mask::$session"
-            printf 'key_%s=%s\nsession_%s=%s\naccount_%s=%s\n' \
-              "$identity" "$key" "$identity" "$session" "$identity" "$account" >> "$GITHUB_OUTPUT"
-          done
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_seed_dast_identities.sh"
 
       - name: Start disposable application
         id: app
         shell: private_run.sh {0}
-        run: |
-          target/release/notegate-api >"$RUNNER_TEMP/security-api.log" 2>&1 &
-          api_pid=$!
-          echo "$api_pid" >"$RUNNER_TEMP/security-api.pid"
-          for _ in $(seq 1 60); do
-            kill -0 "$api_pid" || { cat "$RUNNER_TEMP/security-api.log"; exit 1; }
-            if curl --fail --silent http://127.0.0.1:9191/ready >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          cat "$RUNNER_TEMP/security-api.log"
-          exit 1
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dast_start.sh"
 
       - name: Probe ownership and read-only permissions over HTTP
         id: api
@@ -199,7 +211,7 @@ jobs:
         run: node deploy/ci/security-api.mjs
 
       - name: Probe malicious document rendering in a real browser
-        if: ${{ !cancelled() && steps.app.outcome == 'success' }}
+        if: ${{ steps.worker.outcome == 'success' && (!cancelled() && steps.app.outcome == 'success') }}
         timeout-minutes: 6
         env:
           NOTEGATE_DAST_BROWSER_SESSION_A: ${{ steps.identity.outputs.session_A }}
@@ -207,7 +219,7 @@ jobs:
         run: pnpm --filter web exec playwright test --config playwright.security.config.ts
 
       - name: Run bounded authenticated ZAP active scan
-        if: ${{ !cancelled() && steps.app.outcome == 'success' && steps.api.outcome != 'skipped' }}
+        if: ${{ steps.worker.outcome == 'success' && (!cancelled() && steps.app.outcome == 'success' && steps.api.outcome != 'skipped') }}
         timeout-minutes: 12
         env:
           NOTEGATE_DAST_API_KEY_A: ${{ steps.identity.outputs.key_A }}
@@ -215,21 +227,11 @@ jobs:
         run: GITHUB_SHA="$SOURCE_SHA" node deploy/ci/security-zap.mjs
 
       - name: Publish sanitized findings
-        if: always()
+        if: ${{ steps.worker.outcome == 'success' && (always()) }}
         shell: private_run.sh {0}
-        run: |
-          for report in security-results/summary-*.md; do
-            if [ -f "$report" ]; then
-              cat "$report" >> "$GITHUB_STEP_SUMMARY"
-            fi
-          done
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dast_report.sh"
 
       - name: Stop scanner and application
-        if: always()
+        if: ${{ steps.worker.outcome == 'success' && (always()) }}
         shell: private_run.sh {0}
-        run: |
-          docker rm -f notegate-zap-pilot >/dev/null 2>&1 || true
-          docker network rm notegate-dast >/dev/null 2>&1 || true
-          if [ -f "$RUNNER_TEMP/security-api.pid" ]; then
-            kill "$(cat "$RUNNER_TEMP/security-api.pid")" 2>/dev/null || true
-          fi
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dast_cleanup.sh"
