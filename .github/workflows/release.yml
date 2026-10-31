@@ -49,12 +49,6 @@ jobs:
       notes_sha256: ${{ steps.plan.outputs.notes_sha256 }}
       should_release: ${{ steps.plan.outputs.should_release }}
     steps:
-      - name: Checkout trusted distribution scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-
       - name: Create short-lived core read token
         id: core-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
@@ -66,6 +60,17 @@ jobs:
           permission-contents: read
           permission-actions: read
 
+      - name: Checkout trusted private Release control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cagojeiger/notegate-core
+          ref: 71c98dd45852f3174ca9a5b9fff1066c7deec98e
+          token: ${{ steps.core-token.outputs.token }}
+          path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
+          persist-credentials: false
+
       - name: Check exact source, CI, and release version
         id: plan
         env:
@@ -75,7 +80,15 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           SOURCE_CI_RUN_ID: ${{ inputs.source_ci_run_id }}
           PUBLISH: ${{ inputs.publish }}
-        run: python3 .github/scripts/release_gate.py >> "$GITHUB_OUTPUT"
+        run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/release_gate.py" >> "$GITHUB_OUTPUT"
+
+      - name: Revoke Release control token
+        if: ${{ always() && steps.core-token.outputs.token != '' }}
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
+        run: bash .control/.github/scripts/checkout_core_revoke.sh
 
   build:
     name: Build ${{ matrix.platform }}
@@ -97,12 +110,34 @@ jobs:
             runner: ubuntu-24.04-arm
             arch: arm64
     steps:
-      - name: Checkout trusted control
+      - name: Create short-lived core read token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+
+      - name: Checkout trusted private Release control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: 71c98dd45852f3174ca9a5b9fff1066c7deec98e
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
           persist-credentials: false
+
+      - name: Revoke Release control token
+        if: ${{ always() && steps.core-token.outputs.token != '' }}
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
+        run: bash .control/.github/scripts/checkout_core_revoke.sh
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -128,24 +163,14 @@ jobs:
         env:
           PLATFORM: ${{ matrix.platform }}
         shell: private_run.sh {0}
-        run: |
-          metadata="$RUNNER_TEMP/image-metadata.json"
-          docker buildx build --platform "$PLATFORM" --file deploy/docker/web.Dockerfile \
-            --provenance=mode=min --metadata-file "$metadata" \
-            --output "type=image,name=${REGISTRY}/${IMAGE},push-by-digest=true,name-canonical=true,push=true" .
-          digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$metadata")
-          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_release_build_image.sh"
 
       - name: Export digest
         env:
           BUILD_DIGEST: ${{ steps.build.outputs.digest }}
           ARCH: ${{ matrix.arch }}
         shell: private_run.sh {0}
-        run: |
-          set -euo pipefail
-          [[ "$BUILD_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          mkdir -p /tmp/digests
-          printf '%s\n' "$BUILD_DIGEST" > "/tmp/digests/$ARCH"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_release_export_digest.sh"
 
       - name: Upload digest
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -169,6 +194,35 @@ jobs:
       matrix:
         arch: [amd64, arm64]
     steps:
+      - name: Create short-lived core read token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+
+      - name: Checkout trusted private Release control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cagojeiger/notegate-core
+          ref: 71c98dd45852f3174ca9a5b9fff1066c7deec98e
+          token: ${{ steps.core-token.outputs.token }}
+          path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
+          persist-credentials: false
+
+      - name: Revoke Release control token
+        if: ${{ always() && steps.core-token.outputs.token != '' }}
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
+        run: bash .control/.github/scripts/checkout_core_revoke.sh
+
       - name: Download image digest
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -179,11 +233,7 @@ jobs:
         id: image
         env:
           ARCH: ${{ matrix.arch }}
-        run: |
-          set -euo pipefail
-          digest="$(cat "/tmp/digests/$ARCH")"
-          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          echo "ref=${REGISTRY}/${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_release_select_image.sh"
 
       - name: Report high and critical vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -204,13 +254,7 @@ jobs:
       - name: Prepare SARIF and summary
         env:
           ARCH: ${{ matrix.arch }}
-        run: |
-          set -euo pipefail
-          trivy convert --format sarif --output "trivy-linux-$ARCH.sarif" "trivy-linux-$ARCH.json"
-          {
-            echo '### HIGH and CRITICAL findings, including unfixed'
-            jq -r '[.Results[]?.Vulnerabilities[]?] | group_by(.Severity)[] | "- \(.[0].Severity): \(length)"' "trivy-linux-$ARCH.json"
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_release_scan_reports.sh"
 
       - name: Retain scan evidence
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -265,12 +309,34 @@ jobs:
           - target: aarch64-apple-darwin
             runner: macos-15
     steps:
-      - name: Checkout trusted control
+      - name: Create short-lived core read token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+
+      - name: Checkout trusted private Release control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: 71c98dd45852f3174ca9a5b9fff1066c7deec98e
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
           persist-credentials: false
+
+      - name: Revoke Release control token
+        if: ${{ always() && steps.core-token.outputs.token != '' }}
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
+        run: bash .control/.github/scripts/checkout_core_revoke.sh
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -299,18 +365,7 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
           VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          test "$("target/$TARGET/release/notegate-cli" --version)" = "notegate-cli $VERSION"
-          asset="notegate-cli-$TARGET"
-          mkdir -p /tmp/cli-assets
-          cp "target/$TARGET/release/notegate-cli" "/tmp/cli-assets/$asset"
-          chmod 755 "/tmp/cli-assets/$asset"
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "/tmp/cli-assets/$asset" | awk '{print $1}' > "/tmp/cli-assets/$asset.sha256"
-          else
-            shasum -a 256 "/tmp/cli-assets/$asset" | awk '{print $1}' > "/tmp/cli-assets/$asset.sha256"
-          fi
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_release_package_cli.sh"
 
       - name: Upload CLI assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -330,12 +385,6 @@ jobs:
       contents: write
       packages: write
     steps:
-      - name: Checkout trusted distribution scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-
       - name: Create short-lived core read token
         id: core-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
@@ -346,6 +395,17 @@ jobs:
           repositories: notegate-core
           permission-contents: read
           permission-actions: read
+
+      - name: Checkout trusted private Release control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cagojeiger/notegate-core
+          ref: 71c98dd45852f3174ca9a5b9fff1066c7deec98e
+          token: ${{ steps.core-token.outputs.token }}
+          path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
+          persist-credentials: false
 
       - name: Checkout installer data without executing core scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -420,4 +480,12 @@ jobs:
           RELEASE_NOTES_SHA256: ${{ needs.version.outputs.notes_sha256 }}
           VERSION: ${{ needs.version.outputs.version }}
           PUBLISH: "true"
-        run: python3 .github/scripts/publish_release.py
+        run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/publish_release.py"
+
+      - name: Revoke Release control token
+        if: ${{ always() && steps.core-token.outputs.token != '' }}
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
+        run: bash .control/.github/scripts/checkout_core_revoke.sh

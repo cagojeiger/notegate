@@ -50,7 +50,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          ref: 71c98dd45852f3174ca9a5b9fff1066c7deec98e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -136,7 +136,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          ref: 71c98dd45852f3174ca9a5b9fff1066c7deec98e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
