@@ -29,7 +29,7 @@ jobs:
       actions: read
     if: github.repository == 'cagojeiger/notegate' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     outputs:
       tested_sha: ${{ steps.request.outputs.tested_sha }}
       source_event: ${{ steps.request.outputs.source_event }}
@@ -50,13 +50,6 @@ jobs:
       impact_reason: ${{ steps.request.outputs.impact_reason }}
 
     steps:
-      - name: Checkout trusted public control
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          path: .control
-          persist-credentials: false
-
       - name: Create scoped core metadata token
         id: core-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
@@ -69,6 +62,17 @@ jobs:
           permission-actions: read
           permission-pull-requests: read
 
+      - name: Checkout trusted private CI control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cagojeiger/notegate-core
+          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          token: ${{ steps.core-token.outputs.token }}
+          path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
+          persist-credentials: false
+
       - name: Validate immutable core request
         id: request
         env:
@@ -77,17 +81,62 @@ jobs:
           CORE_TOKEN: ${{ steps.core-token.outputs.token }}
         run: python3 .control/.github/scripts/ci_bridge.py gate --kind ci >> "$GITHUB_OUTPUT"
 
+      - name: Revoke gate metadata token
+        if: ${{ always() && steps.core-token.outputs.token != '' }}
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
+        run: bash .control/.github/scripts/checkout_core_revoke.sh
+
   security:
+    permissions:
+      contents: read
+      actions: read
     needs: gate
     name: Source Security
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout trusted public control
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
+          persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: ci
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
+
+      - name: Checkout public workflow metadata
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cagojeiger/notegate
+          ref: ${{ github.sha }}
+          token: ${{ github.token }}
+          path: .public-control
           persist-credentials: false
 
       - name: Set up pinned local scanners
@@ -101,16 +150,32 @@ jobs:
           sha: ${{ needs.gate.outputs.tested_sha }}
           path: source
 
+      - name: Validate public CI contracts with private control
+        shell: private_run.sh {0}
+        working-directory: ${{ github.workspace }}
+        run: |
+          python3 "$GITHUB_WORKSPACE/.control/.github/scripts/check_public_ci.py" \
+            --public-root "$GITHUB_WORKSPACE/.public-control" \
+            --private-control-root "$GITHUB_WORKSPACE/.control"
+
+      - name: Verify pinned scanner compatibility
+        shell: private_run.sh {0}
+        working-directory: ${{ github.workspace }}
+        run: bash "$GITHUB_WORKSPACE/.control/.github/scripts/ci_scanner_smoke.sh"
+
+      - name: Verify private-output shell behavior
+        shell: private_run.sh {0}
+        working-directory: ${{ github.workspace }}
+        run: bash "$GITHUB_WORKSPACE/.control/.github/scripts/ci_private_shell_smoke.sh"
+
       - name: Check source security without publishing source diagnostics
         shell: bash
-        run: |
-          semgrep_status=0
-          gitleaks_status=0
-          python3 .control/.github/scripts/security_scan.py semgrep source --rules-repo .rules || semgrep_status=$?
-          python3 .control/.github/scripts/security_scan.py gitleaks source || gitleaks_status=$?
-          test "$semgrep_status" = 0 && test "$gitleaks_status" = 0
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_source_security.sh"
 
   hygiene:
+    permissions:
+      contents: read
+      actions: read
     needs: gate
     name: Hygiene
     runs-on: ubuntu-latest
@@ -126,12 +191,37 @@ jobs:
       image: ${{ steps.impact.outputs.image }}
 
     steps:
-      - name: Checkout trusted public control
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
           persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: ci
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -154,52 +244,30 @@ jobs:
           IMPACT_SCOPE: ${{ needs.gate.outputs.impact_scope }}
           IMPACT_REASON: ${{ needs.gate.outputs.impact_reason }}
         shell: private_run.sh {0}
-        run: |
-          set -euo pipefail
-          plan="$RUNNER_TEMP/ci-impact-plan"
-          for key in rust_build rust web browser postgres image; do
-            var="${key^^}"
-            value="${!var}"
-            [[ "$value" == true || "$value" == false ]]
-            printf '%s=%s\n' "$key" "$value" >> "$plan"
-          done
-          printf 'scope=%s\nreason=%s\n' "$IMPACT_SCOPE" "$IMPACT_REASON" >> "$plan"
-          cat "$plan" >> "$GITHUB_OUTPUT"
-          {
-            echo '### Selected CI checks'
-            echo '```text'
-            cat "$plan"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_hygiene_impact.sh"
 
       - name: Install actionlint
         env:
           ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
         shell: private_run.sh {0}
-        run: |
-          archive="$RUNNER_TEMP/actionlint.tar.gz"
-          bin_dir="$RUNNER_TEMP/actionlint-bin"
-          curl --fail --location --silent --show-error \
-            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
-            --output "$archive"
-          printf '%s  %s\n' "$ACTIONLINT_SHA256" "$archive" | sha256sum --check --status
-          mkdir -p "$bin_dir"
-          tar -xzf "$archive" -C "$bin_dir" actionlint
-          echo "$bin_dir" >> "$GITHUB_PATH"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_hygiene_install_actionlint.sh"
 
       - name: Workflow checks
         shell: private_run.sh {0}
-        run: make workflow-check
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_hygiene_workflow_check.sh"
 
       - name: Format
         shell: private_run.sh {0}
-        run: cargo fmt --all --check
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_hygiene_fmt.sh"
 
       - name: Diff check
         shell: private_run.sh {0}
-        run: git diff --check
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_hygiene_diff.sh"
 
   rust-build:
+    permissions:
+      contents: read
+      actions: read
     name: Rust Build
     needs: [gate, hygiene]
     if: needs.hygiene.outputs.rust_build == 'true'
@@ -209,12 +277,37 @@ jobs:
         working-directory: source
     timeout-minutes: 25
     steps:
-      - name: Checkout trusted public control
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
           persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: ci
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -228,36 +321,33 @@ jobs:
       - name: Check
         if: needs.hygiene.outputs.rust == 'true'
         shell: private_run.sh {0}
-        run: cargo check --locked --workspace --all-targets
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_check.sh"
 
       - name: Clippy
         if: needs.hygiene.outputs.rust == 'true'
         shell: private_run.sh {0}
-        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_clippy.sh"
 
       - name: Prepare Rust tests and doctests
         if: needs.hygiene.outputs.rust == 'true'
         shell: private_run.sh {0}
-        run: python3 deploy/ci/rust-test-suites.py prepare --strip-debug --output target/test-suites/prepare --bundle target/ci-artifacts/rust-tests.tar
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_prepare_tests.sh"
 
       - name: Build API and seed executable
         shell: private_run.sh {0}
-        run: cargo build --locked --package notegate-api --bin notegate-api --example seed_user
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_api.sh"
 
       - name: Package API and seed executable
         shell: private_run.sh {0}
-        run: python3 deploy/ci/rust-test-suites.py pack-api --strip-debug --output target/test-suites/api --bundle target/ci-artifacts/api.tar
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_package_api.sh"
 
       - name: Report prepared bundle sizes
         shell: private_run.sh {0}
-        run: stat --format='%n %s bytes' target/ci-artifacts/*.tar | tee -a "$GITHUB_STEP_SUMMARY"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_report_bundles.sh"
 
       - name: Compress prepared bundles
         shell: private_run.sh {0}
-        run: |
-          zstd --version
-          zstd -T0 -3 --long=27 --rm target/ci-artifacts/*.tar
-          stat --format='%n %s bytes' target/ci-artifacts/*.tar.zst | tee -a "$GITHUB_STEP_SUMMARY"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_compress_bundles.sh"
 
       - name: Retain prepared Rust tests
         if: needs.hygiene.outputs.rust == 'true'
@@ -279,6 +369,9 @@ jobs:
           retention-days: 7
 
   rust:
+    permissions:
+      contents: read
+      actions: read
     name: Rust
     needs: [gate, hygiene, rust-build]
     if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.hygiene.outputs.rust == 'true' }}
@@ -316,12 +409,37 @@ jobs:
           BUILD_RESULT: ${{ needs.rust-build.result }}
         run: test "$BUILD_RESULT" = success
 
-      - name: Checkout trusted public control
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
           persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: ci
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -364,31 +482,7 @@ jobs:
 
       - name: Reject missing integration settings
         shell: private_run.sh {0}
-        run: |
-          assert_missing_setting_fails() {
-            local setting="$1"
-            shift
-            local log="$RUNNER_TEMP/missing-$setting.log"
-            if env -u "$setting" -u NOTEGATE_TEST_SKIP_INTEGRATION "$@" >"$log" 2>&1; then
-              echo "::error::Tests succeeded without $setting"
-              exit 1
-            fi
-            if ! grep -Fq "$setting is required" "$log"; then
-              cat "$log"
-              exit 1
-            fi
-            echo "Confirmed $setting is required by the selected integration test"
-          }
-          assert_missing_setting_fails NOTEGATE_TEST_DATABASE_URL \
-            python3 deploy/ci/rust-test-suites.py exact --prepared target/ci-artifacts/rust-tests.tar \
-            --package notegate-db --target-kind test --target files_commands \
-            --test-name resolved_paths_and_search_candidates_preserve_all_node_fields \
-            --output target/test-suites/missing-database
-          assert_missing_setting_fails NOTEGATE_TEST_S3_ENDPOINT \
-            python3 deploy/ci/rust-test-suites.py exact --prepared target/ci-artifacts/rust-tests.tar \
-            --package notegate-api --target-kind bin --target notegate-api \
-            --test-name rest::file_upload_tests::verified_docx_bytes_use_the_dedicated_preview_url \
-            --output target/test-suites/missing-s3
+        run: bash "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_assert_integration_settings.sh"
 
       - name: Measure search date candidate filtering
         shell: private_run.sh {0}
@@ -400,17 +494,12 @@ jobs:
 
       - name: Measure command completion and history capture
         shell: private_run.sh {0}
-        run: |
-          python3 deploy/ci/rust-test-suites.py exact --prepared target/ci-artifacts/rust-tests.tar \
-            --package notegate-api --target-kind bin --target notegate-api \
-            --test-name command_api::tests::measure_command_completion \
-            --output target/test-suites/measure-command-api -- --ignored --show-output --test-threads=1
-          python3 deploy/ci/rust-test-suites.py exact --prepared target/ci-artifacts/rust-tests.tar \
-            --package notegate-api --target-kind bin --target notegate-api \
-            --test-name mcp::invocation::tests::measure_command_completion \
-            --output target/test-suites/measure-command-mcp -- --ignored --show-output --test-threads=1
+        run: bash "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_measure_commands.sh"
 
   postgres18:
+    permissions:
+      contents: read
+      actions: read
     name: PostgreSQL 18
     needs: [gate, hygiene]
     if: needs.hygiene.outputs.postgres == 'true'
@@ -425,12 +514,37 @@ jobs:
       NOTEGATE_TEST_DATABASE_URL: postgres://notegate:notegate@localhost:5433/notegate
 
     steps:
-      - name: Checkout trusted public control
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
           persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: ci
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -454,14 +568,14 @@ jobs:
         run: cargo test --locked -p notegate-db --tests
 
       - name: Stop Compose
-        if: always()
+        if: ${{ steps.worker.outcome == 'success' && (always()) }}
         shell: private_run.sh {0}
-        run: |
-          if [[ -f .env ]]; then
-            docker compose -f docker-compose.yml down
-          fi
+        run: bash "$GITHUB_WORKSPACE/.control/.github/scripts/ci_postgres_cleanup.sh"
 
   rust-audit:
+    permissions:
+      contents: read
+      actions: read
     needs: gate
     name: Main RustSec Audit
     if: needs.gate.outputs.source_event == 'push'
@@ -471,12 +585,37 @@ jobs:
         working-directory: source
 
     steps:
-      - name: Checkout trusted public control
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
           persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: ci
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -498,6 +637,9 @@ jobs:
         run: cargo audit --deny yanked
 
   web:
+    permissions:
+      contents: read
+      actions: read
     name: Web
     needs: [gate, hygiene]
     if: needs.hygiene.outputs.web == 'true'
@@ -507,12 +649,37 @@ jobs:
         working-directory: source
 
     steps:
-      - name: Checkout trusted public control
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
           persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: ci
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -585,14 +752,40 @@ jobs:
         working-directory: source
     timeout-minutes: 45
     permissions:
+      actions: read
       contents: read
     steps:
-      - name: Checkout trusted public control
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
           persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: ci
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -612,9 +805,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ needs.gate.outputs.tested_sha }}
         shell: private_run.sh {0}
-        run: |
-          docker buildx build --platform linux/amd64 --file deploy/docker/web.Dockerfile \
-            --tag "notegate-pr:$SOURCE_SHA" --load .
+        run: bash "$GITHUB_WORKSPACE/.control/.github/scripts/ci_pr_image_build.sh"
 
       - name: Report high and critical vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -634,11 +825,7 @@ jobs:
 
       - name: Summarize image findings
         shell: private_run.sh {0}
-        run: |
-          {
-            echo '### HIGH and CRITICAL findings, including unfixed'
-            jq -r '[.Results[]?.Vulnerabilities[]?] | group_by(.Severity)[] | "- \(.[0].Severity): \(length)"' trivy.json
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: bash "$GITHUB_WORKSPACE/.control/.github/scripts/ci_pr_image_summary.sh"
 
       - name: Retain scan report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -664,6 +851,9 @@ jobs:
           timeout: 10m
 
   browser-ui:
+    permissions:
+      contents: read
+      actions: read
     name: Browser UI
     needs: [gate, hygiene]
     if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.hygiene.outputs.browser == 'true' }}
@@ -672,12 +862,37 @@ jobs:
       run:
         working-directory: source
     steps:
-      - name: Checkout trusted public control
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
           persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: ci
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -709,22 +924,7 @@ jobs:
 
       - name: Start frontend without API or external services
         shell: private_run.sh {0}
-        run: |
-          mkdir -p browser-ui
-          pnpm --filter web dev --host 127.0.0.1 >browser-ui/web.log 2>&1 &
-          web_pid=$!
-          for _ in $(seq 1 60); do
-            if ! kill -0 "$web_pid" 2>/dev/null; then
-              cat browser-ui/web.log
-              exit 1
-            fi
-            if curl --fail --silent http://127.0.0.1:5173/ >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          cat browser-ui/web.log
-          exit 1
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_browser_ui_start.sh"
 
       - name: Test browser UI without external services
         id: browser_tests
@@ -735,15 +935,12 @@ jobs:
 
       - name: Collect browser UI test timings
         id: browser_timings
-        if: ${{ !cancelled() && (steps.browser_tests.outcome == 'success' || steps.browser_tests.outcome == 'failure') }}
+        if: ${{ steps.worker.outcome == 'success' && (!cancelled() && (steps.browser_tests.outcome == 'success' || steps.browser_tests.outcome == 'failure')) }}
         shell: private_run.sh {0}
-        run: |
-          python3 -B deploy/ci/browser-test-timings.py \
-            < "$RUNNER_TEMP/browser-ui-test-results.json" \
-            | tee -a "$GITHUB_STEP_SUMMARY"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_browser_ui_timings.sh"
 
       - name: Retain browser UI test timings
-        if: ${{ !cancelled() && steps.browser_timings.outcome == 'success' }}
+        if: ${{ steps.worker.outcome == 'success' && (!cancelled() && steps.browser_timings.outcome == 'success') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: browser-ui-test-timings
@@ -752,7 +949,7 @@ jobs:
           retention-days: 7
 
       - name: Upload login UI screenshots
-        if: always()
+        if: ${{ steps.worker.outcome == 'success' && (always()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: login-ui
@@ -761,7 +958,7 @@ jobs:
           path: source/frontend/web/test-results/login-*.png
 
       - name: Upload authentication UI screenshots
-        if: always()
+        if: ${{ steps.worker.outcome == 'success' && (always()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: authentication-ui
@@ -770,7 +967,7 @@ jobs:
           path: source/frontend/web/test-results/settings-auth-*.png
 
       - name: Upload revision UI screenshots
-        if: always()
+        if: ${{ steps.worker.outcome == 'success' && (always()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: text-revisions-ui
@@ -779,7 +976,7 @@ jobs:
           path: source/frontend/web/test-results/text-revisions-*.png
 
       - name: Upload trash UI screenshots
-        if: always()
+        if: ${{ steps.worker.outcome == 'success' && (always()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: trash-ui
@@ -788,7 +985,7 @@ jobs:
           path: source/frontend/web/test-results/trash-*.png
 
       - name: Upload history and action dialog UI screenshots
-        if: always()
+        if: ${{ steps.worker.outcome == 'success' && (always()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: invocation-history-ui
@@ -799,6 +996,9 @@ jobs:
             source/frontend/web/test-results/dialog-*.png
 
   browser-api:
+    permissions:
+      contents: read
+      actions: read
     name: Browser API
     needs: [gate, hygiene, rust-build, web]
     if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.hygiene.outputs.browser == 'true' }}
@@ -846,12 +1046,37 @@ jobs:
           WEB_RESULT: ${{ needs.web.result }}
         run: test "$RUST_BUILD_RESULT" = success && test "$WEB_RESULT" = success
 
-      - name: Checkout trusted public control
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          repository: cagojeiger/notegate-core
+          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          token: ${{ steps.core-token.outputs.token }}
           path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
           persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: ci
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -870,9 +1095,7 @@ jobs:
 
       - name: Restore API and seed executable
         shell: private_run.sh {0}
-        run: |
-          zstd --decompress --rm target/ci-artifacts/api.tar.zst
-          python3 deploy/ci/rust-test-suites.py restore-api --prepared target/ci-artifacts/api.tar --output target/test-suites/browser-api
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_browser_api_restore_bundle.sh"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -911,42 +1134,14 @@ jobs:
       - name: Seed test identities
         id: seed_test_identity
         shell: bash
-        run: |
-          output=$(target/debug/examples/seed_user 2>"$RUNNER_TEMP/seed-user.stderr")
-          agent_api_key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
-          session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
-          test -n "$agent_api_key"
-          test -n "$session"
-          echo "::add-mask::$agent_api_key"
-          echo "::add-mask::$session"
-          echo "agent_api_key=$agent_api_key" >> "$GITHUB_OUTPUT"
-          echo "browser_session=$session" >> "$GITHUB_OUTPUT"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_seed_test_identity.sh"
 
       - name: Start application
         env:
           NOTEGATE_METRICS_ENABLED: "true"
           NOTEGATE_WEB_DIST_DIR: ${{ github.workspace }}/source/frontend/web/dist
         shell: private_run.sh {0}
-        run: |
-          mkdir -p browser-e2e
-          target/debug/notegate-api >browser-e2e/api.log 2>&1 &
-          api_pid=$!
-          echo "$api_pid" >browser-e2e/api.pid
-          pnpm --filter web dev --host 127.0.0.1 >browser-e2e/web.log 2>&1 &
-          for _ in $(seq 1 60); do
-            if ! kill -0 "$api_pid" 2>/dev/null; then
-              cat browser-e2e/api.log
-              exit 1
-            fi
-            if curl --fail --silent http://127.0.0.1:9191/ready >/dev/null && \
-               curl --fail --silent http://127.0.0.1:5173/ >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          cat browser-e2e/api.log
-          cat browser-e2e/web.log
-          exit 1
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_browser_api_start.sh"
 
       - name: Test public V2 API
         env:
@@ -955,35 +1150,7 @@ jobs:
           REDOCLY_TELEMETRY: "off"
           REDOCLY_SUPPRESS_UPDATE_NOTICE: "true"
         shell: private_run.sh {0}
-        run: |
-          curl --fail --silent \
-            --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
-            http://127.0.0.1:9191/api/v2/me >/dev/null
-          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
-            --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
-            http://127.0.0.1:9191/api/v2/spaces)" = "200"
-          test "$(curl --silent \
-            --dump-header browser-e2e/public-v2-error.headers \
-            --output browser-e2e/public-v2-error.json \
-            --write-out '%{http_code}' \
-            --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
-            http://127.0.0.1:9191/api/v2/spaces/not-a-uuid)" = "400"
-          jq --exit-status \
-            '.error == "invalid_input" and .kind == "invalid_input"' \
-            browser-e2e/public-v2-error.json >/dev/null
-          grep --ignore-case --quiet \
-            '^cache-control: private, no-store' \
-            browser-e2e/public-v2-error.headers
-          curl --fail --silent \
-            --cookie "notegate_browser_session=$NOTEGATE_BROWSER_SESSION" \
-            --output browser-e2e/openapi-v2.json \
-            http://127.0.0.1:9191/openapi/v2.json
-          pnpm exec redocly lint --extends=spec browser-e2e/openapi-v2.json
-          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
-            --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
-            http://127.0.0.1:9191/api/v1/me)" = "401"
-          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
-            http://127.0.0.1:9191/api/v2/me)" = "401"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_browser_api_public_v2.sh"
 
       - name: Check API concurrency and latency smoke budgets
         timeout-minutes: 2
@@ -991,38 +1158,10 @@ jobs:
         env:
           NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.seed_test_identity.outputs.agent_api_key }}
           NOTEGATE_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
-        run: |
-          # Observe only the disposable local DB; never export SQL text or bind values.
-          psql postgres://notegate:notegate@localhost:5432/notegate \
-            --no-psqlrc --no-align --tuples-only --set=ON_ERROR_STOP=1 \
-            >browser-e2e/api-load-postgres.txt 2>&1 <<'SQL' &
-          SELECT json_build_object(
-            'at', statement_timestamp(),
-            'waits', coalesce(json_agg(w), '[]'::json)
-          ) FROM (
-            SELECT state, wait_event_type, wait_event,
-              CASE
-                WHEN query LIKE '%FOR UPDATE OF acc%' THEN 'owner_lock'
-                WHEN query LIKE '%FROM spaces%FOR UPDATE%' THEN 'space_lock'
-                WHEN query LIKE '%INSERT INTO command_invocations%' THEN 'invocation_insert'
-                ELSE 'other'
-              END AS operation,
-              count(*) AS connections,
-              max(extract(epoch FROM statement_timestamp() - query_start) * 1000) AS max_query_age_ms
-            FROM pg_stat_activity
-            WHERE datname = current_database() AND pid <> pg_backend_pid()
-              AND state <> 'idle'
-            GROUP BY 1, 2, 3, 4
-          ) w;
-          \watch 0.2
-          SQL
-          observer_pid=$!
-          trap 'kill "$observer_pid" 2>/dev/null || true; wait "$observer_pid" 2>/dev/null || true' EXIT
-          node deploy/ci/api-load-smoke.mjs | tee -a "$GITHUB_STEP_SUMMARY"
-          kill -0 "$observer_pid"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_browser_api_latency_smoke.sh"
 
       - name: Upload API latency diagnostics
-        if: ${{ always() && !cancelled() }}
+        if: ${{ steps.worker.outcome == 'success' && (always() && !cancelled()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: api-load-diagnostics
@@ -1037,23 +1176,16 @@ jobs:
           NOTEGATE_WEB_E2E_API_KEY: ${{ steps.seed_test_identity.outputs.agent_api_key }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/browser-api-test-results.json
         shell: private_run.sh {0}
-        run: |
-          api_pid=$(cat browser-e2e/api.pid)
-          kill -0 "$api_pid"
-          pnpm --filter web test:e2e --project=live-api --reporter=dot,json
-          kill -0 "$api_pid"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_browser_api_test.sh"
 
       - name: Collect browser API test timings
         id: browser_timings
-        if: ${{ !cancelled() && (steps.browser_tests.outcome == 'success' || steps.browser_tests.outcome == 'failure') }}
+        if: ${{ steps.worker.outcome == 'success' && (!cancelled() && (steps.browser_tests.outcome == 'success' || steps.browser_tests.outcome == 'failure')) }}
         shell: private_run.sh {0}
-        run: |
-          python3 -B deploy/ci/browser-test-timings.py \
-            < "$RUNNER_TEMP/browser-api-test-results.json" \
-            | tee -a "$GITHUB_STEP_SUMMARY"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_browser_api_timings.sh"
 
       - name: Retain browser API test timings
-        if: ${{ !cancelled() && steps.browser_timings.outcome == 'success' }}
+        if: ${{ steps.worker.outcome == 'success' && (!cancelled() && steps.browser_timings.outcome == 'success') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: browser-api-test-timings
@@ -1064,16 +1196,7 @@ jobs:
       - name: Seed live workbench identity
         id: workbench_identity
         shell: bash
-        run: |
-          output=$(target/debug/examples/seed_user workbench 2>"$RUNNER_TEMP/seed-user.stderr")
-          key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
-          session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
-          test -n "$key"
-          test -n "$session"
-          echo "::add-mask::$key"
-          echo "::add-mask::$session"
-          echo "agent_api_key=$key" >> "$GITHUB_OUTPUT"
-          echo "browser_session=$session" >> "$GITHUB_OUTPUT"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_seed_workbench_identity.sh"
 
       - name: Test live workbench contracts
         env:
@@ -1086,18 +1209,7 @@ jobs:
       - name: Seed standalone OAuth identity
         id: oauth_identity
         shell: bash
-        run: |
-          output=$(target/debug/examples/seed_user oauth 2>"$RUNNER_TEMP/seed-user.stderr")
-          session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
-          consent=$(printf '%s\n' "$output" | sed -n 's/^OAUTH_CONSENT_FIXTURE=//p')
-          test -n "$session"
-          test -n "$consent"
-          echo "::add-mask::$session"
-          echo "::add-mask::$(printf '%s' "$consent" | jq -r .secret)"
-          echo "::add-mask::$(printf '%s' "$consent" | jq -r .verifier)"
-          echo "::add-mask::$consent"
-          echo "browser_session=$session" >> "$GITHUB_OUTPUT"
-          echo "oauth_consent=$consent" >> "$GITHUB_OUTPUT"
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_seed_oauth_identity.sh"
 
       - name: Test standalone OAuth contracts
         env:
@@ -1108,7 +1220,7 @@ jobs:
         run: pnpm --filter web exec playwright test --config playwright.functional.config.ts --project standalone-oauth
 
       - name: Upload authentication API screenshots
-        if: always()
+        if: ${{ steps.worker.outcome == 'success' && (always()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: authentication-api
@@ -1117,12 +1229,47 @@ jobs:
           path: source/frontend/web/test-results/browser-functional/oauth-*.png
 
   browser:
+    permissions:
+      contents: read
+      actions: read
     name: Browser E2E
     needs: [gate, hygiene, browser-ui, browser-api]
     # A skipped required check can satisfy branch protection; inspect cancelled suites too.
     if: ${{ always() && needs.hygiene.result == 'success' && needs.hygiene.outputs.browser == 'true' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cagojeiger/notegate-core
+          ref: 30f64e4955b192832594ead97480d96caf3dd753
+          token: ${{ steps.core-token.outputs.token }}
+          path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
+          persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: ci
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
+
       - name: Require both browser suites to pass
         env:
           UI_RESULT: ${{ needs.browser-ui.result }}
