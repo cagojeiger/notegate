@@ -24,7 +24,7 @@ jobs:
       actions: read
     if: github.repository == 'cagojeiger/notegate' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     outputs:
       tested_sha: ${{ steps.request.outputs.tested_sha }}
       source_event: ${{ steps.request.outputs.source_event }}
@@ -37,6 +37,13 @@ jobs:
       web_artifact_run_id: ${{ steps.request.outputs.web_artifact_run_id }}
 
     steps:
+      - name: Checkout trusted public control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+
       - name: Create scoped core metadata token
         id: core-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
@@ -49,17 +56,6 @@ jobs:
           permission-actions: read
           permission-pull-requests: read
 
-      - name: Checkout trusted private CI control
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: cagojeiger/notegate-core
-          ref: ad63fe04543974b991d86afd7c350adf0e2a63b6
-          token: ${{ steps.core-token.outputs.token }}
-          path: .control
-          fetch-depth: 1
-          sparse-checkout: .github
-          persist-credentials: false
-
       - name: Validate immutable core request
         id: request
         env:
@@ -68,18 +64,7 @@ jobs:
           CORE_TOKEN: ${{ steps.core-token.outputs.token }}
         run: python3 .control/.github/scripts/ci_bridge.py gate --kind dependency-security >> "$GITHUB_OUTPUT"
 
-      - name: Revoke gate metadata token
-        if: ${{ always() && steps.core-token.outputs.token != '' }}
-        shell: bash
-        working-directory: ${{ github.workspace }}
-        env:
-          CORE_TOKEN: ${{ steps.core-token.outputs.token }}
-        run: bash .control/.github/scripts/checkout_core_revoke.sh
-
   rust-audit:
-    permissions:
-      contents: read
-      actions: read
     needs: gate
     name: RustSec Audit
     runs-on: ubuntu-latest
@@ -90,37 +75,12 @@ jobs:
       SOURCE_EVENT: ${{ needs.gate.outputs.source_event }}
 
     steps:
-      - name: Create scoped core metadata token
-        id: core-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
-        with:
-          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
-          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
-          owner: cagojeiger
-          repositories: notegate-core
-          permission-contents: read
-          permission-actions: read
-          permission-pull-requests: read
-
-      - name: Checkout trusted private CI control
+      - name: Checkout trusted public control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: ad63fe04543974b991d86afd7c350adf0e2a63b6
-          token: ${{ steps.core-token.outputs.token }}
+          ref: ${{ github.sha }}
           path: .control
-          fetch-depth: 1
-          sparse-checkout: .github
           persist-credentials: false
-
-      - name: Validate current public CI worker
-        id: worker
-        uses: ./.control/.github/actions/ci-worker-entry
-        with:
-          request: ${{ inputs.request }}
-          kind: dependency-security
-          source-sha: ${{ needs.gate.outputs.tested_sha }}
-          core-token: ${{ steps.core-token.outputs.token }}
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
@@ -142,9 +102,6 @@ jobs:
         run: cargo audit --deny yanked
 
   npm-audit:
-    permissions:
-      contents: read
-      actions: read
     needs: gate
     name: Npm Audit
     runs-on: ubuntu-latest
@@ -152,37 +109,12 @@ jobs:
       run:
         working-directory: source
     steps:
-      - name: Create scoped core metadata token
-        id: core-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
-        with:
-          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
-          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
-          owner: cagojeiger
-          repositories: notegate-core
-          permission-contents: read
-          permission-actions: read
-          permission-pull-requests: read
-
-      - name: Checkout trusted private CI control
+      - name: Checkout trusted public control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: ad63fe04543974b991d86afd7c350adf0e2a63b6
-          token: ${{ steps.core-token.outputs.token }}
+          ref: ${{ github.sha }}
           path: .control
-          fetch-depth: 1
-          sparse-checkout: .github
           persist-credentials: false
-
-      - name: Validate current public CI worker
-        id: worker
-        uses: ./.control/.github/actions/ci-worker-entry
-        with:
-          request: ${{ inputs.request }}
-          kind: dependency-security
-          source-sha: ${{ needs.gate.outputs.tested_sha }}
-          core-token: ${{ steps.core-token.outputs.token }}
 
       - name: Checkout exact core source
         uses: ./.control/.github/actions/checkout-core
