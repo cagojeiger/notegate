@@ -953,6 +953,25 @@ jobs:
         with:
           cache-binary: false
 
+      - name: Plan image dependency cache
+        id: image-cache-plan
+        shell: private_run.sh {0}
+        run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dependency_cache.py" plan --kind cargo-target-image
+
+      - name: Restore image dependencies
+        id: image-cache-restore
+        if: steps.image-cache-plan.outputs.enabled == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.image-cache-plan.outputs.path }}
+          key: ${{ steps.image-cache-plan.outputs.key }}
+
+      - name: Prepare verified image dependencies
+        id: image-cache-prepare
+        if: steps.image-cache-plan.outputs.enabled == 'true' && steps.image-cache-restore.outputs.cache-hit == 'true'
+        shell: private_run.sh {0}
+        run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dependency_cache.py" prepare --kind cargo-target-image
+
       - name: Build PR image locally
         env:
           SOURCE_SHA: ${{ needs.gate.outputs.tested_sha }}
@@ -1001,6 +1020,99 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
           timeout: 10m
+
+  image-deps:
+    name: Image Dependencies
+    needs: [gate]
+    if: needs.gate.outputs.source_event == 'push' && needs.gate.outputs.image == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cagojeiger/notegate-core
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
+          token: ${{ steps.core-token.outputs.token }}
+          path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
+          persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: ci
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
+
+      - name: Checkout exact core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          cache-binary: false
+
+      - name: Plan image dependency cache
+        id: image-cache-plan
+        shell: private_run.sh {0}
+        run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dependency_cache.py" plan --kind cargo-target-image
+
+      - name: Check image dependency cache
+        id: image-cache-restore
+        if: steps.image-cache-plan.outputs.enabled == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.image-cache-plan.outputs.path }}
+          key: ${{ steps.image-cache-plan.outputs.key }}
+          lookup-only: true
+
+      - name: Build image dependencies from core main
+        id: image-cache-build
+        if: ${{ needs.gate.outputs.source_event == 'push' && steps.image-cache-plan.outputs.enabled == 'true' && steps.image-cache-restore.outputs.cache-hit != 'true' }}
+        shell: private_run.sh {0}
+        run: bash "$GITHUB_WORKSPACE/.control/.github/scripts/ci_image_deps_build.sh"
+
+      - name: Export image dependencies from core main
+        id: image-cache-export
+        if: ${{ needs.gate.outputs.source_event == 'push' && steps.image-cache-plan.outputs.enabled == 'true' && steps.image-cache-restore.outputs.cache-hit != 'true' }}
+        shell: private_run.sh {0}
+        run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dependency_cache.py" export --kind cargo-target-image
+
+      - name: Save image dependencies from core main
+        id: image-cache-save
+        if: ${{ needs.gate.outputs.source_event == 'push' && steps.image-cache-plan.outputs.enabled == 'true' && steps.image-cache-restore.outputs.cache-hit != 'true' && steps.image-cache-export.outputs.exported == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.image-cache-plan.outputs.path }}
+          key: ${{ steps.image-cache-plan.outputs.key }}
 
   browser-ui:
     permissions:
