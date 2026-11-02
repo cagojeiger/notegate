@@ -66,7 +66,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
+          ref: e4abc72d6427ce351bdd830e6998149d5669966e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -114,7 +114,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
+          ref: e4abc72d6427ce351bdd830e6998149d5669966e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -207,7 +207,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
+          ref: e4abc72d6427ce351bdd830e6998149d5669966e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -293,7 +293,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
+          ref: e4abc72d6427ce351bdd830e6998149d5669966e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -485,7 +485,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
+          ref: e4abc72d6427ce351bdd830e6998149d5669966e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -590,7 +590,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
+          ref: e4abc72d6427ce351bdd830e6998149d5669966e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -661,7 +661,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
+          ref: e4abc72d6427ce351bdd830e6998149d5669966e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -725,7 +725,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
+          ref: e4abc72d6427ce351bdd830e6998149d5669966e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -831,7 +831,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
+          ref: e4abc72d6427ce351bdd830e6998149d5669966e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -914,9 +914,13 @@ jobs:
     permissions:
       contents: read
       actions: read
-    name: Browser UI
+    name: Browser UI (${{ matrix.shard }}/2)
     needs: [gate, hygiene]
     if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.hygiene.outputs.browser == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -938,7 +942,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
+          ref: e4abc72d6427ce351bdd830e6998149d5669966e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -990,8 +994,9 @@ jobs:
         id: browser_tests
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/browser-ui-test-results.json
+          BROWSER_UI_SHARD: ${{ matrix.shard }}/2
         shell: private_run.sh {0}
-        run: pnpm --filter web test:e2e --project=desktop-chromium --reporter=dot,json
+        run: pnpm --filter web test:e2e --project=desktop-chromium --shard="$BROWSER_UI_SHARD" --reporter=dot,json
 
       - name: Collect browser UI test timings
         id: browser_timings
@@ -1003,7 +1008,7 @@ jobs:
         if: ${{ steps.worker.outcome == 'success' && (!cancelled() && steps.browser_timings.outcome == 'success') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: browser-ui-test-timings
+          name: browser-ui-test-timings-${{ matrix.shard }}
           path: source/browser-e2e/browser-test-timings.json
           if-no-files-found: error
           retention-days: 7
@@ -1012,7 +1017,7 @@ jobs:
         if: ${{ steps.worker.outcome == 'success' && (always()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: login-ui
+          name: login-ui-${{ matrix.shard }}
           if-no-files-found: ignore
           retention-days: 7
           path: source/frontend/web/test-results/login-*.png
@@ -1021,7 +1026,7 @@ jobs:
         if: ${{ steps.worker.outcome == 'success' && (always()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: authentication-ui
+          name: authentication-ui-${{ matrix.shard }}
           if-no-files-found: ignore
           retention-days: 7
           path: source/frontend/web/test-results/settings-auth-*.png
@@ -1030,7 +1035,7 @@ jobs:
         if: ${{ steps.worker.outcome == 'success' && (always()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: text-revisions-ui
+          name: text-revisions-ui-${{ matrix.shard }}
           if-no-files-found: ignore
           retention-days: 7
           path: source/frontend/web/test-results/text-revisions-*.png
@@ -1039,7 +1044,7 @@ jobs:
         if: ${{ steps.worker.outcome == 'success' && (always()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: trash-ui
+          name: trash-ui-${{ matrix.shard }}
           if-no-files-found: ignore
           retention-days: 7
           path: source/frontend/web/test-results/trash-*.png
@@ -1048,7 +1053,7 @@ jobs:
         if: ${{ steps.worker.outcome == 'success' && (always()) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: invocation-history-ui
+          name: invocation-history-ui-${{ matrix.shard }}
           if-no-files-found: ignore
           retention-days: 7
           path: |
@@ -1122,7 +1127,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
+          ref: e4abc72d6427ce351bdd830e6998149d5669966e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1314,7 +1319,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
+          ref: e4abc72d6427ce351bdd830e6998149d5669966e
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
