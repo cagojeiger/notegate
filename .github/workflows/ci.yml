@@ -66,7 +66,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: e37c54fca4f0e1d17c04daf5f6aced1d18128586
+          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -114,7 +114,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: e37c54fca4f0e1d17c04daf5f6aced1d18128586
+          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -207,7 +207,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: e37c54fca4f0e1d17c04daf5f6aced1d18128586
+          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -293,7 +293,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: e37c54fca4f0e1d17c04daf5f6aced1d18128586
+          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -345,6 +345,25 @@ jobs:
           path: ${{ steps.dependency-cache-plan.outputs.path }}
           key: ${{ steps.dependency-cache-plan.outputs.key }}
 
+      - name: Plan compiled Cargo dependency cache
+        id: compiled-cache-plan
+        shell: private_run.sh {0}
+        run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dependency_cache.py" plan --kind cargo-target
+
+      - name: Restore compiled Cargo dependencies
+        id: compiled-cache-restore
+        if: steps.dependency-cache-prepare.outputs.prepared == 'true' && steps.compiled-cache-plan.outputs.enabled == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.compiled-cache-plan.outputs.path }}
+          key: ${{ steps.compiled-cache-plan.outputs.key }}
+
+      - name: Prepare verified compiled Cargo dependencies
+        id: compiled-cache-prepare
+        if: steps.dependency-cache-prepare.outputs.prepared == 'true' && steps.compiled-cache-plan.outputs.enabled == 'true' && steps.compiled-cache-restore.outputs.cache-hit == 'true'
+        shell: private_run.sh {0}
+        run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dependency_cache.py" prepare --kind cargo-target
+
       - name: Check
         if: needs.hygiene.outputs.rust == 'true'
         shell: private_run.sh {0}
@@ -363,6 +382,20 @@ jobs:
       - name: Build API and seed executable
         shell: private_run.sh {0}
         run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_api.sh"
+
+      - name: Export compiled Cargo dependencies from core main
+        id: compiled-cache-export
+        if: ${{ needs.gate.outputs.source_event == 'push' && steps.dependency-cache-prepare.outputs.prepared == 'true' && steps.compiled-cache-plan.outputs.enabled == 'true' && steps.compiled-cache-restore.outputs.cache-hit != 'true' }}
+        shell: private_run.sh {0}
+        run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dependency_cache.py" export --kind cargo-target
+
+      - name: Save compiled Cargo dependencies from core main
+        id: compiled-cache-save
+        if: ${{ needs.gate.outputs.source_event == 'push' && steps.dependency-cache-prepare.outputs.prepared == 'true' && steps.compiled-cache-plan.outputs.enabled == 'true' && steps.compiled-cache-restore.outputs.cache-hit != 'true' && steps.compiled-cache-export.outputs.exported == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.compiled-cache-plan.outputs.path }}
+          key: ${{ steps.compiled-cache-plan.outputs.key }}
 
       - name: Package API and seed executable
         shell: private_run.sh {0}
@@ -452,7 +485,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: e37c54fca4f0e1d17c04daf5f6aced1d18128586
+          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -557,7 +590,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: e37c54fca4f0e1d17c04daf5f6aced1d18128586
+          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -628,7 +661,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: e37c54fca4f0e1d17c04daf5f6aced1d18128586
+          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -692,7 +725,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: e37c54fca4f0e1d17c04daf5f6aced1d18128586
+          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -798,7 +831,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: e37c54fca4f0e1d17c04daf5f6aced1d18128586
+          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -905,7 +938,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: e37c54fca4f0e1d17c04daf5f6aced1d18128586
+          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1089,7 +1122,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: e37c54fca4f0e1d17c04daf5f6aced1d18128586
+          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1281,7 +1314,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: e37c54fca4f0e1d17c04daf5f6aced1d18128586
+          ref: 96c3edd4c6169e2d150877cc9008d40838de7d13
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
