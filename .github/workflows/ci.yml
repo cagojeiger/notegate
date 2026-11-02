@@ -66,7 +66,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 85b9342d2117daf4d60982ae6990918440751a5a
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -114,7 +114,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 85b9342d2117daf4d60982ae6990918440751a5a
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -207,7 +207,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 85b9342d2117daf4d60982ae6990918440751a5a
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -269,8 +269,8 @@ jobs:
       contents: read
       actions: read
     name: Rust Build
-    needs: [gate, hygiene]
-    if: needs.hygiene.outputs.rust_build == 'true'
+    needs: [gate]
+    if: needs.gate.outputs.rust == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -293,7 +293,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 85b9342d2117daf4d60982ae6990918440751a5a
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -364,24 +364,13 @@ jobs:
         shell: private_run.sh {0}
         run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dependency_cache.py" prepare --kind cargo-target
 
-      - name: Check
-        if: needs.hygiene.outputs.rust == 'true'
-        shell: private_run.sh {0}
-        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_check.sh"
-
       - name: Clippy
-        if: needs.hygiene.outputs.rust == 'true'
         shell: private_run.sh {0}
         run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_clippy.sh"
 
       - name: Prepare Rust tests and doctests
-        if: needs.hygiene.outputs.rust == 'true'
         shell: private_run.sh {0}
         run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_prepare_tests.sh"
-
-      - name: Build API and seed executable
-        shell: private_run.sh {0}
-        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_api.sh"
 
       - name: Export compiled Cargo dependencies from core main
         id: compiled-cache-export
@@ -397,6 +386,119 @@ jobs:
           path: ${{ steps.compiled-cache-plan.outputs.path }}
           key: ${{ steps.compiled-cache-plan.outputs.key }}
 
+      - name: Report prepared bundle sizes
+        shell: private_run.sh {0}
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_report_bundles.sh"
+
+      - name: Compress prepared bundles
+        shell: private_run.sh {0}
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_compress_bundles.sh"
+
+      - name: Retain prepared Rust tests
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rust-prepared-tests
+          path: source/target/ci-artifacts/rust-tests.tar.zst
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+  rust-api:
+    permissions:
+      contents: read
+      actions: read
+    name: Rust API
+    needs: [gate]
+    if: needs.gate.outputs.rust_build == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    timeout-minutes: 25
+    steps:
+      - name: Create scoped core metadata token
+        id: core-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          owner: cagojeiger
+          repositories: notegate-core
+          permission-contents: read
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Checkout trusted private CI control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cagojeiger/notegate-core
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
+          token: ${{ steps.core-token.outputs.token }}
+          path: .control
+          fetch-depth: 1
+          sparse-checkout: .github
+          persist-credentials: false
+
+      - name: Validate current public CI worker
+        id: worker
+        uses: ./.control/.github/actions/ci-worker-entry
+        with:
+          request: ${{ inputs.request }}
+          kind: ci
+          source-sha: ${{ needs.gate.outputs.tested_sha }}
+          core-token: ${{ steps.core-token.outputs.token }}
+
+      - name: Checkout exact core source
+        uses: ./.control/.github/actions/checkout-core
+        with:
+          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
+          sha: ${{ needs.gate.outputs.tested_sha }}
+          path: source
+          fetch-depth: 1
+
+      - name: Plan Cargo crates.io downloads cache
+        id: dependency-cache-plan
+        shell: private_run.sh {0}
+        run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dependency_cache.py" plan --kind cargo
+
+      - name: Restore Cargo crates.io downloads
+        id: dependency-cache-restore
+        if: steps.dependency-cache-plan.outputs.enabled == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.dependency-cache-plan.outputs.path }}
+          key: ${{ steps.dependency-cache-plan.outputs.key }}
+
+      - name: Prepare verified Cargo crates.io downloads
+        id: dependency-cache-prepare
+        if: steps.dependency-cache-plan.outputs.enabled == 'true'
+        shell: private_run.sh {0}
+        run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dependency_cache.py" prepare --kind cargo
+
+      - name: Plan compiled Cargo dependency cache
+        id: compiled-cache-plan
+        shell: private_run.sh {0}
+        run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dependency_cache.py" plan --kind cargo-target
+
+      - name: Restore compiled Cargo dependencies
+        id: compiled-cache-restore
+        if: steps.dependency-cache-prepare.outputs.prepared == 'true' && steps.compiled-cache-plan.outputs.enabled == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.compiled-cache-plan.outputs.path }}
+          key: ${{ steps.compiled-cache-plan.outputs.key }}
+
+      - name: Prepare verified compiled Cargo dependencies
+        id: compiled-cache-prepare
+        if: steps.dependency-cache-prepare.outputs.prepared == 'true' && steps.compiled-cache-plan.outputs.enabled == 'true' && steps.compiled-cache-restore.outputs.cache-hit == 'true'
+        shell: private_run.sh {0}
+        run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/ci_dependency_cache.py" prepare --kind cargo-target
+
+      - name: Build API and seed executable
+        shell: private_run.sh {0}
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_api.sh"
+
       - name: Package API and seed executable
         shell: private_run.sh {0}
         run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_package_api.sh"
@@ -408,16 +510,6 @@ jobs:
       - name: Compress prepared bundles
         shell: private_run.sh {0}
         run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_compress_bundles.sh"
-
-      - name: Retain prepared Rust tests
-        if: needs.hygiene.outputs.rust == 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: rust-prepared-tests
-          path: source/target/ci-artifacts/rust-tests.tar.zst
-          compression-level: 0
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Retain API and seed executable
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -433,8 +525,8 @@ jobs:
       contents: read
       actions: read
     name: Rust
-    needs: [gate, hygiene, rust-build]
-    if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.hygiene.outputs.rust == 'true' }}
+    needs: [gate, rust-build]
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.gate.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -485,7 +577,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 85b9342d2117daf4d60982ae6990918440751a5a
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -561,8 +653,8 @@ jobs:
       contents: read
       actions: read
     name: PostgreSQL 18
-    needs: [gate, hygiene]
-    if: needs.hygiene.outputs.postgres == 'true'
+    needs: [gate]
+    if: needs.gate.outputs.postgres == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -590,7 +682,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 85b9342d2117daf4d60982ae6990918440751a5a
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -661,7 +753,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 85b9342d2117daf4d60982ae6990918440751a5a
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -701,8 +793,8 @@ jobs:
       contents: read
       actions: read
     name: Web
-    needs: [gate, hygiene]
-    if: needs.hygiene.outputs.web == 'true'
+    needs: [gate]
+    if: needs.gate.outputs.web == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -725,7 +817,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 85b9342d2117daf4d60982ae6990918440751a5a
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -804,8 +896,8 @@ jobs:
 
   image-pr:
     name: PR Image Gate
-    needs: [gate, hygiene]
-    if: needs.gate.outputs.source_event == 'pull_request' && needs.hygiene.outputs.image == 'true'
+    needs: [gate]
+    if: needs.gate.outputs.source_event == 'pull_request' && needs.gate.outputs.image == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -831,7 +923,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 85b9342d2117daf4d60982ae6990918440751a5a
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -915,8 +1007,8 @@ jobs:
       contents: read
       actions: read
     name: Browser UI (${{ matrix.shard }}/2)
-    needs: [gate, hygiene]
-    if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.hygiene.outputs.browser == 'true' }}
+    needs: [gate]
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.gate.outputs.browser == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -942,7 +1034,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 85b9342d2117daf4d60982ae6990918440751a5a
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1065,8 +1157,8 @@ jobs:
       contents: read
       actions: read
     name: Browser API
-    needs: [gate, hygiene, rust-build, web]
-    if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.hygiene.outputs.browser == 'true' }}
+    needs: [gate, rust-api, web]
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.gate.outputs.browser == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -1107,9 +1199,9 @@ jobs:
       - name: Require successful browser inputs
         working-directory: ${{ github.workspace }}
         env:
-          RUST_BUILD_RESULT: ${{ needs.rust-build.result }}
+          RUST_API_RESULT: ${{ needs.rust-api.result }}
           WEB_RESULT: ${{ needs.web.result }}
-        run: test "$RUST_BUILD_RESULT" = success && test "$WEB_RESULT" = success
+        run: test "$RUST_API_RESULT" = success && test "$WEB_RESULT" = success
 
       - name: Create scoped core metadata token
         id: core-token
@@ -1127,7 +1219,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 85b9342d2117daf4d60982ae6990918440751a5a
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1298,9 +1390,9 @@ jobs:
       contents: read
       actions: read
     name: Browser E2E
-    needs: [gate, hygiene, browser-ui, browser-api]
+    needs: [gate, browser-ui, browser-api]
     # A skipped required check can satisfy branch protection; inspect cancelled suites too.
-    if: ${{ always() && needs.hygiene.result == 'success' && needs.hygiene.outputs.browser == 'true' }}
+    if: ${{ always() && needs.gate.result == 'success' && needs.gate.outputs.browser == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Create scoped core metadata token
@@ -1319,7 +1411,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 85b9342d2117daf4d60982ae6990918440751a5a
+          ref: 52ed14871a0c43edf339e6cfd9b8fa8bb55e0865
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
