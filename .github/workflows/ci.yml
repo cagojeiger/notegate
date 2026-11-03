@@ -66,7 +66,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -114,7 +114,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -207,7 +207,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -275,7 +275,30 @@ jobs:
     defaults:
       run:
         working-directory: source
-    timeout-minutes: 25
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: notegate
+          POSTGRES_PASSWORD: notegate
+          POSTGRES_DB: notegate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notegate -d notegate"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NOTEGATE_TEST_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
+      NOTEGATE_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+      NOTEGATE_TEST_S3_PUBLIC_ENDPOINT: http://127.0.0.1:9000
+      NOTEGATE_TEST_S3_REGION: us-east-1
+      NOTEGATE_TEST_S3_BUCKET: notegate-test
+      NOTEGATE_TEST_S3_ACCESS_KEY: notegate-app
+      NOTEGATE_TEST_S3_SECRET_KEY: notegate-app-secret
+
     steps:
       - name: Create scoped core metadata token
         id: core-token
@@ -293,7 +316,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -386,22 +409,9 @@ jobs:
           path: ${{ steps.compiled-cache-plan.outputs.path }}
           key: ${{ steps.compiled-cache-plan.outputs.key }}
 
-      - name: Report prepared bundle sizes
+      - name: Run prepared Rust tests locally
         shell: private_run.sh {0}
-        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_report_bundles.sh"
-
-      - name: Compress prepared bundles
-        shell: private_run.sh {0}
-        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_compress_bundles.sh"
-
-      - name: Retain prepared Rust tests
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: rust-prepared-tests
-          path: source/target/ci-artifacts/rust-tests.tar.zst
-          compression-level: 0
-          if-no-files-found: error
-          retention-days: 7
+        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_build_test.sh"
 
   rust-api:
     permissions:
@@ -432,7 +442,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -528,32 +538,7 @@ jobs:
     needs: [gate, rust-build]
     if: ${{ !cancelled() && needs.gate.result == 'success' && needs.gate.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: source
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: notegate
-          POSTGRES_PASSWORD: notegate
-          POSTGRES_DB: notegate
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U notegate -d notegate"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-    env:
-      NOTEGATE_TEST_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
-      NOTEGATE_TEST_S3_ENDPOINT: http://127.0.0.1:9000
-      NOTEGATE_TEST_S3_PUBLIC_ENDPOINT: http://127.0.0.1:9000
-      NOTEGATE_TEST_S3_REGION: us-east-1
-      NOTEGATE_TEST_S3_BUCKET: notegate-test
-      NOTEGATE_TEST_S3_ACCESS_KEY: notegate-app
-      NOTEGATE_TEST_S3_SECRET_KEY: notegate-app-secret
-
+    timeout-minutes: 10
     steps:
       - name: Require successful Rust build
         working-directory: ${{ github.workspace }}
@@ -577,7 +562,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -592,61 +577,6 @@ jobs:
           kind: ci
           source-sha: ${{ needs.gate.outputs.tested_sha }}
           core-token: ${{ steps.core-token.outputs.token }}
-
-      - name: Checkout exact core source
-        uses: ./.control/.github/actions/checkout-core
-        with:
-          client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
-          private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
-          sha: ${{ needs.gate.outputs.tested_sha }}
-          path: source
-          fetch-depth: 1
-
-      - name: Download prepared Rust tests
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: rust-prepared-tests
-          path: source/target/ci-artifacts
-
-      - name: Decompress prepared Rust tests
-        shell: private_run.sh {0}
-        run: zstd --decompress --rm target/ci-artifacts/rust-tests.tar.zst
-
-      - name: Start MinIO
-        env:
-          NOTEGATE_S3_BUCKET: notegate-test
-          NOTEGATE_S3_ACCESS_KEY: notegate-app
-          NOTEGATE_S3_SECRET_KEY: notegate-app-secret
-        shell: private_run.sh {0}
-        run: bash deploy/ci/start-minio.sh
-
-      - name: Test runner cleanup
-        shell: private_run.sh {0}
-        run: deploy/ci/test-rust.test.sh --postgres
-
-      - name: Test without external services
-        shell: private_run.sh {0}
-        run: python3 deploy/ci/rust-test-suites.py self-contained --prepared target/ci-artifacts/rust-tests.tar --output target/test-suites/self-contained
-
-      - name: Test with PostgreSQL and S3
-        shell: private_run.sh {0}
-        run: python3 deploy/ci/rust-test-suites.py external --prepared target/ci-artifacts/rust-tests.tar --output target/test-suites/external
-
-      - name: Reject missing integration settings
-        shell: private_run.sh {0}
-        run: bash "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_assert_integration_settings.sh"
-
-      - name: Measure search date candidate filtering
-        shell: private_run.sh {0}
-        run: >-
-          python3 deploy/ci/rust-test-suites.py exact --prepared target/ci-artifacts/rust-tests.tar
-          --package notegate-service --target-kind test --target search
-          --test-name search_date_filters_measure_candidate_work
-          --output target/test-suites/measure-search -- --ignored --show-output
-
-      - name: Measure command completion and history capture
-        shell: private_run.sh {0}
-        run: bash "$GITHUB_WORKSPACE/.control/.github/scripts/ci_rust_measure_commands.sh"
 
   postgres18:
     permissions:
@@ -682,7 +612,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -753,7 +683,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -817,7 +747,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -923,7 +853,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1050,7 +980,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1146,7 +1076,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1331,7 +1261,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1523,7 +1453,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: b909226d45199535e1cc645afc3af8bc0c475d3c
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
