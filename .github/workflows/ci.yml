@@ -1072,12 +1072,26 @@ jobs:
         shell: private_run.sh {0}
         run: bash "$GITHUB_WORKSPACE/.control/.github/scripts/ci_pr_image_build.sh"
 
+      - name: Install verified Trivy release
+        shell: private_run.sh {0}
+        run: |
+          trivy_dir="$RUNNER_TEMP/trivy-release"
+          mkdir -p "$trivy_dir"
+          curl --fail --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 \
+            --output "$trivy_dir/trivy.tar.gz" \
+            https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz
+          echo "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a  $trivy_dir/trivy.tar.gz" | sha256sum --check --strict
+          tar -xzf "$trivy_dir/trivy.tar.gz" -C "$trivy_dir" trivy
+          "$trivy_dir/trivy" --version
+          echo "$trivy_dir" >> "$GITHUB_PATH"
+
       - name: Report high and critical vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           TRIVY_IMAGE_SRC: docker
         with:
           version: v0.74.0
+          skip-setup-trivy: true
           cache: false
           image-ref: notegate-pr:${{ needs.gate.outputs.tested_sha }}
           scanners: vuln
@@ -1106,6 +1120,7 @@ jobs:
           TRIVY_IMAGE_SRC: docker
         with:
           version: v0.74.0
+          skip-setup-trivy: true
           cache: false
           image-ref: notegate-pr:${{ needs.gate.outputs.tested_sha }}
           scanners: vuln
