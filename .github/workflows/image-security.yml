@@ -49,7 +49,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 5a9669ab20a90946cde47d1da9201b08b161aae5
+          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -99,7 +99,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 5a9669ab20a90946cde47d1da9201b08b161aae5
+          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -154,7 +154,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 5a9669ab20a90946cde47d1da9201b08b161aae5
+          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -169,6 +169,19 @@ jobs:
           kind: image-security
           core-token: ${{ steps.core-token.outputs.token }}
 
+      - name: Install verified Trivy release
+        shell: bash
+        run: |
+          trivy_dir="$RUNNER_TEMP/trivy-release"
+          mkdir -p "$trivy_dir"
+          curl --fail --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 \
+            --output "$trivy_dir/trivy.tar.gz" \
+            https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz
+          echo "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a  $trivy_dir/trivy.tar.gz" | sha256sum --check --strict
+          tar -xzf "$trivy_dir/trivy.tar.gz" -C "$trivy_dir" trivy
+          "$trivy_dir/trivy" --version
+          echo "$trivy_dir" >> "$GITHUB_PATH"
+
       - name: Scan published image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
@@ -176,6 +189,7 @@ jobs:
           TRIVY_IMAGE_SRC: remote
         with:
           version: v0.74.0
+          skip-setup-trivy: true
           cache: false
           image-ref: ${{ needs.image.outputs.ref }}
           scanners: vuln
@@ -208,6 +222,7 @@ jobs:
           TRIVY_IMAGE_SRC: remote
         with:
           version: v0.74.0
+          skip-setup-trivy: true
           cache: false
           image-ref: ${{ needs.image.outputs.ref }}
           scanners: vuln
@@ -247,7 +262,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 5a9669ab20a90946cde47d1da9201b08b161aae5
+          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
