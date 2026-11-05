@@ -16,7 +16,7 @@ on:
         required: true
         type: string
       publish:
-        description: Build, scan, and publish this release (false only checks the plan)
+        description: Build the image, scan it, and publish the CLI (false checks the plan)
         required: true
         default: false
         type: boolean
@@ -30,7 +30,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE: cagojeiger/notegate
+  IMAGE: cagojeiger/notegate-private
   DOCKER_BUILD_RECORD_UPLOAD: "false"
   DOCKER_BUILD_SUMMARY: "false"
 
@@ -64,7 +64,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: d65e94032bd9354b2694e17ae4865640583a6c91
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -93,6 +93,9 @@ jobs:
   build:
     name: Build ${{ matrix.platform }}
     needs: version
+    outputs:
+      amd64: ${{ steps.digest.outputs.amd64 }}
+      arm64: ${{ steps.digest.outputs.arm64 }}
     if: needs.version.outputs.should_release == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -124,7 +127,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: d65e94032bd9354b2694e17ae4865640583a6c91
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -166,29 +169,25 @@ jobs:
         run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_release_build_image.sh"
 
       - name: Export digest
+        id: digest
         env:
           BUILD_DIGEST: ${{ steps.build.outputs.digest }}
           ARCH: ${{ matrix.arch }}
         shell: private_run.sh {0}
-        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_release_export_digest.sh"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: digest-${{ matrix.arch }}
-          path: /tmp/digests/${{ matrix.arch }}
-          if-no-files-found: error
-          retention-days: 1
+        run: printf '%s=%s\n' "$ARCH" "$BUILD_DIGEST" >> "$GITHUB_OUTPUT"
 
   scan:
     name: Trivy image gate linux/${{ matrix.arch }}
     needs: [version, build]
     if: needs.version.outputs.should_release == 'true'
+    outputs:
+      amd64: ${{ steps.scan.outputs.amd64 }}
+      arm64: ${{ steps.scan.outputs.arm64 }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
-      security-events: write
+      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -208,7 +207,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: d65e94032bd9354b2694e17ae4865640583a6c91
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -223,17 +222,12 @@ jobs:
           CORE_TOKEN: ${{ steps.core-token.outputs.token }}
         run: bash .control/.github/scripts/checkout_core_revoke.sh
 
-      - name: Download image digest
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
-          name: digest-${{ matrix.arch }}
-          path: /tmp/digests
-
-      - name: Select immutable image
-        id: image
-        env:
-          ARCH: ${{ matrix.arch }}
-        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_release_select_image.sh"
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       - name: Install verified Trivy release
         shell: bash
@@ -248,60 +242,27 @@ jobs:
           "$trivy_dir/trivy" --version
           echo "$trivy_dir" >> "$GITHUB_PATH"
 
-      - name: Report high and critical vulnerabilities
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        env:
-          TRIVY_PLATFORM: linux/${{ matrix.arch }}
-          TRIVY_IMAGE_SRC: remote
-        with:
-          version: v0.74.0
-          skip-setup-trivy: true
-          image-ref: ${{ steps.image.outputs.ref }}
-          scanners: vuln
-          severity: HIGH,CRITICAL
-          format: json
-          output: trivy-linux-${{ matrix.arch }}.json
-          exit-code: "0"
-          ignore-unfixed: false
-          timeout: 10m
-
-      - name: Prepare SARIF and summary
+      - name: Validate the exact image and block fixable critical vulnerabilities
+        id: scan
+        shell: bash
         env:
           ARCH: ${{ matrix.arch }}
-        run: source "$GITHUB_WORKSPACE/.control/.github/scripts/ci_release_scan_reports.sh"
-
-      - name: Retain scan evidence
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-trivy-${{ matrix.arch }}
-          path: |
-            trivy-linux-${{ matrix.arch }}.json
-            trivy-linux-${{ matrix.arch }}.sarif
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Publish security findings
-        continue-on-error: true
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
-        with:
-          sarif_file: trivy-linux-${{ matrix.arch }}.sarif
-          category: trivy-release-linux-${{ matrix.arch }}
-
-      - name: Block fixable critical vulnerabilities
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        env:
-          TRIVY_PLATFORM: linux/${{ matrix.arch }}
-          TRIVY_IMAGE_SRC: remote
-        with:
-          version: v0.74.0
-          skip-setup-trivy: true
-          image-ref: ${{ steps.image.outputs.ref }}
-          scanners: vuln
-          severity: CRITICAL
-          format: table
-          ignore-unfixed: true
-          exit-code: "1"
-          timeout: 10m
+          SCAN_DIGEST: ${{ needs.build.outputs[matrix.arch] }}
+        run: |
+          if [[ ! "$SCAN_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo 'The build did not return an image digest.' >&2
+            exit 1
+          fi
+          image="$REGISTRY/$IMAGE@$SCAN_DIGEST"
+          report="$RUNNER_TEMP/release-trivy.json"
+          if ! trivy image --image-src remote --platform "linux/$ARCH" --scanners vuln \
+              --severity HIGH,CRITICAL --format json --output "$report" --exit-code 0 \
+              --ignore-unfixed=false --timeout 10m "$image" >"$RUNNER_TEMP/release-trivy.log" 2>&1; then
+            echo 'The private image scan failed.' >&2
+            exit 1
+          fi
+          python3 "$GITHUB_WORKSPACE/.control/.github/scripts/publish_release.py" --verify-scan "$report" "$image"
+          printf '%s=%s\n' "$ARCH" "$SCAN_DIGEST" >> "$GITHUB_OUTPUT"
 
   cli:
     name: Build CLI ${{ matrix.target }}
@@ -338,7 +299,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: d65e94032bd9354b2694e17ae4865640583a6c91
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -415,7 +376,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 98b12362ad85b6b025a8b0c4cba8af9d2036af6f
+          ref: d65e94032bd9354b2694e17ae4865640583a6c91
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -433,16 +394,6 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
-      - name: Download amd64 digest
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: digest-amd64
-          path: /tmp/release-inputs/digests
-      - name: Download arm64 digest
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: digest-arm64
-          path: /tmp/release-inputs/digests
       - name: Download Linux x64 CLI
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -463,17 +414,6 @@ jobs:
         with:
           name: cli-aarch64-apple-darwin
           path: /tmp/release-inputs/cli
-      - name: Download amd64 scan
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release-trivy-amd64
-          path: /tmp/release-inputs/scans
-      - name: Download arm64 scan
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release-trivy-arm64
-          path: /tmp/release-inputs/scans
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -493,6 +433,8 @@ jobs:
           SOURCE_CI_RUN_ID: ${{ needs.version.outputs.ci_run_id }}
           SOURCE_TAG_OBJECT_SHA: ${{ needs.version.outputs.tag_object_sha }}
           RELEASE_NOTES_SHA256: ${{ needs.version.outputs.notes_sha256 }}
+          AMD64_DIGEST: ${{ needs.scan.outputs.amd64 }}
+          ARM64_DIGEST: ${{ needs.scan.outputs.arm64 }}
           VERSION: ${{ needs.version.outputs.version }}
           PUBLISH: "true"
         run: python3 "$GITHUB_WORKSPACE/.control/.github/scripts/publish_release.py"
