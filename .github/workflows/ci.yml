@@ -1,5 +1,5 @@
 name: CI
-run-name: Core ci ${{ fromJSON(inputs.request).run_id }}.${{ fromJSON(inputs.request).attempt }} ${{ fromJSON(inputs.request).tested_sha }}
+run-name: Core ci ${{ fromJSON(inputs.request).version == 2 && fromJSON(inputs.request).request.run_id || fromJSON(inputs.request).run_id }}.${{ fromJSON(inputs.request).version == 2 && fromJSON(inputs.request).request.attempt || fromJSON(inputs.request).attempt }} ${{ fromJSON(inputs.request).version == 2 && fromJSON(inputs.request).request.tested_sha || fromJSON(inputs.request).tested_sha }}
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: core-ci-${{ fromJSON(inputs.request).run_id }}-${{ fromJSON(inputs.request).attempt }}
+  group: core-ci-${{ fromJSON(inputs.request).version == 2 && fromJSON(inputs.request).request.run_id || fromJSON(inputs.request).run_id }}-${{ fromJSON(inputs.request).version == 2 && fromJSON(inputs.request).request.attempt || fromJSON(inputs.request).attempt }}
   cancel-in-progress: false
 
 env:
@@ -66,7 +66,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -114,7 +114,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -207,7 +207,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -316,7 +316,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -474,7 +474,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -726,7 +726,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -776,7 +776,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -847,7 +847,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -911,7 +911,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1017,7 +1017,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1159,7 +1159,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1255,7 +1255,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1406,7 +1406,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1448,7 +1448,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notegate-core
-          ref: 9e85e74372ea17b88f040a1f332c9af7f2891901
+          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
