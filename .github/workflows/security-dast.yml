@@ -22,7 +22,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    if: github.repository == 'cagojeiger/notegate' && github.ref == 'refs/heads/main'
+    if: github.repository_id == '1437742487' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -44,7 +44,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -52,8 +52,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 9f1bd47f086a2b1c3e0ee56ea9041ea2c19b6be3
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -130,7 +130,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -138,8 +138,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 9f1bd47f086a2b1c3e0ee56ea9041ea2c19b6be3
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
