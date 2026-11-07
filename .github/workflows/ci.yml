@@ -27,7 +27,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    if: github.repository == 'cagojeiger/notegate' && github.ref == 'refs/heads/main'
+    if: github.repository_id == '1437742487' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -57,7 +57,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -65,8 +65,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -105,7 +105,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -113,8 +113,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -133,7 +133,7 @@ jobs:
       - name: Checkout public workflow metadata
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate
+          repository: cagojeiger/notehub
           ref: ${{ github.sha }}
           token: ${{ github.token }}
           path: .public-control
@@ -198,7 +198,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -206,8 +206,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -307,7 +307,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -315,8 +315,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -465,7 +465,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -473,8 +473,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -717,7 +717,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -725,8 +725,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -767,7 +767,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -775,8 +775,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -838,7 +838,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -846,8 +846,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -902,7 +902,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -910,8 +910,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1008,7 +1008,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -1016,8 +1016,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1150,7 +1150,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -1158,8 +1158,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1246,7 +1246,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -1254,8 +1254,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1397,7 +1397,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -1405,8 +1405,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -1439,7 +1439,7 @@ jobs:
           client-id: ${{ vars.CORE_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.CORE_READ_APP_PRIVATE_KEY }}
           owner: cagojeiger
-          repositories: notegate-core
+          repositories: notehub-core
           permission-contents: read
           permission-actions: read
           permission-pull-requests: read
@@ -1447,8 +1447,8 @@ jobs:
       - name: Checkout trusted private CI control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cagojeiger/notegate-core
-          ref: 0340fb85e792fa7fb45eaf2b6f04038d8b6feb18
+          repository: cagojeiger/notehub-core
+          ref: 536c8a2f0fef07bc832c2503fcdf2cb8b1142df8
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
