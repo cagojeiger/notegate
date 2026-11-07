@@ -1,5 +1,5 @@
 name: Dependency Security
-run-name: Core dependency-security ${{ fromJSON(inputs.request).run_id }}.${{ fromJSON(inputs.request).attempt }} ${{ fromJSON(inputs.request).tested_sha }}
+run-name: Core dependency-security ${{ fromJSON(inputs.request).request.run_id }}.${{ fromJSON(inputs.request).request.attempt }} ${{ fromJSON(inputs.request).request.tested_sha }}
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: core-dependency-security-${{ fromJSON(inputs.request).run_id }}-${{ fromJSON(inputs.request).attempt }}
+  group: core-dependency-security-${{ fromJSON(inputs.request).request.run_id }}-${{ fromJSON(inputs.request).request.attempt }}
   cancel-in-progress: false
 
 jobs:
@@ -53,7 +53,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notehub-core
-          ref: 6d8363be52c780b329f4a354e721fd7b4ffe087a
+          ref: 5b6a0fadd351db5f3dd20d1002a2f51e2eb21ded
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -106,7 +106,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notehub-core
-          ref: 6d8363be52c780b329f4a354e721fd7b4ffe087a
+          ref: 5b6a0fadd351db5f3dd20d1002a2f51e2eb21ded
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
@@ -168,7 +168,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cagojeiger/notehub-core
-          ref: 6d8363be52c780b329f4a354e721fd7b4ffe087a
+          ref: 5b6a0fadd351db5f3dd20d1002a2f51e2eb21ded
           token: ${{ steps.core-token.outputs.token }}
           path: .control
           fetch-depth: 1
